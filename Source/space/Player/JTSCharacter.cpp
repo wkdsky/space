@@ -17,6 +17,7 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "space/Components/JTSCarryComponent.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "Math/RotationMatrix.h"
 #include "UObject/ConstructorHelpers.h"
@@ -41,6 +42,7 @@ AJTSCharacter::AJTSCharacter()
 	MovementComponent->BrakingDecelerationWalking = 2000.0f;
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
+	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(GetCapsuleComponent());
@@ -66,6 +68,11 @@ AJTSCharacter::AJTSCharacter()
 	{
 		DebugVisual->SetStaticMesh(DebugMeshAsset.Object);
 	}
+}
+
+UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
+{
+	return CarryComponent.Get();
 }
 
 void AJTSCharacter::BeginPlay()

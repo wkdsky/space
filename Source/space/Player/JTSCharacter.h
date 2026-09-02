@@ -8,6 +8,7 @@
 #include "JTSCharacter.generated.h"
 
 class UCameraComponent;
+class UJTSCarryComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
 class UInputAction;
@@ -27,6 +28,10 @@ class SPACE_API AJTSCharacter : public ACharacter
 
 public:
 	AJTSCharacter();
+
+	/** Returns this character's resource carry inventory. */
+	UFUNCTION(BlueprintPure, Category = "Carry")
+	UJTSCarryComponent* GetCarryComponent() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -63,6 +68,10 @@ private:
 	/** Reusable nearby-target detection and interaction execution for this player. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInteractionComponent> InteractionComponent;
+
+	/** Fixed-capacity resource carry inventory for the current player. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Carry", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSCarryComponent> CarryComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;
