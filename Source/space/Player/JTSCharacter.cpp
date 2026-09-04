@@ -3,10 +3,12 @@
 #include "JTSCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -17,9 +19,10 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Interaction/InteractionComponent.h"
-#include "Math/RotationMatrix.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSCharacter::AJTSCharacter()
@@ -75,10 +78,166 @@ UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
 	return CarryComponent.Get();
 }
 
+bool AJTSCharacter::IsBoardingHoldActive() const
+{
+	return bBoardingHoldActive;
+}
+
+float AJTSCharacter::GetBoardingHoldProgress() const
+{
+	if (!bBoardingHoldActive)
+	{
+		return 0.0f;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Clamp(
+		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - BoardingHoldStartTime) / static_cast<double>(BoardingHoldDuration)),
+		0.0f,
+		1.0f);
+}
+
+float AJTSCharacter::GetBoardingHoldRemainingTime() const
+{
+	if (!bBoardingHoldActive)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Max(0.0f, BoardingHoldDuration * (1.0f - GetBoardingHoldProgress()));
+}
+
+bool AJTSCharacter::IsBoarded() const
+{
+	return BoardedSpacecraft.IsValid();
+}
+
+AJTSSpacecraftActor* AJTSCharacter::GetNearbySpacecraft() const
+{
+	return NearbySpacecraft.Get();
+}
+
+AJTSSpacecraftActor* AJTSCharacter::GetBoardedSpacecraft() const
+{
+	return BoardedSpacecraft.Get();
+}
+
+void AJTSCharacter::NotifySpacecraftEntered(AJTSSpacecraftActor* Spacecraft)
+{
+	if (!IsValid(Spacecraft))
+	{
+		return;
+	}
+
+	if (NearbySpacecraft.Get() != Spacecraft)
+	{
+		CancelBoardingHold();
+	}
+
+	NearbySpacecraft = Spacecraft;
+}
+
+void AJTSCharacter::NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft)
+{
+	if (NearbySpacecraft.Get() != Spacecraft)
+	{
+		return;
+	}
+
+	NearbySpacecraft = nullptr;
+	if (BoardedSpacecraft.Get() != Spacecraft)
+	{
+		bInteractKeyHeld = false;
+		CancelBoardingHold();
+	}
+}
+
+bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
+{
+	if (!IsValid(Spacecraft) || IsBoarded() || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	USceneComponent* const BoardingPoint = Spacecraft->GetBoardingPoint();
+	if (!IsValid(BoardingPoint))
+	{
+		return false;
+	}
+
+	CancelBoardingHold();
+	bInteractKeyHeld = false;
+	NearbySpacecraft = Spacecraft;
+	BoardedSpacecraft = Spacecraft;
+
+	PreviousCapsuleCollisionEnabled = GetCapsuleComponent()->GetCollisionEnabled();
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	if (GetMesh() != nullptr)
+	{
+		bPreviousMeshVisible = GetMesh()->IsVisible();
+		GetMesh()->SetVisibility(false, true);
+	}
+	if (DebugVisual != nullptr)
+	{
+		bPreviousDebugVisualVisible = DebugVisual->IsVisible();
+		DebugVisual->SetVisibility(false, true);
+	}
+
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->StopMovementImmediately();
+		MovementComponent->DisableMovement();
+	}
+
+	if (!AttachToComponent(BoardingPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale))
+	{
+		RestoreAfterBoarding(Spacecraft, false);
+		return false;
+	}
+
+	SetActorRelativeLocation(FVector::ZeroVector);
+	return true;
+}
+
+void AJTSCharacter::ExitBoardedState(AJTSSpacecraftActor* Spacecraft)
+{
+	if (BoardedSpacecraft.Get() != Spacecraft)
+	{
+		return;
+	}
+
+	RestoreAfterBoarding(Spacecraft, true);
+}
+
+void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
+{
+	if (BoardedSpacecraft.Get() == Spacecraft)
+	{
+		RestoreAfterBoarding(Spacecraft, false);
+	}
+
+	if (NearbySpacecraft.Get() == Spacecraft)
+	{
+		NearbySpacecraft = nullptr;
+	}
+	if (bBoardingHoldActive)
+	{
+		bInteractKeyHeld = false;
+		CancelBoardingHold();
+	}
+}
+
 void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
 
 	RegisterInputMappingContext();
@@ -102,6 +261,9 @@ void AJTSCharacter::OnRep_Controller()
 
 void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bInteractKeyHeld = false;
+	CancelBoardingHold();
+	UnbindGameState();
 	UnregisterInputMappingContext();
 
 	Super::EndPlay(EndPlayReason);
@@ -130,15 +292,14 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AJTSCharacter::MoveRight);
 	EnhancedInputComponent->BindAction(LookYawAction, ETriggerEvent::Triggered, this, &AJTSCharacter::LookYaw);
 	EnhancedInputComponent->BindAction(LookPitchAction, ETriggerEvent::Triggered, this, &AJTSCharacter::LookPitch);
-	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleJumpStarted);
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &AJTSCharacter::StartSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AJTSCharacter::StopSprint);
-	if (InteractionComponent != nullptr)
-	{
-		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, InteractionComponent.Get(), &UInteractionComponent::TryInteract);
-	}
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
 
 	BoundInputComponent = PlayerInputComponent;
 	RegisterInputMappingContext();
@@ -231,9 +392,38 @@ void AJTSCharacter::UnregisterInputMappingContext()
 	RegisteredInputSubsystem.Reset();
 }
 
+void AJTSCharacter::BindGameState()
+{
+	AJTSGameState* const NewGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	if (BoundGameState.Get() == NewGameState)
+	{
+		return;
+	}
+
+	if (AJTSGameState* const PreviousGameState = BoundGameState.Get())
+	{
+		PreviousGameState->OnGameplayPhaseChanged.RemoveDynamic(this, &AJTSCharacter::HandleGameplayPhaseChanged);
+	}
+
+	BoundGameState = NewGameState;
+	if (NewGameState != nullptr)
+	{
+		NewGameState->OnGameplayPhaseChanged.AddDynamic(this, &AJTSCharacter::HandleGameplayPhaseChanged);
+	}
+}
+
+void AJTSCharacter::UnbindGameState()
+{
+	if (AJTSGameState* const GameState = BoundGameState.Get())
+	{
+		GameState->OnGameplayPhaseChanged.RemoveDynamic(this, &AJTSCharacter::HandleGameplayPhaseChanged);
+	}
+	BoundGameState.Reset();
+}
+
 void AJTSCharacter::MoveForward(const FInputActionValue& Value)
 {
-	if (Controller == nullptr)
+	if (IsBoarded() || Controller == nullptr)
 	{
 		return;
 	}
@@ -249,7 +439,7 @@ void AJTSCharacter::MoveForward(const FInputActionValue& Value)
 
 void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 {
-	if (Controller == nullptr)
+	if (IsBoarded() || Controller == nullptr)
 	{
 		return;
 	}
@@ -265,20 +455,198 @@ void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 
 void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 {
-	AddControllerYawInput(Value.Get<float>());
+	if (!IsBoarded())
+	{
+		AddControllerYawInput(Value.Get<float>());
+	}
 }
 
 void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
-	AddControllerPitchInput(Value.Get<float>());
+	if (!IsBoarded())
+	{
+		AddControllerPitchInput(Value.Get<float>());
+	}
 }
 
 void AJTSCharacter::StartSprint(const FInputActionValue& Value)
 {
-	GetCharacterMovement()->MaxWalkSpeed = SprintingSpeed;
+	if (!IsBoarded())
+	{
+		GetCharacterMovement()->MaxWalkSpeed = SprintingSpeed;
+	}
 }
 
 void AJTSCharacter::StopSprint(const FInputActionValue& Value)
 {
 	GetCharacterMovement()->MaxWalkSpeed = WalkingSpeed;
+}
+
+void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
+{
+	if (!IsBoarded())
+	{
+		Jump();
+	}
+}
+
+void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
+{
+	bInteractKeyHeld = true;
+
+	if (IsBoarded())
+	{
+		bInteractKeyHeld = false;
+		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
+		{
+			Spacecraft->TryDisembarkPlayer(this);
+		}
+		return;
+	}
+
+	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	if (bEarthCollectionActive && IsValid(Spacecraft) && Spacecraft->IsPawnInBoardingRange(this))
+	{
+		BeginBoardingHold();
+		return;
+	}
+
+	bInteractKeyHeld = false;
+	if (InteractionComponent != nullptr)
+	{
+		InteractionComponent->TryInteract();
+	}
+}
+
+void AJTSCharacter::HandleInteractCompleted(const FInputActionValue& Value)
+{
+	bInteractKeyHeld = false;
+	CancelBoardingHold();
+}
+
+void AJTSCharacter::HandleInteractCanceled(const FInputActionValue& Value)
+{
+	bInteractKeyHeld = false;
+	CancelBoardingHold();
+}
+
+void AJTSCharacter::BeginBoardingHold()
+{
+	if (bBoardingHoldActive || IsBoarded() || !BoundGameState.IsValid() || !BoundGameState->IsEarthCollectionActive())
+	{
+		return;
+	}
+
+	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	UWorld* const World = GetWorld();
+	if (!IsValid(Spacecraft) || World == nullptr || !Spacecraft->IsPawnInBoardingRange(this))
+	{
+		return;
+	}
+
+	bBoardingHoldActive = true;
+	BoardingHoldStartTime = static_cast<double>(World->GetTimeSeconds());
+	World->GetTimerManager().SetTimer(
+		BoardingHoldTimerHandle,
+		this,
+		&AJTSCharacter::CompleteBoardingHold,
+		BoardingHoldDuration,
+		false);
+}
+
+void AJTSCharacter::CancelBoardingHold()
+{
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BoardingHoldTimerHandle);
+	}
+
+	bBoardingHoldActive = false;
+	BoardingHoldStartTime = 0.0;
+}
+
+void AJTSCharacter::CompleteBoardingHold()
+{
+	if (!bBoardingHoldActive || !bInteractKeyHeld || IsBoarded())
+	{
+		CancelBoardingHold();
+		return;
+	}
+
+	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	if (!BoundGameState.IsValid() || !BoundGameState->IsEarthCollectionActive() || !IsValid(Spacecraft) || !Spacecraft->IsPawnInBoardingRange(this))
+	{
+		CancelBoardingHold();
+		return;
+	}
+
+	const bool bBoarded = Spacecraft->TryBoardPlayer(this);
+	CancelBoardingHold();
+	if (!bBoarded)
+	{
+		bInteractKeyHeld = false;
+	}
+}
+
+void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint)
+{
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	GetCapsuleComponent()->SetCollisionEnabled(PreviousCapsuleCollisionEnabled);
+
+	if (bMoveToExitPoint && IsValid(Spacecraft))
+	{
+		if (USceneComponent* const ExitPoint = Spacecraft->GetExitPoint())
+		{
+			FVector ExitLocation = ExitPoint->GetComponentLocation();
+			if (UWorld* const World = GetWorld())
+			{
+				FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSBoardingExitGroundTrace), false, this);
+				TraceParams.AddIgnoredActor(this);
+				TraceParams.AddIgnoredActor(Spacecraft);
+				const FVector TraceStart = ExitLocation + FVector(0.0f, 0.0f, 500.0f);
+				const FVector TraceEnd = ExitLocation - FVector(0.0f, 0.0f, 500.0f);
+				FHitResult GroundHit;
+				if (World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, TraceParams) && GroundHit.bBlockingHit)
+				{
+					ExitLocation.Z = GroundHit.ImpactPoint.Z + GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+				}
+			}
+
+			FHitResult SweepHit;
+			if (!SetActorLocation(ExitLocation, true, &SweepHit, ETeleportType::TeleportPhysics) && SweepHit.bBlockingHit)
+			{
+				SetActorLocation(ExitLocation + FVector(0.0f, 0.0f, 100.0f), false, nullptr, ETeleportType::TeleportPhysics);
+			}
+		}
+	}
+
+	if (GetMesh() != nullptr)
+	{
+		GetMesh()->SetVisibility(bPreviousMeshVisible, true);
+	}
+	if (DebugVisual != nullptr)
+	{
+		DebugVisual->SetVisibility(bPreviousDebugVisualVisible, true);
+	}
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->SetMovementMode(MOVE_Walking);
+		MovementComponent->MaxWalkSpeed = WalkingSpeed;
+	}
+
+	BoardedSpacecraft = nullptr;
+	if (NearbySpacecraft.Get() == Spacecraft)
+	{
+		NearbySpacecraft = nullptr;
+	}
+}
+
+void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)
+{
+	if (NewGameplayPhase != EJTSGameplayPhase::EarthCollection)
+	{
+		bInteractKeyHeld = false;
+		CancelBoardingHold();
+	}
 }

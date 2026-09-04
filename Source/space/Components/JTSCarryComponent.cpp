@@ -24,6 +24,21 @@ bool UJTSCarryComponent::TryAddResource(EJTSResourceType ResourceType)
 	return true;
 }
 
+bool UJTSCarryComponent::TryTakeAllResources(TArray<EJTSResourceType>& OutResources)
+{
+	OutResources.Reset();
+
+	if (CarriedResources.IsEmpty())
+	{
+		return false;
+	}
+
+	OutResources = CarriedResources;
+	CarriedResources.Reset();
+	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+	return true;
+}
+
 int32 UJTSCarryComponent::GetCarriedItemCount() const
 {
 	return CarriedResources.Num();

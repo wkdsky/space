@@ -29,6 +29,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Carry")
 	bool TryAddResource(EJTSResourceType ResourceType);
 
+	/** Copies every carried resource to the output, then clears the carry inventory. */
+	UFUNCTION(BlueprintCallable, Category = "Carry")
+	bool TryTakeAllResources(TArray<EJTSResourceType>& OutResources);
+
 	/** Returns the number of resources currently carried. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	int32 GetCarriedItemCount() const;

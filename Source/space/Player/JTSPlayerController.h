@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "space/Core/JTSGameState.h"
 
 #include "JTSPlayerController.generated.h"
 
@@ -18,6 +19,29 @@ class SPACE_API AJTSPlayerController : public APlayerController
 public:
 	AJTSPlayerController();
 
+	UFUNCTION(BlueprintCallable, Category = "Menu")
+	void StartGame();
+
+	UFUNCTION(BlueprintCallable, Category = "Menu")
+	void RestartCurrentLevel();
+
+	UFUNCTION(BlueprintCallable, Category = "Menu")
+	void QuitGame();
+
+	/** Applies the unpaused game-only input mode used by Earth collection. */
+	void ApplyEarthCollectionInputMode();
+
 protected:
+	virtual void BeginPlay() override;
 	virtual void BeginPlayingState() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
+	void BindGameState();
+	void ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhase);
+
+	UFUNCTION()
+	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
+
+	TWeakObjectPtr<AJTSGameState> BoundGameState;
 };

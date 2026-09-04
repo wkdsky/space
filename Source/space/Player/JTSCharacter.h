@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "space/Core/JTSGameState.h"
 
 #include "JTSCharacter.generated.h"
 
+class AJTSSpacecraftActor;
 class UCameraComponent;
 class UJTSCarryComponent;
 class UEnhancedInputLocalPlayerSubsystem;
@@ -33,6 +35,39 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	UJTSCarryComponent* GetCarryComponent() const;
 
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	bool IsBoardingHoldActive() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	float GetBoardingHoldProgress() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	float GetBoardingHoldRemainingTime() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	bool IsBoarded() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	AJTSSpacecraftActor* GetNearbySpacecraft() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boarding")
+	AJTSSpacecraftActor* GetBoardedSpacecraft() const;
+
+	/** Called by a spacecraft's pawn-only trigger when this character enters. */
+	void NotifySpacecraftEntered(AJTSSpacecraftActor* Spacecraft);
+
+	/** Called by a spacecraft's pawn-only trigger when this character exits. */
+	void NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft);
+
+	/** Applies the minimal attached/hidden state used while boarding. */
+	bool EnterBoardedState(AJTSSpacecraftActor* Spacecraft);
+
+	/** Restores movement and visibility after a normal disembark. */
+	void ExitBoardedState(AJTSSpacecraftActor* Spacecraft);
+
+	/** Restores the character if its spacecraft is destroyed during teardown. */
+	void HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -44,6 +79,8 @@ private:
 	void InitializeInput();
 	void RegisterInputMappingContext();
 	void UnregisterInputMappingContext();
+	void BindGameState();
+	void UnbindGameState();
 
 	void MoveForward(const FInputActionValue& Value);
 	void MoveRight(const FInputActionValue& Value);
@@ -51,9 +88,22 @@ private:
 	void LookPitch(const FInputActionValue& Value);
 	void StartSprint(const FInputActionValue& Value);
 	void StopSprint(const FInputActionValue& Value);
+	void HandleJumpStarted(const FInputActionValue& Value);
+	void HandleInteractStarted(const FInputActionValue& Value);
+	void HandleInteractCompleted(const FInputActionValue& Value);
+	void HandleInteractCanceled(const FInputActionValue& Value);
+
+	void BeginBoardingHold();
+	void CancelBoardingHold();
+	void CompleteBoardingHold();
+	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
+
+	UFUNCTION()
+	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
+	static constexpr float BoardingHoldDuration = 3.0f;
 
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
@@ -99,4 +149,15 @@ private:
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundInputComponent;
+	TWeakObjectPtr<AJTSGameState> BoundGameState;
+	TWeakObjectPtr<AJTSSpacecraftActor> NearbySpacecraft;
+	TWeakObjectPtr<AJTSSpacecraftActor> BoardedSpacecraft;
+
+	FTimerHandle BoardingHoldTimerHandle;
+	double BoardingHoldStartTime = 0.0;
+	bool bBoardingHoldActive = false;
+	bool bInteractKeyHeld = false;
+	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+	bool bPreviousDebugVisualVisible = true;
+	bool bPreviousMeshVisible = true;
 };
