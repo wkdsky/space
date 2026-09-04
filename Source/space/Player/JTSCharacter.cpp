@@ -3,6 +3,7 @@
 #include "JTSCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "CollisionShape.h"
 #include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -19,6 +20,7 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Interaction/InteractionComponent.h"
@@ -594,30 +596,12 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	GetCapsuleComponent()->SetCollisionEnabled(PreviousCapsuleCollisionEnabled);
 
-	if (bMoveToExitPoint && IsValid(Spacecraft))
+	if (bMoveToExitPoint)
 	{
-		if (USceneComponent* const ExitPoint = Spacecraft->GetExitPoint())
+		FVector DisembarkLocation;
+		if (FindSafeDisembarkLocation(Spacecraft, DisembarkLocation))
 		{
-			FVector ExitLocation = ExitPoint->GetComponentLocation();
-			if (UWorld* const World = GetWorld())
-			{
-				FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSBoardingExitGroundTrace), false, this);
-				TraceParams.AddIgnoredActor(this);
-				TraceParams.AddIgnoredActor(Spacecraft);
-				const FVector TraceStart = ExitLocation + FVector(0.0f, 0.0f, 500.0f);
-				const FVector TraceEnd = ExitLocation - FVector(0.0f, 0.0f, 500.0f);
-				FHitResult GroundHit;
-				if (World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, TraceParams) && GroundHit.bBlockingHit)
-				{
-					ExitLocation.Z = GroundHit.ImpactPoint.Z + GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-				}
-			}
-
-			FHitResult SweepHit;
-			if (!SetActorLocation(ExitLocation, true, &SweepHit, ETeleportType::TeleportPhysics) && SweepHit.bBlockingHit)
-			{
-				SetActorLocation(ExitLocation + FVector(0.0f, 0.0f, 100.0f), false, nullptr, ETeleportType::TeleportPhysics);
-			}
+			SetActorLocation(DisembarkLocation, false, nullptr, ETeleportType::TeleportPhysics);
 		}
 	}
 
@@ -640,6 +624,115 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 	{
 		NearbySpacecraft = nullptr;
 	}
+}
+
+bool AJTSCharacter::FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FVector RequestedExitLocation = Spacecraft->GetActorLocation();
+	if (USceneComponent* const ExitPoint = Spacecraft->GetExitPoint())
+	{
+		RequestedExitLocation = ExitPoint->GetComponentLocation();
+	}
+
+	FVector ShipCenter = Spacecraft->GetActorLocation();
+	FVector ShipExtent(180.0f, 180.0f, 90.0f);
+	if (const UStaticMeshComponent* const ShipMesh = Spacecraft->FindComponentByClass<UStaticMeshComponent>())
+	{
+		const FBoxSphereBounds MeshBounds = ShipMesh->Bounds;
+		ShipCenter = MeshBounds.Origin;
+		ShipExtent = MeshBounds.BoxExtent;
+	}
+
+	FVector ExitDirection = RequestedExitLocation - ShipCenter;
+	ExitDirection.Z = 0.0f;
+	ExitDirection = ExitDirection.GetSafeNormal();
+	if (ExitDirection.IsNearlyZero())
+	{
+		ExitDirection = Spacecraft->GetActorForwardVector();
+		ExitDirection.Z = 0.0f;
+		ExitDirection = ExitDirection.GetSafeNormal();
+	}
+	if (ExitDirection.IsNearlyZero())
+	{
+		ExitDirection = FVector(1.0f, 0.0f, 0.0f);
+	}
+
+	const float ProjectedShipExtent = FMath::Abs(ExitDirection.X) * ShipExtent.X
+		+ FMath::Abs(ExitDirection.Y) * ShipExtent.Y;
+	const float CapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const float CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const float MinimumOutsideDistance = ProjectedShipExtent + CapsuleRadius + 16.0f;
+	const FVector RequestedHorizontalOffset = RequestedExitLocation - ShipCenter;
+	const float RequestedDistance = FMath::Max(
+		0.0f,
+		FVector::DotProduct(FVector(RequestedHorizontalOffset.X, RequestedHorizontalOffset.Y, 0.0f), ExitDirection));
+	const float StartDistance = FMath::Max(MinimumOutsideDistance, RequestedDistance);
+
+	FCollisionQueryParams GroundTraceParams(SCENE_QUERY_STAT(JTSBoardingExitGroundTrace), false, this);
+	GroundTraceParams.AddIgnoredActor(this);
+	GroundTraceParams.AddIgnoredActor(Spacecraft);
+
+	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSBoardingExitPlacement), false, this);
+	PlacementParams.AddIgnoredActor(this);
+	const FCollisionShape CharacterShape = GetCapsuleComponent()->GetCollisionShape();
+	const FQuat CharacterRotation = GetCapsuleComponent()->GetComponentQuat();
+
+	FVector FarthestGroundLocation = FVector::ZeroVector;
+	bool bHasGroundLocation = false;
+	constexpr int32 MaxExitSearchAttempts = 16;
+	constexpr float ExitSearchStep = 75.0f;
+	for (int32 AttemptIndex = 0; AttemptIndex < MaxExitSearchAttempts; ++AttemptIndex)
+	{
+		const float CandidateDistance = StartDistance + (ExitSearchStep * static_cast<float>(AttemptIndex));
+		const FVector CandidateHorizontal = ShipCenter + ExitDirection * CandidateDistance;
+		const FVector TraceStart = CandidateHorizontal + FVector(0.0f, 0.0f, 1000.0f);
+		const FVector TraceEnd = CandidateHorizontal - FVector(0.0f, 0.0f, 2000.0f);
+
+		FHitResult GroundHit;
+		if (!World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, GroundTraceParams)
+			|| !GroundHit.bBlockingHit)
+		{
+			continue;
+		}
+
+		const FVector CandidateLocation = FVector(
+			CandidateHorizontal.X,
+			CandidateHorizontal.Y,
+			GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 4.0f);
+		FarthestGroundLocation = CandidateLocation;
+		bHasGroundLocation = true;
+		if (World->OverlapBlockingTestByChannel(
+			CandidateLocation,
+			CharacterRotation,
+			ECC_Pawn,
+			CharacterShape,
+			PlacementParams))
+		{
+			continue;
+		}
+
+		OutLocation = CandidateLocation;
+		return true;
+	}
+
+	if (bHasGroundLocation)
+	{
+		OutLocation = FarthestGroundLocation;
+		return true;
+	}
+
+	return false;
 }
 
 void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)

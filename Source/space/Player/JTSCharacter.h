@@ -97,13 +97,14 @@ private:
 	void CancelBoardingHold();
 	void CompleteBoardingHold();
 	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
+	bool FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
 
 	UFUNCTION()
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
-	static constexpr float BoardingHoldDuration = 3.0f;
+	static constexpr float BoardingHoldDuration = 2.0f;
 
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;

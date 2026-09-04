@@ -446,7 +446,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			BoardingProgressWidget->SetBackgroundColor(FLinearColor(0.10f, 0.18f, 0.25f, 0.90f));
 		}
 		AddCanvasChild(GameplayLayer, BoardingProgressWidget, FAnchors(0.5f, 0.5f), FVector2D(0.0f, -40.0f), FVector2D(220.0f, 220.0f), FVector2D(0.5f, 0.5f));
-		BoardingRemainingText = MakeTextBlock(WidgetTree, TEXT("BoardingRemainingText"), TEXT("3.0"), 34.0f, FLinearColor::White, ETextJustify::Center);
+		BoardingRemainingText = MakeTextBlock(WidgetTree, TEXT("BoardingRemainingText"), TEXT("2.0"), 34.0f, FLinearColor::White, ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingRemainingText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, -42.0f), FVector2D(160.0f, 50.0f), FVector2D(0.5f, 0.5f));
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
