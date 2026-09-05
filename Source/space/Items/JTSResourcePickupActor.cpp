@@ -55,6 +55,61 @@ AJTSResourcePickupActor::AJTSResourcePickupActor()
 	}
 }
 
+bool AJTSResourcePickupActor::CanCollectResource(APawn* InteractingPawn, int32 ResourceAmount, bool bRequireEarthCollection)
+{
+	if (!IsValid(InteractingPawn) || ResourceAmount <= 0)
+	{
+		return false;
+	}
+
+	if (bRequireEarthCollection)
+	{
+		UWorld* const World = InteractingPawn->GetWorld();
+		const AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
+		if (!IsValid(JTSGameState) || !JTSGameState->IsEarthCollectionActive())
+		{
+			return false;
+		}
+	}
+
+	const UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
+	if (!IsValid(CarryComponent))
+	{
+		return false;
+	}
+
+	const int32 AvailableSlots = CarryComponent->GetCarryCapacity() - CarryComponent->GetCarriedItemCount();
+	return AvailableSlots >= ResourceAmount;
+}
+
+bool AJTSResourcePickupActor::TryCollectResource(
+	APawn* InteractingPawn,
+	EJTSResourceType ResourceType,
+	int32 ResourceAmount,
+	bool bRequireEarthCollection)
+{
+	if (!CanCollectResource(InteractingPawn, ResourceAmount, bRequireEarthCollection))
+	{
+		return false;
+	}
+
+	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
+	if (!IsValid(CarryComponent))
+	{
+		return false;
+	}
+
+	for (int32 AmountIndex = 0; AmountIndex < ResourceAmount; ++AmountIndex)
+	{
+		if (!CarryComponent->TryAddResource(ResourceType))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 EJTSResourceType AJTSResourcePickupActor::GetResourceType() const
 {
 	return ResourceType;
@@ -115,19 +170,13 @@ void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
 
 bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 {
-	if (bPickupConsumed || IsPendingKillPending() || !IsEarthCollectionActive() || !IsValid(InteractingPawn))
-	{
-		return false;
-	}
-
-	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-	if (!IsValid(CarryComponent))
+	if (bPickupConsumed || IsPendingKillPending() || !CanCollectResource(InteractingPawn, 1, true))
 	{
 		return false;
 	}
 
 	bPickupConsumed = true;
-	if (!CarryComponent->TryAddResource(ResourceType))
+	if (!TryCollectResource(InteractingPawn, ResourceType, 1, true))
 	{
 		bPickupConsumed = false;
 		return false;
@@ -135,13 +184,6 @@ bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 
 	Destroy();
 	return true;
-}
-
-bool AJTSResourcePickupActor::IsEarthCollectionActive() const
-{
-	UWorld* const World = GetWorld();
-	AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
-	return IsValid(JTSGameState) && JTSGameState->IsEarthCollectionActive();
 }
 
 void AJTSResourcePickupActor::ApplyResourceAppearance()
@@ -174,6 +216,14 @@ void AJTSResourcePickupActor::ApplyResourceAppearance()
 
 	case EJTSResourceType::Food:
 		ResourceColor = FLinearColor(0.20f, 0.85f, 0.10f, 1.0f);
+		break;
+
+	case EJTSResourceType::Rock:
+		ResourceColor = FLinearColor(0.35f, 0.35f, 0.38f, 1.0f);
+		break;
+
+	case EJTSResourceType::Ore:
+		ResourceColor = FLinearColor(0.15f, 0.65f, 0.85f, 1.0f);
 		break;
 
 	default:

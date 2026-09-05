@@ -5,7 +5,7 @@
 
 #include "JTSMoonWrappedActorComponent.generated.h"
 
-class AJTSMoonFakeWorldActor;
+class AJTSMoonWorldActor;
 class UJTSMoonWrapSubsystem;
 class UMaterialInterface;
 
@@ -62,7 +62,7 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
 	bool bApplyBendBoundsScale = true;
 
-	TWeakObjectPtr<AJTSMoonFakeWorldActor> FakeWorld;
+	TWeakObjectPtr<AJTSMoonWorldActor> FakeWorld;
 	TWeakObjectPtr<UJTSMoonWrapSubsystem> WrapSubsystem;
 	bool bMoonWrappingEnabled = false;
 	bool bHasPhysicalImage = false;

@@ -49,7 +49,7 @@ void AJTSMoonPlanetActor::BeginPlay()
 			PlanetMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
 		SetActorHiddenInGame(true);
-		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored in AJTSMoonGameMode. Use AJTSMoonFakeWorldActor and AJTSMoonLoopGroundActor."));
+		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored in AJTSMoonGameMode. Use AJTSMoonWorldActor and AJTSMoonLoopGroundActor."));
 	}
 }
 

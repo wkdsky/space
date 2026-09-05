@@ -38,10 +38,10 @@ public:
 	void RefreshConfiguration() const;
 
 private:
-	const class AJTSMoonFakeWorldActor* FindConfigurationActor() const;
+	const class AJTSMoonWorldActor* FindConfigurationActor() const;
 	static float CanonicalizeAxis(float Value, float Size);
 	static float ShortestWrappedAxisDelta(float From, float To, float Size);
 
-	mutable TWeakObjectPtr<const class AJTSMoonFakeWorldActor> ConfigurationActor;
+	mutable TWeakObjectPtr<const class AJTSMoonWorldActor> ConfigurationActor;
 	mutable FVector2D CachedMapSize = FVector2D(24000.0f, 24000.0f);
 };

@@ -1,4 +1,4 @@
-#include "JTSMoonFakeWorldActor.h"
+#include "JTSMoonWorldActor.h"
 
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -18,74 +18,74 @@ namespace
 	const FName BendMaxDistanceName(TEXT("BendMaxDistance"));
 }
 
-AJTSMoonFakeWorldActor::AJTSMoonFakeWorldActor()
+AJTSMoonWorldActor::AJTSMoonWorldActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
 	SetActorTickEnabled(true);
 }
 
-float AJTSMoonFakeWorldActor::GetMapSizeX() const
+float AJTSMoonWorldActor::GetMapSizeX() const
 {
 	return FMath::IsFinite(MapSizeX) ? FMath::Max(1.0f, MapSizeX) : 24000.0f;
 }
 
-float AJTSMoonFakeWorldActor::GetMapSizeY() const
+float AJTSMoonWorldActor::GetMapSizeY() const
 {
 	return FMath::IsFinite(MapSizeY) ? FMath::Max(1.0f, MapSizeY) : 24000.0f;
 }
 
-FVector2D AJTSMoonFakeWorldActor::GetMapSize2D() const
+FVector2D AJTSMoonWorldActor::GetMapSize2D() const
 {
 	return FVector2D(GetMapSizeX(), GetMapSizeY());
 }
 
-bool AJTSMoonFakeWorldActor::IsWorldBendEnabled() const
+bool AJTSMoonWorldActor::IsWorldBendEnabled() const
 {
 	return bEnableWorldBend;
 }
 
-float AJTSMoonFakeWorldActor::GetFlatRadius() const
+float AJTSMoonWorldActor::GetFlatRadius() const
 {
 	return FMath::IsFinite(FlatRadius) ? FMath::Max(0.0f, FlatRadius) : 0.0f;
 }
 
-float AJTSMoonFakeWorldActor::GetBendTransitionWidth() const
+float AJTSMoonWorldActor::GetBendTransitionWidth() const
 {
 	return FMath::IsFinite(BendTransitionWidth) ? FMath::Max(0.0f, BendTransitionWidth) : 0.0f;
 }
 
-float AJTSMoonFakeWorldActor::GetVisualCurveRadius() const
+float AJTSMoonWorldActor::GetVisualCurveRadius() const
 {
 	return FMath::IsFinite(VisualCurveRadius) ? FMath::Max(1.0f, VisualCurveRadius) : 1.0f;
 }
 
-float AJTSMoonFakeWorldActor::GetBendMaxDistance() const
+float AJTSMoonWorldActor::GetBendMaxDistance() const
 {
 	return FMath::IsFinite(BendMaxDistance) ? FMath::Max(1.0f, BendMaxDistance) : 1.0f;
 }
 
-float AJTSMoonFakeWorldActor::GetMaximumVisualDisplacement() const
+float AJTSMoonWorldActor::GetMaximumVisualDisplacement() const
 {
 	const float CurvedDistance = FMath::Max(0.0f, GetBendMaxDistance() - GetFlatRadius());
 	return (CurvedDistance * CurvedDistance) / (2.0f * GetVisualCurveRadius());
 }
 
-float AJTSMoonFakeWorldActor::GetRecommendedBoundsScale(float BaseBoundsRadius) const
+float AJTSMoonWorldActor::GetRecommendedBoundsScale(float BaseBoundsRadius) const
 {
 	const float SafeBaseRadius = FMath::Max(1.0f, FMath::Abs(BaseBoundsRadius));
 	const float DisplacementRatio = GetMaximumVisualDisplacement() / SafeBaseRadius;
 	return FMath::Clamp(1.0f + DisplacementRatio + 0.05f, 1.05f, 64.0f);
 }
 
-void AJTSMoonFakeWorldActor::BeginPlay()
+void AJTSMoonWorldActor::BeginPlay()
 {
 	Super::BeginPlay();
 
 	bMissingCollectionLogged = false;
 	if (!IsMoonWorld())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("JTSMoonFakeWorldActor is present outside AJTSMoonGameMode; its bend driver is disabled."));
+		UE_LOG(LogTemp, Warning, TEXT("JTSMoonWorldActor is present outside AJTSMoonGameMode; its bend driver is disabled."));
 		SetActorTickEnabled(false);
 		return;
 	}
@@ -93,19 +93,19 @@ void AJTSMoonFakeWorldActor::BeginPlay()
 	UpdateBendMaterialParameters();
 }
 
-void AJTSMoonFakeWorldActor::Tick(float DeltaSeconds)
+void AJTSMoonWorldActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateBendMaterialParameters();
 }
 
-bool AJTSMoonFakeWorldActor::IsMoonWorld() const
+bool AJTSMoonWorldActor::IsMoonWorld() const
 {
 	const UWorld* const World = GetWorld();
 	return World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr;
 }
 
-void AJTSMoonFakeWorldActor::PublishScalar(
+void AJTSMoonWorldActor::PublishScalar(
 	UMaterialParameterCollectionInstance* Instance,
 	FName ParameterName,
 	float Value,
@@ -124,7 +124,7 @@ void AJTSMoonFakeWorldActor::PublishScalar(
 	}
 }
 
-void AJTSMoonFakeWorldActor::UpdateBendMaterialParameters()
+void AJTSMoonWorldActor::UpdateBendMaterialParameters()
 {
 	if (!IsMoonWorld() || !bDriveMaterialParameterCollection)
 	{
@@ -136,7 +136,7 @@ void AJTSMoonFakeWorldActor::UpdateBendMaterialParameters()
 	{
 		if (!bMissingCollectionLogged && BendParameterCollection == nullptr)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("JTSMoonFakeWorldActor has no MPC assigned. Assign MPC_JTSFakeMoon to publish Fake Moon bend parameters."));
+			UE_LOG(LogTemp, Warning, TEXT("JTSMoonWorldActor has no MPC assigned. Assign MPC_JTSFakeMoon to publish Fake Moon bend parameters."));
 			bMissingCollectionLogged = true;
 		}
 		return;

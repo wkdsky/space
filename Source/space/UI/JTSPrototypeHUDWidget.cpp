@@ -916,6 +916,12 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 	case EJTSResourceType::Food:
 		return TEXT("Food");
 
+	case EJTSResourceType::Rock:
+		return TEXT("Rock");
+
+	case EJTSResourceType::Ore:
+		return TEXT("Ore");
+
 	default:
 		return TEXT("Unknown");
 	}

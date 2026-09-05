@@ -27,6 +27,14 @@ class SPACE_API AJTSResourcePickupActor : public AActor, public IInteractable
 public:
 	AJTSResourcePickupActor();
 
+	static bool CanCollectResource(APawn* InteractingPawn, int32 ResourceAmount = 1, bool bRequireEarthCollection = true);
+
+	static bool TryCollectResource(
+		APawn* InteractingPawn,
+		EJTSResourceType ResourceType,
+		int32 ResourceAmount = 1,
+		bool bRequireEarthCollection = true);
+
 	UFUNCTION(BlueprintPure, Category = "Resource")
 	EJTSResourceType GetResourceType() const;
 
@@ -55,7 +63,6 @@ protected:
 		const FHitResult& SweepResult);
 
 private:
-	bool IsEarthCollectionActive() const;
 	bool TryPickup(APawn* InteractingPawn);
 	void ApplyResourceAppearance();
 

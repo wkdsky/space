@@ -2,7 +2,7 @@
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
-#include "space/World/JTSMoonFakeWorldActor.h"
+#include "space/World/JTSMoonWorldActor.h"
 
 void UJTSMoonWrapSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -12,7 +12,7 @@ void UJTSMoonWrapSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 FVector2D UJTSMoonWrapSubsystem::GetMapSize2D() const
 {
-	if (const AJTSMoonFakeWorldActor* const Configuration = FindConfigurationActor())
+	if (const AJTSMoonWorldActor* const Configuration = FindConfigurationActor())
 	{
 		CachedMapSize = Configuration->GetMapSize2D();
 	}
@@ -68,13 +68,13 @@ void UJTSMoonWrapSubsystem::RefreshConfiguration() const
 {
 	ConfigurationActor.Reset();
 	CachedMapSize = FVector2D(24000.0f, 24000.0f);
-	if (const AJTSMoonFakeWorldActor* const Configuration = FindConfigurationActor())
+	if (const AJTSMoonWorldActor* const Configuration = FindConfigurationActor())
 	{
 		CachedMapSize = Configuration->GetMapSize2D();
 	}
 }
 
-const AJTSMoonFakeWorldActor* UJTSMoonWrapSubsystem::FindConfigurationActor() const
+const AJTSMoonWorldActor* UJTSMoonWrapSubsystem::FindConfigurationActor() const
 {
 	if (ConfigurationActor.IsValid())
 	{
@@ -87,7 +87,7 @@ const AJTSMoonFakeWorldActor* UJTSMoonWrapSubsystem::FindConfigurationActor() co
 		return nullptr;
 	}
 
-	for (TActorIterator<AJTSMoonFakeWorldActor> It(World); It; ++It)
+	for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
 	{
 		if (IsValid(*It))
 		{

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 
-#include "JTSMoonFakeWorldActor.generated.h"
+#include "JTSMoonWorldActor.generated.h"
 
 class UMaterialInterface;
 class UMaterialParameterCollection;
@@ -13,12 +13,12 @@ class UMaterialParameterCollection;
  * The actor is intentionally visual-only: it does not provide gravity or collision.
  */
 UCLASS()
-class SPACE_API AJTSMoonFakeWorldActor : public AActor
+class SPACE_API AJTSMoonWorldActor : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	AJTSMoonFakeWorldActor();
+	AJTSMoonWorldActor();
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Looping Map")
 	float GetMapSizeX() const;

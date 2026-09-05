@@ -8,7 +8,7 @@
 #include "Materials/MaterialInterface.h"
 #include "space/Core/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
-#include "space/World/JTSMoonFakeWorldActor.h"
+#include "space/World/JTSMoonWorldActor.h"
 
 UJTSMoonWrappedActorComponent::UJTSMoonWrappedActorComponent()
 {
@@ -99,10 +99,10 @@ void UJTSMoonWrappedActorComponent::ResolveMoonWorld()
 		return;
 	}
 
-	AJTSMoonFakeWorldActor* FoundFakeWorld = FakeWorld.Get();
+	AJTSMoonWorldActor* FoundFakeWorld = FakeWorld.Get();
 	if (!IsValid(FoundFakeWorld))
 	{
-		for (TActorIterator<AJTSMoonFakeWorldActor> It(World); It; ++It)
+		for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
 		{
 			if (IsValid(*It))
 			{
@@ -199,7 +199,7 @@ void UJTSMoonWrappedActorComponent::ApplyBendRenderingSettings()
 	}
 
 	AActor* const Owner = GetOwner();
-	const AJTSMoonFakeWorldActor* const WorldConfig = FakeWorld.Get();
+	const AJTSMoonWorldActor* const WorldConfig = FakeWorld.Get();
 	if (!IsValid(Owner) || !IsValid(WorldConfig))
 	{
 		return;

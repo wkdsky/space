@@ -16,7 +16,7 @@
 #include "UObject/UnrealType.h"
 #include "space/Core/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
-#include "space/World/JTSMoonFakeWorldActor.h"
+#include "space/World/JTSMoonWorldActor.h"
 
 namespace
 {
@@ -181,7 +181,7 @@ bool AJTSMoonLoopGroundActor::IsMoonWorld() const
 		return false;
 	}
 
-	for (TActorIterator<AJTSMoonFakeWorldActor> It(World); It; ++It)
+	for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
 	{
 		if (IsValid(*It))
 		{
@@ -885,7 +885,7 @@ float AJTSMoonLoopGroundActor::GetVisualBoundsScale() const
 		+ FMath::Square(CachedMapSize.Y * 0.5f));
 	if (const UWorld* const World = GetWorld())
 	{
-		for (TActorIterator<AJTSMoonFakeWorldActor> It(World); It; ++It)
+		for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
 		{
 			if (IsValid(*It))
 			{
