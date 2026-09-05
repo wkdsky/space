@@ -181,6 +181,10 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 		ApplyEarthCollectionInputMode();
 		break;
 
+	case EJTSGameplayPhase::MoonExploration:
+		ApplyEarthCollectionInputMode();
+		break;
+
 	case EJTSGameplayPhase::EarthCollectionFinished:
 	{
 		SetPause(false);

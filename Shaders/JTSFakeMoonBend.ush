@@ -1,0 +1,68 @@
+#ifndef JTS_FAKE_MOON_BEND_USH
+#define JTS_FAKE_MOON_BEND_USH
+
+float JTSFakeMoon_SmoothClampDistance(
+	float DistanceAfterFlat,
+	float MaxDistanceAfterFlat,
+	float TransitionWidth)
+{
+	float SafeMaxDistance = max(MaxDistanceAfterFlat, 0.0);
+	if (SafeMaxDistance <= 0.0)
+	{
+		return 0.0;
+	}
+
+	float SafeDistance = max(DistanceAfterFlat, 0.0);
+	float ClampWidth = min(max(TransitionWidth, 1.0), max(SafeMaxDistance * 0.25, 1.0));
+	float ClampStart = max(0.0, SafeMaxDistance - ClampWidth);
+	if (SafeDistance <= ClampStart)
+	{
+		return SafeDistance;
+	}
+
+	float ClampT = saturate((min(SafeDistance, SafeMaxDistance) - ClampStart) / max(ClampWidth, 0.0001));
+	float SmoothT = ClampT * ClampT * (3.0 - (2.0 * ClampT));
+	return lerp(min(SafeDistance, SafeMaxDistance), SafeMaxDistance, SmoothT);
+}
+
+float3 JTSFakeMoon_GetWPO(
+	float3 WorldPosition,
+	float2 BendOrigin,
+	float FlatRadius,
+	float TransitionWidth,
+	float CurveRadius,
+	float MaxDistance,
+	float Enabled)
+{
+	if (Enabled <= 0.0 || CurveRadius <= 0.0001 || MaxDistance <= 0.0)
+	{
+		return float3(0.0, 0.0, 0.0);
+	}
+
+	float2 DeltaXY = WorldPosition.xy - BendOrigin;
+	float Distance = sqrt(max(dot(DeltaXY, DeltaXY), 0.0));
+	float SafeFlatRadius = max(FlatRadius, 0.0);
+	float DistanceAfterFlat = max(Distance - SafeFlatRadius, 0.0);
+
+	float TransitionFactor = 1.0;
+	if (TransitionWidth > 0.0)
+	{
+		TransitionFactor = smoothstep(0.0, TransitionWidth, DistanceAfterFlat);
+	}
+	else if (DistanceAfterFlat <= 0.0)
+	{
+		TransitionFactor = 0.0;
+	}
+
+	float EffectiveDistance = DistanceAfterFlat * TransitionFactor;
+	EffectiveDistance = JTSFakeMoon_SmoothClampDistance(
+		EffectiveDistance,
+		max(MaxDistance - SafeFlatRadius, 0.0),
+		TransitionWidth);
+
+	float SafeCurveRadius = max(CurveRadius, 0.0001);
+	float VerticalOffset = -(EffectiveDistance * EffectiveDistance) / (2.0 * SafeCurveRadius);
+	return float3(0.0, 0.0, VerticalOffset);
+}
+
+#endif

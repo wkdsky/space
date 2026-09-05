@@ -14,6 +14,8 @@ class UPrimitiveComponent;
 class USceneComponent;
 class USphereComponent;
 class UStaticMeshComponent;
+class UJTSMoonWrappedActorComponent;
+class UMaterialInterface;
 struct FHitResult;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnShipResourcesChanged, int32, FuelCount, int32, WaterCount, int32, FoodCount);
@@ -85,6 +87,7 @@ public:
 	FOnShipResourcesChanged OnShipResourcesChanged;
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION()
@@ -125,6 +128,14 @@ private:
 	/** Location where a character appears after disembarking. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> ExitPoint;
+
+	/** Supplies the single authoritative spacecraft with a nearest-image representation in Fake Moon worlds. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
+
+	/** Optional shared Fake Moon WPO material. Earth worlds leave this untouched. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
 
 	/** Fuel resources deposited into the spacecraft. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))

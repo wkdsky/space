@@ -62,6 +62,11 @@ bool AJTSGameState::IsMoonArrivalSuccess() const
 	return GameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess;
 }
 
+bool AJTSGameState::IsMoonExploration() const
+{
+	return GameplayPhase == EJTSGameplayPhase::MoonExploration;
+}
+
 bool AJTSGameState::IsSuccessfulOutcome() const
 {
 	return IsMoonArrivalSuccess();

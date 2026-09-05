@@ -8,8 +8,11 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Core/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -54,6 +57,24 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	ExitPoint = CreateDefaultSubobject<USceneComponent>(TEXT("ExitPoint"));
 	ExitPoint->SetupAttachment(SceneRoot);
 	ExitPoint->SetRelativeLocation(FVector(0.0f, -380.0f, 105.0f));
+
+	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
+}
+
+void AJTSSpacecraftActor::BeginPlay()
+{
+	Super::BeginPlay();
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	{
+		return;
+	}
+
+	if (MoonWrappedActorComponent != nullptr && FakeMoonBendMaterial != nullptr)
+	{
+		MoonWrappedActorComponent->SetFakeMoonBendMaterial(FakeMoonBendMaterial);
+	}
 }
 
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)

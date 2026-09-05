@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "space/Core/JTSGameInstance.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -309,6 +310,20 @@ void AJTSGameMode::ResolveLaunchOutcome()
 	{
 		if (bHasEnoughFuel)
 		{
+			UJTSGameInstance* const GameInstance = World != nullptr
+				? World->GetGameInstance<UJTSGameInstance>()
+				: nullptr;
+			if (!IsValid(GameInstance))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not preserve expedition Food and Water because the configured GameInstance is not UJTSGameInstance."));
+				JTSGameState->SetFailureReason(EJTSFailureReason::InvalidGameInstance);
+				JTSGameState->SetGameplayPhase(EJTSGameplayPhase::EarthCaptureFailure);
+				return;
+			}
+
+			GameInstance->SetExpeditionSupplies(
+				static_cast<float>(Spacecraft->GetFoodCount()),
+				static_cast<float>(Spacecraft->GetWaterCount()));
 			JTSGameState->SetFailureReason(EJTSFailureReason::None);
 			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::MoonArrivalSuccess);
 		}

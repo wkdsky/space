@@ -23,6 +23,7 @@
 #include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "UObject/ConstructorHelpers.h"
@@ -45,9 +46,13 @@ AJTSCharacter::AJTSCharacter()
 	MovementComponent->MaxWalkSpeed = WalkingSpeed;
 	MovementComponent->MinAnalogWalkSpeed = 20.0f;
 	MovementComponent->BrakingDecelerationWalking = 2000.0f;
+	MovementComponent->GravityScale = 1.0f;
+	MovementComponent->SetGravityDirection(FVector::DownVector);
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
+	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
+	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(GetCapsuleComponent());
@@ -433,9 +438,10 @@ void AJTSCharacter::MoveForward(const FInputActionValue& Value)
 	const float MovementValue = Value.Get<float>();
 	if (!FMath::IsNearlyZero(MovementValue))
 	{
-		const FRotator ControlRotation = Controller->GetControlRotation();
-		const FRotator YawRotation(0.0f, ControlRotation.Yaw, 0.0f);
-		AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X), MovementValue);
+		FVector ForwardDirection;
+		FVector RightDirection;
+		GetMovementInputDirections(ForwardDirection, RightDirection);
+		AddMovementInput(ForwardDirection, MovementValue);
 	}
 }
 
@@ -449,10 +455,26 @@ void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 	const float MovementValue = Value.Get<float>();
 	if (!FMath::IsNearlyZero(MovementValue))
 	{
-		const FRotator ControlRotation = Controller->GetControlRotation();
-		const FRotator YawRotation(0.0f, ControlRotation.Yaw, 0.0f);
-		AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y), MovementValue);
+		FVector ForwardDirection;
+		FVector RightDirection;
+		GetMovementInputDirections(ForwardDirection, RightDirection);
+		AddMovementInput(RightDirection, MovementValue);
 	}
+}
+
+void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& OutRight) const
+{
+	OutForward = FVector::ForwardVector;
+	OutRight = FVector::RightVector;
+	if (Controller == nullptr)
+	{
+		return;
+	}
+
+	const FRotator ControlRotation = Controller->GetControlRotation();
+	const FRotator YawRotation(0.0f, ControlRotation.Yaw, 0.0f);
+	OutForward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	OutRight = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 }
 
 void AJTSCharacter::LookYaw(const FInputActionValue& Value)
@@ -494,6 +516,7 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 {
+	// TODO(FakeMoon): Re-evaluate camera-ray versus flat-world trajectory for future long-range hitscan/projectiles.
 	bInteractKeyHeld = true;
 
 	if (IsBoarded())

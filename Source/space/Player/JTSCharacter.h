@@ -11,6 +11,7 @@
 class AJTSSpacecraftActor;
 class UCameraComponent;
 class UJTSCarryComponent;
+class UJTSPlanetGravityComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
 class UInputAction;
@@ -84,6 +85,7 @@ private:
 
 	void MoveForward(const FInputActionValue& Value);
 	void MoveRight(const FInputActionValue& Value);
+	void GetMovementInputDirections(FVector& OutForward, FVector& OutRight) const;
 	void LookYaw(const FInputActionValue& Value);
 	void LookPitch(const FInputActionValue& Value);
 	void StartSprint(const FInputActionValue& Value);
@@ -123,6 +125,10 @@ private:
 	/** Fixed-capacity resource carry inventory for the current player. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Carry", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSCarryComponent> CarryComponent;
+
+	/** Legacy radial-gravity component retained for Blueprint compatibility; Moon fake worlds bypass it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))
+	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;

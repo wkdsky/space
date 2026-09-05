@@ -708,6 +708,11 @@ void UJTSPrototypeHUDWidget::RefreshResultView(EJTSGameplayPhase NewGameplayPhas
 		Subtitle = TEXT("NO SHIP WAS READY");
 		Detail = TEXT("THE SPACECRAFT COULD NOT BE FOUND");
 	}
+	else if (FailureReason == EJTSFailureReason::InvalidGameInstance)
+	{
+		Subtitle = TEXT("MISSION STATE ERROR");
+		Detail = TEXT("THE EXPEDITION SUPPLIES COULD NOT BE SAVED");
+	}
 
 	if (ResultBackground != nullptr)
 	{

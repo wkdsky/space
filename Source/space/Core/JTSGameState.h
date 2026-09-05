@@ -7,6 +7,8 @@
 
 #include "JTSGameState.generated.h"
 
+class AJTSMoonGameMode;
+
 /** The gameplay phase currently active in the level. */
 UENUM(BlueprintType)
 enum class EJTSGameplayPhase : uint8
@@ -16,7 +18,8 @@ enum class EJTSGameplayPhase : uint8
 	Launching = 2 UMETA(DisplayName = "Launching"),
 	EarthCaptureFailure = 3 UMETA(DisplayName = "Earth Capture Failure"),
 	MoonArrivalSuccess = 4 UMETA(DisplayName = "Moon Arrival Success"),
-	WaitingToStart = 5 UMETA(DisplayName = "Waiting To Start")
+	WaitingToStart = 5 UMETA(DisplayName = "Waiting To Start"),
+	MoonExploration = 6 UMETA(DisplayName = "Moon Exploration")
 };
 
 UENUM(BlueprintType)
@@ -25,7 +28,8 @@ enum class EJTSFailureReason : uint8
 	None UMETA(DisplayName = "None"),
 	NoTimelyBoarding UMETA(DisplayName = "No Timely Boarding"),
 	InsufficientFuel UMETA(DisplayName = "Insufficient Fuel"),
-	NoSpacecraft UMETA(DisplayName = "No Spacecraft")
+	NoSpacecraft UMETA(DisplayName = "No Spacecraft"),
+	InvalidGameInstance UMETA(DisplayName = "Invalid Game Instance")
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSGameplayPhaseChanged, EJTSGameplayPhase, NewGameplayPhase);
@@ -70,6 +74,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Gameplay|Outcome")
 	bool IsMoonArrivalSuccess() const;
 
+	UFUNCTION(BlueprintPure, Category = "Gameplay|Moon")
+	bool IsMoonExploration() const;
+
 	UFUNCTION(BlueprintPure, Category = "Gameplay|Outcome")
 	bool IsSuccessfulOutcome() const;
 
@@ -86,6 +93,7 @@ public:
 
 private:
 	friend class AJTSGameMode;
+	friend class AJTSMoonGameMode;
 
 	void SetGameplayPhase(EJTSGameplayPhase NewGameplayPhase);
 	void SetFailureReason(EJTSFailureReason NewFailureReason);
