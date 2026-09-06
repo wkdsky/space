@@ -2,6 +2,8 @@
 
 #include "space/Components/JTSCarryComponent.h"
 
+#include "space/Components/JTSPlayerEquipmentComponent.h"
+
 UJTSCarryComponent::UJTSCarryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -30,6 +32,10 @@ bool UJTSCarryComponent::TryAddResources(EJTSResourceType ResourceType, int32 Re
 		return false;
 	}
 
+	for (int32 ResourceIndex = 0; ResourceIndex < ResourceAmount; ++ResourceIndex)
+	{
+		CarriedItems.Add(ResourceType);
+	}
 	CarriedResources.FindOrAdd(ResourceType) += ResourceAmount;
 
 	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
@@ -40,12 +46,13 @@ bool UJTSCarryComponent::TryTakeAllResources(TMap<EJTSResourceType, int32>& OutR
 {
 	OutResources.Reset();
 
-	if (CarriedResources.IsEmpty())
+	if (CarriedItems.IsEmpty())
 	{
 		return false;
 	}
 
 	OutResources = CarriedResources;
+	CarriedItems.Reset();
 	CarriedResources.Reset();
 	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
 	return true;
@@ -53,18 +60,17 @@ bool UJTSCarryComponent::TryTakeAllResources(TMap<EJTSResourceType, int32>& OutR
 
 int32 UJTSCarryComponent::GetCarriedItemCount() const
 {
-	int32 CarriedItemCount = 0;
-	for (const TPair<EJTSResourceType, int32>& CarriedResource : CarriedResources)
-	{
-		CarriedItemCount += FMath::Max(0, CarriedResource.Value);
-	}
+	return CarriedItems.Num();
+}
 
-	return CarriedItemCount;
+int32 UJTSCarryComponent::GetBaseCapacity() const
+{
+	return FMath::Max(1, BaseCapacity);
 }
 
 int32 UJTSCarryComponent::GetCarryCapacity() const
 {
-	return CarryCapacity;
+	return GetBaseCapacity() + GetEquipmentCapacityBonus();
 }
 
 bool UJTSCarryComponent::IsFull() const
@@ -81,4 +87,68 @@ int32 UJTSCarryComponent::GetCarriedResourceAmount(EJTSResourceType ResourceType
 const TMap<EJTSResourceType, int32>& UJTSCarryComponent::GetCarriedResources() const
 {
 	return CarriedResources;
+}
+
+const TArray<EJTSResourceType>& UJTSCarryComponent::GetCarriedItems() const
+{
+	return CarriedItems;
+}
+
+bool UJTSCarryComponent::GetOverflowItemsForCapacity(int32 NewCapacity, TArray<EJTSResourceType>& OutOverflowItems) const
+{
+	OutOverflowItems.Reset();
+	if (NewCapacity < 0 || NewCapacity > CarriedItems.Num())
+	{
+		return NewCapacity >= 0;
+	}
+
+	for (int32 SlotIndex = NewCapacity; SlotIndex < CarriedItems.Num(); ++SlotIndex)
+	{
+		OutOverflowItems.Add(CarriedItems[SlotIndex]);
+	}
+	return true;
+}
+
+bool UJTSCarryComponent::CommitOverflowRemovalForCapacity(
+	int32 NewCapacity,
+	const TArray<EJTSResourceType>& ExpectedOverflowItems)
+{
+	TArray<EJTSResourceType> CurrentOverflowItems;
+	if (!GetOverflowItemsForCapacity(NewCapacity, CurrentOverflowItems)
+		|| CurrentOverflowItems != ExpectedOverflowItems)
+	{
+		return false;
+	}
+
+	if (CurrentOverflowItems.IsEmpty())
+	{
+		return true;
+	}
+
+	CarriedItems.SetNum(NewCapacity, EAllowShrinking::No);
+	RebuildCarriedResourceAmounts();
+	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+	return true;
+}
+
+void UJTSCarryComponent::NotifyCapacityChanged()
+{
+	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+}
+
+int32 UJTSCarryComponent::GetEquipmentCapacityBonus() const
+{
+	const UJTSPlayerEquipmentComponent* const EquipmentComponent = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<UJTSPlayerEquipmentComponent>()
+		: nullptr;
+	return IsValid(EquipmentComponent) ? EquipmentComponent->GetInventoryCapacityBonus() : 0;
+}
+
+void UJTSCarryComponent::RebuildCarriedResourceAmounts()
+{
+	CarriedResources.Reset();
+	for (const EJTSResourceType ResourceType : CarriedItems)
+	{
+		++CarriedResources.FindOrAdd(ResourceType);
+	}
 }

@@ -4,7 +4,10 @@
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Items/JTSWorldPickupActor.h"
+#include "space/Items/JTSWorldPickupItemType.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -49,12 +52,226 @@ float AJTSMoonGameMode::GetMinimumConsumptionUnit() const
 	return FMath::Max(0.0f, MinimumConsumptionUnit);
 }
 
+int32 AJTSMoonGameMode::GetPickaxeRockCost() const
+{
+	return FMath::Max(1, PickaxeRockCost);
+}
+
+int32 AJTSMoonGameMode::GetBackpackRockCost() const
+{
+	return FMath::Max(1, BackpackRockCost);
+}
+
+int32 AJTSMoonGameMode::GetBackpackOreCost() const
+{
+	return FMath::Max(1, BackpackOreCost);
+}
+
+int32 AJTSMoonGameMode::GetLargeRockTotalYieldUnits() const
+{
+	return FMath::Max(1, LargeRockTotalYieldUnits);
+}
+
+int32 AJTSMoonGameMode::GetOreDepositTotalYieldUnits() const
+{
+	return FMath::Max(1, OreDepositTotalYieldUnits);
+}
+
+float AJTSMoonGameMode::GetPickupMaxDistance() const
+{
+	return FMath::Max(50.0f, PickupMaxDistance);
+}
+
+float AJTSMoonGameMode::GetPickupAcquireRadius() const
+{
+	return FMath::Max(1.0f, PickupAcquireRadius);
+}
+
+float AJTSMoonGameMode::GetPickupRetainRadius() const
+{
+	return FMath::Max(GetPickupAcquireRadius(), PickupRetainRadius);
+}
+
+float AJTSMoonGameMode::GetPickupAimRayRadius() const
+{
+	return FMath::Max(1.0f, PickupAimRayRadius);
+}
+
+AJTSSpacecraftActor* AJTSMoonGameMode::GetSpacecraft() const
+{
+	if (CachedSpacecraft.IsValid())
+	{
+		return CachedSpacecraft.Get();
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+
+	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
+	{
+		if (IsValid(*It))
+		{
+			CachedSpacecraft = *It;
+			return *It;
+		}
+	}
+
+	return nullptr;
+}
+
+float AJTSMoonGameMode::GetSpacecraftMarkerShowDistance() const
+{
+	return FMath::Max(0.0f, SpacecraftMarkerShowDistance);
+}
+
+float AJTSMoonGameMode::GetSpacecraftMarkerScreenSafeMargin() const
+{
+	return FMath::Max(20.0f, SpacecraftMarkerScreenSafeMargin);
+}
+
+float AJTSMoonGameMode::GetPickupDropUpwardSpeed() const
+{
+	return FMath::Max(0.0f, PickupDropUpwardSpeed);
+}
+
+float AJTSMoonGameMode::GetPickupDropHorizontalSpeed() const
+{
+	return FMath::Max(0.0f, PickupDropHorizontalSpeed);
+}
+
+bool AJTSMoonGameMode::TryCraftPickaxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
+{
+	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Pickaxe);
+}
+
+bool AJTSMoonGameMode::TryCraftBackpack(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
+{
+	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Backpack);
+}
+
+bool AJTSMoonGameMode::TryBuyWorkshopEquipment(
+	AJTSCharacter* Player,
+	AJTSSpacecraftActor* Spacecraft,
+	EJTSEquipmentType EquipmentType)
+{
+	if (EquipmentType != EJTSEquipmentType::Pickaxe && EquipmentType != EJTSEquipmentType::Backpack)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Shop Buy: Result=Failed Reason=UnsupportedItem"));
+		return false;
+	}
+
+	const TCHAR* const ItemName = EquipmentType == EJTSEquipmentType::Backpack ? TEXT("Backpack") : TEXT("Pickaxe");
+	const int32 RockCost = EquipmentType == EJTSEquipmentType::Backpack ? GetBackpackRockCost() : GetPickaxeRockCost();
+	const int32 OreCost = EquipmentType == EJTSEquipmentType::Backpack ? GetBackpackOreCost() : 0;
+	auto LogBuyFailure = [ItemName, RockCost, OreCost](const TCHAR* Reason)
+	{
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("JumpToSpace Shop Buy: Item=%s RockCost=%d OreCost=%d Result=Failed Reason=%s"),
+			ItemName,
+			RockCost,
+			OreCost,
+			Reason);
+	};
+
+	const AJTSGameState* const JTSGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	if (!IsValid(JTSGameState) || !JTSGameState->IsMoonExploration())
+	{
+		LogBuyFailure(TEXT("NotMoonExploration"));
+		return false;
+	}
+
+	if (!IsValid(Player) || !IsValid(Spacecraft))
+	{
+		LogBuyFailure(TEXT("InvalidPlayerOrShip"));
+		return false;
+	}
+
+	if (Player->GetNearbySpacecraft() != Spacecraft || !Spacecraft->IsPawnInBoardingRange(Player))
+	{
+		LogBuyFailure(TEXT("NotNearShip"));
+		return false;
+	}
+
+	UJTSPlayerEquipmentComponent* const EquipmentComponent = Player->GetEquipmentComponent();
+	if (!IsValid(EquipmentComponent))
+	{
+		LogBuyFailure(TEXT("MissingEquipment"));
+		return false;
+	}
+
+	TMap<EJTSResourceType, int32> ResourceCosts;
+	ResourceCosts.Add(EJTSResourceType::Rock, RockCost);
+	if (OreCost > 0)
+	{
+		ResourceCosts.Add(EJTSResourceType::Ore, OreCost);
+	}
+	if (!Spacecraft->HasResource(EJTSResourceType::Rock, RockCost)
+		|| (OreCost > 0 && !Spacecraft->HasResource(EJTSResourceType::Ore, OreCost)))
+	{
+		LogBuyFailure(TEXT("NotEnoughResources"));
+		return false;
+	}
+
+	const bool bCanAutoEquip = !EquipmentComponent->HasEquippedItem(EquipmentType)
+		&& EquipmentComponent->HasAvailableSlot();
+	if (bCanAutoEquip)
+	{
+		if (!EquipmentComponent->TryEquipItem(EquipmentType))
+		{
+			LogBuyFailure(TEXT("AutoEquipFailed"));
+			return false;
+		}
+
+		if (!Spacecraft->TryConsumeResourceAmounts(ResourceCosts))
+		{
+			EquipmentComponent->UnequipItem(EquipmentType);
+			LogBuyFailure(TEXT("ConsumeFailedRolledBack"));
+			return false;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Shop Buy: Item=%s Result=AutoEquipped"), ItemName);
+		return true;
+	}
+
+	const EJTSWorldPickupItemType PickupItemType = EquipmentType == EJTSEquipmentType::Backpack
+		? EJTSWorldPickupItemType::Backpack
+		: EJTSWorldPickupItemType::Pickaxe;
+	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGroundedPickup(
+		GetWorld(),
+		PickupItemType,
+		Player->GetActorLocation(),
+		Player,
+		Spacecraft,
+		Player->GetActorForwardVector());
+	if (!IsValid(Pickup))
+	{
+		LogBuyFailure(TEXT("DropSpawnFailed"));
+		return false;
+	}
+
+	if (!Spacecraft->TryConsumeResourceAmounts(ResourceCosts))
+	{
+		Pickup->Destroy();
+		LogBuyFailure(TEXT("ConsumeFailedRolledBack"));
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("JumpToSpace Shop Buy: Item=%s Result=DroppedNearPlayer"), ItemName);
+	return true;
+}
+
 void AJTSMoonGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
 	FoodConsumptionAccumulator = 0.0;
 	WaterConsumptionAccumulator = 0.0;
+	CachedSpacecraft.Reset();
 	bMissingSpacecraftLogged = false;
 
 	if (AJTSGameState* const JTSGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
@@ -72,12 +289,24 @@ void AJTSMoonGameMode::BeginPlay()
 		UE_LOG(
 			LogTemp,
 			Log,
-			TEXT("JumpToSpace Moon Config: Crew=%d FoodRate=%.2f WaterRate=%.2f ResourceCount=%d SpawnRadius=%.1f"),
+			TEXT("JumpToSpace Moon Config: Crew=%d FoodRate=%.2f WaterRate=%.2f ResourceCount=%d SpawnRadius=%.1f PickaxeCost=%d BackpackRockCost=%d BackpackOreCost=%d LargeYield=%d OreYield=%d PickupMaxDistance=%.0f PickupAcquireRadius=%.0f PickupRetainRadius=%.0f PickupAimRayRadius=%.0f ShipMarkerDistance=%.0f PickupUpwardSpeed=%.0f PickupHorizontalSpeed=%.0f"),
 			GetCrewCount(),
 			GetFoodConsumptionPerPersonPerMinute(),
 			GetWaterConsumptionPerPersonPerMinute(),
 			FMath::Max(0, MoonResourceSpawnSettings.TotalResourceCount),
-			FMath::Max(0.0f, MoonResourceSpawnSettings.SpawnRadius));
+			FMath::Max(0.0f, MoonResourceSpawnSettings.SpawnRadius),
+			GetPickaxeRockCost(),
+			GetBackpackRockCost(),
+			GetBackpackOreCost(),
+			GetLargeRockTotalYieldUnits(),
+			GetOreDepositTotalYieldUnits(),
+			GetPickupMaxDistance(),
+			GetPickupAcquireRadius(),
+			GetPickupRetainRadius(),
+			GetPickupAimRayRadius(),
+			GetSpacecraftMarkerShowDistance(),
+			GetPickupDropUpwardSpeed(),
+			GetPickupDropHorizontalSpeed());
 
 		World->GetTimerManager().ClearTimer(MoonResourceInitializationTimerHandle);
 		MoonResourceInitializationTimerHandle = World->GetTimerManager().SetTimerForNextTick(
@@ -117,6 +346,7 @@ void AJTSMoonGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	FoodConsumptionAccumulator = 0.0;
 	WaterConsumptionAccumulator = 0.0;
+	CachedSpacecraft.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -167,15 +397,7 @@ void AJTSMoonGameMode::ConsumeExpeditionSupplies()
 		return;
 	}
 
-	AJTSSpacecraftActor* Spacecraft = nullptr;
-	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
-	{
-		if (IsValid(*It))
-		{
-			Spacecraft = *It;
-			break;
-		}
-	}
+	AJTSSpacecraftActor* const Spacecraft = GetSpacecraft();
 
 	if (!IsValid(Spacecraft))
 	{

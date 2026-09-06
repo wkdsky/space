@@ -40,7 +40,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryBoardPlayer(APawn* InteractingPawn);
 
-	/** Immediately disembarks the currently boarded character during Earth collection. */
+	/** Immediately disembarks the currently boarded character during active exploration. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryDisembarkPlayer(APawn* InteractingPawn);
 
@@ -59,6 +59,13 @@ public:
 	USceneComponent* GetBoardingPoint() const;
 	USceneComponent* GetExitPoint() const;
 
+	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
+	FBox GetResourceExclusionBounds() const;
+
+	/** Bounds-top anchor shared by the world interaction prompt and Moon navigation marker. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Navigation")
+	FVector GetNavigationMarkerWorldLocation() const;
+
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
@@ -67,9 +74,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	int32 GetResourceAmount(EJTSResourceType ResourceType) const;
 
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	bool HasResource(EJTSResourceType ResourceType, int32 ResourceAmount) const;
+
 	/** Removes ResourceAmount units when the spacecraft has enough of the supplied resource. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Resources")
 	bool TryConsumeResource(EJTSResourceType ResourceType, int32 ResourceAmount);
+
+	/** Atomically removes a set of resource costs only when every amount is available. */
+	bool TryConsumeResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts);
 
 	/** Returns the number of fuel resources currently stored in the spacecraft. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
@@ -126,6 +139,7 @@ protected:
 
 private:
 	bool IsEarthCollectionActive() const;
+	bool IsMoonExplorationActive() const;
 	bool DepositPlayerResources(AJTSCharacter* Player);
 	void DepositResourcesFromOverlappingPlayers();
 	void RestoreStorageForMoonTravel();
@@ -158,6 +172,10 @@ private:
 	/** Optional shared Fake Moon WPO material. Earth worlds leave this untouched. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
+
+	/** Small visual clearance above the spacecraft mesh top for navigation and interaction labels. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float NavigationMarkerHeightOffset = 44.0f;
 
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))

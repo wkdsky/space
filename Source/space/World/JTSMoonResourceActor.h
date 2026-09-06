@@ -26,19 +26,23 @@ public:
 	EJTSResourceType GetResourceType() const;
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Resource")
-	int32 GetResourceAmount() const;
+	int32 GetTotalYieldUnits() const;
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Resource")
-	bool CanBePickedUp() const;
+	int32 GetRemainingYieldUnits() const;
+
+	/** Name and mesh-top anchor used by the native world interaction prompt. */
+	UFUNCTION(BlueprintPure, Category = "Moon|Interaction")
+	FText GetInteractionDisplayName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Interaction")
+	FVector GetInteractionAnchorWorldLocation() const;
 
 	FVector GetVisualBoundsExtent() const;
 	void AdjustToGround(const FVector& GroundHitLocation);
 
-	void InitializeResource(
-		EJTSResourceType NewResourceType,
-		int32 NewResourceAmount,
-		bool bNewCanPickup,
-		const FText& NewPickupText = FText::GetEmpty());
+	/** Initializes a multi-use Large Rock or Ore Deposit mining node. */
+	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits);
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
@@ -49,7 +53,7 @@ protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-	FText MakeDefaultPickupText() const;
+	FText GetMiningPrompt(APawn* InteractingPawn) const;
 	void ConfigureResourceMesh();
 	void ApplyResourceAppearance();
 
@@ -76,17 +80,14 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSResourceType ResourceType = EJTSResourceType::Rock;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
-	int32 ResourceAmount = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
+	int32 TotalYieldUnits = 6;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
-	FText PickupText;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
-	bool bCanPickup = true;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 RemainingYieldUnits = 6;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
 
-	bool bResourceConsumed = false;
+	bool bMiningInProgress = false;
 };

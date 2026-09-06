@@ -11,6 +11,11 @@ AJTSPrototypeHUD::AJTSPrototypeHUD()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
+UJTSPrototypeHUDWidget* AJTSPrototypeHUD::GetPrototypeWidget() const
+{
+	return PrototypeWidget.Get();
+}
+
 void AJTSPrototypeHUD::BeginPlay()
 {
 	Super::BeginPlay();

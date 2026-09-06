@@ -10,6 +10,7 @@
 
 class AActor;
 class APawn;
+class AJTSWorldPickupActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInteractionTargetChanged, AActor*, PreviousTarget, AActor*, NewTarget);
 
@@ -28,9 +29,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	void RefreshInteractable();
 
-	/** Attempts to interact with the nearest valid target. */
+	/** Attempts to interact with the selected valid target and reports whether interaction was dispatched. */
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
-	void TryInteract();
+	bool TryInteract();
 
 	/** Returns the target selected by the most recent detection pass. */
 	UFUNCTION(BlueprintPure, Category = "Interaction")
@@ -49,13 +50,14 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	AActor* FindBestInteractable(APawn* InteractingPawn) const;
+	AActor* FindBestInteractable(APawn* InteractingPawn);
+	AActor* FindBestWorldPickup(APawn* InteractingPawn);
 	bool IsValidInteractable(AActor* Candidate, APawn* InteractingPawn) const;
 	void SetCurrentInteractable(AActor* NewTarget);
 
 	/** Radius, in centimeters, used to look for IInteractable actors. */
 	UPROPERTY(EditAnywhere, Category = "Interaction", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float InteractionRadius = 250.0f;
+	float InteractionRadius = 360.0f;
 
 	/** Frequency used to refresh the target without adding per-frame Character logic. */
 	UPROPERTY(EditAnywhere, Category = "Interaction", meta = (ClampMin = "0.05", UIMin = "0.05"))

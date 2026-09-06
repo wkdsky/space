@@ -23,8 +23,10 @@
 #include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Interaction/InteractionComponent.h"
+#include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -51,13 +53,14 @@ AJTSCharacter::AJTSCharacter()
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
+	EquipmentComponent = CreateDefaultSubobject<UJTSPlayerEquipmentComponent>(TEXT("EquipmentComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(GetCapsuleComponent());
 	CameraBoom->TargetArmLength = 420.0f;
-	CameraBoom->SocketOffset = FVector(0.0f, 0.0f, 60.0f);
+	CameraBoom->SocketOffset = ThirdPersonShoulderOffset;
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = true;
 
@@ -83,6 +86,48 @@ AJTSCharacter::AJTSCharacter()
 UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
 {
 	return CarryComponent.Get();
+}
+
+UJTSPlayerEquipmentComponent* AJTSCharacter::GetEquipmentComponent() const
+{
+	return EquipmentComponent.Get();
+}
+
+bool AJTSCharacter::IsFirstPersonView() const
+{
+	return bFirstPersonView;
+}
+
+int32 AJTSCharacter::GetEquipmentHoldSlotIndex() const
+{
+	if (bEquipmentHoldCompleted || !IsValid(EquipmentComponent)
+		|| !EquipmentComponent->GetEquipmentSlots().IsValidIndex(HeldEquipmentSlotIndex)
+		|| EquipmentComponent->GetEquipmentSlot(HeldEquipmentSlotIndex) == EJTSEquipmentType::None)
+	{
+		return INDEX_NONE;
+	}
+
+	return HeldEquipmentSlotIndex;
+}
+
+float AJTSCharacter::GetEquipmentHoldProgress() const
+{
+	if (GetEquipmentHoldSlotIndex() == INDEX_NONE)
+	{
+		return 0.0f;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Clamp(
+		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - EquipmentHoldStartTime)
+			/ static_cast<double>(FMath::Max(0.1f, EquipmentHoldToDropDuration))),
+		0.0f,
+		1.0f);
 }
 
 bool AJTSCharacter::IsBoardingHoldActive() const
@@ -161,6 +206,10 @@ void AJTSCharacter::NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft)
 	{
 		bInteractKeyHeld = false;
 		CancelBoardingHold();
+		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+		{
+			PlayerController->CloseMoonShop();
+		}
 	}
 }
 
@@ -178,6 +227,7 @@ bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 	}
 
 	CancelBoardingHold();
+	CancelEquipmentSlotHold();
 	bInteractKeyHeld = false;
 	NearbySpacecraft = Spacecraft;
 	BoardedSpacecraft = Spacecraft;
@@ -244,10 +294,19 @@ void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	ApplyCameraView();
 	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
 
 	RegisterInputMappingContext();
+}
+
+void AJTSCharacter::ApplyThirdPersonCameraOffset()
+{
+	if (!bFirstPersonView)
+	{
+		ApplyCameraView();
+	}
 }
 
 void AJTSCharacter::PossessedBy(AController* NewController)
@@ -270,6 +329,7 @@ void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
+	CancelEquipmentSlotHold();
 	UnbindGameState();
 	UnregisterInputMappingContext();
 
@@ -307,6 +367,22 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
+	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
+	if (EquipmentSlotActions.Num() == 4)
+	{
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotOneStarted);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotTwoStarted);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotThreeStarted);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotFourStarted);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotOneReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotTwoReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotThreeReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotFourReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotOneReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotTwoReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotThreeReleased);
+		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotFourReleased);
+	}
 
 	BoundInputComponent = PlayerInputComponent;
 	RegisterInputMappingContext();
@@ -327,6 +403,12 @@ void AJTSCharacter::InitializeInput()
 	JumpAction = NewObject<UInputAction>(this, TEXT("JumpAction"), RF_Transient);
 	SprintAction = NewObject<UInputAction>(this, TEXT("SprintAction"), RF_Transient);
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
+	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
+	EquipmentSlotActions.Reset();
+	for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
+	{
+		EquipmentSlotActions.Add(NewObject<UInputAction>(this, *FString::Printf(TEXT("EquipmentSlot%dAction"), SlotIndex + 1), RF_Transient));
+	}
 
 	MoveForwardAction->ValueType = EInputActionValueType::Axis1D;
 	MoveRightAction->ValueType = EInputActionValueType::Axis1D;
@@ -335,6 +417,11 @@ void AJTSCharacter::InitializeInput()
 	JumpAction->ValueType = EInputActionValueType::Boolean;
 	SprintAction->ValueType = EInputActionValueType::Boolean;
 	InteractAction->ValueType = EInputActionValueType::Boolean;
+	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
+	for (UInputAction* const EquipmentSlotAction : EquipmentSlotActions)
+	{
+		EquipmentSlotAction->ValueType = EInputActionValueType::Boolean;
+	}
 
 	InputMappingContext->MapKey(MoveForwardAction, EKeys::W);
 	InputMappingContext->MapKey(MoveRightAction, EKeys::D);
@@ -343,6 +430,14 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputMappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
+	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
+	if (EquipmentSlotActions.Num() == 4)
+	{
+		InputMappingContext->MapKey(EquipmentSlotActions[0], EKeys::One);
+		InputMappingContext->MapKey(EquipmentSlotActions[1], EKeys::Two);
+		InputMappingContext->MapKey(EquipmentSlotActions[2], EKeys::Three);
+		InputMappingContext->MapKey(EquipmentSlotActions[3], EKeys::Four);
+	}
 
 	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
 	{
@@ -516,8 +611,19 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 {
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+
 	// TODO(FakeMoon): Re-evaluate camera-ray versus flat-world trajectory for future long-range hitscan/projectiles.
 	bInteractKeyHeld = true;
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()); PlayerController != nullptr && PlayerController->IsMoonShopOpen())
+	{
+		bInteractKeyHeld = false;
+		PlayerController->CloseMoonShop();
+		return;
+	}
 
 	if (IsBoarded())
 	{
@@ -530,10 +636,35 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	}
 
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
 	if (bEarthCollectionActive && IsValid(Spacecraft) && Spacecraft->IsPawnInBoardingRange(this))
 	{
 		BeginBoardingHold();
+		return;
+	}
+	if (bMoonExplorationActive)
+	{
+	bInteractKeyHeld = false;
+	if (InteractionComponent != nullptr)
+	{
+		if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
+			{
+				if (!InteractionTarget->IsA<AJTSSpacecraftActor>())
+				{
+					InteractionComponent->TryInteract();
+					return;
+				}
+			}
+		}
+
+		if (IsValid(Spacecraft) && Spacecraft->IsPawnInBoardingRange(this))
+		{
+			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+			{
+				PlayerController->OpenMoonShop(this);
+			}
+		}
 		return;
 	}
 
@@ -554,6 +685,167 @@ void AJTSCharacter::HandleInteractCanceled(const FInputActionValue& Value)
 {
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
+}
+
+void AJTSCharacter::HandleToggleCameraStarted(const FInputActionValue& Value)
+{
+	if (!CanUseNormalGameplayInput())
+	{
+		return;
+	}
+
+	bFirstPersonView = !bFirstPersonView;
+	ApplyCameraView();
+}
+
+void AJTSCharacter::HandleEquipmentSlotOneStarted(const FInputActionValue& Value)
+{
+	BeginEquipmentSlotHold(0);
+}
+
+void AJTSCharacter::HandleEquipmentSlotTwoStarted(const FInputActionValue& Value)
+{
+	BeginEquipmentSlotHold(1);
+}
+
+void AJTSCharacter::HandleEquipmentSlotThreeStarted(const FInputActionValue& Value)
+{
+	BeginEquipmentSlotHold(2);
+}
+
+void AJTSCharacter::HandleEquipmentSlotFourStarted(const FInputActionValue& Value)
+{
+	BeginEquipmentSlotHold(3);
+}
+
+void AJTSCharacter::HandleEquipmentSlotOneReleased(const FInputActionValue& Value)
+{
+	EndEquipmentSlotHold(0);
+}
+
+void AJTSCharacter::HandleEquipmentSlotTwoReleased(const FInputActionValue& Value)
+{
+	EndEquipmentSlotHold(1);
+}
+
+void AJTSCharacter::HandleEquipmentSlotThreeReleased(const FInputActionValue& Value)
+{
+	EndEquipmentSlotHold(2);
+}
+
+void AJTSCharacter::HandleEquipmentSlotFourReleased(const FInputActionValue& Value)
+{
+	EndEquipmentSlotHold(3);
+}
+
+void AJTSCharacter::BeginEquipmentSlotHold(int32 SlotIndex)
+{
+	if (!CanUseNormalGameplayInput() || !IsValid(EquipmentComponent)
+		|| SlotIndex < 0 || SlotIndex >= EquipmentComponent->GetEquipmentCapacity())
+	{
+		return;
+	}
+
+	CancelEquipmentSlotHold();
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	HeldEquipmentSlotIndex = SlotIndex;
+	bEquipmentHoldCompleted = false;
+	EquipmentHoldStartTime = static_cast<double>(World->GetTimeSeconds());
+	if (EquipmentComponent->GetEquipmentSlot(SlotIndex) == EJTSEquipmentType::None)
+	{
+		return;
+	}
+	World->GetTimerManager().SetTimer(
+		EquipmentHoldTimerHandle,
+		this,
+		&AJTSCharacter::CompleteEquipmentSlotHold,
+		FMath::Max(0.1f, EquipmentHoldToDropDuration),
+		false);
+}
+
+void AJTSCharacter::EndEquipmentSlotHold(int32 SlotIndex)
+{
+	if (HeldEquipmentSlotIndex != SlotIndex)
+	{
+		return;
+	}
+
+	const bool bShouldSelectSlot = !bEquipmentHoldCompleted;
+	CancelEquipmentSlotHold();
+	if (bShouldSelectSlot && CanUseNormalGameplayInput() && IsValid(EquipmentComponent))
+	{
+		EquipmentComponent->SelectEquipmentSlot(SlotIndex);
+	}
+}
+
+void AJTSCharacter::CancelEquipmentSlotHold()
+{
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(EquipmentHoldTimerHandle);
+	}
+
+	HeldEquipmentSlotIndex = INDEX_NONE;
+	EquipmentHoldStartTime = 0.0;
+	bEquipmentHoldCompleted = false;
+}
+
+void AJTSCharacter::CompleteEquipmentSlotHold()
+{
+	if (!CanUseNormalGameplayInput() || !IsValid(EquipmentComponent) || HeldEquipmentSlotIndex == INDEX_NONE)
+	{
+		CancelEquipmentSlotHold();
+		return;
+	}
+
+	const int32 SlotIndex = HeldEquipmentSlotIndex;
+	bEquipmentHoldCompleted = EquipmentComponent->DropEquippedItemAtSlot(SlotIndex);
+	HeldEquipmentSlotIndex = INDEX_NONE;
+	EquipmentHoldStartTime = 0.0;
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(EquipmentHoldTimerHandle);
+	}
+}
+
+bool AJTSCharacter::CanUseNormalGameplayInput() const
+{
+	return !IsBoarded()
+		&& BoundGameState.IsValid()
+		&& (BoundGameState->IsEarthCollectionActive() || BoundGameState->IsMoonExploration())
+		&& !IsGameplayInputBlocked();
+}
+
+bool AJTSCharacter::IsGameplayInputBlocked() const
+{
+	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
+	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsGameMenuOpen();
+}
+
+void AJTSCharacter::ApplyCameraView()
+{
+	if (CameraBoom == nullptr || FollowCamera == nullptr)
+	{
+		return;
+	}
+
+	CameraBoom->SocketOffset = bFirstPersonView ? FirstPersonCameraOffset : ThirdPersonShoulderOffset;
+	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : 420.0f;
+	CameraBoom->bDoCollisionTest = !bFirstPersonView;
+	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
+	if (GetMesh() != nullptr)
+	{
+		GetMesh()->SetOwnerNoSee(bFirstPersonView);
+	}
+	if (DebugVisual != nullptr)
+	{
+		DebugVisual->SetOwnerNoSee(bFirstPersonView);
+	}
 }
 
 void AJTSCharacter::BeginBoardingHold()
@@ -764,5 +1056,13 @@ void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhas
 	{
 		bInteractKeyHeld = false;
 		CancelBoardingHold();
+	}
+
+	if (NewGameplayPhase != EJTSGameplayPhase::MoonExploration)
+	{
+		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+		{
+			PlayerController->CloseMoonShop();
+		}
 	}
 }

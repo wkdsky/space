@@ -7,6 +7,7 @@
 #include "JTSMoonResourceSpawner.generated.h"
 
 class AJTSMoonResourceActor;
+class AJTSWorldPickupActor;
 
 /** Moon resource distribution values owned by the Moon chapter ruleset. */
 USTRUCT(BlueprintType)
@@ -31,6 +32,10 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
+
+	/** Extra XY clearance added around the spacecraft's physical mesh bounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float SpacecraftExclusionPadding = 500.0f;
 };
 
 UCLASS()
@@ -53,15 +58,15 @@ protected:
 
 private:
 	void ClearGeneratedResources();
-	AJTSMoonResourceActor* SpawnResource(
+	AJTSMoonResourceActor* SpawnMiningNode(
 		EJTSResourceType ResourceType,
-		int32 ResourceAmount,
-		bool bCanPickup,
+		int32 TotalYieldUnits,
 		const FVector& ResourceScale,
 		const FRotator& ResourceRotation,
-		const FText& ResourcePickupText,
 		const FVector& GroundLocation);
+	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation, const FVector& PreferredDirection = FVector::ZeroVector);
 	bool ResolveGroundLocation(const FVector& CandidateXY, FVector& OutGroundLocation) const;
+	bool IsCandidateExcludedBySpacecraft(const FVector& CandidateXY) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonResourceActor> ResourceActorClass;
@@ -84,6 +89,10 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
 
+	/** Runtime copy of the Moon GameMode's sole spacecraft exclusion setting. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
+	float SpacecraftExclusionPadding = 0.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float GroundTraceStartHeight = 1000.0f;
 
@@ -98,4 +107,7 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AJTSMoonResourceActor>> GeneratedResources;
+
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<AJTSWorldPickupActor>> GeneratedPickups;
 };

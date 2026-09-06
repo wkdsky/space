@@ -11,6 +11,7 @@
 class AJTSSpacecraftActor;
 class UCameraComponent;
 class UJTSCarryComponent;
+class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
@@ -35,6 +36,20 @@ public:
 	/** Returns this character's resource carry inventory. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	UJTSCarryComponent* GetCarryComponent() const;
+
+	/** Returns this character's four-slot equipment loadout. */
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	UJTSPlayerEquipmentComponent* GetEquipmentComponent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Camera")
+	bool IsFirstPersonView() const;
+
+	/** The HUD queries this state to draw an equipment-slot hold ring. */
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	int32 GetEquipmentHoldSlotIndex() const;
+
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	float GetEquipmentHoldProgress() const;
 
 	UFUNCTION(BlueprintPure, Category = "Boarding")
 	bool IsBoardingHoldActive() const;
@@ -94,10 +109,27 @@ private:
 	void HandleInteractStarted(const FInputActionValue& Value);
 	void HandleInteractCompleted(const FInputActionValue& Value);
 	void HandleInteractCanceled(const FInputActionValue& Value);
+	void HandleToggleCameraStarted(const FInputActionValue& Value);
+	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
+	void HandleEquipmentSlotTwoStarted(const FInputActionValue& Value);
+	void HandleEquipmentSlotThreeStarted(const FInputActionValue& Value);
+	void HandleEquipmentSlotFourStarted(const FInputActionValue& Value);
+	void HandleEquipmentSlotOneReleased(const FInputActionValue& Value);
+	void HandleEquipmentSlotTwoReleased(const FInputActionValue& Value);
+	void HandleEquipmentSlotThreeReleased(const FInputActionValue& Value);
+	void HandleEquipmentSlotFourReleased(const FInputActionValue& Value);
 
 	void BeginBoardingHold();
 	void CancelBoardingHold();
 	void CompleteBoardingHold();
+	void BeginEquipmentSlotHold(int32 SlotIndex);
+	void EndEquipmentSlotHold(int32 SlotIndex);
+	void CancelEquipmentSlotHold();
+	void CompleteEquipmentSlotHold();
+	bool CanUseNormalGameplayInput() const;
+	bool IsGameplayInputBlocked() const;
+	void ApplyThirdPersonCameraOffset();
+	void ApplyCameraView();
 	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
 	bool FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
 
@@ -126,9 +158,30 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Carry", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSCarryComponent> CarryComponent;
 
+	/** Separate fixed-capacity equipment loadout; never stores ordinary resources. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSPlayerEquipmentComponent> EquipmentComponent;
+
 	/** Legacy radial-gravity component retained for Blueprint compatibility; Moon fake worlds bypass it. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
+
+	/** Camera socket offset used to keep the character left and below the centered crosshair. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true"))
+	FVector ThirdPersonShoulderOffset = FVector(0.0f, 90.0f, 80.0f);
+
+	/** Eye-level socket offset used while the spring arm is collapsed for first person. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true"))
+	FVector FirstPersonCameraOffset = FVector(0.0f, 0.0f, 66.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
+	float FirstPersonFOV = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
+	float ThirdPersonFOV = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float EquipmentHoldToDropDuration = 0.8f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;
@@ -154,6 +207,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> InteractAction;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ToggleCameraAction;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInputAction>> EquipmentSlotActions;
+
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundInputComponent;
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
@@ -161,9 +220,14 @@ private:
 	TWeakObjectPtr<AJTSSpacecraftActor> BoardedSpacecraft;
 
 	FTimerHandle BoardingHoldTimerHandle;
+	FTimerHandle EquipmentHoldTimerHandle;
 	double BoardingHoldStartTime = 0.0;
+	double EquipmentHoldStartTime = 0.0;
+	int32 HeldEquipmentSlotIndex = INDEX_NONE;
 	bool bBoardingHoldActive = false;
 	bool bInteractKeyHeld = false;
+	bool bEquipmentHoldCompleted = false;
+	bool bFirstPersonView = false;
 	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 	bool bPreviousDebugVisualVisible = true;
 	bool bPreviousMeshVisible = true;

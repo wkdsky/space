@@ -186,7 +186,7 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
-	if (!IsEarthCollectionActive() || !IsValid(Character) || BoardedPlayer.Get() != Character)
+	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive()) || !IsValid(Character) || BoardedPlayer.Get() != Character)
 	{
 		return false;
 	}
@@ -234,14 +234,57 @@ USceneComponent* AJTSSpacecraftActor::GetExitPoint() const
 	return ExitPoint.Get();
 }
 
-bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* /*InteractingPawn*/) const
+FBox AJTSSpacecraftActor::GetResourceExclusionBounds() const
 {
-	return false;
+	if (IsValid(SpacecraftMesh) && SpacecraftMesh->IsRegistered())
+	{
+		const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
+		const FVector PhysicalExtent = SpacecraftMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
+		return FBox(
+			SpacecraftMesh->Bounds.Origin - PhysicalExtent,
+			SpacecraftMesh->Bounds.Origin + PhysicalExtent);
+	}
+
+	return GetComponentsBoundingBox(true);
 }
 
-FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* /*InteractingPawn*/) const
+FVector AJTSSpacecraftActor::GetNavigationMarkerWorldLocation() const
 {
-	return FText::GetEmpty();
+	if (IsValid(SpacecraftMesh) && SpacecraftMesh->IsRegistered())
+	{
+		const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
+		const FVector PhysicalExtent = SpacecraftMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
+		return SpacecraftMesh->Bounds.Origin + FVector(0.0f, 0.0f, PhysicalExtent.Z + NavigationMarkerHeightOffset);
+	}
+
+	const FBox ActorBounds = GetComponentsBoundingBox(true);
+	return ActorBounds.IsValid
+		? FVector(ActorBounds.GetCenter().X, ActorBounds.GetCenter().Y, ActorBounds.Max.Z + NavigationMarkerHeightOffset)
+		: GetActorLocation() + FVector(0.0f, 0.0f, NavigationMarkerHeightOffset);
+}
+
+bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) const
+{
+	return IsValid(InteractingPawn)
+		&& (IsEarthCollectionActive() || IsMoonExplorationActive())
+		&& IsPawnInBoardingRange(InteractingPawn);
+}
+
+FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
+{
+	if (!CanInteract_Implementation(InteractingPawn))
+	{
+		return FText::GetEmpty();
+	}
+
+	if (IsPlayerBoarded(InteractingPawn))
+	{
+		return FText::FromString(TEXT("[E] EXIT"));
+	}
+
+	return IsMoonExplorationActive()
+		? FText::FromString(TEXT("[E] WORKSHOP"))
+		: FText::FromString(TEXT("HOLD [E] BOARD"));
 }
 
 void AJTSSpacecraftActor::Interact_Implementation(APawn* /*InteractingPawn*/)
@@ -254,23 +297,48 @@ int32 AJTSSpacecraftActor::GetResourceAmount(EJTSResourceType ResourceType) cons
 	return ResourceAmount != nullptr ? FMath::Max(0, *ResourceAmount) : 0;
 }
 
+bool AJTSSpacecraftActor::HasResource(EJTSResourceType ResourceType, int32 ResourceAmount) const
+{
+	return IsSupportedResourceType(ResourceType)
+		&& ResourceAmount > 0
+		&& GetResourceAmount(ResourceType) >= ResourceAmount;
+}
+
 bool AJTSSpacecraftActor::TryConsumeResource(EJTSResourceType ResourceType, int32 ResourceAmount)
 {
-	if (!IsSupportedResourceType(ResourceType) || ResourceAmount <= 0)
+	TMap<EJTSResourceType, int32> ResourceAmounts;
+	ResourceAmounts.Add(ResourceType, ResourceAmount);
+	return TryConsumeResourceAmounts(ResourceAmounts);
+}
+
+bool AJTSSpacecraftActor::TryConsumeResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts)
+{
+	if (ResourceAmounts.IsEmpty())
 	{
 		return false;
 	}
 
-	int32* const StoredAmount = Storage.Find(ResourceType);
-	if (StoredAmount == nullptr || *StoredAmount < ResourceAmount)
+	for (const TPair<EJTSResourceType, int32>& Resource : ResourceAmounts)
 	{
-		return false;
+		if (!HasResource(Resource.Key, Resource.Value))
+		{
+			return false;
+		}
 	}
 
-	*StoredAmount -= ResourceAmount;
-	if (*StoredAmount == 0)
+	for (const TPair<EJTSResourceType, int32>& Resource : ResourceAmounts)
 	{
-		Storage.Remove(ResourceType);
+		int32* const StoredAmount = Storage.Find(Resource.Key);
+		if (StoredAmount == nullptr)
+		{
+			return false;
+		}
+
+		*StoredAmount -= Resource.Value;
+		if (*StoredAmount == 0)
+		{
+			Storage.Remove(Resource.Key);
+		}
 	}
 
 	SaveStorageForMoonTravel();
@@ -355,6 +423,13 @@ bool AJTSSpacecraftActor::IsEarthCollectionActive() const
 	UWorld* const World = GetWorld();
 	const AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
 	return IsValid(JTSGameState) && JTSGameState->IsEarthCollectionActive();
+}
+
+bool AJTSSpacecraftActor::IsMoonExplorationActive() const
+{
+	UWorld* const World = GetWorld();
+	const AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
+	return IsValid(JTSGameState) && JTSGameState->IsMoonExploration();
 }
 
 bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)

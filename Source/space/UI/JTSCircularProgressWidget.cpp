@@ -46,7 +46,7 @@ public:
 		const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
 		const FVector2D Center = LocalSize * 0.5f;
 		const float Radius = FMath::Max(0.0f, FMath::Min(LocalSize.X, LocalSize.Y) * 0.5f - RingThickness * 0.5f);
-		const int32 CircleSegments = 64;
+		const int32 CircleSegments = 32;
 		const float FullCircle = 2.0f * PI;
 		const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
 

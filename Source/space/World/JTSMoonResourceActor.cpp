@@ -2,12 +2,16 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
+#include "space/Items/JTSWorldPickupActor.h"
+#include "space/Items/JTSWorldPickupItemType.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -34,6 +38,11 @@ namespace
 		default:
 			return TEXT("Unknown");
 		}
+	}
+
+	const TCHAR* GetMiningNodeName(EJTSResourceType ResourceType)
+	{
+		return ResourceType == EJTSResourceType::Ore ? TEXT("Ore") : TEXT("LargeRock");
 	}
 }
 
@@ -97,14 +106,31 @@ EJTSResourceType AJTSMoonResourceActor::GetResourceType() const
 	return ResourceType;
 }
 
-int32 AJTSMoonResourceActor::GetResourceAmount() const
+int32 AJTSMoonResourceActor::GetTotalYieldUnits() const
 {
-	return FMath::Max(1, ResourceAmount);
+	return FMath::Max(1, TotalYieldUnits);
 }
 
-bool AJTSMoonResourceActor::CanBePickedUp() const
+int32 AJTSMoonResourceActor::GetRemainingYieldUnits() const
 {
-	return ResourceType != EJTSResourceType::Ore && bCanPickup;
+	return FMath::Clamp(RemainingYieldUnits, 0, GetTotalYieldUnits());
+}
+
+FText AJTSMoonResourceActor::GetInteractionDisplayName() const
+{
+	return FText::FromString(ResourceType == EJTSResourceType::Ore ? TEXT("ORE DEPOSIT") : TEXT("LARGE ROCK"));
+}
+
+FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
+{
+	if (IsValid(ResourceMesh) && ResourceMesh->IsRegistered())
+	{
+		const float BoundsScale = FMath::Max(FMath::Abs(ResourceMesh->BoundsScale), KINDA_SMALL_NUMBER);
+		const FVector PhysicalExtent = ResourceMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
+		return ResourceMesh->Bounds.Origin + FVector(0.0f, 0.0f, PhysicalExtent.Z + 28.0f);
+	}
+
+	return GetActorLocation() + FVector(0.0f, 0.0f, 120.0f);
 }
 
 FVector AJTSMoonResourceActor::GetVisualBoundsExtent() const
@@ -193,74 +219,112 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 		FinalScale.Z);
 }
 
-void AJTSMoonResourceActor::InitializeResource(
-	EJTSResourceType NewResourceType,
-	int32 NewResourceAmount,
-	bool bNewCanPickup,
-	const FText& NewPickupText)
+void AJTSMoonResourceActor::InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits)
 {
 	ResourceType = NewResourceType;
-	ResourceAmount = FMath::Max(1, NewResourceAmount);
-	bCanPickup = NewResourceType != EJTSResourceType::Ore && bNewCanPickup;
-	PickupText = NewPickupText;
-	bResourceConsumed = false;
+	TotalYieldUnits = FMath::Max(1, NewTotalYieldUnits);
+	RemainingYieldUnits = TotalYieldUnits;
+	bMiningInProgress = false;
 	ApplyResourceAppearance();
 }
 
 bool AJTSMoonResourceActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
-	if (bResourceConsumed || IsPendingKillPending())
-	{
-		return false;
-	}
-
-	if (!CanBePickedUp())
-	{
-		// Large rocks and ore deposits remain valid interaction targets so the player sees the tool requirement.
-		return true;
-	}
-
-	const UJTSCarryComponent* const CarryComponent = IsValid(InteractingPawn)
-		? InteractingPawn->FindComponentByClass<UJTSCarryComponent>()
-		: nullptr;
-
-	return IsValid(CarryComponent)
-		&& CarryComponent->CanCarryResources(GetResourceAmount());
+	return IsValid(InteractingPawn)
+		&& !bMiningInProgress
+		&& !IsPendingKillPending()
+		&& GetRemainingYieldUnits() > 0;
 }
 
 FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
-	if (!CanBePickedUp())
-	{
-		return CanInteract_Implementation(InteractingPawn)
-			? FText::FromString(TEXT("Need Pickaxe"))
-			: FText::GetEmpty();
-	}
-
 	if (!CanInteract_Implementation(InteractingPawn))
 	{
 		return FText::GetEmpty();
 	}
 
-	return PickupText.IsEmpty() ? MakeDefaultPickupText() : PickupText;
+	return GetMiningPrompt(InteractingPawn);
 }
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	if (!CanBePickedUp() || !CanInteract_Implementation(InteractingPawn))
+	if (!CanInteract_Implementation(InteractingPawn))
 	{
 		return;
 	}
 
-	bResourceConsumed = true;
+	const UJTSPlayerEquipmentComponent* const EquipmentComponent = InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>();
+	if (!IsValid(EquipmentComponent) || !EquipmentComponent->HasActiveTool(EJTSEquipmentType::Pickaxe))
+	{
+		const TCHAR* const FailureReason = IsValid(EquipmentComponent)
+			&& EquipmentComponent->HasEquippedItem(EJTSEquipmentType::Pickaxe)
+			? TEXT("PickaxeNotSelected")
+			: TEXT("NeedPickaxe");
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=%s"),
+			GetMiningNodeName(ResourceType),
+			GetRemainingYieldUnits(),
+			GetResourceTypeName(ResourceType),
+			FailureReason);
+		return;
+	}
+
+	const EJTSWorldPickupItemType PickupItemType = ResourceType == EJTSResourceType::Ore
+		? EJTSWorldPickupItemType::Ore
+		: EJTSWorldPickupItemType::Rock;
 	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-	if (!IsValid(CarryComponent) || !CarryComponent->TryAddResources(ResourceType, GetResourceAmount()))
+	const bool bAddToInventory = IsValid(CarryComponent) && CarryComponent->CanCarryResource(ResourceType);
+	bMiningInProgress = true;
+	bool bDelivered = false;
+	FString Destination;
+	if (bAddToInventory)
 	{
-		bResourceConsumed = false;
+		bDelivered = CarryComponent->TryAddResource(ResourceType);
+		Destination = TEXT("Inventory");
+	}
+	else
+	{
+		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGroundedPickup(
+			GetWorld(),
+			PickupItemType,
+			GetActorLocation(),
+			InteractingPawn,
+			this);
+		bDelivered = IsValid(Pickup);
+		Destination = TEXT("WorldDrop");
+	}
+
+	if (!bDelivered)
+	{
+		bMiningInProgress = false;
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=DeliveryFailed"),
+			GetMiningNodeName(ResourceType),
+			GetRemainingYieldUnits(),
+			GetResourceTypeName(ResourceType));
 		return;
 	}
 
-	Destroy();
+	RemainingYieldUnits = FMath::Max(0, RemainingYieldUnits - 1);
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=true Destination=%s"),
+		GetMiningNodeName(ResourceType),
+		GetRemainingYieldUnits(),
+		GetResourceTypeName(ResourceType),
+		*Destination);
+	if (RemainingYieldUnits == 0)
+	{
+		Destroy();
+		return;
+	}
+
+	bMiningInProgress = false;
 }
 
 void AJTSMoonResourceActor::BeginPlay()
@@ -283,32 +347,27 @@ void AJTSMoonResourceActor::BeginPlay()
 void AJTSMoonResourceActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	ResourceAmount = FMath::Max(1, ResourceAmount);
-	if (ResourceType == EJTSResourceType::Ore)
-	{
-		bCanPickup = false;
-	}
+	TotalYieldUnits = FMath::Max(1, TotalYieldUnits);
+	RemainingYieldUnits = FMath::Clamp(RemainingYieldUnits, 0, TotalYieldUnits);
 	ApplyResourceAppearance();
 }
 
-FText AJTSMoonResourceActor::MakeDefaultPickupText() const
+FText AJTSMoonResourceActor::GetMiningPrompt(APawn* InteractingPawn) const
 {
-	const TCHAR* ResourceName = TEXT("Resource");
-	switch (ResourceType)
+	const UJTSPlayerEquipmentComponent* const EquipmentComponent = IsValid(InteractingPawn)
+		? InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>()
+		: nullptr;
+	if (!IsValid(EquipmentComponent) || !EquipmentComponent->HasEquippedItem(EJTSEquipmentType::Pickaxe))
 	{
-	case EJTSResourceType::Rock:
-		ResourceName = TEXT("Rock");
-		break;
-
-	case EJTSResourceType::Ore:
-		ResourceName = TEXT("Ore");
-		break;
-
-	default:
-		break;
+		return FText::FromString(TEXT("NEED PICKAXE"));
+	}
+	if (!EquipmentComponent->HasActiveTool(EJTSEquipmentType::Pickaxe))
+	{
+		const int32 PickaxeSlotIndex = EquipmentComponent->GetEquipmentSlotIndex(EJTSEquipmentType::Pickaxe);
+		return FText::FromString(FString::Printf(TEXT("SELECT PICKAXE [%d]"), PickaxeSlotIndex + 1));
 	}
 
-	return FText::Format(FText::FromString(TEXT("Press E Collect {0}")), FText::FromString(ResourceName));
+	return FText::FromString(TEXT("[E] MINE"));
 }
 
 void AJTSMoonResourceActor::ConfigureResourceMesh()

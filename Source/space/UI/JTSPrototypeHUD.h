@@ -18,6 +18,8 @@ class SPACE_API AJTSPrototypeHUD : public AHUD
 public:
 	AJTSPrototypeHUD();
 
+	UJTSPrototypeHUDWidget* GetPrototypeWidget() const;
+
 protected:
 	virtual void BeginPlay() override;
 
