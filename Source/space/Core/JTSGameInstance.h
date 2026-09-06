@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "space/Items/JTSResourceTypes.h"
 
 #include "JTSGameInstance.generated.h"
 
@@ -37,6 +38,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Settings")
 	FLinearColor GetSelectedAvatarLinearColor() const;
 
+	/** Returns the resource amount stored in the cross-level spacecraft snapshot. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	int32 GetPersistedSpacecraftResourceAmount(EJTSResourceType ResourceType) const;
+
+	/** Returns whether a spacecraft storage snapshot is available for Moon arrival. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	bool HasPersistedSpacecraftStorage() const;
+
+	/** Replaces the cross-level spacecraft storage snapshot after a successful launch. */
+	void SetPersistedSpacecraftStorage(const TMap<EJTSResourceType, int32>& NewStorage);
+
+	/** Returns the cross-level spacecraft storage snapshot. */
+	const TMap<EJTSResourceType, int32>& GetPersistedSpacecraftStorage() const;
+
+	/** Clears the completed or failed mission's spacecraft storage before a new Earth run. */
+	void ClearPersistedSpacecraftStorage();
+
 	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
 	float GetExpeditionFood() const;
 
@@ -60,13 +78,14 @@ public:
 
 private:
 	static float NormalizeExpeditionResource(float Value);
+	static bool IsSupportedResourceType(EJTSResourceType ResourceType);
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Settings", meta = (AllowPrivateAccess = "true"))
 	EJTSAvatarColor SelectedAvatarColor = EJTSAvatarColor::Blue;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Expedition|Supplies", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float ExpeditionFood = 0.0f;
+	/** Travel-only snapshot. The active spacecraft owns the live Storage in each level. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
+	TMap<EJTSResourceType, int32> PersistedSpacecraftStorage;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Expedition|Supplies", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float ExpeditionWater = 0.0f;
+	bool bHasPersistedSpacecraftStorage = false;
 };

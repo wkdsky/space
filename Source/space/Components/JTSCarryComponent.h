@@ -25,13 +25,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool CanCarryResource(EJTSResourceType ResourceType) const;
 
+	/** Returns whether the requested number of carry slots can fit in the inventory. */
+	UFUNCTION(BlueprintPure, Category = "Carry")
+	bool CanCarryResources(int32 ResourceAmount) const;
+
 	/** Adds one resource when capacity remains and reports whether it succeeded. */
 	UFUNCTION(BlueprintCallable, Category = "Carry")
 	bool TryAddResource(EJTSResourceType ResourceType);
 
-	/** Copies every carried resource to the output, then clears the carry inventory. */
+	/** Atomically adds ResourceAmount copies of a resource when all required slots are available. */
 	UFUNCTION(BlueprintCallable, Category = "Carry")
-	bool TryTakeAllResources(TArray<EJTSResourceType>& OutResources);
+	bool TryAddResources(EJTSResourceType ResourceType, int32 ResourceAmount);
+
+	/** Copies every carried resource amount to the output, then clears the carry inventory. */
+	UFUNCTION(BlueprintCallable, Category = "Carry")
+	bool TryTakeAllResources(TMap<EJTSResourceType, int32>& OutResources);
 
 	/** Returns the number of resources currently carried. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
@@ -45,9 +53,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	bool IsFull() const;
 
-	/** Returns the resources currently occupying the carry slots. */
+	/** Returns the amount carried for a single resource type. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
-	const TArray<EJTSResourceType>& GetCarriedResources() const;
+	int32 GetCarriedResourceAmount(EJTSResourceType ResourceType) const;
+
+	/** Returns the resource amounts currently occupying the carry slots. */
+	const TMap<EJTSResourceType, int32>& GetCarriedResources() const;
 
 	/** Broadcast after a resource is successfully added. */
 	UPROPERTY(BlueprintAssignable, Category = "Carry")
@@ -56,7 +67,7 @@ public:
 private:
 	static constexpr int32 CarryCapacity = 2;
 
-	/** Resources currently held by this actor. Each entry consumes one slot. */
+	/** Resource amounts currently held by this actor. Every unit consumes one carry slot. */
 	UPROPERTY(VisibleAnywhere, Category = "Carry")
-	TArray<EJTSResourceType> CarriedResources;
+	TMap<EJTSResourceType, int32> CarriedResources;
 };

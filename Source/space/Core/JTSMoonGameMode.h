@@ -32,7 +32,7 @@ protected:
 
 private:
 	void ConsumeExpeditionSupplies();
-	static int32 GetWholeTenths(double Accumulator);
+	static int32 GetWholeResources(double Accumulator);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gameplay|Moon Survival", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 CrewCount = 1;
@@ -46,5 +46,5 @@ private:
 	FTimerHandle ExpeditionConsumptionTimerHandle;
 	double FoodConsumptionAccumulator = 0.0;
 	double WaterConsumptionAccumulator = 0.0;
-	bool bMissingGameInstanceLogged = false;
+	bool bMissingSpacecraftLogged = false;
 };

@@ -85,6 +85,11 @@ void AJTSGameMode::StartEarthCollection()
 		return;
 	}
 
+	if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>())
+	{
+		GameInstance->ClearPersistedSpacecraftStorage();
+	}
+
 	bEarthCollectionStarted = true;
 	JTSGameState->SetFailureReason(EJTSFailureReason::None);
 
@@ -298,13 +303,13 @@ void AJTSGameMode::ResolveLaunchOutcome()
 	}
 
 	const int32 FuelCount = IsValid(Spacecraft) ? Spacecraft->GetFuelCount() : 0;
+	const int32 LaunchFuelCost = FMath::CeilToInt(GetMinimumFuelRequired());
 	if (!IsValid(Spacecraft))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Jump to Space could not find a spacecraft during launch resolution; treating the launch as fuel insufficient."));
 	}
 
-	const bool bHasEnoughFuel = IsValid(Spacecraft)
-		&& static_cast<float>(FuelCount) >= GetMinimumFuelRequired();
+	const bool bHasEnoughFuel = IsValid(Spacecraft) && FuelCount >= LaunchFuelCost;
 
 	if (AJTSGameState* const JTSGameState = GetJTSGameState())
 	{
@@ -315,15 +320,22 @@ void AJTSGameMode::ResolveLaunchOutcome()
 				: nullptr;
 			if (!IsValid(GameInstance))
 			{
-				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not preserve expedition Food and Water because the configured GameInstance is not UJTSGameInstance."));
+				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not preserve spacecraft Storage because the configured GameInstance is not UJTSGameInstance."));
 				JTSGameState->SetFailureReason(EJTSFailureReason::InvalidGameInstance);
 				JTSGameState->SetGameplayPhase(EJTSGameplayPhase::EarthCaptureFailure);
 				return;
 			}
 
-			GameInstance->SetExpeditionSupplies(
-				static_cast<float>(Spacecraft->GetFoodCount()),
-				static_cast<float>(Spacecraft->GetWaterCount()));
+			if (LaunchFuelCost > 0
+				&& !Spacecraft->TryConsumeResource(EJTSResourceType::Fuel, LaunchFuelCost))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not consume %d fuel from the spacecraft during launch."), LaunchFuelCost);
+				JTSGameState->SetFailureReason(EJTSFailureReason::InsufficientFuel);
+				JTSGameState->SetGameplayPhase(EJTSGameplayPhase::EarthCaptureFailure);
+				return;
+			}
+
+			GameInstance->SetPersistedSpacecraftStorage(Spacecraft->GetStorage());
 			JTSGameState->SetFailureReason(EJTSFailureReason::None);
 			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::MoonArrivalSuccess);
 		}

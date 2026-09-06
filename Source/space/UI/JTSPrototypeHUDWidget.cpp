@@ -7,7 +7,6 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -20,7 +19,6 @@
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Core/JTSGameInstance.h"
-#include "space/Core/JTSGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -152,22 +150,6 @@ namespace
 		return Button;
 	}
 
-	void ConfigureTransparentProgressBar(UProgressBar* ProgressBar)
-	{
-		if (ProgressBar == nullptr)
-		{
-			return;
-		}
-
-		FProgressBarStyle Style = FProgressBarStyle::GetDefault();
-		Style.BackgroundImage.TintColor = FSlateColor(FLinearColor::Transparent);
-		Style.FillImage.TintColor = FSlateColor(FLinearColor::White);
-		Style.MarqueeImage.TintColor = FSlateColor(FLinearColor::Transparent);
-		Style.EnableFillAnimation = false;
-		ProgressBar->SetWidgetStyle(Style);
-		ProgressBar->SetBarFillType(EProgressBarFillType::BottomToTop);
-		ProgressBar->SetBarFillStyle(EProgressBarFillStyle::Scale);
-	}
 }
 
 TSharedRef<SWidget> UJTSPrototypeHUDWidget::RebuildWidget()
@@ -214,14 +196,23 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 		BindGameState();
 	}
 
-	if (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	if (bEarthCollectionActive || bMoonExplorationActive)
 	{
 		RefreshGameplayHud();
-		RefreshBoardingProgress();
-
-		const float RemainingTime = BoundGameState->GetEarthCollectionRemainingTime();
-		if (TimeText != nullptr)
+		if (bEarthCollectionActive)
 		{
+			RefreshBoardingProgress();
+		}
+		else
+		{
+			SetBoardingProgressVisible(false);
+		}
+
+		if (bEarthCollectionActive && TimeText != nullptr)
+		{
+			const float RemainingTime = BoundGameState->GetEarthCollectionRemainingTime();
 			const float PulseAlpha = RemainingTime <= 5.0f
 				? (0.5f + 0.5f * FMath::Sin(static_cast<float>(GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0) * 8.0f))
 				: 0.0f;
@@ -405,12 +396,12 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		RocketFlame = MakeBorder(WidgetTree, TEXT("RocketFlame"), FLinearColor(1.0f, 0.42f, 0.05f, 1.0f), 1.0f);
 		AddCanvasChild(RocketIconCanvas, RocketFlame, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -4.0f), FVector2D(9.0f, 13.0f), FVector2D(0.5f, 1.0f));
 
-		UBorder* const LeftPanel = MakeBorder(WidgetTree, TEXT("EarthPanel"), FLinearColor(0.02f, 0.06f, 0.10f, 0.90f), 18.0f);
-		AddCanvasChild(GameplayLayer, LeftPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 178.0f), FVector2D(390.0f, 220.0f));
+		EarthPanel = MakeBorder(WidgetTree, TEXT("EarthPanel"), FLinearColor(0.02f, 0.06f, 0.10f, 0.90f), 18.0f);
+		AddCanvasChild(GameplayLayer, EarthPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 178.0f), FVector2D(390.0f, 220.0f));
 		UVerticalBox* const LeftBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("EarthPanelBox"));
-		if (LeftPanel != nullptr && LeftBox != nullptr)
+		if (EarthPanel != nullptr && LeftBox != nullptr)
 		{
-			LeftPanel->SetContent(LeftBox);
+			EarthPanel->SetContent(LeftBox);
 			AddVerticalChild(LeftBox, MakeTextBlock(WidgetTree, TEXT("EarthHeading"), TEXT("EARTH BASE"), 27.0f, FLinearColor(0.75f, 0.95f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 2.0f));
 			AddVerticalChild(LeftBox, MakeTextBlock(WidgetTree, TEXT("EarthPhase"), TEXT("COLLECTION PHASE"), 17.0f, FLinearColor(0.45f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 8.0f));
 			CarryText = MakeTextBlock(WidgetTree, TEXT("CarryText"), TEXT("CARRY: 0 / 2"), 20.0f, FLinearColor::White);
@@ -419,24 +410,15 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(LeftBox, HoldingText, FMargin(0.0f, 2.0f));
 		}
 
-		UBorder* const FuelPanel = MakeBorder(WidgetTree, TEXT("FuelPanel"), FLinearColor(0.02f, 0.03f, 0.07f, 0.82f), 14.0f);
-		AddCanvasChild(GameplayLayer, FuelPanel, FAnchors(1.0f, 0.5f), FVector2D(-28.0f, 0.0f), FVector2D(250.0f, 360.0f), FVector2D(1.0f, 0.5f));
-		UCanvasPanel* const FuelCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("FuelCanvas"));
-		if (FuelPanel != nullptr && FuelCanvas != nullptr)
+		UBorder* const ShipResourcesPanel = MakeBorder(WidgetTree, TEXT("ShipResourcesPanel"), FLinearColor(0.02f, 0.03f, 0.07f, 0.88f), 14.0f);
+		AddCanvasChild(GameplayLayer, ShipResourcesPanel, FAnchors(0.0f, 0.0f), FVector2D(176.0f, 28.0f), FVector2D(280.0f, 220.0f));
+		UVerticalBox* const ShipResourcesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ShipResourcesBox"));
+		if (ShipResourcesPanel != nullptr && ShipResourcesBox != nullptr)
 		{
-			FuelPanel->SetContent(FuelCanvas);
-			AddCanvasChild(FuelCanvas, MakeTextBlock(WidgetTree, TEXT("ShipHeading"), TEXT("SPACESHIP"), 25.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(10.0f, 4.0f), FVector2D(220.0f, 34.0f));
-			FuelProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("FuelProgressBar"));
-			ConfigureTransparentProgressBar(FuelProgressBar);
-			AddCanvasChild(FuelCanvas, FuelProgressBar, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 52.0f), FVector2D(58.0f, 250.0f));
-			FuelText = MakeTextBlock(WidgetTree, TEXT("FuelText"), TEXT("FUEL: 0"), 21.0f, FLinearColor(1.0f, 0.55f, 0.25f, 1.0f));
-			WaterText = MakeTextBlock(WidgetTree, TEXT("WaterText"), TEXT("WATER: 0"), 17.0f, FLinearColor(0.35f, 0.65f, 1.0f, 1.0f));
-			FoodText = MakeTextBlock(WidgetTree, TEXT("FoodText"), TEXT("FOOD: 0"), 17.0f, FLinearColor(0.40f, 0.90f, 0.30f, 1.0f));
-			MinimumFuelText = MakeTextBlock(WidgetTree, TEXT("MinimumFuelText"), TEXT("TARGET: 3"), 17.0f, FLinearColor(1.0f, 0.45f, 0.45f, 1.0f));
-			AddCanvasChild(FuelCanvas, FuelText, FAnchors(0.0f, 0.0f), FVector2D(95.0f, 75.0f), FVector2D(140.0f, 34.0f));
-			AddCanvasChild(FuelCanvas, MinimumFuelText, FAnchors(0.0f, 0.0f), FVector2D(95.0f, 115.0f), FVector2D(140.0f, 30.0f));
-			AddCanvasChild(FuelCanvas, WaterText, FAnchors(0.0f, 0.0f), FVector2D(95.0f, 165.0f), FVector2D(140.0f, 28.0f));
-			AddCanvasChild(FuelCanvas, FoodText, FAnchors(0.0f, 0.0f), FVector2D(95.0f, 202.0f), FVector2D(140.0f, 28.0f));
+			ShipResourcesPanel->SetContent(ShipResourcesBox);
+			AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("SHIP RESOURCES"), 22.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 8.0f));
+			ShipResourcesText = MakeTextBlock(WidgetTree, TEXT("ShipResourcesText"), TEXT(""), 19.0f, FLinearColor::White);
+			AddVerticalChild(ShipResourcesBox, ShipResourcesText, FMargin(0.0f, 0.0f));
 		}
 
 		BoardingProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("BoardingProgressWidget"));
@@ -536,6 +518,8 @@ void UJTSPrototypeHUDWidget::BindGameState()
 void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase)
 {
 	CachedGameplayPhase = NewGameplayPhase;
+	const bool bEarthCollection = NewGameplayPhase == EJTSGameplayPhase::EarthCollection;
+	const bool bMoonExploration = NewGameplayPhase == EJTSGameplayPhase::MoonExploration;
 	if (NewGameplayPhase != EJTSGameplayPhase::WaitingToStart)
 	{
 		bSettingsVisible = false;
@@ -543,15 +527,17 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 
 	ApplyLayerVisibility(StartMenuLayer, NewGameplayPhase == EJTSGameplayPhase::WaitingToStart && !bSettingsVisible);
 	ApplyLayerVisibility(SettingsLayer, NewGameplayPhase == EJTSGameplayPhase::WaitingToStart && bSettingsVisible);
-	ApplyLayerVisibility(GameplayLayer, NewGameplayPhase == EJTSGameplayPhase::EarthCollection);
+	ApplyLayerVisibility(GameplayLayer, bEarthCollection || bMoonExploration);
 	ApplyLayerVisibility(LaunchingLayer, NewGameplayPhase == EJTSGameplayPhase::Launching);
 	ApplyLayerVisibility(ResultLayer, NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess);
+	ApplyLayerVisibility(EarthPanel, bEarthCollection);
+	ApplyLayerVisibility(TimeText, bEarthCollection);
 
 	if (NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess)
 	{
 		RefreshResultView(NewGameplayPhase);
 	}
-	else if (NewGameplayPhase == EJTSGameplayPhase::EarthCollection)
+	else if (bEarthCollection || bMoonExploration)
 	{
 		RefreshGameplayHud();
 	}
@@ -572,9 +558,10 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		return;
 	}
 
-	const float RemainingTime = BoundGameState->GetEarthCollectionRemainingTime();
-	if (TimeText != nullptr)
+	const bool bEarthCollection = BoundGameState->IsEarthCollectionActive();
+	if (bEarthCollection && TimeText != nullptr)
 	{
+		const float RemainingTime = BoundGameState->GetEarthCollectionRemainingTime();
 		TimeText->SetText(FText::FromString(FString::Printf(TEXT("TIME: %s"), *FormatRemainingTime(RemainingTime))));
 		TimeText->SetColorAndOpacity(FSlateColor(RemainingTime <= 5.0f ? FLinearColor(1.0f, 0.25f, 0.18f, 1.0f) : FLinearColor::White));
 		TimeText->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), 34.0f));
@@ -597,52 +584,58 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		}
 		else
 		{
-			const TArray<EJTSResourceType>& CarriedResources = CarryComponent->GetCarriedResources();
-			for (int32 Index = 0; Index < CarriedResources.Num(); ++Index)
+			const TMap<EJTSResourceType, int32>& CarriedResources = CarryComponent->GetCarriedResources();
+			bool bFirstResource = true;
+			for (const TPair<EJTSResourceType, int32>& CarriedResource : CarriedResources)
 			{
-				if (Index > 0)
+				if (CarriedResource.Value <= 0)
+				{
+					continue;
+				}
+
+				if (!bFirstResource)
 				{
 					HoldingString += TEXT(", ");
 				}
-				HoldingString += ResourceTypeToString(CarriedResources[Index]);
+				HoldingString += FString::Printf(TEXT("%s %d"), *ResourceTypeToString(CarriedResource.Key), CarriedResource.Value);
+				bFirstResource = false;
+			}
+
+			if (bFirstResource)
+			{
+				HoldingString += TEXT("Empty");
 			}
 		}
 		HoldingText->SetText(FText::FromString(HoldingString));
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
-	const int32 FuelCount = Spacecraft != nullptr ? Spacecraft->GetFuelCount() : 0;
-	const int32 WaterCount = Spacecraft != nullptr ? Spacecraft->GetWaterCount() : 0;
-	const int32 FoodCount = Spacecraft != nullptr ? Spacecraft->GetFoodCount() : 0;
-	if (FuelText != nullptr)
+	if (ShipResourcesText != nullptr)
 	{
-		FuelText->SetText(FText::FromString(FString::Printf(TEXT("FUEL: %d"), FuelCount)));
-	}
-	if (WaterText != nullptr)
-	{
-		WaterText->SetText(FText::FromString(FString::Printf(TEXT("WATER: %d"), WaterCount)));
-	}
-	if (FoodText != nullptr)
-	{
-		FoodText->SetText(FText::FromString(FString::Printf(TEXT("FOOD: %d"), FoodCount)));
-	}
+		const EJTSResourceType DisplayedResourceTypes[] = {
+			EJTSResourceType::Fuel,
+			EJTSResourceType::Water,
+			EJTSResourceType::Food,
+			EJTSResourceType::Rock,
+			EJTSResourceType::Ore};
 
-	const AJTSGameMode* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameMode>() : nullptr;
-	const float MinimumFuelRequired = GameMode != nullptr ? FMath::Max(0.0f, GameMode->GetMinimumFuelRequired()) : 0.0f;
-	if (MinimumFuelText != nullptr)
-	{
-		MinimumFuelText->SetText(FText::FromString(FString::Printf(TEXT("TARGET: %d"), FMath::CeilToInt(MinimumFuelRequired))));
-	}
+		FString ShipResourceLines;
+		for (const EJTSResourceType ResourceType : DisplayedResourceTypes)
+		{
+			const int32 ResourceAmount = Spacecraft != nullptr ? Spacecraft->GetResourceAmount(ResourceType) : 0;
+			if (ResourceAmount <= 0)
+			{
+				continue;
+			}
 
-	const float FuelRatio = MinimumFuelRequired > KINDA_SMALL_NUMBER
-		? FMath::Clamp(static_cast<float>(FuelCount) / MinimumFuelRequired, 0.0f, 1.0f)
-		: (FuelCount > 0 ? 1.0f : 0.0f);
-	if (FuelProgressBar != nullptr)
-	{
-		FuelProgressBar->SetPercent(FuelRatio);
-		FuelProgressBar->SetFillColorAndOpacity(FuelCount >= MinimumFuelRequired
-			? FLinearColor(0.15f, 0.85f, 0.35f, 1.0f)
-			: FLinearColor(0.95f, 0.24f, 0.10f, 1.0f));
+			if (!ShipResourceLines.IsEmpty())
+			{
+				ShipResourceLines += TEXT("\n");
+			}
+			ShipResourceLines += FString::Printf(TEXT("%s %d"), *ResourceTypeToString(ResourceType), ResourceAmount);
+		}
+
+		ShipResourcesText->SetText(FText::FromString(ShipResourceLines));
 	}
 
 	if (AvatarBlock != nullptr)

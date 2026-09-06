@@ -10,6 +10,7 @@
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class USceneComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
 
@@ -49,6 +50,7 @@ protected:
 
 private:
 	FText MakeDefaultPickupText() const;
+	void ConfigureResourceMesh();
 	void ApplyResourceAppearance();
 
 	UPROPERTY(VisibleAnywhere, Category = "Moon|Resource")
@@ -62,6 +64,14 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
+
+	/** Engine primitive used by all rock variants. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> RockMesh;
+
+	/** Engine primitive used by every ore deposit. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> OreMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSResourceType ResourceType = EJTSResourceType::Rock;

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "space/Core/JTSGameState.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSResourceTypes.h"
 
@@ -62,6 +63,14 @@ public:
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
 
+	/** Returns the amount of one resource type currently stored in the spacecraft. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	int32 GetResourceAmount(EJTSResourceType ResourceType) const;
+
+	/** Removes ResourceAmount units when the spacecraft has enough of the supplied resource. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Resources")
+	bool TryConsumeResource(EJTSResourceType ResourceType, int32 ResourceAmount);
+
 	/** Returns the number of fuel resources currently stored in the spacecraft. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	int32 GetFuelCount() const;
@@ -81,6 +90,12 @@ public:
 	/** Adds each supplied resource to the matching spacecraft inventory count. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Resources")
 	bool DepositResources(const TArray<EJTSResourceType>& Resources);
+
+	/** Adds the supplied resource amounts to unbounded spacecraft storage. */
+	bool DepositResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts);
+
+	/** Returns the active spacecraft storage, keyed by resource type. */
+	const TMap<EJTSResourceType, int32>& GetStorage() const;
 
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
@@ -106,8 +121,15 @@ protected:
 		UPrimitiveComponent* OtherComp,
 		int32 OtherBodyIndex);
 
+	UFUNCTION()
+	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
+
 private:
 	bool IsEarthCollectionActive() const;
+	bool DepositPlayerResources(AJTSCharacter* Player);
+	void DepositResourcesFromOverlappingPlayers();
+	void RestoreStorageForMoonTravel();
+	void SaveStorageForMoonTravel() const;
 
 	/** Non-visual transform root for the temporary spacecraft actor. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship", meta = (AllowPrivateAccess = "true"))
@@ -137,17 +159,9 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
 
-	/** Fuel resources deposited into the spacecraft. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
-	int32 FuelCount = 0;
-
-	/** Water resources deposited into the spacecraft. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
-	int32 WaterCount = 0;
-
-	/** Food resources deposited into the spacecraft. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
-	int32 FoodCount = 0;
+	/** Unbounded resource storage used by both Earth and Moon collection. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
+	TMap<EJTSResourceType, int32> Storage;
 
 	/** Character currently attached to this spacecraft, if any. */
 	UPROPERTY(Transient)

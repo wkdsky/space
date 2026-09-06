@@ -16,7 +16,6 @@ class UButton;
 class UCanvasPanel;
 class UCanvasPanelSlot;
 class UJTSCircularProgressWidget;
-class UProgressBar;
 class UTextBlock;
 class UWidget;
 class SWidget;
@@ -107,19 +106,10 @@ private:
 	TObjectPtr<UTextBlock> HoldingText;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> FuelText;
+	TObjectPtr<UBorder> EarthPanel;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> WaterText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> FoodText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> MinimumFuelText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UProgressBar> FuelProgressBar;
+	TObjectPtr<UTextBlock> ShipResourcesText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> AvatarBlock;

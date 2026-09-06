@@ -9,22 +9,34 @@ UJTSCarryComponent::UJTSCarryComponent()
 
 bool UJTSCarryComponent::CanCarryResource(EJTSResourceType ResourceType) const
 {
-	return !IsFull();
+	return CanCarryResources(1);
+}
+
+bool UJTSCarryComponent::CanCarryResources(int32 ResourceAmount) const
+{
+	return ResourceAmount > 0
+		&& ResourceAmount <= GetCarryCapacity() - GetCarriedItemCount();
 }
 
 bool UJTSCarryComponent::TryAddResource(EJTSResourceType ResourceType)
 {
-	if (!CanCarryResource(ResourceType))
+	return TryAddResources(ResourceType, 1);
+}
+
+bool UJTSCarryComponent::TryAddResources(EJTSResourceType ResourceType, int32 ResourceAmount)
+{
+	if (!CanCarryResources(ResourceAmount))
 	{
 		return false;
 	}
 
-	CarriedResources.Add(ResourceType);
+	CarriedResources.FindOrAdd(ResourceType) += ResourceAmount;
+
 	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
 	return true;
 }
 
-bool UJTSCarryComponent::TryTakeAllResources(TArray<EJTSResourceType>& OutResources)
+bool UJTSCarryComponent::TryTakeAllResources(TMap<EJTSResourceType, int32>& OutResources)
 {
 	OutResources.Reset();
 
@@ -41,7 +53,13 @@ bool UJTSCarryComponent::TryTakeAllResources(TArray<EJTSResourceType>& OutResour
 
 int32 UJTSCarryComponent::GetCarriedItemCount() const
 {
-	return CarriedResources.Num();
+	int32 CarriedItemCount = 0;
+	for (const TPair<EJTSResourceType, int32>& CarriedResource : CarriedResources)
+	{
+		CarriedItemCount += FMath::Max(0, CarriedResource.Value);
+	}
+
+	return CarriedItemCount;
 }
 
 int32 UJTSCarryComponent::GetCarryCapacity() const
@@ -54,7 +72,13 @@ bool UJTSCarryComponent::IsFull() const
 	return GetCarriedItemCount() >= GetCarryCapacity();
 }
 
-const TArray<EJTSResourceType>& UJTSCarryComponent::GetCarriedResources() const
+int32 UJTSCarryComponent::GetCarriedResourceAmount(EJTSResourceType ResourceType) const
+{
+	const int32* const ResourceAmount = CarriedResources.Find(ResourceType);
+	return ResourceAmount != nullptr ? FMath::Max(0, *ResourceAmount) : 0;
+}
+
+const TMap<EJTSResourceType, int32>& UJTSCarryComponent::GetCarriedResources() const
 {
 	return CarriedResources;
 }

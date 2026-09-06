@@ -65,7 +65,7 @@ private:
 	float EarthCollectionDuration = 60.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float MinimumFuelRequired = 3.0f;
+	float MinimumFuelRequired = 35.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float LaunchSequenceDuration = 2.0f;

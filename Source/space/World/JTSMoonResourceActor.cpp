@@ -6,8 +6,8 @@
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
-#include "space/Items/JTSResourcePickupActor.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -46,9 +46,10 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 
 	ResourceMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ResourceMesh"));
 	ResourceMesh->SetupAttachment(SceneRoot);
-	ResourceMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	ResourceMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ResourceMesh->SetCollisionObjectType(ECC_WorldDynamic);
 	ResourceMesh->SetCollisionResponseToAllChannels(ECR_Overlap);
+	ResourceMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	ResourceMesh->SetGenerateOverlapEvents(true);
 	ResourceMesh->SetCanEverAffectNavigation(false);
 
@@ -57,7 +58,22 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
 	{
-		ResourceMesh->SetStaticMesh(SphereMeshAsset.Object);
+		RockMesh = SphereMeshAsset.Object;
+		ResourceMesh->SetStaticMesh(RockMesh);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMeshAsset(TEXT("/Engine/BasicShapes/Cone.Cone"));
+	if (ConeMeshAsset.Succeeded())
+	{
+		OreMesh = ConeMeshAsset.Object;
+	}
+	else
+	{
+		static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMeshAsset(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+		if (CylinderMeshAsset.Succeeded())
+		{
+			OreMesh = CylinderMeshAsset.Object;
+		}
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
@@ -88,7 +104,7 @@ int32 AJTSMoonResourceActor::GetResourceAmount() const
 
 bool AJTSMoonResourceActor::CanBePickedUp() const
 {
-	return bCanPickup;
+	return ResourceType != EJTSResourceType::Ore && bCanPickup;
 }
 
 FVector AJTSMoonResourceActor::GetVisualBoundsExtent() const
@@ -185,7 +201,7 @@ void AJTSMoonResourceActor::InitializeResource(
 {
 	ResourceType = NewResourceType;
 	ResourceAmount = FMath::Max(1, NewResourceAmount);
-	bCanPickup = bNewCanPickup;
+	bCanPickup = NewResourceType != EJTSResourceType::Ore && bNewCanPickup;
 	PickupText = NewPickupText;
 	bResourceConsumed = false;
 	ApplyResourceAppearance();
@@ -193,14 +209,34 @@ void AJTSMoonResourceActor::InitializeResource(
 
 bool AJTSMoonResourceActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
-	return bCanPickup
-		&& !bResourceConsumed
-		&& !IsPendingKillPending()
-		&& AJTSResourcePickupActor::CanCollectResource(InteractingPawn, GetResourceAmount(), false);
+	if (bResourceConsumed || IsPendingKillPending())
+	{
+		return false;
+	}
+
+	if (!CanBePickedUp())
+	{
+		// Large rocks and ore deposits remain valid interaction targets so the player sees the tool requirement.
+		return true;
+	}
+
+	const UJTSCarryComponent* const CarryComponent = IsValid(InteractingPawn)
+		? InteractingPawn->FindComponentByClass<UJTSCarryComponent>()
+		: nullptr;
+
+	return IsValid(CarryComponent)
+		&& CarryComponent->CanCarryResources(GetResourceAmount());
 }
 
 FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
+	if (!CanBePickedUp())
+	{
+		return CanInteract_Implementation(InteractingPawn)
+			? FText::FromString(TEXT("Need Pickaxe"))
+			: FText::GetEmpty();
+	}
+
 	if (!CanInteract_Implementation(InteractingPawn))
 	{
 		return FText::GetEmpty();
@@ -211,13 +247,14 @@ FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* Interact
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	if (!CanInteract_Implementation(InteractingPawn))
+	if (!CanBePickedUp() || !CanInteract_Implementation(InteractingPawn))
 	{
 		return;
 	}
 
 	bResourceConsumed = true;
-	if (!AJTSResourcePickupActor::TryCollectResource(InteractingPawn, ResourceType, GetResourceAmount(), false))
+	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
+	if (!IsValid(CarryComponent) || !CarryComponent->TryAddResources(ResourceType, GetResourceAmount()))
 	{
 		bResourceConsumed = false;
 		return;
@@ -247,6 +284,10 @@ void AJTSMoonResourceActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	ResourceAmount = FMath::Max(1, ResourceAmount);
+	if (ResourceType == EJTSResourceType::Ore)
+	{
+		bCanPickup = false;
+	}
 	ApplyResourceAppearance();
 }
 
@@ -270,12 +311,33 @@ FText AJTSMoonResourceActor::MakeDefaultPickupText() const
 	return FText::Format(FText::FromString(TEXT("Press E Collect {0}")), FText::FromString(ResourceName));
 }
 
+void AJTSMoonResourceActor::ConfigureResourceMesh()
+{
+	if (!IsValid(ResourceMesh))
+	{
+		return;
+	}
+
+	UStaticMesh* const DesiredMesh = ResourceType == EJTSResourceType::Ore
+		? OreMesh.Get()
+		: RockMesh.Get();
+	if (!IsValid(DesiredMesh) || ResourceMesh->GetStaticMesh() == DesiredMesh)
+	{
+		return;
+	}
+
+	ResourceMesh->SetStaticMesh(DesiredMesh);
+	ResourceMesh->UpdateBounds();
+}
+
 void AJTSMoonResourceActor::ApplyResourceAppearance()
 {
 	if (!IsValid(ResourceMesh))
 	{
 		return;
 	}
+
+	ConfigureResourceMesh();
 
 	if (!IsValid(ResourceMaterial))
 	{
@@ -289,13 +351,11 @@ void AJTSMoonResourceActor::ApplyResourceAppearance()
 
 	const bool bIsOre = ResourceType == EJTSResourceType::Ore;
 	const FLinearColor ResourceColor = bIsOre
-		? FLinearColor(0.20f, 0.18f, 0.31f, 1.0f)
-		: FLinearColor(0.14f, 0.15f, 0.17f, 1.0f);
-	const float Roughness = bIsOre ? 0.32f : 0.90f;
-	const float Metallic = bIsOre ? 0.35f : 0.0f;
-	ResourceMaterial->SetVectorParameterValue(TEXT("Color"), ResourceColor);
-	ResourceMaterial->SetVectorParameterValue(TEXT("BaseColor"), ResourceColor);
-	ResourceMaterial->SetVectorParameterValue(TEXT("Tint"), ResourceColor);
-	ResourceMaterial->SetScalarParameterValue(TEXT("Roughness"), Roughness);
-	ResourceMaterial->SetScalarParameterValue(TEXT("Metallic"), Metallic);
+		? FLinearColor(0.08f, 0.20f, 0.32f, 1.0f)
+		: FLinearColor(0.10f, 0.11f, 0.13f, 1.0f);
+	const float ResourceRoughness = bIsOre ? 0.26f : 0.90f;
+	const float ResourceMetallic = bIsOre ? 0.62f : 0.0f;
+	ResourceMaterial->SetVectorParameterValue(TEXT("ResourceColor"), ResourceColor);
+	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceRoughness"), ResourceRoughness);
+	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceMetallic"), ResourceMetallic);
 }

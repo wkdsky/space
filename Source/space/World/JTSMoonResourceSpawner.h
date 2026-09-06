@@ -28,7 +28,8 @@ private:
 		EJTSResourceType ResourceType,
 		int32 ResourceAmount,
 		bool bCanPickup,
-		float ResourceScale,
+		const FVector& ResourceScale,
+		const FRotator& ResourceRotation,
 		const FText& ResourcePickupText,
 		const FVector& GroundLocation);
 	bool ResolveGroundLocation(const FVector& CandidateXY, FVector& OutGroundLocation) const;
@@ -37,7 +38,7 @@ private:
 	TSubclassOf<AJTSMoonResourceActor> ResourceActorClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 ResourceCount = 50;
+	int32 ResourceCount = 75;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float Radius = 10000.0f;

@@ -14,6 +14,8 @@ namespace
 	constexpr int32 LargeRockWeight = 10;
 	constexpr int32 OreWeight = 15;
 	constexpr int32 TotalResourceWeight = SmallRockWeight + MediumRockWeight + LargeRockWeight + OreWeight;
+	constexpr float MinimumScaleMultiplier = 0.85f;
+	constexpr float MaximumScaleMultiplier = 1.15f;
 }
 
 AJTSMoonResourceSpawner::AJTSMoonResourceSpawner()
@@ -70,41 +72,43 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 
 		const int32 ResourceRoll = RandomStream.RandRange(1, TotalResourceWeight);
 		EJTSResourceType ResourceType = EJTSResourceType::Rock;
-		float ResourceScale = 1.0f;
+		FVector BaseResourceScale(0.5f);
 		int32 ResourceAmount = 1;
 		bool bCanPickup = true;
-		const TCHAR* ResourceName = TEXT("Small Rock");
 		if (ResourceRoll <= SmallRockWeight)
 		{
-			ResourceScale = 0.5f;
+			BaseResourceScale = FVector(0.5f);
 		}
 		else if (ResourceRoll <= SmallRockWeight + MediumRockWeight)
 		{
-			ResourceScale = 1.0f;
+			BaseResourceScale = FVector(1.0f);
 			ResourceAmount = 2;
-			ResourceName = TEXT("Medium Rock");
 		}
 		else if (ResourceRoll <= SmallRockWeight + MediumRockWeight + LargeRockWeight)
 		{
-			ResourceScale = 2.0f;
+			BaseResourceScale = FVector(2.0f);
 			bCanPickup = false;
-			ResourceName = TEXT("Large Rock");
 		}
 		else
 		{
 			ResourceType = EJTSResourceType::Ore;
-			ResourceName = TEXT("Ore");
+			BaseResourceScale = FVector(1.2f, 1.2f, 1.8f);
+			ResourceAmount = 1;
+			bCanPickup = false;
 		}
 
-		const FText PickupText = FText::Format(
-			FText::FromString(TEXT("Press E Collect {0}")),
-			FText::FromString(ResourceName));
+		const FVector ResourceScale(
+			BaseResourceScale.X * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier),
+			BaseResourceScale.Y * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier),
+			BaseResourceScale.Z * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier));
+		const FRotator ResourceRotation(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f);
 		if (AJTSMoonResourceActor* const Resource = SpawnResource(
 			ResourceType,
 			ResourceAmount,
 			bCanPickup,
 			ResourceScale,
-			PickupText,
+			ResourceRotation,
+			FText::GetEmpty(),
 			GroundLocation))
 		{
 			++SpawnedCount;
@@ -130,7 +134,8 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnResource(
 	EJTSResourceType ResourceType,
 	int32 ResourceAmount,
 	bool bCanPickup,
-	float ResourceScale,
+	const FVector& ResourceScale,
+	const FRotator& ResourceRotation,
 	const FText& ResourcePickupText,
 	const FVector& GroundLocation)
 {
@@ -146,9 +151,11 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnResource(
 		SpawnClass = AJTSMoonResourceActor::StaticClass();
 	}
 
-	const float SafeUniformScale = FMath::Max(0.01f, ResourceScale);
-	const FVector SafeScale(SafeUniformScale, SafeUniformScale, SafeUniformScale);
-	const FTransform SpawnTransform(FRotator::ZeroRotator, GroundLocation, SafeScale);
+	const FVector SafeScale(
+		FMath::Max(0.01f, ResourceScale.X),
+		FMath::Max(0.01f, ResourceScale.Y),
+		FMath::Max(0.01f, ResourceScale.Z));
+	const FTransform SpawnTransform(ResourceRotation, GroundLocation, SafeScale);
 	AJTSMoonResourceActor* const Resource = World->SpawnActorDeferred<AJTSMoonResourceActor>(
 		SpawnClass,
 		SpawnTransform,

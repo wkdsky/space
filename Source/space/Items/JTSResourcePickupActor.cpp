@@ -78,8 +78,7 @@ bool AJTSResourcePickupActor::CanCollectResource(APawn* InteractingPawn, int32 R
 		return false;
 	}
 
-	const int32 AvailableSlots = CarryComponent->GetCarryCapacity() - CarryComponent->GetCarriedItemCount();
-	return AvailableSlots >= ResourceAmount;
+	return CarryComponent->CanCarryResources(ResourceAmount);
 }
 
 bool AJTSResourcePickupActor::TryCollectResource(
@@ -99,20 +98,17 @@ bool AJTSResourcePickupActor::TryCollectResource(
 		return false;
 	}
 
-	for (int32 AmountIndex = 0; AmountIndex < ResourceAmount; ++AmountIndex)
-	{
-		if (!CarryComponent->TryAddResource(ResourceType))
-		{
-			return false;
-		}
-	}
-
-	return true;
+	return CarryComponent->TryAddResources(ResourceType, ResourceAmount);
 }
 
 EJTSResourceType AJTSResourcePickupActor::GetResourceType() const
 {
 	return ResourceType;
+}
+
+int32 AJTSResourcePickupActor::GetResourceAmount() const
+{
+	return FMath::Max(1, ResourceAmount);
 }
 
 FVector AJTSResourcePickupActor::GetVisualBoundsExtent() const
@@ -129,9 +125,10 @@ FVector AJTSResourcePickupActor::GetVisualBoundsExtent() const
 	return FVector(50.0f);
 }
 
-void AJTSResourcePickupActor::InitializeResource(EJTSResourceType NewResourceType)
+void AJTSResourcePickupActor::InitializeResource(EJTSResourceType NewResourceType, int32 NewResourceAmount)
 {
 	ResourceType = NewResourceType;
+	ResourceAmount = FMath::Max(1, NewResourceAmount);
 	ApplyResourceAppearance();
 }
 
@@ -170,13 +167,13 @@ void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
 
 bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 {
-	if (bPickupConsumed || IsPendingKillPending() || !CanCollectResource(InteractingPawn, 1, true))
+	if (bPickupConsumed || IsPendingKillPending() || !CanCollectResource(InteractingPawn, GetResourceAmount(), true))
 	{
 		return false;
 	}
 
 	bPickupConsumed = true;
-	if (!TryCollectResource(InteractingPawn, ResourceType, 1, true))
+	if (!TryCollectResource(InteractingPawn, ResourceType, GetResourceAmount(), true))
 	{
 		bPickupConsumed = false;
 		return false;

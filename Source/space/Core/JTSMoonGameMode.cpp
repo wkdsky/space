@@ -2,18 +2,18 @@
 
 #include "JTSMoonGameMode.h"
 
+#include "EngineUtils.h"
 #include "Engine/World.h"
-#include "space/Core/JTSGameInstance.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "space/UI/JTSPrototypeHUD.h"
 
 namespace
 {
 	constexpr float ExpeditionConsumptionInterval = 1.0f;
 	constexpr double SecondsPerMinute = 60.0;
-	constexpr double ExpeditionResourceUnit = 0.1;
 }
 
 AJTSMoonGameMode::AJTSMoonGameMode()
@@ -46,7 +46,7 @@ void AJTSMoonGameMode::BeginPlay()
 
 	FoodConsumptionAccumulator = 0.0;
 	WaterConsumptionAccumulator = 0.0;
-	bMissingGameInstanceLogged = false;
+	bMissingSpacecraftLogged = false;
 
 	if (AJTSGameState* const JTSGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
 	{
@@ -95,19 +95,28 @@ void AJTSMoonGameMode::ConsumeExpeditionSupplies()
 		return;
 	}
 
-	UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
-	if (!IsValid(GameInstance))
+	AJTSSpacecraftActor* Spacecraft = nullptr;
+	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
+	{
+		if (IsValid(*It))
+		{
+			Spacecraft = *It;
+			break;
+		}
+	}
+
+	if (!IsValid(Spacecraft))
 	{
 		FoodConsumptionAccumulator = 0.0;
 		WaterConsumptionAccumulator = 0.0;
-		if (!bMissingGameInstanceLogged)
+		if (!bMissingSpacecraftLogged)
 		{
-			UE_LOG(LogTemp, Error, TEXT("Jump to Space Moon GameMode cannot consume expedition supplies because the configured GameInstance is not UJTSGameInstance."));
-			bMissingGameInstanceLogged = true;
+			UE_LOG(LogTemp, Error, TEXT("Jump to Space Moon GameMode cannot consume expedition supplies because no spacecraft was found."));
+			bMissingSpacecraftLogged = true;
 		}
 		return;
 	}
-	bMissingGameInstanceLogged = false;
+	bMissingSpacecraftLogged = false;
 
 	const double SafeCrewCount = static_cast<double>(GetCrewCount());
 	FoodConsumptionAccumulator += static_cast<double>(GetFoodConsumptionPerPersonPerMinute())
@@ -115,42 +124,46 @@ void AJTSMoonGameMode::ConsumeExpeditionSupplies()
 	WaterConsumptionAccumulator += static_cast<double>(GetWaterConsumptionPerPersonPerMinute())
 		* SafeCrewCount / SecondsPerMinute;
 
-	const int32 FoodUnitsDue = GetWholeTenths(FoodConsumptionAccumulator);
-	const int32 WaterUnitsDue = GetWholeTenths(WaterConsumptionAccumulator);
-	if (FoodUnitsDue <= 0 && WaterUnitsDue <= 0)
+	const int32 FoodResourcesDue = GetWholeResources(FoodConsumptionAccumulator);
+	const int32 WaterResourcesDue = GetWholeResources(WaterConsumptionAccumulator);
+	if (FoodResourcesDue <= 0 && WaterResourcesDue <= 0)
 	{
 		return;
 	}
 
-	const int32 AvailableFoodUnits = FMath::Max(0, FMath::RoundToInt(GameInstance->GetExpeditionFood() * 10.0f));
-	const int32 AvailableWaterUnits = FMath::Max(0, FMath::RoundToInt(GameInstance->GetExpeditionWater() * 10.0f));
-	const int32 FoodUnitsToConsume = FMath::Min(FoodUnitsDue, AvailableFoodUnits);
-	const int32 WaterUnitsToConsume = FMath::Min(WaterUnitsDue, AvailableWaterUnits);
+	const int32 FoodResourcesToConsume = FMath::Min(
+		FoodResourcesDue,
+		Spacecraft->GetResourceAmount(EJTSResourceType::Food));
+	const int32 WaterResourcesToConsume = FMath::Min(
+		WaterResourcesDue,
+		Spacecraft->GetResourceAmount(EJTSResourceType::Water));
 
-	if (FoodUnitsToConsume > 0 || WaterUnitsToConsume > 0)
+	if (FoodResourcesToConsume > 0)
 	{
-		GameInstance->ConsumeExpeditionSupplies(
-			static_cast<float>(FoodUnitsToConsume) * 0.1f,
-			static_cast<float>(WaterUnitsToConsume) * 0.1f);
+		Spacecraft->TryConsumeResource(EJTSResourceType::Food, FoodResourcesToConsume);
+	}
+	if (WaterResourcesToConsume > 0)
+	{
+		Spacecraft->TryConsumeResource(EJTSResourceType::Water, WaterResourcesToConsume);
 	}
 
 	FoodConsumptionAccumulator = FMath::Max(
 		0.0,
-		FoodConsumptionAccumulator - static_cast<double>(FoodUnitsDue) * ExpeditionResourceUnit);
+		FoodConsumptionAccumulator - static_cast<double>(FoodResourcesDue));
 	WaterConsumptionAccumulator = FMath::Max(
 		0.0,
-		WaterConsumptionAccumulator - static_cast<double>(WaterUnitsDue) * ExpeditionResourceUnit);
+		WaterConsumptionAccumulator - static_cast<double>(WaterResourcesDue));
 }
 
-int32 AJTSMoonGameMode::GetWholeTenths(double Accumulator)
+int32 AJTSMoonGameMode::GetWholeResources(double Accumulator)
 {
 	if (!FMath::IsFinite(Accumulator) || Accumulator <= 0.0)
 	{
 		return 0;
 	}
 
-	const double WholeTenths = FMath::FloorToDouble((Accumulator + 1.0e-9) / ExpeditionResourceUnit);
-	return WholeTenths >= static_cast<double>(MAX_int32)
+	const double WholeResources = FMath::FloorToDouble(Accumulator + 1.0e-9);
+	return WholeResources >= static_cast<double>(MAX_int32)
 		? MAX_int32
-		: static_cast<int32>(WholeTenths);
+		: static_cast<int32>(WholeResources);
 }

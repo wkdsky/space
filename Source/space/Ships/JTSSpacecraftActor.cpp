@@ -10,11 +10,44 @@
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Core/JTSGameInstance.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Core/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	const TCHAR* GetResourceTypeName(EJTSResourceType ResourceType)
+	{
+		switch (ResourceType)
+		{
+		case EJTSResourceType::Fuel:
+			return TEXT("Fuel");
+
+		case EJTSResourceType::Water:
+			return TEXT("Water");
+
+		case EJTSResourceType::Food:
+			return TEXT("Food");
+
+		case EJTSResourceType::Rock:
+			return TEXT("Rock");
+
+		case EJTSResourceType::Ore:
+			return TEXT("Ore");
+
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	bool IsSupportedResourceType(EJTSResourceType ResourceType)
+	{
+		return ResourceType >= EJTSResourceType::Fuel && ResourceType <= EJTSResourceType::Ore;
+	}
+}
 
 AJTSSpacecraftActor::AJTSSpacecraftActor()
 {
@@ -65,13 +98,34 @@ void AJTSSpacecraftActor::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (!IsValid(BoardingTrigger))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Spacecraft BoardingTrigger Overlap Not Bound"));
+	}
+	else if (!BoardingTrigger->OnComponentBeginOverlap.IsAlreadyBound(this, &AJTSSpacecraftActor::HandleBoardingTriggerBeginOverlap))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Spacecraft BoardingTrigger Overlap Not Bound"));
+		BoardingTrigger->OnComponentBeginOverlap.AddDynamic(this, &AJTSSpacecraftActor::HandleBoardingTriggerBeginOverlap);
+	}
+
 	UWorld* const World = GetWorld();
-	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	if (World == nullptr)
 	{
 		return;
 	}
 
-	if (MoonWrappedActorComponent != nullptr && FakeMoonBendMaterial != nullptr)
+	RestoreStorageForMoonTravel();
+
+	if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
+	{
+		JTSGameState->OnGameplayPhaseChanged.AddDynamic(this, &AJTSSpacecraftActor::HandleGameplayPhaseChanged);
+	}
+
+	DepositResourcesFromOverlappingPlayers();
+
+	if (World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
+		&& MoonWrappedActorComponent != nullptr
+		&& FakeMoonBendMaterial != nullptr)
 	{
 		MoonWrappedActorComponent->SetFakeMoonBendMaterial(FakeMoonBendMaterial);
 	}
@@ -79,6 +133,16 @@ void AJTSSpacecraftActor::BeginPlay()
 
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	SaveStorageForMoonTravel();
+
+	if (UWorld* const World = GetWorld())
+	{
+		if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
+		{
+			JTSGameState->OnGameplayPhaseChanged.RemoveDynamic(this, &AJTSSpacecraftActor::HandleGameplayPhaseChanged);
+		}
+	}
+
 	AJTSCharacter* const BoardedCharacter = BoardedPlayer.Get();
 	AJTSCharacter* const NearbyCharacter = NearbyPlayer.Get();
 	if (BoardedCharacter != nullptr)
@@ -98,33 +162,7 @@ void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
 {
-	if (!IsEarthCollectionActive() || !IsValid(InteractingPawn))
-	{
-		return false;
-	}
-
-	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-	if (!IsValid(CarryComponent))
-	{
-		return false;
-	}
-
-	TArray<EJTSResourceType> ResourcesToDeposit;
-	if (!CarryComponent->TryTakeAllResources(ResourcesToDeposit) || ResourcesToDeposit.IsEmpty())
-	{
-		return false;
-	}
-
-	if (DepositResources(ResourcesToDeposit))
-	{
-		return true;
-	}
-
-	for (const EJTSResourceType ResourceType : ResourcesToDeposit)
-	{
-		CarryComponent->TryAddResource(ResourceType);
-	}
-	return false;
+	return DepositPlayerResources(Cast<AJTSCharacter>(InteractingPawn));
 }
 
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
@@ -134,8 +172,6 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 	{
 		return false;
 	}
-
-	TryDepositResourcesFromPawn(Character);
 
 	if (!Character->EnterBoardedState(this))
 	{
@@ -198,89 +234,120 @@ USceneComponent* AJTSSpacecraftActor::GetExitPoint() const
 	return ExitPoint.Get();
 }
 
-bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) const
+bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* /*InteractingPawn*/) const
 {
-	if (!IsEarthCollectionActive() || !IsValid(InteractingPawn))
+	return false;
+}
+
+FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* /*InteractingPawn*/) const
+{
+	return FText::GetEmpty();
+}
+
+void AJTSSpacecraftActor::Interact_Implementation(APawn* /*InteractingPawn*/)
+{
+}
+
+int32 AJTSSpacecraftActor::GetResourceAmount(EJTSResourceType ResourceType) const
+{
+	const int32* const ResourceAmount = Storage.Find(ResourceType);
+	return ResourceAmount != nullptr ? FMath::Max(0, *ResourceAmount) : 0;
+}
+
+bool AJTSSpacecraftActor::TryConsumeResource(EJTSResourceType ResourceType, int32 ResourceAmount)
+{
+	if (!IsSupportedResourceType(ResourceType) || ResourceAmount <= 0)
 	{
 		return false;
 	}
 
-	const UJTSCarryComponent* CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-	return IsValid(CarryComponent) && CarryComponent->GetCarriedItemCount() > 0;
-}
+	int32* const StoredAmount = Storage.Find(ResourceType);
+	if (StoredAmount == nullptr || *StoredAmount < ResourceAmount)
+	{
+		return false;
+	}
 
-FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
-{
-	return CanInteract_Implementation(InteractingPawn)
-		? FText::FromString(TEXT("Deposit Resources"))
-		: FText::GetEmpty();
-}
+	*StoredAmount -= ResourceAmount;
+	if (*StoredAmount == 0)
+	{
+		Storage.Remove(ResourceType);
+	}
 
-void AJTSSpacecraftActor::Interact_Implementation(APawn* InteractingPawn)
-{
-	TryDepositResourcesFromPawn(InteractingPawn);
+	SaveStorageForMoonTravel();
+	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
+	return true;
 }
 
 int32 AJTSSpacecraftActor::GetFuelCount() const
 {
-	return FuelCount;
+	return GetResourceAmount(EJTSResourceType::Fuel);
 }
 
 int32 AJTSSpacecraftActor::GetWaterCount() const
 {
-	return WaterCount;
+	return GetResourceAmount(EJTSResourceType::Water);
 }
 
 int32 AJTSSpacecraftActor::GetFoodCount() const
 {
-	return FoodCount;
+	return GetResourceAmount(EJTSResourceType::Food);
 }
 
 int32 AJTSSpacecraftActor::GetTotalResourceCount() const
 {
-	return GetFuelCount() + GetWaterCount() + GetFoodCount();
+	int32 TotalResourceCount = 0;
+	for (const TPair<EJTSResourceType, int32>& Resource : Storage)
+	{
+		TotalResourceCount += FMath::Max(0, Resource.Value);
+	}
+
+	return TotalResourceCount;
 }
 
 bool AJTSSpacecraftActor::DepositResources(const TArray<EJTSResourceType>& Resources)
 {
-	if (!IsEarthCollectionActive() || Resources.IsEmpty())
+	if (Resources.IsEmpty())
 	{
 		return false;
 	}
 
+	TMap<EJTSResourceType, int32> ResourceAmounts;
 	for (const EJTSResourceType ResourceType : Resources)
 	{
-		if (ResourceType != EJTSResourceType::Fuel
-			&& ResourceType != EJTSResourceType::Water
-			&& ResourceType != EJTSResourceType::Food)
+		++ResourceAmounts.FindOrAdd(ResourceType);
+	}
+
+	return DepositResourceAmounts(ResourceAmounts);
+}
+bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts)
+{
+	if (ResourceAmounts.IsEmpty())
+	{
+		return false;
+	}
+
+	for (const TPair<EJTSResourceType, int32>& Resource : ResourceAmounts)
+	{
+		if (!IsSupportedResourceType(Resource.Key) || Resource.Value <= 0)
 		{
 			return false;
 		}
 	}
 
-	for (const EJTSResourceType ResourceType : Resources)
+	for (const TPair<EJTSResourceType, int32>& Resource : ResourceAmounts)
 	{
-		switch (ResourceType)
-		{
-		case EJTSResourceType::Fuel:
-			++FuelCount;
-			break;
-
-		case EJTSResourceType::Water:
-			++WaterCount;
-			break;
-
-		case EJTSResourceType::Food:
-			++FoodCount;
-			break;
-
-		default:
-			break;
-		}
+		Storage.FindOrAdd(Resource.Key) += Resource.Value;
+		UE_LOG(LogTemp, Log, TEXT("Spacecraft Deposit: Type=%s Amount=%d"), GetResourceTypeName(Resource.Key), Resource.Value);
 	}
 
-	OnShipResourcesChanged.Broadcast(FuelCount, WaterCount, FoodCount);
+	SaveStorageForMoonTravel();
+	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 	return true;
+}
+
+const TMap<EJTSResourceType, int32>& AJTSSpacecraftActor::GetStorage() const
+{
+	return Storage;
 }
 
 bool AJTSSpacecraftActor::IsEarthCollectionActive() const
@@ -288,6 +355,98 @@ bool AJTSSpacecraftActor::IsEarthCollectionActive() const
 	UWorld* const World = GetWorld();
 	const AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
 	return IsValid(JTSGameState) && JTSGameState->IsEarthCollectionActive();
+}
+
+bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
+{
+	if (!IsValid(Player))
+	{
+		return false;
+	}
+
+	UJTSCarryComponent* const CarryComponent = Player->FindComponentByClass<UJTSCarryComponent>();
+	if (!IsValid(CarryComponent))
+	{
+		return false;
+	}
+
+	TMap<EJTSResourceType, int32> ResourcesToDeposit;
+	if (!CarryComponent->TryTakeAllResources(ResourcesToDeposit) || ResourcesToDeposit.IsEmpty())
+	{
+		return false;
+	}
+
+	if (!DepositResourceAmounts(ResourcesToDeposit))
+	{
+		for (const TPair<EJTSResourceType, int32>& Resource : ResourcesToDeposit)
+		{
+			CarryComponent->TryAddResources(Resource.Key, Resource.Value);
+		}
+		return false;
+	}
+
+	return true;
+}
+
+void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
+{
+	if (!IsValid(BoardingTrigger))
+	{
+		return;
+	}
+
+	TArray<AActor*> OverlappingActors;
+	BoardingTrigger->GetOverlappingActors(OverlappingActors, AJTSCharacter::StaticClass());
+	for (AActor* const OverlappingActor : OverlappingActors)
+	{
+		AJTSCharacter* const Character = Cast<AJTSCharacter>(OverlappingActor);
+		if (!IsValid(Character))
+		{
+			continue;
+		}
+
+		NearbyPlayer = Character;
+		DepositPlayerResources(Character);
+		Character->NotifySpacecraftEntered(this);
+	}
+}
+
+void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	{
+		return;
+	}
+
+	UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
+	if (IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftStorage())
+	{
+		Storage = GameInstance->GetPersistedSpacecraftStorage();
+	}
+}
+
+void AJTSSpacecraftActor::SaveStorageForMoonTravel() const
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	{
+		return;
+	}
+
+	if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>())
+	{
+		GameInstance->SetPersistedSpacecraftStorage(Storage);
+	}
+}
+
+void AJTSSpacecraftActor::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)
+{
+	if (NewGameplayPhase == EJTSGameplayPhase::EarthCollection
+		|| NewGameplayPhase == EJTSGameplayPhase::MoonExploration)
+	{
+		DepositResourcesFromOverlappingPlayers();
+	}
 }
 
 void AJTSSpacecraftActor::HandleBoardingTriggerBeginOverlap(
@@ -304,8 +463,10 @@ void AJTSSpacecraftActor::HandleBoardingTriggerBeginOverlap(
 		return;
 	}
 
+	UE_LOG(LogTemp, Log, TEXT("Spacecraft BoardingTrigger Enter Player=%s"), *Character->GetName());
+
 	NearbyPlayer = Character;
-	TryDepositResourcesFromPawn(Character);
+	DepositPlayerResources(Character);
 	Character->NotifySpacecraftEntered(this);
 }
 

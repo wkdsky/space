@@ -38,11 +38,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Resource")
 	EJTSResourceType GetResourceType() const;
 
+	UFUNCTION(BlueprintPure, Category = "Resource")
+	int32 GetResourceAmount() const;
+
 	/** Returns the world-space half extents of the visible resource mesh for placement calculations. */
 	FVector GetVisualBoundsExtent() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Resource")
-	void InitializeResource(EJTSResourceType NewResourceType);
+	void InitializeResource(EJTSResourceType NewResourceType, int32 NewResourceAmount = 1);
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
@@ -81,6 +84,10 @@ private:
 	/** Resource added to the interacting pawn when this pickup succeeds. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSResourceType ResourceType = EJTSResourceType::Fuel;
+
+	/** Number of resource units awarded by this pickup. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
+	int32 ResourceAmount = 1;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
