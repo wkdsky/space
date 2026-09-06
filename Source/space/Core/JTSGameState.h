@@ -7,6 +7,7 @@
 
 #include "JTSGameState.generated.h"
 
+class AJTSEarthGameMode;
 class AJTSMoonGameMode;
 
 /** The gameplay phase currently active in the level. */
@@ -92,7 +93,7 @@ public:
 	FOnJTSEarthCollectionTimeChanged OnEarthCollectionTimeChanged;
 
 private:
-	friend class AJTSGameMode;
+	friend class AJTSEarthGameMode;
 	friend class AJTSMoonGameMode;
 
 	void SetGameplayPhase(EJTSGameplayPhase NewGameplayPhase);

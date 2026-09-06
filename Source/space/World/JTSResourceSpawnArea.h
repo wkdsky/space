@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "space/Modes/JTSEarthGameMode.h"
 
 #include "JTSResourceSpawnArea.generated.h"
 
@@ -24,6 +25,10 @@ public:
 	/** Generates this round's resource pickups and returns the number actually placed. */
 	UFUNCTION(BlueprintCallable, Category = "Resources|Spawning")
 	int32 GenerateResources();
+
+	/** Applies Earth chapter balance values before this area generates its pickups. */
+	UFUNCTION(BlueprintCallable, Category = "Resources|Spawning")
+	void ApplyEarthSpawnSettings(const FJTSEarthResourceSpawnSettings& Settings);
 
 	/** Pickup class used for every generated resource. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resources|Spawning")

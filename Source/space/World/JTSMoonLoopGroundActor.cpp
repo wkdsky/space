@@ -14,7 +14,7 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "UObject/UnrealType.h"
-#include "space/Core/JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonWorldActor.h"
 

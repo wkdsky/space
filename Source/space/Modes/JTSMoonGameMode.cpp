@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
@@ -12,7 +12,6 @@
 
 namespace
 {
-	constexpr float ExpeditionConsumptionInterval = 1.0f;
 	constexpr double SecondsPerMinute = 60.0;
 }
 
@@ -40,6 +39,16 @@ float AJTSMoonGameMode::GetWaterConsumptionPerPersonPerMinute() const
 	return FMath::Max(0.0f, WaterConsumptionPerPersonPerMinute);
 }
 
+float AJTSMoonGameMode::GetConsumptionTickInterval() const
+{
+	return FMath::Max(0.0f, ConsumptionTickInterval);
+}
+
+float AJTSMoonGameMode::GetMinimumConsumptionUnit() const
+{
+	return FMath::Max(0.0f, MinimumConsumptionUnit);
+}
+
 void AJTSMoonGameMode::BeginPlay()
 {
 	Super::BeginPlay();
@@ -60,14 +69,37 @@ void AJTSMoonGameMode::BeginPlay()
 
 	if (UWorld* const World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
-		World->GetTimerManager().SetTimer(
-			ExpeditionConsumptionTimerHandle,
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("JumpToSpace Moon Config: Crew=%d FoodRate=%.2f WaterRate=%.2f ResourceCount=%d SpawnRadius=%.1f"),
+			GetCrewCount(),
+			GetFoodConsumptionPerPersonPerMinute(),
+			GetWaterConsumptionPerPersonPerMinute(),
+			FMath::Max(0, MoonResourceSpawnSettings.TotalResourceCount),
+			FMath::Max(0.0f, MoonResourceSpawnSettings.SpawnRadius));
+
+		World->GetTimerManager().ClearTimer(MoonResourceInitializationTimerHandle);
+		MoonResourceInitializationTimerHandle = World->GetTimerManager().SetTimerForNextTick(
 			this,
-			&AJTSMoonGameMode::ConsumeExpeditionSupplies,
-			ExpeditionConsumptionInterval,
-			true,
-			ExpeditionConsumptionInterval);
+			&AJTSMoonGameMode::InitializeMoonResources);
+
+		World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
+		const float ConsumptionInterval = GetConsumptionTickInterval();
+		if (ConsumptionInterval > 0.0f)
+		{
+			World->GetTimerManager().SetTimer(
+				ExpeditionConsumptionTimerHandle,
+				this,
+				&AJTSMoonGameMode::ConsumeExpeditionSupplies,
+				ConsumptionInterval,
+				true,
+				ConsumptionInterval);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Jump to Space Moon GameMode did not start expedition supply consumption because ConsumptionTickInterval is zero."));
+		}
 	}
 	else
 	{
@@ -80,11 +112,51 @@ void AJTSMoonGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
+		World->GetTimerManager().ClearTimer(MoonResourceInitializationTimerHandle);
 	}
 
 	FoodConsumptionAccumulator = 0.0;
 	WaterConsumptionAccumulator = 0.0;
 	Super::EndPlay(EndPlayReason);
+}
+
+void AJTSMoonGameMode::InitializeMoonResources()
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	AJTSMoonResourceSpawner* ResourceSpawner = nullptr;
+	int32 ResourceSpawnerCount = 0;
+	for (TActorIterator<AJTSMoonResourceSpawner> It(World); It; ++It)
+	{
+		if (!IsValid(*It))
+		{
+			continue;
+		}
+
+		++ResourceSpawnerCount;
+		if (ResourceSpawner == nullptr)
+		{
+			ResourceSpawner = *It;
+		}
+	}
+
+	if (ResourceSpawner == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Jump to Space Moon GameMode found no AJTSMoonResourceSpawner. Moon exploration will start without automatically generated resources."));
+		return;
+	}
+
+	if (ResourceSpawnerCount > 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Jump to Space Moon GameMode found %d AJTSMoonResourceSpawner actors; using the first valid spawner only."), ResourceSpawnerCount);
+	}
+
+	ResourceSpawner->ApplyMoonSpawnSettings(MoonResourceSpawnSettings);
+	ResourceSpawner->GenerateResources();
 }
 
 void AJTSMoonGameMode::ConsumeExpeditionSupplies()
@@ -118,14 +190,21 @@ void AJTSMoonGameMode::ConsumeExpeditionSupplies()
 	}
 	bMissingSpacecraftLogged = false;
 
+	const double ConsumptionTickSeconds = static_cast<double>(GetConsumptionTickInterval());
+	const double ConsumptionUnit = static_cast<double>(GetMinimumConsumptionUnit());
+	if (ConsumptionTickSeconds <= 0.0 || ConsumptionUnit <= 0.0)
+	{
+		return;
+	}
+
 	const double SafeCrewCount = static_cast<double>(GetCrewCount());
 	FoodConsumptionAccumulator += static_cast<double>(GetFoodConsumptionPerPersonPerMinute())
-		* SafeCrewCount / SecondsPerMinute;
+		* SafeCrewCount * ConsumptionTickSeconds / SecondsPerMinute;
 	WaterConsumptionAccumulator += static_cast<double>(GetWaterConsumptionPerPersonPerMinute())
-		* SafeCrewCount / SecondsPerMinute;
+		* SafeCrewCount * ConsumptionTickSeconds / SecondsPerMinute;
 
-	const int32 FoodResourcesDue = GetWholeResources(FoodConsumptionAccumulator);
-	const int32 WaterResourcesDue = GetWholeResources(WaterConsumptionAccumulator);
+	const int32 FoodResourcesDue = GetWholeConsumptionUnits(FoodConsumptionAccumulator, ConsumptionUnit);
+	const int32 WaterResourcesDue = GetWholeConsumptionUnits(WaterConsumptionAccumulator, ConsumptionUnit);
 	if (FoodResourcesDue <= 0 && WaterResourcesDue <= 0)
 	{
 		return;
@@ -149,21 +228,24 @@ void AJTSMoonGameMode::ConsumeExpeditionSupplies()
 
 	FoodConsumptionAccumulator = FMath::Max(
 		0.0,
-		FoodConsumptionAccumulator - static_cast<double>(FoodResourcesDue));
+		FoodConsumptionAccumulator - static_cast<double>(FoodResourcesDue) * ConsumptionUnit);
 	WaterConsumptionAccumulator = FMath::Max(
 		0.0,
-		WaterConsumptionAccumulator - static_cast<double>(WaterResourcesDue));
+		WaterConsumptionAccumulator - static_cast<double>(WaterResourcesDue) * ConsumptionUnit);
 }
 
-int32 AJTSMoonGameMode::GetWholeResources(double Accumulator)
+int32 AJTSMoonGameMode::GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit)
 {
-	if (!FMath::IsFinite(Accumulator) || Accumulator <= 0.0)
+	if (!FMath::IsFinite(Accumulator)
+		|| !FMath::IsFinite(MinimumConsumptionUnit)
+		|| Accumulator <= 0.0
+		|| MinimumConsumptionUnit <= 0.0)
 	{
 		return 0;
 	}
 
-	const double WholeResources = FMath::FloorToDouble(Accumulator + 1.0e-9);
-	return WholeResources >= static_cast<double>(MAX_int32)
+	const double WholeConsumptionUnits = FMath::FloorToDouble((Accumulator / MinimumConsumptionUnit) + 1.0e-9);
+	return WholeConsumptionUnits >= static_cast<double>(MAX_int32)
 		? MAX_int32
-		: static_cast<int32>(WholeResources);
+		: static_cast<int32>(WholeConsumptionUnits);
 }

@@ -16,6 +16,7 @@ class UButton;
 class UCanvasPanel;
 class UCanvasPanelSlot;
 class UJTSCircularProgressWidget;
+class UProgressBar;
 class UTextBlock;
 class UWidget;
 class SWidget;
@@ -40,6 +41,8 @@ private:
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshAvatarSelection();
 	void RefreshBoardingProgress();
+	void RefreshEarthCollectionDurationText();
+	void RefreshFuelToMoonHud();
 	void ApplyLayerVisibility(UWidget* Layer, bool bVisible);
 	void SetBoardingProgressVisible(bool bVisible);
 
@@ -100,6 +103,9 @@ private:
 	TObjectPtr<UTextBlock> TimeText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> StartRulesText;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> CarryText;
 
 	UPROPERTY(Transient)
@@ -107,6 +113,18 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> EarthPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> FuelToMoonPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> FuelProgressBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FuelAmountText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FuelStatusText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ShipResourcesText;
@@ -155,6 +173,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ResultDetailText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> RestartButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> QuitButton;
 
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 	EJTSGameplayPhase CachedGameplayPhase = EJTSGameplayPhase::WaitingToStart;

@@ -7,6 +7,7 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -19,6 +20,7 @@
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Core/JTSGameInstance.h"
+#include "space/Modes/JTSEarthGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -165,6 +167,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 	BuildWidgetTree();
 	BindGameState();
 	RefreshAvatarSelection();
+	RefreshEarthCollectionDurationText();
 
 	if (BoundGameState.IsValid())
 	{
@@ -278,7 +281,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(MenuBox, MakeTextBlock(WidgetTree, TEXT("StartTitle"), TEXT("JUMP TO SPACE"), 46.0f, FLinearColor(0.65f, 0.90f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 12.0f, 0.0f, 8.0f));
 			AddVerticalChild(MenuBox, MakeTextBlock(WidgetTree, TEXT("StartLocation"), TEXT("EARTH BASE"), 30.0f, FLinearColor(0.35f, 0.70f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 4.0f));
 			AddVerticalChild(MenuBox, MakeTextBlock(WidgetTree, TEXT("StartTagline"), TEXT("PACK THE SHIP BEFORE EARTH CATCHES YOU"), 19.0f, FLinearColor::White, ETextJustify::Center), FMargin(0.0f, 16.0f, 0.0f, 20.0f));
-			AddVerticalChild(MenuBox, MakeTextBlock(WidgetTree, TEXT("StartRules"), TEXT("60 SECONDS\nTWO HANDS\nONE TERRIBLE PLAN"), 25.0f, FLinearColor(1.0f, 0.78f, 0.28f, 1.0f), ETextJustify::Center), FMargin(0.0f, 6.0f, 0.0f, 28.0f));
+			StartRulesText = MakeTextBlock(WidgetTree, TEXT("StartRules"), TEXT("TIME LIMITED\nTWO HANDS\nONE TERRIBLE PLAN"), 25.0f, FLinearColor(1.0f, 0.78f, 0.28f, 1.0f), ETextJustify::Center);
+			AddVerticalChild(MenuBox, StartRulesText, FMargin(0.0f, 6.0f, 0.0f, 28.0f));
 
 			UButton* const StartButton = MakeButton(WidgetTree, TEXT("StartMissionButton"), TEXT("START MISSION"));
 			if (StartButton != nullptr)
@@ -375,7 +379,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 
 	if (GameplayLayer != nullptr)
 	{
-		TimeText = MakeTextBlock(WidgetTree, TEXT("TimeText"), TEXT("TIME: 60.00"), 34.0f, FLinearColor::White, ETextJustify::Center);
+		TimeText = MakeTextBlock(WidgetTree, TEXT("TimeText"), TEXT("TIME: 00.00"), 34.0f, FLinearColor::White, ETextJustify::Center);
 		if (TimeText != nullptr)
 		{
 			TimeText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
@@ -419,6 +423,36 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("SHIP RESOURCES"), 22.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 8.0f));
 			ShipResourcesText = MakeTextBlock(WidgetTree, TEXT("ShipResourcesText"), TEXT(""), 19.0f, FLinearColor::White);
 			AddVerticalChild(ShipResourcesBox, ShipResourcesText, FMargin(0.0f, 0.0f));
+		}
+
+		FuelToMoonPanel = MakeBorder(WidgetTree, TEXT("FuelToMoonPanel"), FLinearColor(0.02f, 0.055f, 0.09f, 0.91f), 14.0f);
+		AddCanvasChild(GameplayLayer, FuelToMoonPanel, FAnchors(1.0f, 0.5f), FVector2D(-28.0f, 0.0f), FVector2D(220.0f, 370.0f), FVector2D(1.0f, 0.5f));
+		UVerticalBox* const FuelToMoonBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FuelToMoonBox"));
+		if (FuelToMoonPanel != nullptr && FuelToMoonBox != nullptr)
+		{
+			FuelToMoonPanel->SetContent(FuelToMoonBox);
+			AddVerticalChild(FuelToMoonBox, MakeTextBlock(WidgetTree, TEXT("FuelToMoonHeading"), TEXT("FUEL TO MOON"), 21.0f, FLinearColor(0.72f, 0.91f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 0.0f, 0.0f, 12.0f), HAlign_Center);
+
+			USizeBox* const FuelProgressSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FuelProgressSize"));
+			if (FuelProgressSize != nullptr)
+			{
+				FuelProgressSize->SetWidthOverride(52.0f);
+				FuelProgressSize->SetHeightOverride(205.0f);
+				FuelProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("FuelProgressBar"));
+				if (FuelProgressBar != nullptr)
+				{
+					FuelProgressBar->SetBarFillType(EProgressBarFillType::BottomToTop);
+					FuelProgressBar->SetPercent(0.0f);
+					FuelProgressBar->SetFillColorAndOpacity(FLinearColor(1.0f, 0.48f, 0.12f, 1.0f));
+					FuelProgressSize->SetContent(FuelProgressBar);
+				}
+			}
+			AddVerticalChild(FuelToMoonBox, FuelProgressSize, FMargin(0.0f, 0.0f, 0.0f, 12.0f), HAlign_Center);
+
+			FuelAmountText = MakeTextBlock(WidgetTree, TEXT("FuelAmountText"), TEXT("0 / 0"), 24.0f, FLinearColor::White, ETextJustify::Center);
+			AddVerticalChild(FuelToMoonBox, FuelAmountText, FMargin(0.0f, 0.0f, 0.0f, 5.0f), HAlign_Center);
+			FuelStatusText = MakeTextBlock(WidgetTree, TEXT("FuelStatusText"), TEXT("NEED FUEL"), 19.0f, FLinearColor(1.0f, 0.48f, 0.12f, 1.0f), ETextJustify::Center);
+			AddVerticalChild(FuelToMoonBox, FuelStatusText, FMargin(0.0f, 0.0f), HAlign_Center);
 		}
 
 		BoardingProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("BoardingProgressWidget"));
@@ -470,14 +504,14 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(ResultBox, ResultDetailText, FMargin(0.0f, 8.0f, 0.0f, 18.0f));
 			AddVerticalChild(ResultBox, MakeTextBlock(WidgetTree, TEXT("ResultArt"), TEXT("[  SHIP  ]\n      v\n   ( MOON )"), 28.0f, FLinearColor(0.75f, 0.85f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 4.0f, 0.0f, 18.0f));
 
-			UButton* const RestartButton = MakeButton(WidgetTree, TEXT("RestartButton"), TEXT("RESTART"));
+			RestartButton = MakeButton(WidgetTree, TEXT("RestartButton"), TEXT("RESTART"));
 			if (RestartButton != nullptr)
 			{
 				RestartButton->OnClicked.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleRestartClicked);
 			}
 			AddVerticalChild(ResultBox, RestartButton, FMargin(80.0f, 5.0f), HAlign_Fill);
 
-			UButton* const QuitButton = MakeButton(WidgetTree, TEXT("QuitButton"), TEXT("QUIT"));
+			QuitButton = MakeButton(WidgetTree, TEXT("QuitButton"), TEXT("QUIT"));
 			if (QuitButton != nullptr)
 			{
 				QuitButton->OnClicked.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleQuitClicked);
@@ -491,6 +525,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 	ApplyLayerVisibility(GameplayLayer, false);
 	ApplyLayerVisibility(LaunchingLayer, false);
 	ApplyLayerVisibility(ResultLayer, false);
+	ApplyLayerVisibility(FuelToMoonPanel, false);
 	SetBoardingProgressVisible(false);
 }
 
@@ -531,7 +566,12 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	ApplyLayerVisibility(LaunchingLayer, NewGameplayPhase == EJTSGameplayPhase::Launching);
 	ApplyLayerVisibility(ResultLayer, NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess);
 	ApplyLayerVisibility(EarthPanel, bEarthCollection);
+	ApplyLayerVisibility(FuelToMoonPanel, bEarthCollection);
 	ApplyLayerVisibility(TimeText, bEarthCollection);
+	if (NewGameplayPhase == EJTSGameplayPhase::WaitingToStart)
+	{
+		RefreshEarthCollectionDurationText();
+	}
 
 	if (NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess)
 	{
@@ -638,6 +678,8 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		ShipResourcesText->SetText(FText::FromString(ShipResourceLines));
 	}
 
+	RefreshFuelToMoonHud();
+
 	if (AvatarBlock != nullptr)
 	{
 		if (const UJTSGameInstance* const GameInstance = GetWorld() != nullptr ? GetWorld()->GetGameInstance<UJTSGameInstance>() : nullptr)
@@ -648,6 +690,72 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	if (RocketIconCanvas != nullptr)
 	{
 		RocketIconCanvas->SetVisibility(PlayerCharacter != nullptr && PlayerCharacter->IsBoarded() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UJTSPrototypeHUDWidget::RefreshEarthCollectionDurationText()
+{
+	if (StartRulesText == nullptr)
+	{
+		return;
+	}
+
+	const AJTSEarthGameMode* const EarthGameMode = GetWorld() != nullptr
+		? GetWorld()->GetAuthGameMode<AJTSEarthGameMode>()
+		: nullptr;
+	if (!IsValid(EarthGameMode))
+	{
+		StartRulesText->SetText(FText::FromString(TEXT("TIME LIMITED\nTWO HANDS\nONE TERRIBLE PLAN")));
+		return;
+	}
+
+	const int32 DisplayedDuration = FMath::Max(0, FMath::RoundToInt(EarthGameMode->GetEarthCollectionDuration()));
+	StartRulesText->SetText(FText::FromString(FString::Printf(
+		TEXT("%d SECONDS\nTWO HANDS\nONE TERRIBLE PLAN"),
+		DisplayedDuration)));
+}
+
+void UJTSPrototypeHUDWidget::RefreshFuelToMoonHud()
+{
+	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	const AJTSEarthGameMode* const EarthGameMode = bEarthCollectionActive && GetWorld() != nullptr
+		? GetWorld()->GetAuthGameMode<AJTSEarthGameMode>()
+		: nullptr;
+	const bool bShowFuelPanel = bEarthCollectionActive && IsValid(EarthGameMode);
+	ApplyLayerVisibility(FuelToMoonPanel, bShowFuelPanel);
+	if (!bShowFuelPanel)
+	{
+		return;
+	}
+
+	const AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
+	const int32 CurrentFuel = IsValid(Spacecraft) ? Spacecraft->GetFuelCount() : 0;
+	const float RequiredFuel = EarthGameMode->GetMinimumFuelRequired();
+	const float Progress = RequiredFuel > 0.0f
+		? FMath::Clamp(static_cast<float>(CurrentFuel) / RequiredFuel, 0.0f, 1.0f)
+		: 1.0f;
+	const bool bHasEnoughFuel = static_cast<float>(CurrentFuel) >= RequiredFuel;
+	const FLinearColor StatusColor = bHasEnoughFuel
+		? FLinearColor(0.18f, 0.90f, 0.63f, 1.0f)
+		: FLinearColor(1.0f, 0.48f, 0.12f, 1.0f);
+	const float RoundedRequiredFuel = FMath::RoundToFloat(RequiredFuel);
+	const FString RequiredFuelText = FMath::IsNearlyEqual(RequiredFuel, RoundedRequiredFuel)
+		? FString::FromInt(FMath::RoundToInt(RequiredFuel))
+		: FString::SanitizeFloat(RequiredFuel);
+
+	if (FuelProgressBar != nullptr)
+	{
+		FuelProgressBar->SetPercent(Progress);
+		FuelProgressBar->SetFillColorAndOpacity(StatusColor);
+	}
+	if (FuelAmountText != nullptr)
+	{
+		FuelAmountText->SetText(FText::FromString(FString::Printf(TEXT("%d / %s"), CurrentFuel, *RequiredFuelText)));
+	}
+	if (FuelStatusText != nullptr)
+	{
+		FuelStatusText->SetText(FText::FromString(bHasEnoughFuel ? TEXT("READY") : TEXT("NEED FUEL")));
+		FuelStatusText->SetColorAndOpacity(FSlateColor(StatusColor));
 	}
 }
 
@@ -720,12 +828,24 @@ void UJTSPrototypeHUDWidget::RefreshResultView(EJTSGameplayPhase NewGameplayPhas
 	}
 	if (ResultSubtitleText != nullptr)
 	{
-		ResultSubtitleText->SetText(FText::FromString(bSuccess ? TEXT("THE SHIP REACHED THE MOON!") : *Subtitle));
+		ResultSubtitleText->SetText(FText::FromString(bSuccess ? TEXT("COURSE SET FOR THE MOON") : *Subtitle));
 	}
 	if (ResultDetailText != nullptr)
 	{
-		ResultDetailText->SetText(FText::FromString(bSuccess ? TEXT("WELCOME TO THE MOON") : *Detail));
+		ResultDetailText->SetText(FText::FromString(bSuccess ? TEXT("ARRIVING...") : *Detail));
 		ResultDetailText->SetColorAndOpacity(FSlateColor(bSuccess ? FLinearColor(0.75f, 0.85f, 1.0f, 1.0f) : FLinearColor(1.0f, 0.75f, 0.70f, 1.0f)));
+	}
+
+	const ESlateVisibility ResultButtonVisibility = bSuccess ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
+	if (RestartButton != nullptr)
+	{
+		RestartButton->SetIsEnabled(!bSuccess);
+		RestartButton->SetVisibility(ResultButtonVisibility);
+	}
+	if (QuitButton != nullptr)
+	{
+		QuitButton->SetIsEnabled(!bSuccess);
+		QuitButton->SetVisibility(ResultButtonVisibility);
 	}
 }
 

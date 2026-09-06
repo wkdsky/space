@@ -59,6 +59,28 @@ AJTSResourceSpawnArea::AJTSResourceSpawnArea()
 	ResourcePickupClass = AJTSResourcePickupActor::StaticClass();
 }
 
+void AJTSResourceSpawnArea::ApplyEarthSpawnSettings(const FJTSEarthResourceSpawnSettings& Settings)
+{
+	FuelPickupCount = FMath::Max(0, Settings.FuelPickupCount);
+	WaterPickupCount = FMath::Max(0, Settings.WaterPickupCount);
+	FoodPickupCount = FMath::Max(0, Settings.FoodPickupCount);
+	MinimumPickupSpacing = FMath::Max(0.0f, Settings.MinimumPickupSpacing);
+	PlayerExclusionRadius = FMath::Max(0.0f, Settings.PlayerExclusionRadius);
+	SpacecraftExclusionRadius = FMath::Max(0.0f, Settings.SpacecraftExclusionRadius);
+	EdgePadding = FMath::Max(0.0f, Settings.EdgePadding);
+
+	if (SpawnBox != nullptr)
+	{
+		const FVector CurrentExtent = SpawnBox->GetUnscaledBoxExtent();
+		SpawnBox->SetBoxExtent(
+			FVector(
+				FMath::Max(0.0f, Settings.SpawnHalfExtentX),
+				FMath::Max(0.0f, Settings.SpawnHalfExtentY),
+				FMath::Max(0.0f, CurrentExtent.Z)),
+			false);
+	}
+}
+
 int32 AJTSResourceSpawnArea::GenerateResources()
 {
 	UWorld* const World = GetWorld();

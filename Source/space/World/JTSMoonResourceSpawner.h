@@ -8,6 +8,31 @@
 
 class AJTSMoonResourceActor;
 
+/** Moon resource distribution values owned by the Moon chapter ruleset. */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSMoonResourceSpawnSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 TotalResourceCount = 75;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float SpawnRadius = 10000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 SmallRockWeight = 55;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 MediumRockWeight = 20;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 LargeRockWeight = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 OreWeight = 15;
+};
+
 UCLASS()
 class SPACE_API AJTSMoonResourceSpawner : public AActor
 {
@@ -18,6 +43,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
 	int32 GenerateResources();
+
+	/** Applies Moon GameMode balance values before this spawner generates its resources. */
+	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
+	void ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings);
 
 protected:
 	virtual void BeginPlay() override;
@@ -42,6 +71,18 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float Radius = 10000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 SmallRockWeight = 55;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 MediumRockWeight = 20;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 LargeRockWeight = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 OreWeight = 15;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float GroundTraceStartHeight = 1000.0f;

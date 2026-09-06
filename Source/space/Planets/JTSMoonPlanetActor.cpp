@@ -6,7 +6,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "space/Core/JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace

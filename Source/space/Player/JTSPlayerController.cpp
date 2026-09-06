@@ -5,7 +5,7 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "space/Core/JTSGameMode.h"
+#include "space/Modes/JTSEarthGameMode.h"
 
 AJTSPlayerController::AJTSPlayerController()
 {
@@ -51,7 +51,7 @@ void AJTSPlayerController::StartGame()
 
 	BindGameState();
 
-	if (AJTSGameMode* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameMode>() : nullptr)
+	if (AJTSEarthGameMode* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSEarthGameMode>() : nullptr)
 	{
 		GameMode->StartEarthCollection();
 	}
@@ -150,7 +150,6 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 	{
 	case EJTSGameplayPhase::WaitingToStart:
 	case EJTSGameplayPhase::EarthCaptureFailure:
-	case EJTSGameplayPhase::MoonArrivalSuccess:
 	{
 		SetPause(true);
 		FInputModeUIOnly InputMode;
@@ -158,6 +157,21 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 		bShowMouseCursor = true;
 		bEnableClickEvents = true;
 		bEnableMouseOverEvents = true;
+		SetIgnoreMoveInput(true);
+		SetIgnoreLookInput(true);
+		break;
+	}
+
+	case EJTSGameplayPhase::MoonArrivalSuccess:
+	{
+		// Keep the world running so the Earth GameMode transition timer can travel to the Moon.
+		SetPause(false);
+		FInputModeGameOnly InputMode;
+		InputMode.SetConsumeCaptureMouseDown(true);
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+		bEnableClickEvents = false;
+		bEnableMouseOverEvents = false;
 		SetIgnoreMoveInput(true);
 		SetIgnoreLookInput(true);
 		break;

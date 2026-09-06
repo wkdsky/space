@@ -5,7 +5,7 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "GameFramework/Pawn.h"
-#include "space/Core/JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 
 namespace
 {

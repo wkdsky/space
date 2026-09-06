@@ -13,7 +13,7 @@
 #include "space/Core/JTSGameInstance.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
-#include "space/Core/JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -423,6 +423,15 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 	if (IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftStorage())
 	{
 		Storage = GameInstance->GetPersistedSpacecraftStorage();
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d"),
+			GetResourceAmount(EJTSResourceType::Fuel),
+			static_cast<float>(GetResourceAmount(EJTSResourceType::Water)),
+			static_cast<float>(GetResourceAmount(EJTSResourceType::Food)),
+			GetResourceAmount(EJTSResourceType::Rock),
+			GetResourceAmount(EJTSResourceType::Ore));
 	}
 }
 

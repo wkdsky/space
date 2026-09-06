@@ -6,7 +6,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "space/Core/JTSMoonGameMode.h"
+#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Planets/JTSMoonPlanetActor.h"
 
 UJTSPlanetGravityComponent::UJTSPlanetGravityComponent()

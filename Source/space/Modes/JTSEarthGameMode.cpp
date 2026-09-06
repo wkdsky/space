@@ -1,10 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "JTSGameMode.h"
+#include "space/Modes/JTSEarthGameMode.h"
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/SoftObjectPath.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
@@ -13,7 +14,7 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/UI/JTSPrototypeHUD.h"
 
-AJTSGameMode::AJTSGameMode()
+AJTSEarthGameMode::AJTSEarthGameMode()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	DefaultPawnClass = AJTSCharacter::StaticClass();
@@ -22,12 +23,12 @@ AJTSGameMode::AJTSGameMode()
 	HUDClass = AJTSPrototypeHUD::StaticClass();
 }
 
-float AJTSGameMode::GetEarthCollectionDuration() const
+float AJTSEarthGameMode::GetEarthCollectionDuration() const
 {
 	return FMath::Max(0.0f, EarthCollectionDuration);
 }
 
-void AJTSGameMode::BeginPlay()
+void AJTSEarthGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -35,11 +36,13 @@ void AJTSGameMode::BeginPlay()
 	bEarthCollectionFinished = false;
 	bLaunchSequenceStarted = false;
 	bLaunchOutcomeResolved = false;
+	bMoonTravelScheduled = false;
 
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(EarthCollectionTimerHandle);
 		World->GetTimerManager().ClearTimer(LaunchSequenceTimerHandle);
+		World->GetTimerManager().ClearTimer(MoonTransitionTimerHandle);
 	}
 
 	if (AJTSGameState* const JTSGameState = GetJTSGameState())
@@ -54,18 +57,19 @@ void AJTSGameMode::BeginPlay()
 	}
 }
 
-void AJTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AJTSEarthGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(EarthCollectionTimerHandle);
 		World->GetTimerManager().ClearTimer(LaunchSequenceTimerHandle);
+		World->GetTimerManager().ClearTimer(MoonTransitionTimerHandle);
 	}
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void AJTSGameMode::StartEarthCollection()
+void AJTSEarthGameMode::StartEarthCollection()
 {
 	if (bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
@@ -125,6 +129,7 @@ void AJTSGameMode::StartEarthCollection()
 			UE_LOG(LogTemp, Warning, TEXT("Jump to Space found %d JTSResourceSpawnArea actors; using the first valid area only."), ResourceSpawnAreaCount);
 		}
 
+		ResourceSpawnArea->ApplyEarthSpawnSettings(ResourceSpawnSettings);
 		ResourceSpawnArea->GenerateResources();
 	}
 
@@ -135,7 +140,7 @@ void AJTSGameMode::StartEarthCollection()
 		World->GetTimerManager().SetTimer(
 			EarthCollectionTimerHandle,
 			this,
-			&AJTSGameMode::FinishEarthCollection,
+			&AJTSEarthGameMode::FinishEarthCollection,
 			RemainingDuration,
 			false);
 	}
@@ -152,23 +157,28 @@ void AJTSGameMode::StartEarthCollection()
 
 }
 
-bool AJTSGameMode::IsEarthCollectionActive() const
+bool AJTSEarthGameMode::IsEarthCollectionActive() const
 {
 	const AJTSGameState* const JTSGameState = GetJTSGameState();
 	return IsValid(JTSGameState) && JTSGameState->IsEarthCollectionActive();
 }
 
-float AJTSGameMode::GetMinimumFuelRequired() const
+float AJTSEarthGameMode::GetMinimumFuelRequired() const
 {
 	return FMath::Max(0.0f, MinimumFuelRequired);
 }
 
-float AJTSGameMode::GetLaunchSequenceDuration() const
+float AJTSEarthGameMode::GetLaunchSequenceDuration() const
 {
 	return FMath::Max(0.0f, LaunchSequenceDuration);
 }
 
-void AJTSGameMode::FinishEarthCollection()
+float AJTSEarthGameMode::GetMoonTransitionDelay() const
+{
+	return FMath::Max(0.0f, MoonTransitionDelay);
+}
+
+void AJTSEarthGameMode::FinishEarthCollection()
 {
 	if (!bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
@@ -233,7 +243,7 @@ void AJTSGameMode::FinishEarthCollection()
 	StartLaunchSequence();
 }
 
-void AJTSGameMode::StartLaunchSequence()
+void AJTSEarthGameMode::StartLaunchSequence()
 {
 	if (!bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
@@ -261,12 +271,12 @@ void AJTSGameMode::StartLaunchSequence()
 	World->GetTimerManager().SetTimer(
 		LaunchSequenceTimerHandle,
 		this,
-		&AJTSGameMode::ResolveLaunchOutcome,
+		&AJTSEarthGameMode::ResolveLaunchOutcome,
 		SequenceDuration,
 		false);
 }
 
-void AJTSGameMode::ResolveLaunchOutcome()
+void AJTSEarthGameMode::ResolveLaunchOutcome()
 {
 	if (!bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
@@ -310,6 +320,13 @@ void AJTSGameMode::ResolveLaunchOutcome()
 	}
 
 	const bool bHasEnoughFuel = IsValid(Spacecraft) && FuelCount >= LaunchFuelCost;
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JumpToSpace Launch Resolve: Fuel=%d Required=%d Enough=%s"),
+		FuelCount,
+		LaunchFuelCost,
+		bHasEnoughFuel ? TEXT("true") : TEXT("false"));
 
 	if (AJTSGameState* const JTSGameState = GetJTSGameState())
 	{
@@ -335,9 +352,27 @@ void AJTSGameMode::ResolveLaunchOutcome()
 				return;
 			}
 
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("JumpToSpace Launch Fuel Consumed: Before=%d Cost=%d Remaining=%d"),
+				FuelCount,
+				LaunchFuelCost,
+				Spacecraft->GetFuelCount());
+
 			GameInstance->SetPersistedSpacecraftStorage(Spacecraft->GetStorage());
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("JumpToSpace EarthToMoon Storage Saved: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d"),
+				Spacecraft->GetResourceAmount(EJTSResourceType::Fuel),
+				static_cast<float>(Spacecraft->GetResourceAmount(EJTSResourceType::Water)),
+				static_cast<float>(Spacecraft->GetResourceAmount(EJTSResourceType::Food)),
+				Spacecraft->GetResourceAmount(EJTSResourceType::Rock),
+				Spacecraft->GetResourceAmount(EJTSResourceType::Ore));
 			JTSGameState->SetFailureReason(EJTSFailureReason::None);
 			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::MoonArrivalSuccess);
+			BeginMoonTravel();
 		}
 		else
 		{
@@ -352,7 +387,79 @@ void AJTSGameMode::ResolveLaunchOutcome()
 		UE_LOG(LogTemp, Error, TEXT("Jump to Space could not store the launch outcome because its GameState is unavailable."));
 	}
 }
-AJTSGameState* AJTSGameMode::GetJTSGameState() const
+
+void AJTSEarthGameMode::BeginMoonTravel()
+{
+	if (bMoonTravelScheduled)
+	{
+		return;
+	}
+
+	FString MoonLevelPackageName;
+	if (!ResolveMoonLevelPackageName(MoonLevelPackageName))
+	{
+		UE_LOG(LogTemp, Error, TEXT("JumpToSpace EarthToMoon Travel Failed: MoonLevel is not configured."));
+		return;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("JumpToSpace EarthToMoon Travel Failed: the current World is unavailable."));
+		return;
+	}
+
+	bMoonTravelScheduled = true;
+	const float TransitionDelay = GetMoonTransitionDelay();
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JumpToSpace EarthToMoon Travel: Level=%s Delay=%.2f"),
+		*MoonLevelPackageName,
+		TransitionDelay);
+
+	if (TransitionDelay <= 0.0f)
+	{
+		TravelToMoon();
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		MoonTransitionTimerHandle,
+		this,
+		&AJTSEarthGameMode::TravelToMoon,
+		TransitionDelay,
+		false);
+}
+
+void AJTSEarthGameMode::TravelToMoon()
+{
+	FString MoonLevelPackageName;
+	if (!ResolveMoonLevelPackageName(MoonLevelPackageName))
+	{
+		bMoonTravelScheduled = false;
+		UE_LOG(LogTemp, Error, TEXT("JumpToSpace EarthToMoon Travel Failed: MoonLevel is not configured."));
+		return;
+	}
+
+	UGameplayStatics::OpenLevel(this, FName(*MoonLevelPackageName));
+}
+
+bool AJTSEarthGameMode::ResolveMoonLevelPackageName(FString& OutPackageName) const
+{
+	OutPackageName.Reset();
+
+	const FSoftObjectPath MoonLevelPath = MoonLevel.ToSoftObjectPath();
+	if (!MoonLevelPath.IsValid())
+	{
+		return false;
+	}
+
+	OutPackageName = MoonLevelPath.GetLongPackageName();
+	return !OutPackageName.IsEmpty();
+}
+
+AJTSGameState* AJTSEarthGameMode::GetJTSGameState() const
 {
 	UWorld* const World = GetWorld();
 	return World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;

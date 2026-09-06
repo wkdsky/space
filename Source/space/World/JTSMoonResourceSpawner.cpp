@@ -5,15 +5,11 @@
 #include "HAL/PlatformTime.h"
 #include "Math/RandomStream.h"
 #include "space/Items/JTSResourceType.h"
+#include "space/Modes/JTSMoonGameMode.h"
 #include "space/World/JTSMoonResourceActor.h"
 
 namespace
 {
-	constexpr int32 SmallRockWeight = 55;
-	constexpr int32 MediumRockWeight = 20;
-	constexpr int32 LargeRockWeight = 10;
-	constexpr int32 OreWeight = 15;
-	constexpr int32 TotalResourceWeight = SmallRockWeight + MediumRockWeight + LargeRockWeight + OreWeight;
 	constexpr float MinimumScaleMultiplier = 0.85f;
 	constexpr float MaximumScaleMultiplier = 1.15f;
 }
@@ -27,7 +23,22 @@ AJTSMoonResourceSpawner::AJTSMoonResourceSpawner()
 void AJTSMoonResourceSpawner::BeginPlay()
 {
 	Super::BeginPlay();
-	GenerateResources();
+
+	// Moon GameMode applies its Blueprint balance values after all level actors have begun play.
+	if (GetWorld() == nullptr || GetWorld()->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	{
+		GenerateResources();
+	}
+}
+
+void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings)
+{
+	ResourceCount = FMath::Max(0, Settings.TotalResourceCount);
+	Radius = FMath::Max(0.0f, Settings.SpawnRadius);
+	SmallRockWeight = FMath::Max(0, Settings.SmallRockWeight);
+	MediumRockWeight = FMath::Max(0, Settings.MediumRockWeight);
+	LargeRockWeight = FMath::Max(0, Settings.LargeRockWeight);
+	OreWeight = FMath::Max(0, Settings.OreWeight);
 }
 
 int32 AJTSMoonResourceSpawner::GenerateResources()
@@ -43,6 +54,20 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	const int32 SafeResourceCount = FMath::Max(0, ResourceCount);
 	if (SafeResourceCount <= 0)
 	{
+		return 0;
+	}
+
+	const int32 SafeSmallRockWeight = FMath::Max(0, SmallRockWeight);
+	const int32 SafeMediumRockWeight = FMath::Max(0, MediumRockWeight);
+	const int32 SafeLargeRockWeight = FMath::Max(0, LargeRockWeight);
+	const int32 SafeOreWeight = FMath::Max(0, OreWeight);
+	const int64 TotalResourceWeight = static_cast<int64>(SafeSmallRockWeight)
+		+ static_cast<int64>(SafeMediumRockWeight)
+		+ static_cast<int64>(SafeLargeRockWeight)
+		+ static_cast<int64>(SafeOreWeight);
+	if (TotalResourceWeight <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Moon Resource Spawn Skipped: all resource weights are zero or negative."));
 		return 0;
 	}
 
@@ -70,21 +95,24 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			continue;
 		}
 
-		const int32 ResourceRoll = RandomStream.RandRange(1, TotalResourceWeight);
+		const double ResourceRoll = static_cast<double>(RandomStream.FRand()) * static_cast<double>(TotalResourceWeight);
+		const double MediumRockThreshold = static_cast<double>(SafeSmallRockWeight)
+			+ static_cast<double>(SafeMediumRockWeight);
+		const double LargeRockThreshold = MediumRockThreshold + static_cast<double>(SafeLargeRockWeight);
 		EJTSResourceType ResourceType = EJTSResourceType::Rock;
 		FVector BaseResourceScale(0.5f);
 		int32 ResourceAmount = 1;
 		bool bCanPickup = true;
-		if (ResourceRoll <= SmallRockWeight)
+		if (ResourceRoll < static_cast<double>(SafeSmallRockWeight))
 		{
 			BaseResourceScale = FVector(0.5f);
 		}
-		else if (ResourceRoll <= SmallRockWeight + MediumRockWeight)
+		else if (ResourceRoll < MediumRockThreshold)
 		{
 			BaseResourceScale = FVector(1.0f);
 			ResourceAmount = 2;
 		}
-		else if (ResourceRoll <= SmallRockWeight + MediumRockWeight + LargeRockWeight)
+		else if (ResourceRoll < LargeRockThreshold)
 		{
 			BaseResourceScale = FVector(2.0f);
 			bCanPickup = false;
