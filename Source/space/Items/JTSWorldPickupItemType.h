@@ -14,5 +14,7 @@ enum class EJTSWorldPickupItemType : uint8
 	Rock UMETA(DisplayName = "Rock"),
 	Ore UMETA(DisplayName = "Ore"),
 	Pickaxe UMETA(DisplayName = "Pickaxe"),
-	Backpack UMETA(DisplayName = "Backpack")
+	Backpack UMETA(DisplayName = "Backpack"),
+	Knife UMETA(DisplayName = "Knife"),
+	Axe UMETA(DisplayName = "Axe")
 };

@@ -45,9 +45,8 @@ AJTSResourcePickupActor::AJTSResourcePickupActor()
 	PickupTrigger->SetCollisionObjectType(ECC_WorldDynamic);
 	PickupTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
 	PickupTrigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-	PickupTrigger->SetGenerateOverlapEvents(true);
+	PickupTrigger->SetGenerateOverlapEvents(false);
 	PickupTrigger->SetCanEverAffectNavigation(false);
-	PickupTrigger->OnComponentBeginOverlap.AddDynamic(this, &AJTSResourcePickupActor::HandlePickupTriggerBeginOverlap);
 
 	if (!HasAnyFlags(RF_ClassDefaultObject))
 	{
@@ -125,6 +124,22 @@ FVector AJTSResourcePickupActor::GetVisualBoundsExtent() const
 	return FVector(50.0f);
 }
 
+FText AJTSResourcePickupActor::GetInteractionDisplayName() const
+{
+	return FText::FromString(ResourceTypeToPromptName(ResourceType));
+}
+
+FVector AJTSResourcePickupActor::GetInteractionAnchorWorldLocation() const
+{
+	if (IsValid(ResourceMesh) && ResourceMesh->IsRegistered())
+	{
+		const FVector PhysicalExtent = ResourceMesh->Bounds.BoxExtent.GetAbs();
+		return ResourceMesh->Bounds.Origin + FVector(0.0f, 0.0f, PhysicalExtent.Z + 24.0f);
+	}
+
+	return GetActorLocation() + FVector(0.0f, 0.0f, 74.0f);
+}
+
 void AJTSResourcePickupActor::InitializeResource(EJTSResourceType NewResourceType, int32 NewResourceAmount)
 {
 	ResourceType = NewResourceType;
@@ -152,12 +167,25 @@ void AJTSResourcePickupActor::OnConstruction(const FTransform& Transform)
 
 bool AJTSResourcePickupActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
-	return false;
+	if (bPickupConsumed || IsPendingKillPending() || !IsValid(InteractingPawn))
+	{
+		return false;
+	}
+
+	const UWorld* const World = InteractingPawn->GetWorld();
+	const AJTSGameState* const JTSGameState = World != nullptr ? World->GetGameState<AJTSGameState>() : nullptr;
+	return IsValid(JTSGameState) && JTSGameState->IsEarthCollectionActive();
 }
 
 FText AJTSResourcePickupActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
-	return FText::GetEmpty();
+	if (!CanInteract_Implementation(InteractingPawn))
+	{
+		return FText::GetEmpty();
+	}
+
+	const FText FailureFeedback = GetFailureFeedback();
+	return FailureFeedback.IsEmpty() ? FText::FromString(TEXT("[E] PICK UP")) : FailureFeedback;
 }
 
 void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
@@ -167,8 +195,14 @@ void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
 
 bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 {
-	if (bPickupConsumed || IsPendingKillPending() || !CanCollectResource(InteractingPawn, GetResourceAmount(), true))
+	if (!CanInteract_Implementation(InteractingPawn))
 	{
+		return false;
+	}
+
+	if (!CanCollectResource(InteractingPawn, GetResourceAmount(), true))
+	{
+		ShowFailureFeedback(TEXT("InventoryFull"));
 		return false;
 	}
 
@@ -176,6 +210,7 @@ bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 	if (!TryCollectResource(InteractingPawn, ResourceType, GetResourceAmount(), true))
 	{
 		bPickupConsumed = false;
+		ShowFailureFeedback(TEXT("InventoryFull"));
 		return false;
 	}
 
@@ -233,13 +268,50 @@ void AJTSResourcePickupActor::ApplyResourceAppearance()
 	ResourceMaterial->SetVectorParameterValue(TEXT("Tint"), ResourceColor);
 }
 
-void AJTSResourcePickupActor::HandlePickupTriggerBeginOverlap(
-	UPrimitiveComponent* OverlappedComponent,
-	AActor* OtherActor,
-	UPrimitiveComponent* OtherComp,
-	int32 OtherBodyIndex,
-	bool bFromSweep,
-	const FHitResult& SweepResult)
+void AJTSResourcePickupActor::ShowFailureFeedback(const FString& FailureReason)
 {
-	TryPickup(Cast<APawn>(OtherActor));
+	FailureFeedbackText = FailureReason == TEXT("InventoryFull")
+		? TEXT("INVENTORY FULL")
+		: TEXT("PICKUP FAILED");
+	const UWorld* const World = GetWorld();
+	FailureFeedbackEndTime = World != nullptr
+		? static_cast<double>(World->GetTimeSeconds()) + static_cast<double>(FMath::Max(0.1f, FailureFeedbackDuration))
+		: 0.0;
+}
+
+FText AJTSResourcePickupActor::GetFailureFeedback() const
+{
+	const UWorld* const World = GetWorld();
+	if (World != nullptr
+		&& !FailureFeedbackText.IsEmpty()
+		&& static_cast<double>(World->GetTimeSeconds()) < FailureFeedbackEndTime)
+	{
+		return FText::FromString(FailureFeedbackText);
+	}
+
+	return FText::GetEmpty();
+}
+
+FString AJTSResourcePickupActor::ResourceTypeToPromptName(EJTSResourceType InResourceType)
+{
+	switch (InResourceType)
+	{
+	case EJTSResourceType::Fuel:
+		return TEXT("FUEL");
+
+	case EJTSResourceType::Water:
+		return TEXT("WATER");
+
+	case EJTSResourceType::Food:
+		return TEXT("FOOD");
+
+	case EJTSResourceType::Rock:
+		return TEXT("ROCK");
+
+	case EJTSResourceType::Ore:
+		return TEXT("ORE");
+
+	default:
+		return TEXT("RESOURCE");
+	}
 }

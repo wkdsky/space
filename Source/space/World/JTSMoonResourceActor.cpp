@@ -16,7 +16,7 @@
 
 namespace
 {
-	const TCHAR* GetResourceTypeName(EJTSResourceType ResourceType)
+	const TCHAR* GetMoonResourceTypeName(EJTSResourceType ResourceType)
 	{
 		switch (ResourceType)
 		{
@@ -158,7 +158,7 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 			LogTemp,
 			Warning,
 			TEXT("JTSMoonResourceActor: ResourceType=%s OriginalLocation=(%.2f, %.2f, %.2f) AdjustedLocation=(%.2f, %.2f, %.2f) BoundsExtentZ=0.00 FinalScale=(%.2f, %.2f, %.2f) ResourceMesh is unavailable."),
-			GetResourceTypeName(ResourceType),
+			GetMoonResourceTypeName(ResourceType),
 			OriginalLocation.X,
 			OriginalLocation.Y,
 			OriginalLocation.Z,
@@ -183,7 +183,7 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 			LogTemp,
 			Warning,
 			TEXT("JTSMoonResourceActor: ResourceType=%s OriginalLocation=(%.2f, %.2f, %.2f) AdjustedLocation=(%.2f, %.2f, %.2f) BoundsExtentZ=%.2f FinalScale=(%.2f, %.2f, %.2f) ResourceMesh has no vertical bounds."),
-			GetResourceTypeName(ResourceType),
+			GetMoonResourceTypeName(ResourceType),
 			OriginalLocation.X,
 			OriginalLocation.Y,
 			OriginalLocation.Z,
@@ -206,7 +206,7 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 		LogTemp,
 		Log,
 		TEXT("JTSMoonResourceActor: ResourceType=%s OriginalLocation=(%.2f, %.2f, %.2f) AdjustedLocation=(%.2f, %.2f, %.2f) BoundsExtentZ=%.2f FinalScale=(%.2f, %.2f, %.2f)"),
-		GetResourceTypeName(ResourceType),
+		GetMoonResourceTypeName(ResourceType),
 		OriginalLocation.X,
 		OriginalLocation.Y,
 		OriginalLocation.Z,
@@ -266,7 +266,7 @@ void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=%s"),
 			GetMiningNodeName(ResourceType),
 			GetRemainingYieldUnits(),
-			GetResourceTypeName(ResourceType),
+			GetMoonResourceTypeName(ResourceType),
 			FailureReason);
 		return;
 	}
@@ -286,7 +286,7 @@ void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 	}
 	else
 	{
-		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGroundedPickup(
+		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
 			GetWorld(),
 			PickupItemType,
 			GetActorLocation(),
@@ -305,7 +305,7 @@ void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=DeliveryFailed"),
 			GetMiningNodeName(ResourceType),
 			GetRemainingYieldUnits(),
-			GetResourceTypeName(ResourceType));
+			GetMoonResourceTypeName(ResourceType));
 		return;
 	}
 
@@ -316,7 +316,7 @@ void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 		TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=true Destination=%s"),
 		GetMiningNodeName(ResourceType),
 		GetRemainingYieldUnits(),
-		GetResourceTypeName(ResourceType),
+		GetMoonResourceTypeName(ResourceType),
 		*Destination);
 	if (RemainingYieldUnits == 0)
 	{

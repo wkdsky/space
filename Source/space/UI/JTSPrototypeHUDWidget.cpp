@@ -12,6 +12,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
@@ -20,8 +21,11 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSMeleeComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/InteractionComponent.h"
+#include "space/Interaction/JTSMeleeTarget.h"
+#include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Modes/JTSEarthGameMode.h"
 #include "space/Modes/JTSMoonGameMode.h"
@@ -542,17 +546,19 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			SpacecraftWorldMarker,
 			FAnchors(0.0f, 0.0f),
 			FVector2D::ZeroVector,
-			FVector2D(150.0f, 78.0f),
-			FVector2D(0.5f, 0.5f));
+			FVector2D(150.0f, 96.0f),
+			FVector2D(0.5f, 1.0f));
 		if (SpacecraftWorldMarker != nullptr)
 		{
 			const FLinearColor MarkerColor(0.22f, 0.91f, 0.90f, 1.0f);
 			SpacecraftWorldMarkerText = MakeTextBlock(WidgetTree, TEXT("SpacecraftWorldMarkerText"), TEXT("SHIP"), 19.0f, MarkerColor, ETextJustify::Center);
 			SpacecraftWorldMarkerDistanceText = MakeTextBlock(WidgetTree, TEXT("SpacecraftWorldMarkerDistanceText"), TEXT("0m"), 14.0f, MarkerColor, ETextJustify::Center);
-			SpacecraftWorldMarkerArrowText = MakeTextBlock(WidgetTree, TEXT("SpacecraftWorldMarkerArrowText"), TEXT("v"), 25.0f, MarkerColor, ETextJustify::Center);
+			SpacecraftWorldMarkerArrowText = MakeTextBlock(WidgetTree, TEXT("SpacecraftWorldMarkerArrowText"), TEXT("▽"), 25.0f, MarkerColor, ETextJustify::Center);
+			SpacecraftWorldMarkerDesignationText = MakeTextBlock(WidgetTree, TEXT("SpacecraftWorldMarkerDesignationText"), TEXT("[SPACECRAFT]"), 12.0f, MarkerColor, ETextJustify::Center);
 			AddCanvasChild(SpacecraftWorldMarker, SpacecraftWorldMarkerText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 0.0f), FVector2D(140.0f, 26.0f), FVector2D(0.5f, 0.0f));
 			AddCanvasChild(SpacecraftWorldMarker, SpacecraftWorldMarkerDistanceText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 25.0f), FVector2D(140.0f, 21.0f), FVector2D(0.5f, 0.0f));
 			AddCanvasChild(SpacecraftWorldMarker, SpacecraftWorldMarkerArrowText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 44.0f), FVector2D(42.0f, 28.0f), FVector2D(0.5f, 0.0f));
+			AddCanvasChild(SpacecraftWorldMarker, SpacecraftWorldMarkerDesignationText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 70.0f), FVector2D(150.0f, 20.0f), FVector2D(0.5f, 0.0f));
 		}
 
 		SpacecraftEdgeIndicator = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("SpacecraftEdgeIndicator"));
@@ -688,7 +694,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
 
-		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
+		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    V: CAMERA"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
 		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(560.0f, 28.0f), FVector2D(1.0f, 1.0f));
 	}
 
@@ -851,6 +857,34 @@ void UJTSPrototypeHUDWidget::BuildWorkshopPanel()
 		ShopPickaxeBuyButton->OnClicked.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleBuyPickaxeClicked);
 	}
 
+	ShopKnifeCard = BuildWorkshopItemCard(
+		WorkshopCanvas,
+		TEXT("WorkshopKnifeCard"),
+		TEXT("KNIFE"),
+		TEXT("WEAPON"),
+		TEXT("ONE-HIT ROACHES AND NESTS"),
+		ShopKnifeCostText,
+		ShopKnifeBuyButton);
+	ShopKnifeCardSlot = ShopKnifeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopKnifeCard->Slot) : nullptr;
+	if (ShopKnifeBuyButton != nullptr)
+	{
+		ShopKnifeBuyButton->OnClicked.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleBuyKnifeClicked);
+	}
+
+	ShopAxeCard = BuildWorkshopItemCard(
+		WorkshopCanvas,
+		TEXT("WorkshopAxeCard"),
+		TEXT("AXE"),
+		TEXT("WEAPON"),
+		TEXT("ONE-HIT ROACHES AND NESTS"),
+		ShopAxeCostText,
+		ShopAxeBuyButton);
+	ShopAxeCardSlot = ShopAxeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopAxeCard->Slot) : nullptr;
+	if (ShopAxeBuyButton != nullptr)
+	{
+		ShopAxeBuyButton->OnClicked.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleBuyAxeClicked);
+	}
+
 	ShopBackpackCard = BuildWorkshopItemCard(
 		WorkshopCanvas,
 		TEXT("WorkshopBackpackCard"),
@@ -888,7 +922,7 @@ UBorder* UJTSPrototypeHUDWidget::BuildWorkshopItemCard(
 	OutCostText = nullptr;
 	OutBuyButton = nullptr;
 	UBorder* const Card = MakeBorder(WidgetTree, CardName, FLinearColor(0.035f, 0.075f, 0.12f, 0.98f), 10.0f);
-	AddCanvasChild(Parent, Card, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 110.0f), FVector2D(700.0f, 240.0f), FVector2D(0.5f, 0.0f));
+	AddCanvasChild(Parent, Card, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 110.0f), FVector2D(700.0f, 160.0f), FVector2D(0.5f, 0.0f));
 	UCanvasPanel* const CardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), *FString::Printf(TEXT("%sCanvas"), *CardName.ToString()));
 	if (Card == nullptr || CardCanvas == nullptr)
 	{
@@ -901,12 +935,12 @@ UBorder* UJTSPrototypeHUDWidget::BuildWorkshopItemCard(
 	{
 		IconArea->SetContent(MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sIconLabel"), *CardName.ToString()), TEXT("+"), 42.0f, FLinearColor(0.78f, 0.91f, 1.0f, 1.0f), ETextJustify::Center));
 	}
-	AddCanvasChild(CardCanvas, IconArea, FAnchors(0.0f, 0.0f), FVector2D(12.0f, 14.0f), FVector2D(112.0f, 142.0f));
-	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sName"), *CardName.ToString()), ItemName, 24.0f, FLinearColor(0.96f, 0.88f, 0.55f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(140.0f, 16.0f), FVector2D(300.0f, 32.0f));
-	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sCategory"), *CardName.ToString()), ItemCategory, 15.0f, FLinearColor(0.52f, 0.75f, 0.94f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(140.0f, 48.0f), FVector2D(300.0f, 24.0f));
-	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sDescription"), *CardName.ToString()), Description, 16.0f, FLinearColor(0.88f, 0.92f, 0.96f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(140.0f, 76.0f), FVector2D(340.0f, 38.0f));
+	AddCanvasChild(CardCanvas, IconArea, FAnchors(0.0f, 0.0f), FVector2D(12.0f, 12.0f), FVector2D(88.0f, 112.0f));
+	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sName"), *CardName.ToString()), ItemName, 22.0f, FLinearColor(0.96f, 0.88f, 0.55f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(114.0f, 12.0f), FVector2D(280.0f, 28.0f));
+	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sCategory"), *CardName.ToString()), ItemCategory, 14.0f, FLinearColor(0.52f, 0.75f, 0.94f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(114.0f, 39.0f), FVector2D(260.0f, 21.0f));
+	AddCanvasChild(CardCanvas, MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sDescription"), *CardName.ToString()), Description, 14.0f, FLinearColor(0.88f, 0.92f, 0.96f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(114.0f, 60.0f), FVector2D(310.0f, 32.0f));
 	OutCostText = MakeTextBlock(WidgetTree, *FString::Printf(TEXT("%sCost"), *CardName.ToString()), TEXT("COST"), 16.0f, FLinearColor::White);
-	AddCanvasChild(CardCanvas, OutCostText, FAnchors(0.0f, 0.0f), FVector2D(140.0f, 128.0f), FVector2D(270.0f, 48.0f));
+	AddCanvasChild(CardCanvas, OutCostText, FAnchors(0.0f, 0.0f), FVector2D(114.0f, 102.0f), FVector2D(300.0f, 38.0f));
 	OutBuyButton = MakeButton(WidgetTree, *FString::Printf(TEXT("%sBuy"), *CardName.ToString()), TEXT("BUY"));
 	AddCanvasChild(CardCanvas, OutBuyButton, FAnchors(1.0f, 1.0f), FVector2D(-14.0f, -14.0f), FVector2D(150.0f, 42.0f), FVector2D(1.0f, 1.0f));
 	return Card;
@@ -1247,6 +1281,40 @@ void UJTSPrototypeHUDWidget::RefreshEquipmentSlots()
 	}
 }
 
+bool UJTSPrototypeHUDWidget::ProjectWorldToViewportWidget(
+	const FVector& WorldLocation,
+	FVector2D& OutWidgetPosition) const
+{
+	OutWidgetPosition = FVector2D::ZeroVector;
+	// ProjectWorldLocationToWidgetPosition returns coordinates in the owning viewport widget's
+	// Slate-local space. These can be written directly to our RootCanvas slots; converting them
+	// a second time with a viewport or DPI offset caused the shared prompt/marker displacement.
+	APlayerController* const PlayerController = GetOwningPlayer();
+	return IsValid(PlayerController)
+		&& UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
+			PlayerController,
+			WorldLocation,
+			OutWidgetPosition,
+			true);
+}
+
+FVector2D UJTSPrototypeHUDWidget::GetViewportWidgetLocalSize() const
+{
+	// bPlayerViewportRelative=true above is paired with PlayerScreen geometry here.  Keeping
+	// projection and screen bounds in this one Slate-local space avoids mixing viewport-absolute
+	// pixels with canvas coordinates (and remains correct if a player viewport has an offset).
+	APlayerController* const PlayerController = GetOwningPlayer();
+	FGeometry PlayerScreenGeometry = IsValid(PlayerController)
+		? UWidgetLayoutLibrary::GetPlayerScreenWidgetGeometry(PlayerController)
+		: UWidgetLayoutLibrary::GetViewportWidgetGeometry(this);
+	FVector2D LocalSize = PlayerScreenGeometry.GetLocalSize();
+	if (LocalSize.X <= KINDA_SMALL_NUMBER || LocalSize.Y <= KINDA_SMALL_NUMBER)
+	{
+		LocalSize = GetCachedGeometry().GetLocalSize();
+	}
+	return FVector2D(FMath::Max(1.0f, LocalSize.X), FMath::Max(1.0f, LocalSize.Y));
+}
+
 void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 {
 	FText PromptText;
@@ -1255,41 +1323,60 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	bool bHasPromptAnchor = false;
 	if (!bMoonShopOpen && !bGameMenuOpen)
 	{
-		if (const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
+		if (AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
 		{
-			if (const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>())
+			// Combat owns its own context prompt, but shares the same world-to-widget projection path
+			// as normal interaction targets. This keeps LMB feedback separate from [E] interactions.
+			if (const UJTSMeleeComponent* const MeleeComponent = PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>())
 			{
-				if (AActor* const Target = InteractionComponent->GetCurrentInteractable())
+				if (AActor* const MeleeTarget = MeleeComponent->GetCurrentMeleeTarget())
 				{
-					PromptText = InteractionComponent->GetCurrentInteractionPrompt();
-					if (const AJTSWorldPickupActor* const Pickup = Cast<AJTSWorldPickupActor>(Target))
+					PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
+					TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
+					PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
+					bHasPromptAnchor = !PromptText.IsEmpty() && !TargetName.IsEmpty();
+				}
+			}
+
+			if (!bHasPromptAnchor)
+			{
+				if (const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>())
+				{
+					if (AActor* const Target = InteractionComponent->GetCurrentInteractable())
 					{
-						TargetName = Pickup->GetItemDisplayName();
-						PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
-						bHasPromptAnchor = true;
-					}
-					else if (const AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Target))
-					{
-						TargetName = Resource->GetInteractionDisplayName();
-						PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
-						bHasPromptAnchor = true;
-					}
-					else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
-					{
-						TargetName = FText::FromString(TEXT("SPACECRAFT"));
-						PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
-						bHasPromptAnchor = true;
+						PromptText = InteractionComponent->GetCurrentInteractionPrompt();
+						if (const AJTSWorldPickupActor* const Pickup = Cast<AJTSWorldPickupActor>(Target))
+						{
+							TargetName = Pickup->GetItemDisplayName();
+							PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
+							bHasPromptAnchor = true;
+						}
+						else if (const AJTSResourcePickupActor* const ResourcePickup = Cast<AJTSResourcePickupActor>(Target))
+						{
+							TargetName = ResourcePickup->GetInteractionDisplayName();
+							PromptAnchor = ResourcePickup->GetInteractionAnchorWorldLocation();
+							bHasPromptAnchor = true;
+						}
+						else if (const AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Target))
+						{
+							TargetName = Resource->GetInteractionDisplayName();
+							PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
+							bHasPromptAnchor = true;
+						}
+						else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
+						{
+							TargetName = FText::FromString(TEXT("SPACECRAFT"));
+							PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+							bHasPromptAnchor = true;
+						}
 					}
 				}
 			}
 		}
 	}
 
-	APlayerController* const PlayerController = GetOwningPlayer();
 	FVector2D PromptScreenPosition = FVector2D::ZeroVector;
-	const bool bProjected = bHasPromptAnchor
-		&& IsValid(PlayerController)
-		&& PlayerController->ProjectWorldLocationToScreen(PromptAnchor, PromptScreenPosition, true);
+	const bool bProjected = bHasPromptAnchor && ProjectWorldToViewportWidget(PromptAnchor, PromptScreenPosition);
 	const bool bShowPrompt = !PromptText.IsEmpty() && !TargetName.IsEmpty() && bProjected;
 	if (InteractionPromptText != nullptr)
 	{
@@ -1318,16 +1405,18 @@ void UJTSPrototypeHUDWidget::RefreshMoonShop()
 	AJTSSpacecraftActor* const Spacecraft = ShopSpacecraft.Get();
 	if (!IsValid(MoonGameMode) || !IsValid(PlayerCharacter) || !IsValid(Spacecraft))
 	{
-		if (ShopPickaxeBuyButton != nullptr)
+		auto DisableBuyButton = [](UButton* BuyButton)
 		{
-			ShopPickaxeBuyButton->SetBackgroundColor(FLinearColor(0.17f, 0.19f, 0.22f, 1.0f));
-			ShopPickaxeBuyButton->SetIsEnabled(false);
-		}
-		if (ShopBackpackBuyButton != nullptr)
-		{
-			ShopBackpackBuyButton->SetBackgroundColor(FLinearColor(0.17f, 0.19f, 0.22f, 1.0f));
-			ShopBackpackBuyButton->SetIsEnabled(false);
-		}
+			if (BuyButton != nullptr)
+			{
+				BuyButton->SetBackgroundColor(FLinearColor(0.17f, 0.19f, 0.22f, 1.0f));
+				BuyButton->SetIsEnabled(false);
+			}
+		};
+		DisableBuyButton(ShopPickaxeBuyButton);
+		DisableBuyButton(ShopKnifeBuyButton);
+		DisableBuyButton(ShopAxeBuyButton);
+		DisableBuyButton(ShopBackpackBuyButton);
 		return;
 	}
 
@@ -1366,6 +1455,16 @@ void UJTSPrototypeHUDWidget::RefreshMoonShop()
 		ShopPickaxeCostText,
 		ShopPickaxeBuyButton);
 	RefreshItemCard(
+		MoonGameMode->GetKnifeRockCost(),
+		MoonGameMode->GetKnifeOreCost(),
+		ShopKnifeCostText,
+		ShopKnifeBuyButton);
+	RefreshItemCard(
+		MoonGameMode->GetAxeRockCost(),
+		MoonGameMode->GetAxeOreCost(),
+		ShopAxeCostText,
+		ShopAxeBuyButton);
+	RefreshItemCard(
 		MoonGameMode->GetBackpackRockCost(),
 		MoonGameMode->GetBackpackOreCost(),
 		ShopBackpackCostText,
@@ -1387,9 +1486,18 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopTabs()
 			? FLinearColor(0.12f, 0.42f, 0.64f, 1.0f)
 			: FLinearColor(0.055f, 0.11f, 0.16f, 1.0f));
 	}
+	const ESlateVisibility ToolCardVisibility = bWorkshopEquipmentTab ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
 	if (ShopPickaxeCard != nullptr)
 	{
-		ShopPickaxeCard->SetVisibility(bWorkshopEquipmentTab ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		ShopPickaxeCard->SetVisibility(ToolCardVisibility);
+	}
+	if (ShopKnifeCard != nullptr)
+	{
+		ShopKnifeCard->SetVisibility(ToolCardVisibility);
+	}
+	if (ShopAxeCard != nullptr)
+	{
+		ShopAxeCard->SetVisibility(ToolCardVisibility);
 	}
 	if (ShopBackpackCard != nullptr)
 	{
@@ -1404,15 +1512,9 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopLayout()
 		return;
 	}
 
-	int32 ViewportWidth = 1280;
-	int32 ViewportHeight = 720;
-	if (APlayerController* const PlayerController = GetOwningPlayer())
-	{
-		PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
-	}
-	ViewportWidth = FMath::Max(1, ViewportWidth);
-	ViewportHeight = FMath::Max(1, ViewportHeight);
-
+	const FVector2D LocalViewportSize = GetViewportWidgetLocalSize();
+	const int32 ViewportWidth = FMath::Max(1, FMath::RoundToInt(LocalViewportSize.X));
+	const int32 ViewportHeight = FMath::Max(1, FMath::RoundToInt(LocalViewportSize.Y));
 	const FIntPoint ViewportSize(ViewportWidth, ViewportHeight);
 	if (CachedWorkshopViewportSize == ViewportSize)
 	{
@@ -1420,9 +1522,9 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopLayout()
 	}
 	CachedWorkshopViewportSize = ViewportSize;
 
-	const float CardHeight = FMath::Clamp(static_cast<float>(ViewportHeight) * 0.33f, 220.0f, 250.0f);
+	const float CardHeight = FMath::Clamp(static_cast<float>(ViewportHeight) * 0.22f, 144.0f, 172.0f);
 	const float CardTop = 106.0f;
-	const float CloseTop = CardTop + CardHeight + 22.0f;
+	const float CloseTop = CardTop + CardHeight * 3.0f + 22.0f;
 	const float PanelWidth = FMath::Clamp(static_cast<float>(ViewportWidth) * 0.70f, 620.0f, 860.0f);
 	const float PanelHeight = CloseTop + 60.0f;
 	const float TabWidth = FMath::Clamp(PanelWidth * 0.22f, 120.0f, 160.0f);
@@ -1440,16 +1542,18 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopLayout()
 		ShopEquipmentTabSlot->SetSize(FVector2D(TabWidth, 40.0f));
 	}
 
-	auto LayoutItemCard = [CardTop, CardHeight, PanelWidth](UCanvasPanelSlot* CardSlot)
+	auto LayoutItemCard = [CardTop, CardHeight, PanelWidth](UCanvasPanelSlot* CardSlot, int32 StackIndex)
 	{
 		if (CardSlot != nullptr)
 		{
-			CardSlot->SetPosition(FVector2D(0.0f, CardTop));
+			CardSlot->SetPosition(FVector2D(0.0f, CardTop + static_cast<float>(StackIndex) * CardHeight));
 			CardSlot->SetSize(FVector2D(PanelWidth - 44.0f, CardHeight));
 		}
 	};
-	LayoutItemCard(ShopPickaxeCardSlot);
-	LayoutItemCard(ShopBackpackCardSlot);
+	LayoutItemCard(ShopPickaxeCardSlot, 0);
+	LayoutItemCard(ShopKnifeCardSlot, 1);
+	LayoutItemCard(ShopAxeCardSlot, 2);
+	LayoutItemCard(ShopBackpackCardSlot, 0);
 
 	if (ShopCloseButtonSlot != nullptr)
 	{
@@ -1497,14 +1601,15 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 		return;
 	}
 
-	const FVector NavigationAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+	const FVector PhysicalNavigationAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+	const FVector VisualNavigationAnchor = WrapSubsystem->GetMoonVisualWorldPosition(
+		PhysicalNavigationAnchor,
+		PlayerLocation);
 	const FVector DistanceDelta(WrappedDelta.X, WrappedDelta.Y, ShipLocation.Z - PlayerLocation.Z);
 	const int32 DistanceMeters = FMath::Max(0, FMath::RoundToInt(DistanceDelta.Size() / 100.0f));
 
-	int32 ViewportWidth = 0;
-	int32 ViewportHeight = 0;
-	PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
-	if (ViewportWidth <= 0 || ViewportHeight <= 0)
+	const FVector2D ViewportSize = GetViewportWidgetLocalSize();
+	if (ViewportSize.X <= 1.0f || ViewportSize.Y <= 1.0f)
 	{
 		SetSpacecraftNavigationVisibility(false, false);
 		return;
@@ -1514,25 +1619,25 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	FRotator CameraRotation;
 	PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
 	const FRotationMatrix CameraMatrix(CameraRotation);
-	const FVector ToNavigationAnchor = NavigationAnchor - CameraLocation;
+	// Projection must use the same player-relative WPO bend as the visible spacecraft mesh.
+	const FVector ToNavigationAnchor = VisualNavigationAnchor - CameraLocation;
 	const float ForwardDot = FVector::DotProduct(ToNavigationAnchor.GetSafeNormal(), CameraMatrix.GetUnitAxis(EAxis::X));
 	FVector2D ProjectedLocation;
-	const bool bProjected = PlayerController->ProjectWorldLocationToScreen(NavigationAnchor, ProjectedLocation, true);
+	const bool bProjected = ProjectWorldToViewportWidget(VisualNavigationAnchor, ProjectedLocation);
 	const float BaseSafeInset = MoonGameMode->GetSpacecraftMarkerScreenSafeMargin();
 	const float HysteresisInset = bSpacecraftWasOnScreen ? -12.0f : 12.0f;
 	const float SafeInset = FMath::Max(16.0f, BaseSafeInset + HysteresisInset);
 	const bool bOnScreen = bProjected
 		&& ForwardDot > 0.0f
 		&& ProjectedLocation.X >= SafeInset
-		&& ProjectedLocation.X <= static_cast<float>(ViewportWidth) - SafeInset
+		&& ProjectedLocation.X <= ViewportSize.X - SafeInset
 		&& ProjectedLocation.Y >= SafeInset
-		&& ProjectedLocation.Y <= static_cast<float>(ViewportHeight) - SafeInset;
+		&& ProjectedLocation.Y <= ViewportSize.Y - SafeInset;
 	if (bOnScreen)
 	{
-		const FVector2D MarkerPosition = ProjectedLocation + FVector2D(0.0f, -4.0f);
 		if (SpacecraftWorldMarkerSlot != nullptr)
 		{
-			SpacecraftWorldMarkerSlot->SetPosition(MarkerPosition);
+			SpacecraftWorldMarkerSlot->SetPosition(ProjectedLocation);
 		}
 		if (SpacecraftWorldMarkerText != nullptr)
 		{
@@ -1547,8 +1652,10 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 		return;
 	}
 
-	const FVector2D ViewportCenter(static_cast<float>(ViewportWidth) * 0.5f, static_cast<float>(ViewportHeight) * 0.5f);
-	const FVector WrappedDirectionWorld(WrappedDelta.X, WrappedDelta.Y, NavigationAnchor.Z - PlayerLocation.Z);
+	const FVector2D ViewportCenter = ViewportSize * 0.5f;
+	// The off-screen indicator remains topology-driven: it uses the shortest wrapped direction,
+	// not a projected virtual image of the spacecraft.
+	const FVector WrappedDirectionWorld(WrappedDelta.X, WrappedDelta.Y, PhysicalNavigationAnchor.Z - PlayerLocation.Z);
 	const FVector SafeWrappedDirection = WrappedDirectionWorld.GetSafeNormal();
 	FVector2D EdgeDirection(
 		FVector::DotProduct(SafeWrappedDirection, CameraMatrix.GetUnitAxis(EAxis::Y)),
@@ -1881,6 +1988,34 @@ void UJTSPrototypeHUDWidget::HandleBuyBackpackClicked()
 	RefreshGameplayHud();
 }
 
+void UJTSPrototypeHUDWidget::HandleBuyKnifeClicked()
+{
+	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
+		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
+		: nullptr;
+	if (IsValid(MoonGameMode))
+	{
+		MoonGameMode->TryCraftKnife(ShopPlayer.Get(), ShopSpacecraft.Get());
+	}
+
+	RefreshMoonShop();
+	RefreshGameplayHud();
+}
+
+void UJTSPrototypeHUDWidget::HandleBuyAxeClicked()
+{
+	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
+		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
+		: nullptr;
+	if (IsValid(MoonGameMode))
+	{
+		MoonGameMode->TryCraftAxe(ShopPlayer.Get(), ShopSpacecraft.Get());
+	}
+
+	RefreshMoonShop();
+	RefreshGameplayHud();
+}
+
 void UJTSPrototypeHUDWidget::HandleCloseMoonShopClicked()
 {
 	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetOwningPlayer()))
@@ -1989,6 +2124,12 @@ FString UJTSPrototypeHUDWidget::EquipmentTypeToString(EJTSEquipmentType Equipmen
 
 	case EJTSEquipmentType::Backpack:
 		return TEXT("BACKPACK");
+
+	case EJTSEquipmentType::Knife:
+		return TEXT("KNIFE");
+
+	case EJTSEquipmentType::Axe:
+		return TEXT("AXE");
 
 	case EJTSEquipmentType::None:
 	default:

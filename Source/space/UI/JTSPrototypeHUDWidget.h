@@ -21,6 +21,7 @@ class UProgressBar;
 class UTextBlock;
 class UWidget;
 class SWidget;
+struct FGeometry;
 
 /** Native C++ presentation for the Earth Base prototype and its menus. */
 UCLASS()
@@ -62,6 +63,8 @@ private:
 	void RefreshWorkshopTabs();
 	void RefreshWorkshopLayout();
 	void RefreshSpacecraftNavigation(AJTSSpacecraftActor* Spacecraft);
+	bool ProjectWorldToViewportWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const;
+	FVector2D GetViewportWidgetLocalSize() const;
 	void SetSpacecraftNavigationVisibility(bool bShowWorldMarker, bool bShowEdgeIndicator);
 	void BuildWorkshopPanel();
 	UBorder* BuildWorkshopItemCard(
@@ -113,6 +116,12 @@ private:
 
 	UFUNCTION()
 	void HandleBuyBackpackClicked();
+
+	UFUNCTION()
+	void HandleBuyKnifeClicked();
+
+	UFUNCTION()
+	void HandleBuyAxeClicked();
 
 	UFUNCTION()
 	void HandleCloseMoonShopClicked();
@@ -226,6 +235,9 @@ private:
 	TObjectPtr<UTextBlock> SpacecraftWorldMarkerArrowText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> SpacecraftWorldMarkerDesignationText;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanelSlot> SpacecraftWorldMarkerSlot;
 
 	UPROPERTY(Transient)
@@ -277,10 +289,22 @@ private:
 	TObjectPtr<UBorder> ShopBackpackCard;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBorder> ShopKnifeCard;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> ShopAxeCard;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanelSlot> ShopPickaxeCardSlot;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanelSlot> ShopBackpackCardSlot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanelSlot> ShopKnifeCardSlot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanelSlot> ShopAxeCardSlot;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ShopPickaxeCostText;
@@ -293,6 +317,18 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ShopBackpackBuyButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ShopKnifeCostText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> ShopKnifeBuyButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ShopAxeCostText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> ShopAxeBuyButton;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ShopToolsTabButton;

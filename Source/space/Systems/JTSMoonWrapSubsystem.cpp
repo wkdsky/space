@@ -59,6 +59,18 @@ FVector2D UJTSMoonWrapSubsystem::GetNearestPhysicalImage(
 	return PlayerPhysicalXY + Delta;
 }
 
+FVector UJTSMoonWrapSubsystem::GetMoonVisualWorldPosition(
+	const FVector& PhysicalWorldPosition,
+	const FVector& ViewerLocation) const
+{
+	if (const AJTSMoonWorldActor* const Configuration = FindConfigurationActor())
+	{
+		return Configuration->GetMoonVisualWorldPosition(PhysicalWorldPosition, ViewerLocation);
+	}
+
+	return PhysicalWorldPosition;
+}
+
 bool UJTSMoonWrapSubsystem::IsConfiguredForMoon() const
 {
 	return FindConfigurationActor() != nullptr;

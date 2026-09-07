@@ -11,7 +11,9 @@ enum class EJTSEquipmentType : uint8
 {
 	None UMETA(DisplayName = "Empty"),
 	Pickaxe UMETA(DisplayName = "Pickaxe"),
-	Backpack UMETA(DisplayName = "Backpack")
+	Backpack UMETA(DisplayName = "Backpack"),
+	Knife UMETA(DisplayName = "Knife"),
+	Axe UMETA(DisplayName = "Axe")
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEquipmentChanged, int32, EquippedItemCount);
@@ -82,6 +84,10 @@ public:
 	/** Pickaxe is active only while its containing slot is selected. */
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	bool HasActiveTool(EJTSEquipmentType EquipmentType) const;
+
+	/** Returns whether the selected slot contains a combat weapon. */
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	bool HasActiveWeapon() const;
 
 	/** C++ read-only view for native presentation code. */
 	const TArray<EJTSEquipmentType>& GetEquipmentSlots() const;

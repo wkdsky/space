@@ -25,8 +25,15 @@ class SPACE_API AJTSWorldPickupActor : public AActor, public IInteractable
 public:
 	AJTSWorldPickupActor();
 
-	/** Spawns one non-physical pickup on nearby valid ground. PreferredDirection biases shop drops forward of a player. */
-	static AJTSWorldPickupActor* SpawnGroundedPickup(
+	/** Places an initial world-generation pickup directly on an already-resolved ground location. */
+	static AJTSWorldPickupActor* SpawnInitialGroundedPickup(
+		UWorld* World,
+		EJTSWorldPickupItemType NewItemType,
+		const FVector& GroundLocation,
+		AActor* SourceActor);
+
+	/** Spawns one gameplay pickup with a short upward launch and grounded landing. */
+	static AJTSWorldPickupActor* SpawnGameplayDrop(
 		UWorld* World,
 		EJTSWorldPickupItemType NewItemType,
 		const FVector& Origin,
@@ -55,14 +62,6 @@ public:
 	FVector GetVisualBoundsExtent() const;
 	void AdjustToGround(const FVector& GroundHitLocation);
 
-	/** Starts the lightweight non-physics drop movement after safe placement succeeds. */
-	void StartDropMotion(
-		const FVector& InitialVelocity,
-		const FVector& GravityAcceleration,
-		const FVector& SafeGroundLocation,
-		AActor* SourceActor,
-		APawn* SafetyPawn);
-
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
@@ -74,6 +73,13 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	/** Starts the lightweight non-physics drop movement used only by SpawnGameplayDrop. */
+	void StartDropMotion(
+		const FVector& InitialVelocity,
+		const FVector& GravityAcceleration,
+		const FVector& SafeGroundLocation,
+		AActor* SourceActor,
+		APawn* SafetyPawn);
 	bool TryPickup(APawn* InteractingPawn, FString& OutFailureReason);
 	bool IsResourceItem() const;
 	float GetVisualSupportDistance(const FVector& GravityDirection) const;

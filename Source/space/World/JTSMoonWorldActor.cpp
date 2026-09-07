@@ -78,6 +78,52 @@ float AJTSMoonWorldActor::GetRecommendedBoundsScale(float BaseBoundsRadius) cons
 	return FMath::Clamp(1.0f + DisplacementRatio + 0.05f, 1.05f, 64.0f);
 }
 
+FVector AJTSMoonWorldActor::GetMoonVisualWorldPosition(
+	const FVector& PhysicalWorldPosition,
+	const FVector& ViewerLocation) const
+{
+	// Keep this in lockstep with Shaders/JTSFakeMoonBend.ush::JTSFakeMoon_GetWPO.
+	if (!IsWorldBendEnabled())
+	{
+		return PhysicalWorldPosition;
+	}
+
+	const float CurveRadius = GetVisualCurveRadius();
+	const float MaxDistance = GetBendMaxDistance();
+	if (CurveRadius <= 0.0001f || MaxDistance <= 0.0f)
+	{
+		return PhysicalWorldPosition;
+	}
+
+	const FVector2D DeltaXY(
+		PhysicalWorldPosition.X - ViewerLocation.X,
+		PhysicalWorldPosition.Y - ViewerLocation.Y);
+	const float Distance = FMath::Sqrt(FMath::Max(DeltaXY.SizeSquared(), 0.0f));
+	const float SafeFlatRadius = FMath::Max(GetFlatRadius(), 0.0f);
+	const float DistanceAfterFlat = FMath::Max(Distance - SafeFlatRadius, 0.0f);
+
+	const float TransitionWidth = GetBendTransitionWidth();
+	float TransitionFactor = 1.0f;
+	if (TransitionWidth > 0.0f)
+	{
+		const float TransitionT = FMath::Clamp(DistanceAfterFlat / TransitionWidth, 0.0f, 1.0f);
+		TransitionFactor = TransitionT * TransitionT * (3.0f - (2.0f * TransitionT));
+	}
+	else if (DistanceAfterFlat <= 0.0f)
+	{
+		TransitionFactor = 0.0f;
+	}
+
+	float EffectiveDistance = DistanceAfterFlat * TransitionFactor;
+	EffectiveDistance = SmoothClampBendDistance(
+		EffectiveDistance,
+		FMath::Max(MaxDistance - SafeFlatRadius, 0.0f),
+		TransitionWidth);
+
+	const float VerticalOffset = -(EffectiveDistance * EffectiveDistance) / (2.0f * FMath::Max(CurveRadius, 0.0001f));
+	return PhysicalWorldPosition + FVector(0.0f, 0.0f, VerticalOffset);
+}
+
 void AJTSMoonWorldActor::BeginPlay()
 {
 	Super::BeginPlay();
@@ -103,6 +149,35 @@ bool AJTSMoonWorldActor::IsMoonWorld() const
 {
 	const UWorld* const World = GetWorld();
 	return World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr;
+}
+
+float AJTSMoonWorldActor::SmoothClampBendDistance(
+	float DistanceAfterFlat,
+	float MaxDistanceAfterFlat,
+	float TransitionWidth)
+{
+	const float SafeMaxDistance = FMath::Max(MaxDistanceAfterFlat, 0.0f);
+	if (SafeMaxDistance <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float SafeDistance = FMath::Max(DistanceAfterFlat, 0.0f);
+	const float ClampWidth = FMath::Min(
+		FMath::Max(TransitionWidth, 1.0f),
+		FMath::Max(SafeMaxDistance * 0.25f, 1.0f));
+	const float ClampStart = FMath::Max(0.0f, SafeMaxDistance - ClampWidth);
+	if (SafeDistance <= ClampStart)
+	{
+		return SafeDistance;
+	}
+
+	const float ClampT = FMath::Clamp(
+		(FMath::Min(SafeDistance, SafeMaxDistance) - ClampStart) / FMath::Max(ClampWidth, 0.0001f),
+		0.0f,
+		1.0f);
+	const float SmoothT = ClampT * ClampT * (3.0f - (2.0f * ClampT));
+	return FMath::Lerp(FMath::Min(SafeDistance, SafeMaxDistance), SafeMaxDistance, SmoothT);
 }
 
 void AJTSMoonWorldActor::PublishScalar(

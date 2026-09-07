@@ -50,6 +50,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Moon|Visual Bend")
 	float GetRecommendedBoundsScale(float BaseBoundsRadius) const;
 
+	/**
+	 * Applies the same player-relative vertical bend as the JTSFakeMoon WPO shader.
+	 * Physical gameplay positions remain unchanged; this is for CPU consumers that must
+	 * align with the visually bent Moon world, such as world-space HUD anchors.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Moon|Visual Bend")
+	FVector GetMoonVisualWorldPosition(const FVector& PhysicalWorldPosition, const FVector& ViewerLocation) const;
+
 	/** Publishes the local player's physical XY and the configured bend values to the optional MPC. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Visual Bend")
 	void UpdateBendMaterialParameters();
@@ -60,6 +68,7 @@ protected:
 
 private:
 	bool IsMoonWorld() const;
+	static float SmoothClampBendDistance(float DistanceAfterFlat, float MaxDistanceAfterFlat, float TransitionWidth);
 	void PublishScalar(class UMaterialParameterCollectionInstance* Instance, FName ParameterName, float Value, float& CachedValue, bool& bHasCachedValue) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Looping Map", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))

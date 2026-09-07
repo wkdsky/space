@@ -7,6 +7,9 @@
 #include "JTSMoonResourceSpawner.generated.h"
 
 class AJTSMoonResourceActor;
+class AJTSMoonCorpseActor;
+class AJTSRoachNestActor;
+class AJTSSpacecraftActor;
 class AJTSWorldPickupActor;
 
 /** Moon resource distribution values owned by the Moon chapter ruleset. */
@@ -36,6 +39,10 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	/** Extra XY clearance added around the spacecraft's physical mesh bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionPadding = 500.0f;
+
+	/** Extra XY clearance added around fixed corpse and random roach-nest landmark bounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float LandmarkExclusionPadding = 400.0f;
 };
 
 UCLASS()
@@ -53,6 +60,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
 	void ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings);
 
+	/** Caches the Moon initialization landmarks used to exclude procedural resource locations. */
+	void SetLandmarkExclusions(
+		AJTSSpacecraftActor* InSpacecraft,
+		const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
+		const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InRoachNestLandmarks);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -64,9 +77,9 @@ private:
 		const FVector& ResourceScale,
 		const FRotator& ResourceRotation,
 		const FVector& GroundLocation);
-	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation, const FVector& PreferredDirection = FVector::ZeroVector);
+	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation);
 	bool ResolveGroundLocation(const FVector& CandidateXY, FVector& OutGroundLocation) const;
-	bool IsCandidateExcludedBySpacecraft(const FVector& CandidateXY) const;
+	bool IsCandidateExcludedByLandmarks(const FVector& CandidateXY) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonResourceActor> ResourceActorClass;
@@ -89,9 +102,13 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
 
-	/** Runtime copy of the Moon GameMode's sole spacecraft exclusion setting. */
+	/** Runtime copy of the Moon GameMode's spacecraft exclusion setting. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	float SpacecraftExclusionPadding = 0.0f;
+
+	/** Runtime copy of the Moon GameMode's corpse/nest landmark exclusion setting. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
+	float LandmarkExclusionPadding = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float GroundTraceStartHeight = 1000.0f;
@@ -110,4 +127,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<AJTSWorldPickupActor>> GeneratedPickups;
+
+	/** Initialization-time landmark cache supplied by AJTSMoonGameMode before GenerateResources. */
+	TWeakObjectPtr<AJTSSpacecraftActor> SpacecraftLandmark;
+	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
+	TArray<TWeakObjectPtr<AJTSRoachNestActor>> RoachNestLandmarks;
 };

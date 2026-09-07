@@ -101,13 +101,52 @@ namespace
 			OutEquipmentType = EJTSEquipmentType::Backpack;
 			return true;
 
+		case EJTSWorldPickupItemType::Knife:
+			OutEquipmentType = EJTSEquipmentType::Knife;
+			return true;
+
+		case EJTSWorldPickupItemType::Axe:
+			OutEquipmentType = EJTSEquipmentType::Axe;
+			return true;
+
 		default:
 			return false;
 		}
 	}
 }
 
-AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGroundedPickup(
+AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
+	UWorld* World,
+	EJTSWorldPickupItemType NewItemType,
+	const FVector& GroundLocation,
+	AActor* SourceActor)
+{
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+
+	const FTransform SpawnTransform(
+		FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f),
+		GroundLocation);
+	AJTSWorldPickupActor* const Pickup = World->SpawnActorDeferred<AJTSWorldPickupActor>(
+		AJTSWorldPickupActor::StaticClass(),
+		SpawnTransform,
+		SourceActor,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!IsValid(Pickup))
+	{
+		return nullptr;
+	}
+
+	Pickup->InitializeItem(NewItemType);
+	Pickup->FinishSpawning(SpawnTransform);
+	Pickup->AdjustToGround(GroundLocation);
+	return Pickup;
+}
+
+AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 	UWorld* World,
 	EJTSWorldPickupItemType NewItemType,
 	const FVector& Origin,
@@ -765,9 +804,18 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 	else if (!IsResourceItem())
 	{
 		DesiredMesh = EquipmentMesh.Get();
-		DesiredScale = ItemType == EJTSWorldPickupItemType::Backpack
-			? FVector(0.33f, 0.24f, 0.38f)
-			: FVector(0.42f, 0.12f, 0.10f);
+		if (ItemType == EJTSWorldPickupItemType::Backpack)
+		{
+			DesiredScale = FVector(0.33f, 0.24f, 0.38f);
+		}
+		else if (ItemType == EJTSWorldPickupItemType::Axe)
+		{
+			DesiredScale = FVector(0.44f, 0.18f, 0.28f);
+		}
+		else
+		{
+			DesiredScale = FVector(0.42f, 0.12f, 0.10f);
+		}
 	}
 
 	if (IsValid(DesiredMesh) && PickupMesh->GetStaticMesh() != DesiredMesh)
@@ -808,6 +856,14 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 
 	case EJTSWorldPickupItemType::Backpack:
 		ItemColor = FLinearColor(0.24f, 0.76f, 0.42f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::Knife:
+		ItemColor = FLinearColor(0.82f, 0.86f, 0.92f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::Axe:
+		ItemColor = FLinearColor(0.88f, 0.30f, 0.12f, 1.0f);
 		break;
 
 	default:
@@ -891,6 +947,12 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 
 	case EJTSWorldPickupItemType::Backpack:
 		return TEXT("BACKPACK");
+
+	case EJTSWorldPickupItemType::Knife:
+		return TEXT("KNIFE");
+
+	case EJTSWorldPickupItemType::Axe:
+		return TEXT("AXE");
 
 	default:
 		return TEXT("UNKNOWN");

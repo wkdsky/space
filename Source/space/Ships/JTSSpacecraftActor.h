@@ -62,7 +62,7 @@ public:
 	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
 	FBox GetResourceExclusionBounds() const;
 
-	/** Bounds-top anchor shared by the world interaction prompt and Moon navigation marker. */
+	/** Physical bounds-top anchor shared by the world interaction prompt and Moon navigation marker. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Navigation")
 	FVector GetNavigationMarkerWorldLocation() const;
 
@@ -173,9 +173,9 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
 
-	/** Small visual clearance above the spacecraft mesh top for navigation and interaction labels. */
+	/** Small visual clearance above the spacecraft mesh top; Moon HUD applies WPO curvature separately. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float NavigationMarkerHeightOffset = 44.0f;
+	float NavigationMarkerHeightOffset = 20.0f;
 
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))

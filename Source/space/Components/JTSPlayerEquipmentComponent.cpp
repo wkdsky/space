@@ -49,6 +49,14 @@ namespace
 			OutPickupItemType = EJTSWorldPickupItemType::Backpack;
 			return true;
 
+		case EJTSEquipmentType::Knife:
+			OutPickupItemType = EJTSWorldPickupItemType::Knife;
+			return true;
+
+		case EJTSEquipmentType::Axe:
+			OutPickupItemType = EJTSWorldPickupItemType::Axe;
+			return true;
+
 		default:
 			return false;
 		}
@@ -92,8 +100,10 @@ bool UJTSPlayerEquipmentComponent::TryEquipItem(EJTSEquipmentType EquipmentType)
 	}
 
 	EquipmentSlots[EmptySlotIndex] = EquipmentType;
-	if (EquipmentType == EJTSEquipmentType::Pickaxe
-		&& !HasActiveTool(EJTSEquipmentType::Pickaxe))
+	const bool bIsSelectableTool = EquipmentType == EJTSEquipmentType::Pickaxe
+		|| EquipmentType == EJTSEquipmentType::Knife
+		|| EquipmentType == EJTSEquipmentType::Axe;
+	if (bIsSelectableTool && !HasActiveTool(EquipmentType))
 	{
 		SelectedEquipmentSlotIndex = EmptySlotIndex;
 	}
@@ -203,6 +213,12 @@ bool UJTSPlayerEquipmentComponent::HasActiveTool(EJTSEquipmentType EquipmentType
 		&& GetEquipmentSlot(GetSelectedEquipmentSlotIndex()) == EquipmentType;
 }
 
+bool UJTSPlayerEquipmentComponent::HasActiveWeapon() const
+{
+	const EJTSEquipmentType ActiveEquipment = GetEquipmentSlot(GetSelectedEquipmentSlotIndex());
+	return ActiveEquipment == EJTSEquipmentType::Knife || ActiveEquipment == EJTSEquipmentType::Axe;
+}
+
 const TArray<EJTSEquipmentType>& UJTSPlayerEquipmentComponent::GetEquipmentSlots() const
 {
 	return EquipmentSlots;
@@ -242,7 +258,7 @@ bool UJTSPlayerEquipmentComponent::TryUnequipItemInternal(EJTSEquipmentType Equi
 	TArray<AJTSWorldPickupActor*> SpawnedPickups;
 	auto SpawnPickup = [World, OwnerPawn, &SpawnedPickups](EJTSWorldPickupItemType PickupItemType)
 	{
-		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGroundedPickup(
+		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
 			World,
 			PickupItemType,
 			OwnerPawn->GetActorLocation(),
@@ -301,7 +317,7 @@ bool UJTSPlayerEquipmentComponent::TryUnequipItemInternal(EJTSEquipmentType Equi
 	}
 	else if (bDropEquipmentPickup)
 	{
-		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Equipment Drop: Item=Pickaxe"));
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Equipment Drop: Item=%d"), static_cast<int32>(EquipmentType));
 	}
 
 	return true;

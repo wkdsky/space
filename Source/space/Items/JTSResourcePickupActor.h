@@ -44,6 +44,14 @@ public:
 	/** Returns the world-space half extents of the visible resource mesh for placement calculations. */
 	FVector GetVisualBoundsExtent() const;
 
+	/** Text used by the target-following Earth pickup prompt. */
+	UFUNCTION(BlueprintPure, Category = "Resource|Interaction")
+	FText GetInteractionDisplayName() const;
+
+	/** Physical mesh-bounds anchor used by the target-following Earth pickup prompt. */
+	UFUNCTION(BlueprintPure, Category = "Resource|Interaction")
+	FVector GetInteractionAnchorWorldLocation() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Resource")
 	void InitializeResource(EJTSResourceType NewResourceType, int32 NewResourceAmount = 1);
 
@@ -56,18 +64,12 @@ protected:
 	virtual void PostInitializeComponents() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-	UFUNCTION()
-	void HandlePickupTriggerBeginOverlap(
-		UPrimitiveComponent* OverlappedComponent,
-		AActor* OtherActor,
-		UPrimitiveComponent* OtherComp,
-		int32 OtherBodyIndex,
-		bool bFromSweep,
-		const FHitResult& SweepResult);
-
 private:
 	bool TryPickup(APawn* InteractingPawn);
 	void ApplyResourceAppearance();
+	void ShowFailureFeedback(const FString& FailureReason);
+	FText GetFailureFeedback() const;
+	static FString ResourceTypeToPromptName(EJTSResourceType InResourceType);
 
 	/** Non-visual transform root for the pickup actor. */
 	UPROPERTY(VisibleAnywhere, Category = "Resource")
@@ -77,7 +79,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> ResourceMesh;
 
-	/** Pawn-only overlap volume used for automatic pickup. */
+	/** Query-only volume lets the shared InteractionComponent discover this manual pickup. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USphereComponent> PickupTrigger;
 
@@ -92,5 +94,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
 
+	/** A failed manual pickup remains at its world anchor briefly rather than drawing over the HUD. */
+	UPROPERTY(EditDefaultsOnly, Category = "Resource|Interaction", meta = (ClampMin = "0.1", UIMin = "0.1"))
+	float FailureFeedbackDuration = 1.0f;
+
+	double FailureFeedbackEndTime = 0.0;
+	FString FailureFeedbackText;
 	bool bPickupConsumed = false;
 };

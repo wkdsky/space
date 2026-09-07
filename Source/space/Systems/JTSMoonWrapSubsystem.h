@@ -32,6 +32,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Moon|Wrapping")
 	FVector2D GetNearestPhysicalImage(const FVector2D& PlayerPhysicalXY, const FVector2D& ActorLogicalXY) const;
 
+	/** Returns a CPU display position that matches the configured Fake Moon WPO bend. */
+	UFUNCTION(BlueprintPure, Category = "Moon|Visual Bend")
+	FVector GetMoonVisualWorldPosition(const FVector& PhysicalWorldPosition, const FVector& ViewerLocation) const;
+
 	UFUNCTION(BlueprintPure, Category = "Moon|Wrapping")
 	bool IsConfiguredForMoon() const;
 

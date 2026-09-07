@@ -12,7 +12,9 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
+#include "space/World/JTSMoonCorpseActor.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSRoachNestActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 
@@ -20,6 +22,28 @@ namespace
 {
 	constexpr float MinimumScaleMultiplier = 0.85f;
 	constexpr float MaximumScaleMultiplier = 1.15f;
+
+	bool IsCandidateInsideWrappedBounds(
+		const FVector2D& CandidatePosition,
+		const FBox& LandmarkBounds,
+		const UJTSMoonWrapSubsystem* WrapSubsystem,
+		float Padding)
+	{
+		if (!LandmarkBounds.IsValid)
+		{
+			return false;
+		}
+
+		const FVector LandmarkCenter = LandmarkBounds.GetCenter();
+		const FVector LandmarkExtent = LandmarkBounds.GetExtent();
+		const FVector2D LandmarkCenterXY(LandmarkCenter.X, LandmarkCenter.Y);
+		const FVector2D RelativeCandidate = WrapSubsystem != nullptr && WrapSubsystem->IsConfiguredForMoon()
+			? WrapSubsystem->ShortestWrappedDelta2D(LandmarkCenterXY, CandidatePosition)
+			: CandidatePosition - LandmarkCenterXY;
+		const float SafePadding = FMath::Max(0.0f, Padding);
+		return FMath::Abs(RelativeCandidate.X) <= LandmarkExtent.X + SafePadding
+			&& FMath::Abs(RelativeCandidate.Y) <= LandmarkExtent.Y + SafePadding;
+	}
 }
 
 AJTSMoonResourceSpawner::AJTSMoonResourceSpawner()
@@ -48,6 +72,17 @@ void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawn
 	LargeRockWeight = FMath::Max(0, Settings.LargeRockWeight);
 	OreWeight = FMath::Max(0, Settings.OreWeight);
 	SpacecraftExclusionPadding = FMath::Max(0.0f, Settings.SpacecraftExclusionPadding);
+	LandmarkExclusionPadding = FMath::Max(0.0f, Settings.LandmarkExclusionPadding);
+}
+
+void AJTSMoonResourceSpawner::SetLandmarkExclusions(
+	AJTSSpacecraftActor* InSpacecraft,
+	const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
+	const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InRoachNestLandmarks)
+{
+	SpacecraftLandmark = InSpacecraft;
+	CorpseLandmarks = InCorpseLandmarks;
+	RoachNestLandmarks = InRoachNestLandmarks;
 }
 
 int32 AJTSMoonResourceSpawner::GenerateResources()
@@ -92,7 +127,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	const int32 LargeRockYieldUnits = IsValid(MoonGameMode) ? MoonGameMode->GetLargeRockTotalYieldUnits() : 6;
 	const int32 OreDepositYieldUnits = IsValid(MoonGameMode) ? MoonGameMode->GetOreDepositTotalYieldUnits() : 6;
 	int32 SpawnedCount = 0;
-	int32 RejectedNearShipCount = 0;
+	int32 RejectedLandmarkCount = 0;
 	int32 CandidateAttemptCount = 0;
 	const int32 MaxCandidateAttempts = FMath::Max(64, SafeResourceCount * 32);
 
@@ -105,9 +140,9 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			FMath::Cos(Angle) * Distance,
 			FMath::Sin(Angle) * Distance,
 			0.0f);
-		if (IsCandidateExcludedBySpacecraft(CandidateXY))
+		if (IsCandidateExcludedByLandmarks(CandidateXY))
 		{
-			++RejectedNearShipCount;
+			++RejectedLandmarkCount;
 			continue;
 		}
 
@@ -171,7 +206,23 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			int32 SpawnedPickupCount = 0;
 			for (int32 PickupIndex = 0; PickupIndex < InitialPickupCount; ++PickupIndex)
 			{
-				if (SpawnInitialPickup(GroundLocation) != nullptr)
+				FVector PickupGroundLocation = GroundLocation;
+				if (PickupIndex > 0)
+				{
+					const float PickupAngle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
+					const float PickupDistance = RandomStream.FRandRange(70.0f, 140.0f);
+					const FVector PickupCandidateXY = GroundLocation + FVector(
+						FMath::Cos(PickupAngle) * PickupDistance,
+						FMath::Sin(PickupAngle) * PickupDistance,
+						0.0f);
+					if (IsCandidateExcludedByLandmarks(PickupCandidateXY)
+						|| !ResolveGroundLocation(PickupCandidateXY, PickupGroundLocation))
+					{
+						continue;
+					}
+				}
+
+				if (SpawnInitialPickup(PickupGroundLocation) != nullptr)
 				{
 					++SpawnedPickupCount;
 				}
@@ -186,9 +237,9 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("JumpToSpace Moon Spawn: Total=%d RejectedNearShip=%d"),
+		TEXT("JumpToSpace Moon Spawn: Total=%d RejectedLandmarks=%d"),
 		SpawnedCount,
-		RejectedNearShipCount);
+		RejectedLandmarkCount);
 
 	return SpawnedCount;
 }
@@ -256,16 +307,13 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	return Resource;
 }
 
-AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector& GroundLocation, const FVector& PreferredDirection)
+AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector& GroundLocation)
 {
-	APawn* const PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
-	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGroundedPickup(
+	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 		GetWorld(),
 		EJTSWorldPickupItemType::Rock,
 		GroundLocation,
-		PlayerPawn,
-		this,
-		PreferredDirection);
+		this);
 	if (IsValid(Pickup))
 	{
 		GeneratedPickups.Add(Pickup);
@@ -300,11 +348,22 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 			TraceParams.AddIgnoredActor(*PlayerIt);
 		}
 	}
-	for (TActorIterator<AJTSSpacecraftActor> SpacecraftIt(World); SpacecraftIt; ++SpacecraftIt)
+	if (SpacecraftLandmark.IsValid())
 	{
-		if (IsValid(*SpacecraftIt))
+		TraceParams.AddIgnoredActor(SpacecraftLandmark.Get());
+	}
+	for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CorpseLandmarks)
+	{
+		if (Corpse.IsValid())
 		{
-			TraceParams.AddIgnoredActor(*SpacecraftIt);
+			TraceParams.AddIgnoredActor(Corpse.Get());
+		}
+	}
+	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : RoachNestLandmarks)
+	{
+		if (Nest.IsValid())
+		{
+			TraceParams.AddIgnoredActor(Nest.Get());
 		}
 	}
 	for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
@@ -334,7 +393,7 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 	return false;
 }
 
-bool AJTSMoonResourceSpawner::IsCandidateExcludedBySpacecraft(const FVector& CandidateXY) const
+bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& CandidateXY) const
 {
 	const UWorld* const World = GetWorld();
 	if (World == nullptr)
@@ -344,29 +403,37 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedBySpacecraft(const FVector& Can
 
 	const UJTSMoonWrapSubsystem* const WrapSubsystem = World->GetSubsystem<UJTSMoonWrapSubsystem>();
 	const FVector2D CandidatePosition(CandidateXY.X, CandidateXY.Y);
-	const float SafePadding = FMath::Max(0.0f, SpacecraftExclusionPadding);
-	for (TActorIterator<AJTSSpacecraftActor> SpacecraftIt(World); SpacecraftIt; ++SpacecraftIt)
+	if (SpacecraftLandmark.IsValid()
+		&& IsCandidateInsideWrappedBounds(
+			CandidatePosition,
+			SpacecraftLandmark->GetResourceExclusionBounds(),
+			WrapSubsystem,
+			SpacecraftExclusionPadding))
 	{
-		const AJTSSpacecraftActor* const Spacecraft = *SpacecraftIt;
-		if (!IsValid(Spacecraft))
-		{
-			continue;
-		}
+		return true;
+	}
 
-		const FBox ShipBounds = Spacecraft->GetResourceExclusionBounds();
-		if (!ShipBounds.IsValid)
+	for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CorpseLandmarks)
+	{
+		if (Corpse.IsValid()
+			&& IsCandidateInsideWrappedBounds(
+				CandidatePosition,
+				Corpse->GetComponentsBoundingBox(true),
+				WrapSubsystem,
+				LandmarkExclusionPadding))
 		{
-			continue;
+			return true;
 		}
+	}
 
-		const FVector ShipCenter = ShipBounds.GetCenter();
-		const FVector ShipExtent = ShipBounds.GetExtent();
-		const FVector2D ShipCenterXY(ShipCenter.X, ShipCenter.Y);
-		const FVector2D RelativeCandidate = WrapSubsystem != nullptr && WrapSubsystem->IsConfiguredForMoon()
-			? WrapSubsystem->ShortestWrappedDelta2D(ShipCenterXY, CandidatePosition)
-			: CandidatePosition - ShipCenterXY;
-		if (FMath::Abs(RelativeCandidate.X) <= ShipExtent.X + SafePadding
-			&& FMath::Abs(RelativeCandidate.Y) <= ShipExtent.Y + SafePadding)
+	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : RoachNestLandmarks)
+	{
+		if (Nest.IsValid()
+			&& IsCandidateInsideWrappedBounds(
+				CandidatePosition,
+				Nest->GetComponentsBoundingBox(true),
+				WrapSubsystem,
+				LandmarkExclusionPadding))
 		{
 			return true;
 		}

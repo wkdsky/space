@@ -11,6 +11,7 @@
 class AJTSSpacecraftActor;
 class UCameraComponent;
 class UJTSCarryComponent;
+class UJTSMeleeComponent;
 class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
 class UEnhancedInputLocalPlayerSubsystem;
@@ -109,6 +110,7 @@ private:
 	void HandleInteractStarted(const FInputActionValue& Value);
 	void HandleInteractCompleted(const FInputActionValue& Value);
 	void HandleInteractCanceled(const FInputActionValue& Value);
+	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotTwoStarted(const FInputActionValue& Value);
@@ -162,6 +164,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlayerEquipmentComponent> EquipmentComponent;
 
+	/** One camera-agnostic Moon melee path for Punch, Knife, and Axe. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSMeleeComponent> MeleeComponent;
+
 	/** Legacy radial-gravity component retained for Blueprint compatibility; Moon fake worlds bypass it. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
@@ -206,6 +212,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> InteractAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> AttackAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ToggleCameraAction;

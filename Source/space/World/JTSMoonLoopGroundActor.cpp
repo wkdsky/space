@@ -47,12 +47,7 @@ AJTSMoonLoopGroundActor::AJTSMoonLoopGroundActor()
 		VisualTile->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		VisualTile->SetGenerateOverlapEvents(false);
 		VisualTile->SetCanEverAffectNavigation(false);
-		VisualTile->CastShadow = true;
-		VisualTile->SetVisibility(true, true);
-		VisualTile->SetHiddenInGame(false);
-		VisualTile->SetRenderInMainPass(true);
-		VisualTile->SetOwnerNoSee(false);
-		VisualTile->SetOnlyOwnerSee(false);
+		ConfigureVisualTileRenderState(VisualTile);
 		VisualTiles.Add(VisualTile);
 
 		const FName CollisionName(*FString::Printf(TEXT("PhysicalTile_%02d"), TileIndex));
@@ -368,6 +363,11 @@ void AJTSMoonLoopGroundActor::ConfigureVisualTileRenderState(UProceduralMeshComp
 		return;
 	}
 
+	// These map-sized non-Nanite visual meshes render and receive shadows, but never cast them.
+	VisualTile->SetCastShadow(false);
+	VisualTile->bCastDynamicShadow = false;
+	VisualTile->bCastStaticShadow = false;
+	VisualTile->SetCastContactShadow(false);
 	VisualTile->SetVisibility(true, true);
 	VisualTile->SetHiddenInGame(false);
 	VisualTile->SetRenderInMainPass(true);

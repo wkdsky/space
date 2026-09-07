@@ -23,6 +23,7 @@
 #include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Interaction/InteractionComponent.h"
@@ -54,6 +55,7 @@ AJTSCharacter::AJTSCharacter()
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
 	EquipmentComponent = CreateDefaultSubobject<UJTSPlayerEquipmentComponent>(TEXT("EquipmentComponent"));
+	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
@@ -367,6 +369,7 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
+	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
 	if (EquipmentSlotActions.Num() == 4)
 	{
@@ -403,6 +406,7 @@ void AJTSCharacter::InitializeInput()
 	JumpAction = NewObject<UInputAction>(this, TEXT("JumpAction"), RF_Transient);
 	SprintAction = NewObject<UInputAction>(this, TEXT("SprintAction"), RF_Transient);
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
+	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
 	EquipmentSlotActions.Reset();
 	for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
@@ -417,6 +421,7 @@ void AJTSCharacter::InitializeInput()
 	JumpAction->ValueType = EInputActionValueType::Boolean;
 	SprintAction->ValueType = EInputActionValueType::Boolean;
 	InteractAction->ValueType = EInputActionValueType::Boolean;
+	AttackAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
 	for (UInputAction* const EquipmentSlotAction : EquipmentSlotActions)
 	{
@@ -430,6 +435,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputMappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
+	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
 	if (EquipmentSlotActions.Num() == 4)
 	{
@@ -584,7 +590,7 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
 	if (!IsBoarded())
 	{
-		AddControllerPitchInput(Value.Get<float>());
+		AddControllerPitchInput(-Value.Get<float>());
 	}
 }
 
@@ -685,6 +691,16 @@ void AJTSCharacter::HandleInteractCanceled(const FInputActionValue& Value)
 {
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
+}
+
+void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
+{
+	if (!CanUseNormalGameplayInput() || !IsValid(MeleeComponent))
+	{
+		return;
+	}
+
+	MeleeComponent->TryAttack();
 }
 
 void AJTSCharacter::HandleToggleCameraStarted(const FInputActionValue& Value)
