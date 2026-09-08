@@ -84,6 +84,10 @@ namespace
 			OutResourceType = EJTSResourceType::Ore;
 			return true;
 
+		case EJTSWorldPickupItemType::AntCorpse:
+			OutResourceType = EJTSResourceType::AntCorpse;
+			return true;
+
 		default:
 			return false;
 		}
@@ -564,9 +568,7 @@ void AJTSWorldPickupActor::BeginPlay()
 
 	if (MoonWrappedActorComponent != nullptr)
 	{
-		UMaterialInterface* const BendMaterial = PickupMaterial != nullptr
-			? PickupMaterial.Get()
-			: FakeMoonBendMaterial.Get();
+		UMaterialInterface* const BendMaterial = GetMoonBendMaterialForPickup();
 		if (BendMaterial != nullptr)
 		{
 			MoonWrappedActorComponent->SetFakeMoonBendMaterial(BendMaterial);
@@ -732,6 +734,23 @@ void AJTSWorldPickupActor::UpdateMoonWrappedLogicalPosition()
 	{
 		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
 	}
+}
+
+UMaterialInterface* AJTSWorldPickupActor::GetMoonBendMaterialForPickup() const
+{
+	return PickupMaterial != nullptr
+		? PickupMaterial.Get()
+		: FakeMoonBendMaterial.Get();
+}
+
+UStaticMeshComponent* AJTSWorldPickupActor::GetPickupMeshComponent() const
+{
+	return PickupMesh.Get();
+}
+
+UJTSMoonWrappedActorComponent* AJTSWorldPickupActor::GetMoonWrappedActorComponent() const
+{
+	return MoonWrappedActorComponent.Get();
 }
 
 bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailureReason)
@@ -941,6 +960,9 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 
 	case EJTSWorldPickupItemType::Ore:
 		return TEXT("ORE");
+
+	case EJTSWorldPickupItemType::AntCorpse:
+		return TEXT("ANT CORPSE");
 
 	case EJTSWorldPickupItemType::Pickaxe:
 		return TEXT("PICKAXE");

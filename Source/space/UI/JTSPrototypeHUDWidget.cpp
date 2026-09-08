@@ -7,6 +7,8 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -241,6 +243,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 	BuildWidgetTree();
 	BindGameState();
 	BindPlayerHealth();
+	BindSpacecraftResources();
 	RefreshAvatarSelection();
 	RefreshEarthCollectionDurationText();
 
@@ -257,6 +260,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 void UJTSPrototypeHUDWidget::NativeDestruct()
 {
 	UnbindPlayerHealth();
+	UnbindSpacecraftResources();
 
 	if (AJTSGameState* const GameState = BoundGameState.Get())
 	{
@@ -489,32 +493,38 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		}
 		AddCanvasChild(GameplayLayer, TimeText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 28.0f), FVector2D(280.0f, 58.0f), FVector2D(0.5f, 0.0f));
 
-		UCanvasPanel* const AvatarCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("AvatarCanvas"));
-		AddCanvasChild(GameplayLayer, AvatarCanvas, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 28.0f), FVector2D(130.0f, 130.0f));
-		AvatarBlock = MakeBorder(WidgetTree, TEXT("AvatarBlock"), FLinearColor(0.10f, 0.45f, 1.0f, 1.0f), 5.0f);
-		AddCanvasChild(AvatarCanvas, AvatarBlock, FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(106.0f, 106.0f));
-		UTextBlock* const AvatarLabel = MakeTextBlock(WidgetTree, TEXT("AvatarLabel"), TEXT("YOU"), 20.0f, FLinearColor::White, ETextJustify::Center);
-		AddCanvasChild(AvatarCanvas, AvatarLabel, FAnchors(0.0f, 0.0f), FVector2D(3.0f, 39.0f), FVector2D(100.0f, 30.0f));
+		PlayerCardPanel = MakeBorder(WidgetTree, TEXT("PlayerCardPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
+		AddCanvasChild(GameplayLayer, PlayerCardPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 28.0f), FVector2D(276.0f, 106.0f));
+		UCanvasPanel* const PlayerCardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("PlayerCardCanvas"));
+		if (PlayerCardPanel != nullptr && PlayerCardCanvas != nullptr)
+		{
+			PlayerCardPanel->SetContent(PlayerCardCanvas);
+		}
 
-		PlayerHealthPanel = MakeBorder(WidgetTree, TEXT("PlayerHealthPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
-		AddCanvasChild(GameplayLayer, PlayerHealthPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 168.0f), FVector2D(164.0f, 48.0f));
+		AvatarBlock = MakeBorder(WidgetTree, TEXT("AvatarBlock"), FLinearColor(0.10f, 0.45f, 1.0f, 1.0f), 5.0f);
+		AddCanvasChild(PlayerCardCanvas, AvatarBlock, FAnchors(0.0f, 0.0f), FVector2D(5.0f, 5.0f), FVector2D(94.0f, 94.0f));
+		UTextBlock* const AvatarLabel = MakeTextBlock(WidgetTree, TEXT("AvatarLabel"), TEXT("YOU"), 19.0f, FLinearColor::White, ETextJustify::Center);
+		AddCanvasChild(PlayerCardCanvas, AvatarLabel, FAnchors(0.0f, 0.0f), FVector2D(10.0f, 35.0f), FVector2D(84.0f, 26.0f));
+
+		PlayerHealthPanel = MakeBorder(WidgetTree, TEXT("PlayerHealthPanel"), FLinearColor(0.035f, 0.075f, 0.12f, 0.96f), 5.0f);
+		AddCanvasChild(PlayerCardCanvas, PlayerHealthPanel, FAnchors(0.0f, 0.0f), FVector2D(104.0f, 5.0f), FVector2D(162.0f, 94.0f));
 		UCanvasPanel* const PlayerHealthCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("PlayerHealthCanvas"));
 		if (PlayerHealthPanel != nullptr && PlayerHealthCanvas != nullptr)
 		{
 			PlayerHealthPanel->SetContent(PlayerHealthCanvas);
-			AddCanvasChild(PlayerHealthCanvas, MakeTextBlock(WidgetTree, TEXT("PlayerHealthLabel"), TEXT("HP"), 15.0f, FLinearColor(0.65f, 0.90f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(5.0f, 4.0f), FVector2D(26.0f, 21.0f));
+			AddCanvasChild(PlayerHealthCanvas, MakeTextBlock(WidgetTree, TEXT("PlayerHealthLabel"), TEXT("HP"), 15.0f, FLinearColor(0.65f, 0.90f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(7.0f, 15.0f), FVector2D(28.0f, 21.0f));
 			PlayerHealthProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("PlayerHealthProgressBar"));
 			if (PlayerHealthProgressBar != nullptr)
 			{
 				PlayerHealthProgressBar->SetFillColorAndOpacity(FLinearColor(0.20f, 0.90f, 0.62f, 1.0f));
 			}
-			AddCanvasChild(PlayerHealthCanvas, PlayerHealthProgressBar, FAnchors(0.0f, 0.0f), FVector2D(31.0f, 7.0f), FVector2D(124.0f, 14.0f));
+			AddCanvasChild(PlayerHealthCanvas, PlayerHealthProgressBar, FAnchors(0.0f, 0.0f), FVector2D(39.0f, 18.0f), FVector2D(112.0f, 15.0f));
 			PlayerHealthAmountText = MakeTextBlock(WidgetTree, TEXT("PlayerHealthAmountText"), TEXT("10 / 10"), 13.0f, FLinearColor(0.88f, 0.95f, 1.0f, 1.0f), ETextJustify::Center);
-			AddCanvasChild(PlayerHealthCanvas, PlayerHealthAmountText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 24.0f), FVector2D(145.0f, 18.0f), FVector2D(0.5f, 0.0f));
+			AddCanvasChild(PlayerHealthCanvas, PlayerHealthAmountText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 48.0f), FVector2D(145.0f, 20.0f), FVector2D(0.5f, 0.0f));
 		}
 
 		RocketIconCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RocketIconCanvas"));
-		AddCanvasChild(AvatarCanvas, RocketIconCanvas, FAnchors(1.0f, 1.0f), FVector2D(-42.0f, -42.0f), FVector2D(48.0f, 48.0f), FVector2D(1.0f, 1.0f));
+		AddCanvasChild(PlayerCardCanvas, RocketIconCanvas, FAnchors(0.0f, 0.0f), FVector2D(59.0f, 59.0f), FVector2D(38.0f, 38.0f));
 		RocketBody = MakeBorder(WidgetTree, TEXT("RocketBody"), FLinearColor(0.85f, 0.94f, 1.0f, 1.0f), 2.0f);
 		AddCanvasChild(RocketIconCanvas, RocketBody, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 5.0f), FVector2D(17.0f, 29.0f), FVector2D(0.5f, 0.0f));
 		RocketFlame = MakeBorder(WidgetTree, TEXT("RocketFlame"), FLinearColor(1.0f, 0.42f, 0.05f, 1.0f), 1.0f);
@@ -603,7 +613,13 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		}
 
 		EquipmentPanel = MakeBorder(WidgetTree, TEXT("EquipmentPanel"), FLinearColor(0.040f, 0.055f, 0.10f, 0.94f), 6.0f);
-		AddCanvasChild(GameplayLayer, EquipmentPanel, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 266.0f), FVector2D(210.0f, 180.0f), FVector2D(1.0f, 0.0f));
+		EquipmentPanelSlot = AddCanvasChild(
+			GameplayLayer,
+			EquipmentPanel,
+			FAnchors(0.5f, 1.0f),
+			FVector2D(-112.0f, -24.0f),
+			FVector2D(210.0f, 180.0f),
+			FVector2D(1.0f, 1.0f));
 		UCanvasPanel* const EquipmentCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("EquipmentCanvas"));
 		if (EquipmentPanel != nullptr && EquipmentCanvas != nullptr)
 		{
@@ -662,45 +678,110 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			}
 		}
 
-		UBorder* const ShipResourcesPanel = MakeBorder(WidgetTree, TEXT("ShipResourcesPanel"), FLinearColor(0.02f, 0.03f, 0.07f, 0.88f), 14.0f);
-		AddCanvasChild(GameplayLayer, ShipResourcesPanel, FAnchors(0.0f, 0.0f), FVector2D(176.0f, 28.0f), FVector2D(280.0f, 220.0f));
-		UVerticalBox* const ShipResourcesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ShipResourcesBox"));
-		if (ShipResourcesPanel != nullptr && ShipResourcesBox != nullptr)
+		RightSidebarPanel = MakeBorder(WidgetTree, TEXT("RightSidebarPanel"), FLinearColor(0.02f, 0.03f, 0.07f, 0.88f), 6.0f);
+		AddCanvasChild(
+			GameplayLayer,
+			RightSidebarPanel,
+			FAnchors(1.0f, 0.0f),
+			FVector2D(-28.0f, 90.0f),
+			FVector2D(278.0f, 350.0f),
+			FVector2D(1.0f, 0.0f));
+		UVerticalBox* const RightSidebarBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RightSidebarBox"));
+		if (RightSidebarPanel != nullptr && RightSidebarBox != nullptr)
 		{
-			ShipResourcesPanel->SetContent(ShipResourcesBox);
-			AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("SHIP RESOURCES"), 22.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 8.0f));
-			ShipResourcesText = MakeTextBlock(WidgetTree, TEXT("ShipResourcesText"), TEXT(""), 19.0f, FLinearColor::White);
-			AddVerticalChild(ShipResourcesBox, ShipResourcesText, FMargin(0.0f, 0.0f));
-		}
+			RightSidebarPanel->SetContent(RightSidebarBox);
 
-		FuelToMoonPanel = MakeBorder(WidgetTree, TEXT("FuelToMoonPanel"), FLinearColor(0.02f, 0.055f, 0.09f, 0.91f), 14.0f);
-		AddCanvasChild(GameplayLayer, FuelToMoonPanel, FAnchors(1.0f, 0.5f), FVector2D(-28.0f, 0.0f), FVector2D(220.0f, 370.0f), FVector2D(1.0f, 0.5f));
-		UVerticalBox* const FuelToMoonBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FuelToMoonBox"));
-		if (FuelToMoonPanel != nullptr && FuelToMoonBox != nullptr)
-		{
-			FuelToMoonPanel->SetContent(FuelToMoonBox);
-			AddVerticalChild(FuelToMoonBox, MakeTextBlock(WidgetTree, TEXT("FuelToMoonHeading"), TEXT("FUEL TO MOON"), 21.0f, FLinearColor(0.72f, 0.91f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 0.0f, 0.0f, 12.0f), HAlign_Center);
-
-			USizeBox* const FuelProgressSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FuelProgressSize"));
-			if (FuelProgressSize != nullptr)
+			FuelToMoonPanel = MakeBorder(WidgetTree, TEXT("FuelToMoonPanel"), FLinearColor(0.02f, 0.055f, 0.09f, 0.94f), 6.0f);
+			UVerticalBox* const FuelToMoonBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FuelToMoonBox"));
+			if (FuelToMoonPanel != nullptr && FuelToMoonBox != nullptr)
 			{
-				FuelProgressSize->SetWidthOverride(52.0f);
-				FuelProgressSize->SetHeightOverride(205.0f);
-				FuelProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("FuelProgressBar"));
-				if (FuelProgressBar != nullptr)
+				FuelToMoonPanel->SetContent(FuelToMoonBox);
+				AddVerticalChild(FuelToMoonBox, MakeTextBlock(WidgetTree, TEXT("FuelToMoonHeading"), TEXT("FUEL TO MOON"), 17.0f, FLinearColor(0.72f, 0.91f, 1.0f, 1.0f), ETextJustify::Center), FMargin(0.0f, 0.0f, 0.0f, 4.0f), HAlign_Center);
+
+				USizeBox* const FuelProgressSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FuelProgressSize"));
+				if (FuelProgressSize != nullptr)
 				{
-					FuelProgressBar->SetBarFillType(EProgressBarFillType::BottomToTop);
-					FuelProgressBar->SetPercent(0.0f);
-					FuelProgressBar->SetFillColorAndOpacity(FLinearColor(1.0f, 0.48f, 0.12f, 1.0f));
-					FuelProgressSize->SetContent(FuelProgressBar);
+					FuelProgressSize->SetWidthOverride(244.0f);
+					FuelProgressSize->SetHeightOverride(14.0f);
+					FuelProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("FuelProgressBar"));
+					if (FuelProgressBar != nullptr)
+					{
+						FuelProgressBar->SetBarFillType(EProgressBarFillType::LeftToRight);
+						FuelProgressBar->SetPercent(0.0f);
+						FuelProgressBar->SetFillColorAndOpacity(FLinearColor(1.0f, 0.48f, 0.12f, 1.0f));
+						FuelProgressSize->SetContent(FuelProgressBar);
+					}
+				}
+				AddVerticalChild(FuelToMoonBox, FuelProgressSize, FMargin(0.0f, 0.0f, 0.0f, 4.0f), HAlign_Center);
+
+				FuelAmountText = MakeTextBlock(WidgetTree, TEXT("FuelAmountText"), TEXT("0 / 0"), 16.0f, FLinearColor::White, ETextJustify::Center);
+				AddVerticalChild(FuelToMoonBox, FuelAmountText, FMargin(0.0f, 0.0f, 0.0f, 1.0f), HAlign_Center);
+				FuelStatusText = MakeTextBlock(WidgetTree, TEXT("FuelStatusText"), TEXT("NEED FUEL"), 14.0f, FLinearColor(1.0f, 0.48f, 0.12f, 1.0f), ETextJustify::Center);
+				AddVerticalChild(FuelToMoonBox, FuelStatusText, FMargin(0.0f, 0.0f), HAlign_Center);
+			}
+			AddVerticalChild(RightSidebarBox, FuelToMoonPanel, FMargin(0.0f, 0.0f, 0.0f, 8.0f));
+
+			ShipResourcesPanel = MakeBorder(WidgetTree, TEXT("ShipResourcesPanel"), FLinearColor(0.035f, 0.055f, 0.10f, 0.94f), 6.0f);
+			UVerticalBox* const ShipResourcesBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ShipResourcesBox"));
+			if (ShipResourcesPanel != nullptr && ShipResourcesBox != nullptr)
+			{
+				ShipResourcesPanel->SetContent(ShipResourcesBox);
+				AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("SHIP RESOURCES"), 18.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+
+				const EJTSResourceType DisplayedResourceTypes[] = {
+					EJTSResourceType::Fuel,
+					EJTSResourceType::Water,
+					EJTSResourceType::Food,
+					EJTSResourceType::Rock,
+					EJTSResourceType::Ore,
+					EJTSResourceType::Organic};
+				for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
+				{
+					UHorizontalBox* const ResourceRow = WidgetTree->ConstructWidget<UHorizontalBox>(
+						UHorizontalBox::StaticClass(),
+						*FString::Printf(TEXT("ShipResourceRow%d"), ResourceIndex));
+					UTextBlock* const ResourceNameText = MakeTextBlock(
+						WidgetTree,
+						*FString::Printf(TEXT("ShipResourceName%d"), ResourceIndex),
+						ResourceTypeToString(DisplayedResourceTypes[ResourceIndex]).ToUpper(),
+						15.0f,
+						FLinearColor(0.80f, 0.88f, 0.98f, 1.0f));
+					UTextBlock* const ResourceAmountText = MakeTextBlock(
+						WidgetTree,
+						*FString::Printf(TEXT("ShipResourceAmount%d"), ResourceIndex),
+						TEXT("0"),
+						15.0f,
+						FLinearColor::White,
+						ETextJustify::Right);
+					USizeBox* const ResourceNameSize = WidgetTree->ConstructWidget<USizeBox>(
+						USizeBox::StaticClass(),
+						*FString::Printf(TEXT("ShipResourceNameSize%d"), ResourceIndex));
+					USizeBox* const ResourceAmountSize = WidgetTree->ConstructWidget<USizeBox>(
+						USizeBox::StaticClass(),
+						*FString::Printf(TEXT("ShipResourceAmountSize%d"), ResourceIndex));
+					if (ResourceNameSize != nullptr)
+					{
+						ResourceNameSize->SetWidthOverride(176.0f);
+						ResourceNameSize->SetContent(ResourceNameText);
+					}
+					if (ResourceAmountSize != nullptr)
+					{
+						ResourceAmountSize->SetWidthOverride(72.0f);
+						ResourceAmountSize->SetContent(ResourceAmountText);
+					}
+					if (ResourceRow != nullptr)
+					{
+						ResourceRow->AddChildToHorizontalBox(ResourceNameSize);
+						ResourceRow->AddChildToHorizontalBox(ResourceAmountSize);
+						ResourceRow->SetVisibility(ESlateVisibility::Collapsed);
+					}
+					AddVerticalChild(ShipResourcesBox, ResourceRow, FMargin(0.0f, 1.0f));
+					ShipResourceRows.Add(ResourceRow);
+					ShipResourceNameTexts.Add(ResourceNameText);
+					ShipResourceAmountTexts.Add(ResourceAmountText);
 				}
 			}
-			AddVerticalChild(FuelToMoonBox, FuelProgressSize, FMargin(0.0f, 0.0f, 0.0f, 12.0f), HAlign_Center);
-
-			FuelAmountText = MakeTextBlock(WidgetTree, TEXT("FuelAmountText"), TEXT("0 / 0"), 24.0f, FLinearColor::White, ETextJustify::Center);
-			AddVerticalChild(FuelToMoonBox, FuelAmountText, FMargin(0.0f, 0.0f, 0.0f, 5.0f), HAlign_Center);
-			FuelStatusText = MakeTextBlock(WidgetTree, TEXT("FuelStatusText"), TEXT("NEED FUEL"), 19.0f, FLinearColor(1.0f, 0.48f, 0.12f, 1.0f), ETextJustify::Center);
-			AddVerticalChild(FuelToMoonBox, FuelStatusText, FMargin(0.0f, 0.0f), HAlign_Center);
+			AddVerticalChild(RightSidebarBox, ShipResourcesPanel, FMargin(0.0f, 0.0f));
 		}
 
 		BoardingProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("BoardingProgressWidget"));
@@ -715,7 +796,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
 
-		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    V: CAMERA"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
+		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
 		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(560.0f, 28.0f), FVector2D(1.0f, 1.0f));
 	}
 
@@ -1025,6 +1106,69 @@ void UJTSPrototypeHUDWidget::UnbindPlayerHealth()
 	BoundPlayerHealthComponent.Reset();
 }
 
+void UJTSPrototypeHUDWidget::BindSpacecraftResources()
+{
+	AJTSSpacecraftActor* const NewSpacecraft = FindSpacecraft();
+	if (BoundSpacecraftResources.Get() == NewSpacecraft)
+	{
+		return;
+	}
+
+	UnbindSpacecraftResources();
+	BoundSpacecraftResources = NewSpacecraft;
+	if (IsValid(NewSpacecraft))
+	{
+		NewSpacecraft->OnShipResourcesChanged.AddDynamic(this, &UJTSPrototypeHUDWidget::HandleShipResourcesChanged);
+	}
+
+	RefreshShipResourcesSidebar();
+}
+
+void UJTSPrototypeHUDWidget::UnbindSpacecraftResources()
+{
+	if (AJTSSpacecraftActor* const PreviousSpacecraft = BoundSpacecraftResources.Get())
+	{
+		PreviousSpacecraft->OnShipResourcesChanged.RemoveDynamic(this, &UJTSPrototypeHUDWidget::HandleShipResourcesChanged);
+	}
+	BoundSpacecraftResources.Reset();
+}
+
+void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
+{
+	const EJTSResourceType DisplayedResourceTypes[] = {
+		EJTSResourceType::Fuel,
+		EJTSResourceType::Water,
+		EJTSResourceType::Food,
+		EJTSResourceType::Rock,
+		EJTSResourceType::Ore,
+		EJTSResourceType::Organic};
+	const AJTSSpacecraftActor* const Spacecraft = BoundSpacecraftResources.IsValid()
+		? BoundSpacecraftResources.Get()
+		: FindSpacecraft();
+
+	for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
+	{
+		const int32 ResourceAmount = IsValid(Spacecraft)
+			? Spacecraft->GetResourceAmount(DisplayedResourceTypes[ResourceIndex])
+			: 0;
+		const bool bShowResource = ResourceAmount > 0;
+		if (ShipResourceRows.IsValidIndex(ResourceIndex) && ShipResourceRows[ResourceIndex] != nullptr)
+		{
+			ShipResourceRows[ResourceIndex]->SetVisibility(bShowResource
+				? ESlateVisibility::SelfHitTestInvisible
+				: ESlateVisibility::Collapsed);
+		}
+		if (ShipResourceNameTexts.IsValidIndex(ResourceIndex) && ShipResourceNameTexts[ResourceIndex] != nullptr)
+		{
+			ShipResourceNameTexts[ResourceIndex]->SetText(FText::FromString(ResourceTypeToString(DisplayedResourceTypes[ResourceIndex]).ToUpper()));
+		}
+		if (ShipResourceAmountTexts.IsValidIndex(ResourceIndex) && ShipResourceAmountTexts[ResourceIndex] != nullptr)
+		{
+			ShipResourceAmountTexts[ResourceIndex]->SetText(FText::AsNumber(ResourceAmount));
+		}
+	}
+}
+
 void UJTSPrototypeHUDWidget::RefreshPlayerHealth(float CurrentHealth, float MaxHealth)
 {
 	const bool bHasPlayerHealth = BoundPlayerHealthComponent.IsValid();
@@ -1055,6 +1199,15 @@ void UJTSPrototypeHUDWidget::RefreshPlayerHealth(float CurrentHealth, float MaxH
 void UJTSPrototypeHUDWidget::HandlePlayerHealthChanged(float CurrentHealth, float MaxHealth)
 {
 	RefreshPlayerHealth(CurrentHealth, MaxHealth);
+}
+
+void UJTSPrototypeHUDWidget::HandleShipResourcesChanged(int32 FuelCount, int32 WaterCount, int32 FoodCount)
+{
+	(void)FuelCount;
+	(void)WaterCount;
+	(void)FoodCount;
+	RefreshShipResourcesSidebar();
+	RefreshFuelToMoonHud();
 }
 
 void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase)
@@ -1142,34 +1295,8 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	ApplyLayerVisibility(GameplayHelpText, bShowGameplayAiming);
 
 	AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
+	BindSpacecraftResources();
 	RefreshSpacecraftNavigation(Spacecraft);
-	if (ShipResourcesText != nullptr)
-	{
-		const EJTSResourceType DisplayedResourceTypes[] = {
-			EJTSResourceType::Fuel,
-			EJTSResourceType::Water,
-			EJTSResourceType::Food,
-			EJTSResourceType::Rock,
-			EJTSResourceType::Ore};
-
-		FString ShipResourceLines;
-		for (const EJTSResourceType ResourceType : DisplayedResourceTypes)
-		{
-			const int32 ResourceAmount = Spacecraft != nullptr ? Spacecraft->GetResourceAmount(ResourceType) : 0;
-			if (ResourceAmount <= 0)
-			{
-				continue;
-			}
-
-			if (!ShipResourceLines.IsEmpty())
-			{
-				ShipResourceLines += TEXT("\n");
-			}
-			ShipResourceLines += FString::Printf(TEXT("%s %d"), *ResourceTypeToString(ResourceType), ResourceAmount);
-		}
-
-		ShipResourcesText->SetText(FText::FromString(ShipResourceLines));
-	}
 
 	RefreshFuelToMoonHud();
 
@@ -1292,6 +1419,11 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 	{
 		InventoryPanelSlot->SetSize(FVector2D(PanelWidth, PanelHeight));
 	}
+	if (EquipmentPanelSlot != nullptr)
+	{
+		// Inventory stays anchored to bottom-center; this separate slot only docks Equipment to its left.
+		EquipmentPanelSlot->SetPosition(FVector2D(-PanelWidth * 0.5f - 10.0f, -24.0f));
+	}
 
 	for (int32 SlotIndex = 0; SlotIndex < InventorySlotTexts.Num(); ++SlotIndex)
 	{
@@ -1334,7 +1466,9 @@ void UJTSPrototypeHUDWidget::RefreshEquipmentSlots()
 	const UJTSPlayerEquipmentComponent* const EquipmentComponent = PlayerCharacter != nullptr
 		? PlayerCharacter->GetEquipmentComponent()
 		: nullptr;
-	const bool bShowEquipment = bMoonExploration && IsValid(EquipmentComponent);
+	const bool bShowEquipment = bMoonExploration
+		&& IsValid(EquipmentComponent)
+		&& EquipmentComponent->GetEquippedItemCount() > 0;
 	ApplyLayerVisibility(EquipmentPanel, bShowEquipment);
 	const int32 SelectedSlotIndex = bShowEquipment ? EquipmentComponent->GetSelectedEquipmentSlotIndex() : INDEX_NONE;
 	const int32 HeldSlotIndex = PlayerCharacter != nullptr ? PlayerCharacter->GetEquipmentHoldSlotIndex() : INDEX_NONE;
@@ -2203,6 +2337,12 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 
 	case EJTSResourceType::Ore:
 		return TEXT("Ore");
+
+	case EJTSResourceType::Organic:
+		return TEXT("Organic");
+
+	case EJTSResourceType::AntCorpse:
+		return TEXT("Ant Corpse");
 
 	default:
 		return TEXT("Unknown");

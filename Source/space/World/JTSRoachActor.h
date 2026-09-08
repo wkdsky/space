@@ -86,6 +86,8 @@ private:
 	void SetVisualBurrowOffset(float RelativeZ);
 	void BeginFleeing();
 	void BeginBurrowing();
+	/** Completes the full deferred corpse spawn before the Ant is allowed to destroy itself. */
+	bool SpawnAntCorpse();
 	void SetAntState(EJTSAntState NewState);
 	void UpdateFallbackMaterial();
 	void UpdateMoonWrappedLogicalPosition();
@@ -177,4 +179,6 @@ private:
 	bool bUsingSkeletalAntMesh = false;
 	bool bAntMeshBaseTransformCaptured = false;
 	bool bAntVisualTransformReady = false;
+	bool bDeathSequenceStarted = false;
+	bool bHasDroppedCorpse = false;
 };

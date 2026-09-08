@@ -2,7 +2,9 @@
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/DamageType.h"
 #include "GameFramework/Pawn.h"
@@ -11,6 +13,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Modes/JTSMoonGameMode.h"
+#include "space/World/JTSRoachActor.h"
 #include "TimerManager.h"
 
 namespace
@@ -69,6 +72,7 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ClearAttackFailSafeTimer();
 
 	CurrentMeleeTarget = nullptr;
+	CachedMeleeTarget.Reset();
 	HitActorsThisSwing.Reset();
 	bAttackHeld = false;
 	bAttackBuffered = false;
@@ -155,8 +159,56 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 
 	// Every montage segment is one new swing. Repeated AttackHit notifies can never re-hit this set.
 	HitActorsThisSwing.Reset();
+	CachedMeleeTarget.Reset();
 	CurrentAttackType = AttackType;
 	bIsAttacking = true;
+
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		APawn* const AttackingPawn = Cast<APawn>(GetOwner());
+		AActor* Candidate = nullptr;
+		FVector CandidateLocation = FVector::ZeroVector;
+		if (FindBestPunchCandidate(
+			AttackingPawn,
+			Candidate,
+			CandidateLocation,
+			false,
+			true,
+			PunchTargetAcquireRadius))
+		{
+			CachedMeleeTarget = Candidate;
+		}
+
+		if (bDebugMeleeAim && IsValid(AttackingPawn))
+		{
+			if (UWorld* const World = GetWorld())
+			{
+				DrawDebugSphere(
+					World,
+					AttackingPawn->GetActorLocation(),
+					FMath::Max(1.0f, PunchTargetAcquireRadius),
+					24,
+					FColor::Cyan,
+					false,
+					0.8f,
+					0,
+					0.75f);
+				if (IsValid(Candidate))
+				{
+					DrawDebugSphere(World, CandidateLocation, 18.0f, 12, FColor::Yellow, false, 0.8f, 0, 1.0f);
+					DrawDebugString(
+						World,
+						CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
+						FString::Printf(TEXT("Cached: %s"), *GetNameSafe(Candidate)),
+						nullptr,
+						FColor::Yellow,
+						0.8f,
+						true);
+				}
+			}
+		}
+	}
+
 	ResetAttackFailSafeTimer();
 	OnAttackStarted.Broadcast(CurrentAttackType);
 }
@@ -199,6 +251,7 @@ void UJTSMeleeComponent::EndAttackState()
 	bIsAttacking = false;
 	bAttackBuffered = false;
 	HitActorsThisSwing.Reset();
+	CachedMeleeTarget.Reset();
 }
 
 void UJTSMeleeComponent::PerformHitCheck()
@@ -207,6 +260,68 @@ void UJTSMeleeComponent::PerformHitCheck()
 	UWorld* const World = GetWorld();
 	if (!bIsAttacking || !IsValid(AttackingPawn) || !IsValid(World) || PunchMaxTargets < 1)
 	{
+		return;
+	}
+	if (HitActorsThisSwing.Num() >= PunchMaxTargets)
+	{
+		return;
+	}
+
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		AActor* Candidate = CachedMeleeTarget.Get();
+		FVector CandidateLocation = FVector::ZeroVector;
+		bool bUsingCachedTarget = false;
+		if (IsValidDamageTarget(Candidate, AttackingPawn) && !HitActorsThisSwing.Contains(Candidate))
+		{
+			CandidateLocation = GetMeleeTargetAimPoint(Candidate);
+			const float AllowedRange = Candidate->IsA<AJTSRoachActor>()
+				? FMath::Min(205.0f, FMath::Max(PunchRange, CachedTargetGraceRange))
+				: PunchRange;
+			bUsingCachedTarget = IsWithinMeleeRange(AttackingPawn, Candidate->GetActorLocation(), AllowedRange)
+				&& HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation);
+		}
+
+		if (!bUsingCachedTarget)
+		{
+			CachedMeleeTarget.Reset();
+			Candidate = nullptr;
+			CandidateLocation = FVector::ZeroVector;
+			if (!FindBestPunchCandidate(
+				AttackingPawn,
+				Candidate,
+				CandidateLocation,
+				false,
+				true,
+				PunchTargetAcquireRadius)
+				|| !IsWithinPunchRange(AttackingPawn, Candidate != nullptr ? Candidate->GetActorLocation() : FVector::ZeroVector)
+				|| HitActorsThisSwing.Contains(Candidate))
+			{
+				return;
+			}
+		}
+
+		const bool bApplied = ApplyAttackToTarget(Candidate, AttackingPawn, EJTSMeleeAttackType::Punch);
+		if (bApplied)
+		{
+			// PunchMaxTargets is intentionally clamped to one. This set also protects duplicate AttackHit notifies.
+			HitActorsThisSwing.Add(Candidate);
+		}
+
+		if (bDebugMeleeAim)
+		{
+			const FColor FinalColor = bApplied ? FColor::Green : FColor::Red;
+			DrawDebugSphere(World, CandidateLocation, 24.0f, 12, FinalColor, false, 1.5f, 0, 2.0f);
+			DrawDebugLine(World, AttackingPawn->GetActorLocation(), CandidateLocation, FinalColor, false, 1.5f, 0, 1.5f);
+			DrawDebugString(
+				World,
+				CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
+				FString::Printf(TEXT("%s %s Damage %.1f"), bUsingCachedTarget ? TEXT("Cached") : TEXT("Reacquired"), *GetNameSafe(Candidate), PunchDamage),
+				nullptr,
+				FinalColor,
+				1.5f,
+				true);
+		}
 		return;
 	}
 
@@ -252,8 +367,6 @@ void UJTSMeleeComponent::PerformHitCheck()
 	const bool bApplied = ApplyAttackToTarget(Candidate, AttackingPawn, AttackType);
 	if (bApplied)
 	{
-		// PunchMaxTargets is intentionally clamped to one. Keeping a per-swing set also protects us from
-		// duplicate AttackHit notifies or overlapping trace frames.
 		HitActorsThisSwing.Add(Candidate);
 	}
 
@@ -367,6 +480,25 @@ EJTSAttackType UJTSMeleeComponent::ResolveAttackType() const
 
 AActor* UJTSMeleeComponent::FindBestMeleeTarget(APawn* AttackingPawn) const
 {
+	if (ResolveAttackType() == EJTSAttackType::Punch)
+	{
+		AActor* PunchTarget = nullptr;
+		FVector PunchTargetLocation = FVector::ZeroVector;
+		if (FindBestPunchCandidate(
+			AttackingPawn,
+			PunchTarget,
+			PunchTargetLocation,
+			false,
+			true,
+			PunchTargetAcquireRadius)
+			&& IsWithinPunchRange(AttackingPawn, PunchTarget != nullptr ? PunchTarget->GetActorLocation() : FVector::ZeroVector))
+		{
+			return PunchTarget;
+		}
+
+		return nullptr;
+	}
+
 	AActor* Target = nullptr;
 	FVector TargetLocation = FVector::ZeroVector;
 	if (!FindBestAimCandidate(AttackingPawn, Target, TargetLocation, true)
@@ -450,6 +582,152 @@ bool UJTSMeleeComponent::FindBestAimCandidate(
 	return IsValid(OutTarget);
 }
 
+bool UJTSMeleeComponent::FindBestPunchCandidate(
+	APawn* AttackingPawn,
+	AActor*& OutTarget,
+	FVector& OutTargetLocation,
+	bool bRequireMeleeTargetInterface,
+	bool bRequireLineOfSight,
+	float MaximumTargetRange) const
+{
+	OutTarget = nullptr;
+	OutTargetLocation = FVector::ZeroVector;
+
+	UWorld* const World = GetWorld();
+	FVector CameraLocation;
+	FVector AimDirection;
+	const float SearchRadius = FMath::Max(0.0f, MaximumTargetRange);
+	if (!IsValid(AttackingPawn)
+		|| !IsValid(World)
+		|| SearchRadius <= KINDA_SMALL_NUMBER
+		|| !GetPlayerAimView(AttackingPawn, CameraLocation, AimDirection))
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSPunchCandidateOverlap), false, AttackingPawn);
+	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
+	TArray<FOverlapResult> OverlapResults;
+	const FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::AllObjects);
+	if (!World->OverlapMultiByObjectType(
+		OverlapResults,
+		AttackingPawn->GetActorLocation(),
+		FQuat::Identity,
+		ObjectQueryParams,
+		FCollisionShape::MakeSphere(SearchRadius),
+		QueryParams))
+	{
+		return false;
+	}
+
+	float BestScore = TNumericLimits<float>::Max();
+	TSet<AActor*> SeenActors;
+	for (const FOverlapResult& OverlapResult : OverlapResults)
+	{
+		AActor* const Candidate = OverlapResult.GetActor();
+		if (!IsValid(Candidate) || SeenActors.Contains(Candidate))
+		{
+			continue;
+		}
+		SeenActors.Add(Candidate);
+
+		const bool bIsValidCandidate = bRequireMeleeTargetInterface
+			? IsValidMeleeTarget(Candidate, AttackingPawn)
+			: IsValidDamageTarget(Candidate, AttackingPawn);
+		if (!bIsValidCandidate)
+		{
+			continue;
+		}
+
+		const float PawnDistance = FVector::Dist(AttackingPawn->GetActorLocation(), Candidate->GetActorLocation());
+		if (PawnDistance > SearchRadius)
+		{
+			continue;
+		}
+
+		const FVector CandidateLocation = GetMeleeTargetAimPoint(Candidate);
+		FVector CameraToCandidate = CandidateLocation - CameraLocation;
+		if (CameraToCandidate.IsNearlyZero())
+		{
+			CameraToCandidate = Candidate->GetActorLocation() - CameraLocation;
+		}
+		if (CameraToCandidate.IsNearlyZero())
+		{
+			continue;
+		}
+
+		const bool bIsAnt = Candidate->IsA<AJTSRoachActor>();
+		const float AimAssistAngle = FMath::Max(
+			0.0f,
+			bIsAnt ? AntPunchAimAssistAngle : GenericPunchAimAssistAngle);
+		if (AimAssistAngle <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const float AimAlignment = FMath::Clamp(FVector::DotProduct(AimDirection, CameraToCandidate.GetSafeNormal()), -1.0f, 1.0f);
+		const float AimAngleDegrees = FMath::RadiansToDegrees(FMath::Acos(AimAlignment));
+		if (AimAngleDegrees > AimAssistAngle)
+		{
+			continue;
+		}
+
+		if (bRequireLineOfSight && !HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation))
+		{
+			continue;
+		}
+
+		// Camera alignment is deliberately dominant: a closer side target must not replace the target under
+		// the crosshair. Ants receive only a small tie-breaking bias after both angle and distance are scored.
+		const float AngleScore = AimAngleDegrees / AimAssistAngle;
+		const float DistanceScore = PawnDistance / SearchRadius;
+		const float SmallTargetBias = bIsAnt ? 0.25f : 0.0f;
+		const float Score = AngleScore * 100.0f + DistanceScore * 10.0f - SmallTargetBias;
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			OutTarget = Candidate;
+			OutTargetLocation = CandidateLocation;
+		}
+	}
+
+	return IsValid(OutTarget);
+}
+
+FVector UJTSMeleeComponent::GetMeleeTargetAimPoint(AActor* Candidate) const
+{
+	if (!IsValid(Candidate))
+	{
+		return FVector::ZeroVector;
+	}
+
+	TArray<UPrimitiveComponent*> PrimitiveComponents;
+	Candidate->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+	UPrimitiveComponent* BoundsComponent = nullptr;
+	for (UPrimitiveComponent* const PrimitiveComponent : PrimitiveComponents)
+	{
+		if (!IsValid(PrimitiveComponent) || !PrimitiveComponent->IsRegistered())
+		{
+			continue;
+		}
+
+		if (PrimitiveComponent->GetCollisionEnabled() != ECollisionEnabled::NoCollision
+			&& PrimitiveComponent->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Block)
+		{
+			return PrimitiveComponent->Bounds.Origin;
+		}
+
+		if (BoundsComponent == nullptr)
+		{
+			BoundsComponent = PrimitiveComponent;
+		}
+	}
+
+	return BoundsComponent != nullptr
+		? BoundsComponent->Bounds.Origin
+		: Candidate->GetActorLocation();
+}
+
 bool UJTSMeleeComponent::IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const
 {
 	return IsValid(Candidate)
@@ -507,9 +785,14 @@ bool UJTSMeleeComponent::GetPlayerAimView(APawn* AttackingPawn, FVector& OutCame
 
 bool UJTSMeleeComponent::IsWithinPunchRange(APawn* AttackingPawn, const FVector& TargetLocation) const
 {
+	return IsWithinMeleeRange(AttackingPawn, TargetLocation, PunchRange);
+}
+
+bool UJTSMeleeComponent::IsWithinMeleeRange(APawn* AttackingPawn, const FVector& TargetLocation, float MaximumRange) const
+{
 	return IsValid(AttackingPawn)
-		&& PunchRange > KINDA_SMALL_NUMBER
-		&& FVector::DistSquared(AttackingPawn->GetActorLocation(), TargetLocation) <= FMath::Square(PunchRange);
+		&& MaximumRange > KINDA_SMALL_NUMBER
+		&& FVector::DistSquared(AttackingPawn->GetActorLocation(), TargetLocation) <= FMath::Square(MaximumRange);
 }
 
 bool UJTSMeleeComponent::HasMeleeLineOfSight(APawn* AttackingPawn, AActor* Candidate, const FVector& TargetLocation) const

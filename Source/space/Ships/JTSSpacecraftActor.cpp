@@ -38,6 +38,9 @@ namespace
 		case EJTSResourceType::Ore:
 			return TEXT("Ore");
 
+		case EJTSResourceType::Organic:
+			return TEXT("Organic");
+
 		default:
 			return TEXT("Unknown");
 		}
@@ -45,7 +48,19 @@ namespace
 
 	bool IsSupportedResourceType(EJTSResourceType ResourceType)
 	{
-		return ResourceType >= EJTSResourceType::Fuel && ResourceType <= EJTSResourceType::Ore;
+		switch (ResourceType)
+		{
+		case EJTSResourceType::Fuel:
+		case EJTSResourceType::Water:
+		case EJTSResourceType::Food:
+		case EJTSResourceType::Rock:
+		case EJTSResourceType::Ore:
+		case EJTSResourceType::Organic:
+			return true;
+
+		default:
+			return false;
+		}
 	}
 }
 
@@ -451,7 +466,21 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 		return false;
 	}
 
-	if (!DepositResourceAmounts(ResourcesToDeposit))
+	TMap<EJTSResourceType, int32> ShipResourceAmounts;
+	for (const TPair<EJTSResourceType, int32>& Resource : ResourcesToDeposit)
+	{
+		if (Resource.Key == EJTSResourceType::AntCorpse)
+		{
+			// Corpses deliberately remain ordinary carried items until they are submitted to the ship.
+			ShipResourceAmounts.FindOrAdd(EJTSResourceType::Organic) += Resource.Value;
+		}
+		else
+		{
+			ShipResourceAmounts.FindOrAdd(Resource.Key) += Resource.Value;
+		}
+	}
+
+	if (!DepositResourceAmounts(ShipResourceAmounts))
 	{
 		for (const TPair<EJTSResourceType, int32>& Resource : ResourcesToDeposit)
 		{
@@ -501,12 +530,13 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 		UE_LOG(
 			LogTemp,
 			Log,
-			TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d"),
+			TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d Organic=%d"),
 			GetResourceAmount(EJTSResourceType::Fuel),
 			static_cast<float>(GetResourceAmount(EJTSResourceType::Water)),
 			static_cast<float>(GetResourceAmount(EJTSResourceType::Food)),
 			GetResourceAmount(EJTSResourceType::Rock),
-			GetResourceAmount(EJTSResourceType::Ore));
+			GetResourceAmount(EJTSResourceType::Ore),
+			GetResourceAmount(EJTSResourceType::Organic));
 	}
 }
 

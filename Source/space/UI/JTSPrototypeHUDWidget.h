@@ -17,6 +17,7 @@ class UBorder;
 class UButton;
 class UCanvasPanel;
 class UCanvasPanelSlot;
+class UHorizontalBox;
 class UJTSCircularProgressWidget;
 class UProgressBar;
 class UTextBlock;
@@ -52,9 +53,12 @@ private:
 	void BindGameState();
 	void BindPlayerHealth();
 	void UnbindPlayerHealth();
+	void BindSpacecraftResources();
+	void UnbindSpacecraftResources();
 	void RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshGameplayHud();
 	void RefreshPlayerHealth(float CurrentHealth, float MaxHealth);
+	void RefreshShipResourcesSidebar();
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshAvatarSelection();
 	void RefreshBoardingProgress();
@@ -87,6 +91,9 @@ private:
 
 	UFUNCTION()
 	void HandlePlayerHealthChanged(float CurrentHealth, float MaxHealth);
+
+	UFUNCTION()
+	void HandleShipResourcesChanged(int32 FuelCount, int32 WaterCount, int32 FoodCount);
 
 	UFUNCTION()
 	void HandleStartMissionClicked();
@@ -182,6 +189,12 @@ private:
 	TObjectPtr<UBorder> FuelToMoonPanel;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBorder> RightSidebarPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> ShipResourcesPanel;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UProgressBar> FuelProgressBar;
 
 	UPROPERTY(Transient)
@@ -191,7 +204,16 @@ private:
 	TObjectPtr<UTextBlock> FuelStatusText;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ShipResourcesText;
+	TArray<TObjectPtr<UHorizontalBox>> ShipResourceRows;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> ShipResourceNameTexts;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> ShipResourceAmountTexts;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> PlayerCardPanel;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> AvatarBlock;
@@ -279,6 +301,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> EquipmentPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanelSlot> EquipmentPanelSlot;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBorder>> EquipmentSlotBorders;
@@ -405,6 +430,7 @@ private:
 
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 	TWeakObjectPtr<UJTSHealthComponent> BoundPlayerHealthComponent;
+	TWeakObjectPtr<AJTSSpacecraftActor> BoundSpacecraftResources;
 	TWeakObjectPtr<AJTSCharacter> ShopPlayer;
 	TWeakObjectPtr<AJTSSpacecraftActor> ShopSpacecraft;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;

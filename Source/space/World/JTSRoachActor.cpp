@@ -21,6 +21,7 @@
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/UI/JTSHealthBarWidget.h"
+#include "space/World/JTSAntCorpsePickupActor.h"
 #include "space/World/JTSRoachNestActor.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -210,6 +211,8 @@ void AJTSRoachActor::BeginPlay()
 {
 	Super::BeginPlay();
 	SetActorTickEnabled(true);
+	bDeathSequenceStarted = false;
+	bHasDroppedCorpse = false;
 
 	// This repeats the construction-time decision so Blueprint component defaults are honored in every runtime spawn path.
 	RefreshVisualMode();
@@ -799,10 +802,171 @@ void AJTSRoachActor::HandleHealthDeath(AController* InstigatorController, AActor
 	(void)InstigatorController;
 	(void)DamageCauser;
 
+	if (bDeathSequenceStarted)
+	{
+		return;
+	}
+
+	bDeathSequenceStarted = true;
 	HideAntHealthBar();
 	SetMeleeHitCollisionEnabled(false);
 	SetActorTickEnabled(false);
+
+	UPrimitiveComponent* const ActiveVisual = GetActiveVisualComponent();
+	const USkeletalMesh* const SkeletalMesh = IsValid(AntMesh) ? AntMesh->GetSkeletalMeshAsset() : nullptr;
+	const UStaticMesh* const FallbackMesh = IsValid(AntFallbackMesh) ? AntFallbackMesh->GetStaticMesh() : nullptr;
+	const UObject* const LoggedMesh = SkeletalMesh != nullptr
+		? static_cast<const UObject*>(SkeletalMesh)
+		: static_cast<const UObject*>(FallbackMesh);
+	const FVector VisualScale = IsValid(ActiveVisual) ? ActiveVisual->GetComponentScale() : FVector::OneVector;
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Moon Ant death: Ant=%s Health=%.0f Location=(%.2f, %.2f, %.2f) Mesh=%s Scale=(%.4f, %.4f, %.4f)"),
+		*GetNameSafe(this),
+		IsValid(HealthComponent) ? HealthComponent->GetHealth() : 0.0f,
+		GetActorLocation().X,
+		GetActorLocation().Y,
+		GetActorLocation().Z,
+		*GetNameSafe(LoggedMesh),
+		VisualScale.X,
+		VisualScale.Y,
+		VisualScale.Z);
+
+	if (HasAuthority())
+	{
+		SpawnAntCorpse();
+	}
+
+	// SpawnAntCorpse finishes the deferred actor (including its visual initialization) synchronously.
+	// Only after that point is it safe to release this Ant and its runtime mesh data.
 	Destroy();
+}
+
+bool AJTSRoachActor::SpawnAntCorpse()
+{
+	if (bHasDroppedCorpse || !IsValid(HealthComponent) || !HealthComponent->IsDead())
+	{
+		return false;
+	}
+
+	bHasDroppedCorpse = true;
+	UWorld* const World = GetWorld();
+	if (!IsValid(World))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ant Corpse spawn FAILED: Ant=%s Reason=MissingWorld"), *GetNameSafe(this));
+		return false;
+	}
+
+	// Read every visual input before any destruction. In particular, never use the AntMesh after
+	// Destroy() because BP-authored mesh, material, and scale data are no longer reliable then.
+	UPrimitiveComponent* const ActiveVisual = GetActiveVisualComponent();
+	TArray<UMaterialInterface*> SourceMaterials;
+	if (IsValid(ActiveVisual))
+	{
+		const int32 MaterialCount = ActiveVisual->GetNumMaterials();
+		SourceMaterials.Reserve(MaterialCount);
+		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+		{
+			SourceMaterials.Add(ActiveVisual->GetMaterial(MaterialIndex));
+		}
+	}
+
+	USkeletalMesh* const SourceSkeletalMesh = bUsingSkeletalAntMesh && IsValid(AntMesh)
+		? AntMesh->GetSkeletalMeshAsset()
+		: nullptr;
+	UStaticMesh* const SourceFallbackMesh = SourceSkeletalMesh == nullptr && IsValid(AntFallbackMesh)
+		? AntFallbackMesh->GetStaticMesh()
+		: nullptr;
+	const FVector SourceRelativeScale = IsValid(ActiveVisual)
+		? ActiveVisual->GetComponentScale()
+		: FVector::OneVector;
+	const FRotator SourceRelativeRotation = IsValid(ActiveVisual)
+		? ActiveVisual->GetRelativeRotation()
+		: FRotator::ZeroRotator;
+
+	// GroundLocation retains the unbent support Z. Rebuild its XY from the Ant's current wrapped
+	// logical position and root physical image; never derive gameplay placement from AntMesh's bent world position.
+	FVector DeathGroundLocation = GroundLocation;
+	if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
+		IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
+	{
+		const FVector2D AntLogicalPosition = IsValid(MoonWrappedActorComponent)
+			? MoonWrappedActorComponent->GetLogicalPosition2D()
+			: MoonWrap->GetLogicalPositionFromWorld(GetActorLocation());
+		const FVector2D DeathPhysicalPosition = MoonWrap->GetNearestPhysicalImage(
+			FVector2D(GetActorLocation().X, GetActorLocation().Y),
+			AntLogicalPosition);
+		DeathGroundLocation.X = DeathPhysicalPosition.X;
+		DeathGroundLocation.Y = DeathPhysicalPosition.Y;
+	}
+
+	if (const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode())
+	{
+		FVector ResolvedDeathGroundLocation;
+		if (MoonGameMode->ResolveMoonGroundLocation(DeathGroundLocation, ResolvedDeathGroundLocation, this))
+		{
+			DeathGroundLocation = ResolvedDeathGroundLocation;
+		}
+	}
+
+	const FTransform SpawnTransform(
+		FRotator(0.0f, GetActorRotation().Yaw, 0.0f),
+		DeathGroundLocation);
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Ant Corpse spawn requested: Location=(%.2f, %.2f, %.2f) Class=%s"),
+		DeathGroundLocation.X,
+		DeathGroundLocation.Y,
+		DeathGroundLocation.Z,
+		*GetNameSafe(AJTSAntCorpsePickupActor::StaticClass()));
+	AJTSAntCorpsePickupActor* const CorpsePickup = World->SpawnActorDeferred<AJTSAntCorpsePickupActor>(
+		AJTSAntCorpsePickupActor::StaticClass(),
+		SpawnTransform,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!IsValid(CorpsePickup))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ant Corpse spawn FAILED: Ant=%s Reason=DeferredSpawnReturnedNull"), *GetNameSafe(this));
+		return false;
+	}
+
+	CorpsePickup->InitializeFromAnt(
+		SourceSkeletalMesh,
+		SourceFallbackMesh,
+		SourceMaterials,
+		SourceRelativeScale,
+		SourceRelativeRotation,
+		DeathGroundLocation);
+	CorpsePickup->FinishSpawning(SpawnTransform);
+	if (!IsValid(CorpsePickup) || !CorpsePickup->HasVisibleCorpseVisual())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ant Corpse spawn FAILED: Ant=%s Reason=NoVisibleCorpseVisual"), *GetNameSafe(this));
+		if (IsValid(CorpsePickup))
+		{
+			CorpsePickup->Destroy();
+		}
+		return false;
+	}
+
+	const FVector CorpseScale = CorpsePickup->GetCorpseVisualScale();
+	const FVector CorpseLocation = CorpsePickup->GetActorLocation();
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Ant Corpse spawned: Actor=%s Mesh=%s Location=(%.2f, %.2f, %.2f) Scale=(%.4f, %.4f, %.4f) Hidden=%s"),
+		*GetNameSafe(CorpsePickup),
+		*CorpsePickup->GetCorpseVisualDebugName(),
+		CorpseLocation.X,
+		CorpseLocation.Y,
+		CorpseLocation.Z,
+		CorpseScale.X,
+		CorpseScale.Y,
+		CorpseScale.Z,
+		CorpsePickup->IsCorpseVisualHidden() ? TEXT("true") : TEXT("false"));
+	return true;
 }
 
 void AJTSRoachActor::UpdateAntVisualTransform()

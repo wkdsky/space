@@ -11,7 +11,11 @@ enum class EJTSResourceType : uint8
 	Water = 1 UMETA(DisplayName = "Water"),
 	Food = 2 UMETA(DisplayName = "Food"),
 	Rock = 3 UMETA(DisplayName = "Rock"),
-	Ore = 4 UMETA(DisplayName = "Ore")
+	Ore = 4 UMETA(DisplayName = "Ore"),
+	/** A processed ship resource produced by submitting an Ant Corpse. */
+	Organic = 5 UMETA(DisplayName = "Organic"),
+	/** A carried Moon item. It occupies one inventory slot and is converted to Organic only by the spacecraft. */
+	AntCorpse = 6 UMETA(DisplayName = "Ant Corpse")
 };
 
 USTRUCT(BlueprintType)

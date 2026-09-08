@@ -49,18 +49,18 @@ public:
 
 	/** Bounds-based points used for forgiving target acquisition and world-space prompt placement. */
 	UFUNCTION(BlueprintPure, Category = "Pickup|Interaction")
-	FVector GetInteractionTargetWorldLocation() const;
+	virtual FVector GetInteractionTargetWorldLocation() const;
 
 	UFUNCTION(BlueprintPure, Category = "Pickup|Interaction")
-	FVector GetInteractionAnchorWorldLocation() const;
+	virtual FVector GetInteractionAnchorWorldLocation() const;
 
 	/** Sets this pickup's single-item payload before deferred spawning completes. */
 	UFUNCTION(BlueprintCallable, Category = "Pickup")
 	void InitializeItem(EJTSWorldPickupItemType NewItemType);
 
 	/** World-space visual extent used by ground-placement helpers. */
-	FVector GetVisualBoundsExtent() const;
-	void AdjustToGround(const FVector& GroundHitLocation);
+	virtual FVector GetVisualBoundsExtent() const;
+	virtual void AdjustToGround(const FVector& GroundHitLocation);
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
@@ -71,6 +71,13 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
+
+	/** Allows specialized pickups to preserve source visual materials instead of receiving the shared prop material. */
+	virtual UMaterialInterface* GetMoonBendMaterialForPickup() const;
+
+	UStaticMeshComponent* GetPickupMeshComponent() const;
+	UJTSMoonWrappedActorComponent* GetMoonWrappedActorComponent() const;
+	void UpdateMoonWrappedLogicalPosition();
 
 private:
 	/** Starts the lightweight non-physics drop movement used only by SpawnGameplayDrop. */
@@ -86,7 +93,6 @@ private:
 	bool TraceDropGround(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutGroundHit) const;
 	void BuildDropTraceIgnoredActors(AActor* SourceActor, APawn* SafetyPawn);
 	void SettleDropOnGround(const FVector& GroundHitLocation);
-	void UpdateMoonWrappedLogicalPosition();
 	void ConfigureAppearance();
 	void ApplyItemAppearance();
 	void ShowFailureFeedback(const FString& FailureReason);

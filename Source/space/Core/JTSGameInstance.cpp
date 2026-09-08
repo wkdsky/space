@@ -146,6 +146,7 @@ bool UJTSGameInstance::IsSupportedResourceType(EJTSResourceType ResourceType)
 	case EJTSResourceType::Food:
 	case EJTSResourceType::Rock:
 	case EJTSResourceType::Ore:
+	case EJTSResourceType::Organic:
 		return true;
 
 	default:
