@@ -12,6 +12,7 @@
 
 class AJTSCharacter;
 class AJTSSpacecraftActor;
+class UJTSHealthComponent;
 class UBorder;
 class UButton;
 class UCanvasPanel;
@@ -49,8 +50,11 @@ protected:
 private:
 	void BuildWidgetTree();
 	void BindGameState();
+	void BindPlayerHealth();
+	void UnbindPlayerHealth();
 	void RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshGameplayHud();
+	void RefreshPlayerHealth(float CurrentHealth, float MaxHealth);
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshAvatarSelection();
 	void RefreshBoardingProgress();
@@ -80,6 +84,9 @@ private:
 
 	UFUNCTION()
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
+
+	UFUNCTION()
+	void HandlePlayerHealthChanged(float CurrentHealth, float MaxHealth);
 
 	UFUNCTION()
 	void HandleStartMissionClicked();
@@ -188,6 +195,15 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> AvatarBlock;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> PlayerHealthPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> PlayerHealthProgressBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> PlayerHealthAmountText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanel> RocketIconCanvas;
@@ -388,6 +404,7 @@ private:
 	TObjectPtr<UButton> GameMenuQuitButton;
 
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
+	TWeakObjectPtr<UJTSHealthComponent> BoundPlayerHealthComponent;
 	TWeakObjectPtr<AJTSCharacter> ShopPlayer;
 	TWeakObjectPtr<AJTSSpacecraftActor> ShopSpacecraft;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;

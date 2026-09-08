@@ -1,20 +1,15 @@
 #include "space/World/JTSRoachNestActor.h"
 
-#include "CollisionQueryParams.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "EngineUtils.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "Math/RandomStream.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Modes/JTSMoonGameMode.h"
-#include "space/Player/JTSCharacter.h"
-#include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSRoachActor.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -27,7 +22,7 @@ AJTSRoachNestActor::AJTSRoachNestActor()
 
 	NestMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NestMesh"));
 	NestMesh->SetupAttachment(SceneRoot);
-	NestMesh->SetRelativeScale3D(FVector(0.68f, 0.68f, 0.20f));
+	NestMesh->SetRelativeScale3D(BaseAntNestMeshScale);
 	NestMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	NestMesh->SetCollisionObjectType(ECC_WorldDynamic);
 	NestMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -68,6 +63,25 @@ void AJTSRoachNestActor::AdjustToGround(const FVector& GroundLocation)
 	UpdateMoonWrappedLogicalPosition();
 }
 
+void AJTSRoachNestActor::SetAntNestVisualScale(float InVisualScale)
+{
+	if (!IsValid(NestMesh))
+	{
+		return;
+	}
+
+	NestMesh->SetRelativeScale3D(BaseAntNestMeshScale * FMath::Max(0.1f, InVisualScale));
+	if (NestMesh->IsRegistered())
+	{
+		NestMesh->UpdateBounds();
+	}
+}
+
+void AJTSRoachNestActor::SetAntActorClass(TSubclassOf<AJTSRoachActor> InAntActorClass)
+{
+	AntActorClass = InAntActorClass;
+}
+
 bool AJTSRoachNestActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const
 {
 	return IsValid(AttackingPawn) && PunchHitsRemaining > 0 && !IsPendingKillPending();
@@ -95,7 +109,7 @@ void AJTSRoachNestActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJ
 
 FText AJTSRoachNestActor::GetMeleeTargetDisplayName_Implementation() const
 {
-	return FText::FromString(TEXT("ROACH NEST"));
+	return FText::FromString(TEXT("ANT NEST"));
 }
 
 FText AJTSRoachNestActor::GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const
@@ -128,26 +142,32 @@ void AJTSRoachNestActor::BeginPlay()
 		return;
 	}
 
-	PunchHitsRemaining = MoonGameMode->GetRoachNestPunchHitsToDestroy();
-	NestMaterial = NestMesh != nullptr ? NestMesh->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
-	if (NestMaterial != nullptr)
+	PunchHitsRemaining = MoonGameMode->GetAntNestPunchHitsToDestroy();
+	AntNestMaterial = NestMesh != nullptr ? NestMesh->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+	if (AntNestMaterial != nullptr)
 	{
-		const FLinearColor NestColor(0.18f, 0.055f, 0.025f, 1.0f);
-		NestMaterial->SetVectorParameterValue(TEXT("Color"), NestColor);
-		NestMaterial->SetVectorParameterValue(TEXT("BaseColor"), NestColor);
-		NestMaterial->SetVectorParameterValue(TEXT("Tint"), NestColor);
+		const FLinearColor AntNestColor(0.18f, 0.055f, 0.025f, 1.0f);
+		AntNestMaterial->SetVectorParameterValue(TEXT("Color"), AntNestColor);
+		AntNestMaterial->SetVectorParameterValue(TEXT("BaseColor"), AntNestColor);
+		AntNestMaterial->SetVectorParameterValue(TEXT("Tint"), AntNestColor);
 	}
-	ScheduleNextRoachSpawn();
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Moon Ant Nest created: Nest=%s AntClass=%s"),
+		*GetNameSafe(this),
+		AntActorClass != nullptr ? *GetNameSafe(AntActorClass.Get()) : TEXT("None (native fallback)"));
+	ScheduleNextAntSpawn();
 }
 
 void AJTSRoachNestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWorld* const World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(RoachSpawnTimerHandle);
+		World->GetTimerManager().ClearTimer(AntSpawnTimerHandle);
 	}
 
-	ActiveRoach.Reset();
+	ActiveAnts.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -172,65 +192,42 @@ FVector AJTSRoachNestActor::GetVisualBoundsExtent() const
 	return FVector(34.0f, 34.0f, 10.0f);
 }
 
-bool AJTSRoachNestActor::ResolveRoachGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const
+bool AJTSRoachNestActor::ResolveAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const
 {
-	UWorld* const World = GetWorld();
 	const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode();
-	if (!IsValid(World) || !IsValid(MoonGameMode))
-	{
-		return false;
-	}
-
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSRoachNestGroundTrace), false, this);
-	TraceParams.AddIgnoredActor(this);
-	if (APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0))
-	{
-		TraceParams.AddIgnoredActor(LocalPawn);
-	}
-	for (TActorIterator<AJTSCharacter> PlayerIt(World); PlayerIt; ++PlayerIt)
-	{
-		if (IsValid(*PlayerIt))
-		{
-			TraceParams.AddIgnoredActor(*PlayerIt);
-		}
-	}
-	for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
-	{
-		if (IsValid(*ShipIt))
-		{
-			TraceParams.AddIgnoredActor(*ShipIt);
-		}
-	}
-	for (TActorIterator<AJTSRoachNestActor> NestIt(World); NestIt; ++NestIt)
-	{
-		if (IsValid(*NestIt))
-		{
-			TraceParams.AddIgnoredActor(*NestIt);
-		}
-	}
-	for (TActorIterator<AJTSRoachActor> RoachIt(World); RoachIt; ++RoachIt)
-	{
-		if (IsValid(*RoachIt))
-		{
-			TraceParams.AddIgnoredActor(*RoachIt);
-		}
-	}
-
-	const float StartHeight = MoonGameMode->GetRoachGroundTraceStartHeight();
-	const float TraceDistance = MoonGameMode->GetRoachGroundTraceDistance();
-	FHitResult GroundHit;
-	return TraceDistance > 0.0f
-		&& World->LineTraceSingleByChannel(
-			GroundHit,
-			CandidateLocation + FVector(0.0f, 0.0f, StartHeight),
-			CandidateLocation + FVector(0.0f, 0.0f, StartHeight - TraceDistance),
-			ECC_Visibility,
-			TraceParams)
-		&& GroundHit.bBlockingHit
-		&& (OutGroundLocation = GroundHit.ImpactPoint, true);
+	return IsValid(MoonGameMode)
+		&& MoonGameMode->ResolveMoonGroundLocation(CandidateLocation, OutGroundLocation, this);
 }
 
-void AJTSRoachNestActor::ScheduleNextRoachSpawn()
+float AJTSRoachNestActor::ChooseAntSpawnDistance(const AJTSMoonGameMode& MoonGameMode) const
+{
+	const float NearWeight = MoonGameMode.GetAntSpawnNearWeight();
+	const float MidWeight = MoonGameMode.GetAntSpawnMidWeight();
+	const float FarWeight = MoonGameMode.GetAntSpawnFarWeight();
+	const float TotalWeight = NearWeight + MidWeight + FarWeight;
+	const float Selection = TotalWeight > KINDA_SMALL_NUMBER ? FMath::FRandRange(0.0f, TotalWeight) : 0.0f;
+	float MinDistance = MoonGameMode.GetAntSpawnNearDistanceMin();
+	float MaxDistance = MoonGameMode.GetAntSpawnNearDistanceMax();
+	if (TotalWeight > KINDA_SMALL_NUMBER && Selection >= NearWeight)
+	{
+		if (Selection < NearWeight + MidWeight)
+		{
+			MinDistance = MoonGameMode.GetAntSpawnMidDistanceMin();
+			MaxDistance = MoonGameMode.GetAntSpawnMidDistanceMax();
+		}
+		else
+		{
+			MinDistance = MoonGameMode.GetAntSpawnFarDistanceMin();
+			MaxDistance = MoonGameMode.GetAntSpawnFarDistanceMax();
+		}
+	}
+
+	const float BaseDistance = FMath::FRandRange(MinDistance, MaxDistance);
+	const float RadialJitter = (MaxDistance - MinDistance) * 0.08f;
+	return FMath::Clamp(BaseDistance + FMath::FRandRange(-RadialJitter, RadialJitter), MinDistance, MaxDistance);
+}
+
+void AJTSRoachNestActor::ScheduleNextAntSpawn()
 {
 	UWorld* const World = GetWorld();
 	const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode();
@@ -240,14 +237,14 @@ void AJTSRoachNestActor::ScheduleNextRoachSpawn()
 	}
 
 	World->GetTimerManager().SetTimer(
-		RoachSpawnTimerHandle,
+		AntSpawnTimerHandle,
 		this,
-		&AJTSRoachNestActor::TrySpawnRoach,
-		FMath::FRandRange(MoonGameMode->GetRoachSpawnIntervalMin(), MoonGameMode->GetRoachSpawnIntervalMax()),
+		&AJTSRoachNestActor::TrySpawnAnt,
+		FMath::FRandRange(MoonGameMode->GetAntSpawnIntervalMin(), MoonGameMode->GetAntSpawnIntervalMax()),
 		false);
 }
 
-void AJTSRoachNestActor::TrySpawnRoach()
+void AJTSRoachNestActor::TrySpawnAnt()
 {
 	const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode();
 	UWorld* const World = GetWorld();
@@ -256,35 +253,57 @@ void AJTSRoachNestActor::TrySpawnRoach()
 		return;
 	}
 
-	if (ActiveRoach.IsValid() || FMath::FRand() > MoonGameMode->GetRoachSpawnChance())
+	ActiveAnts.RemoveAll([](const TWeakObjectPtr<AJTSRoachActor>& Ant)
 	{
-		ScheduleNextRoachSpawn();
+		return !Ant.IsValid();
+	});
+	if (ActiveAnts.Num() >= MoonGameMode->GetMaxActiveAntsPerNest()
+		|| FMath::FRand() > MoonGameMode->GetAntSpawnChance())
+	{
+		ScheduleNextAntSpawn();
 		return;
 	}
 
 	const float SpawnAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
-	const FVector SpawnDirection(FMath::Cos(SpawnAngle), FMath::Sin(SpawnAngle), 0.0f);
-	const FVector CandidateLocation = GetActorLocation()
-		+ SpawnDirection * FMath::FRandRange(MoonGameMode->GetRoachSpawnOffset() * 0.45f, MoonGameMode->GetRoachSpawnOffset());
-	FVector GroundLocation;
-	if (ResolveRoachGroundLocation(CandidateLocation, GroundLocation))
+	const FVector SpawnOffset(FMath::Cos(SpawnAngle), FMath::Sin(SpawnAngle), 0.0f);
+	const float SpawnDistance = ChooseAntSpawnDistance(*MoonGameMode);
+	FVector CandidateLocation = GetActorLocation() + SpawnOffset * SpawnDistance;
+	if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
+		IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
 	{
-		const FTransform SpawnTransform(SpawnDirection.Rotation(), GroundLocation);
-		AJTSRoachActor* const Roach = World->SpawnActorDeferred<AJTSRoachActor>(
-			AJTSRoachActor::StaticClass(),
+		const FVector NestLocation = GetActorLocation();
+		const FVector2D NestPhysicalXY(NestLocation.X, NestLocation.Y);
+		const FVector2D NestLogicalXY = MoonWrap->GetLogicalPositionFromWorld(NestLocation);
+		const FVector2D CandidateLogicalXY = MoonWrap->CanonicalizePosition2D(
+			NestLogicalXY + FVector2D(SpawnOffset.X, SpawnOffset.Y) * SpawnDistance);
+		const FVector2D CandidatePhysicalXY = MoonWrap->GetNearestPhysicalImage(NestPhysicalXY, CandidateLogicalXY);
+		CandidateLocation.X = CandidatePhysicalXY.X;
+		CandidateLocation.Y = CandidatePhysicalXY.Y;
+	}
+	FVector GroundLocation;
+	if (ResolveAntGroundLocation(CandidateLocation, GroundLocation))
+	{
+		const FTransform SpawnTransform(FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f), GroundLocation);
+		TSubclassOf<AJTSRoachActor> SpawnClass = AntActorClass;
+		if (SpawnClass == nullptr)
+		{
+			SpawnClass = AJTSRoachActor::StaticClass();
+		}
+		AJTSRoachActor* const Ant = World->SpawnActorDeferred<AJTSRoachActor>(
+			SpawnClass,
 			SpawnTransform,
 			this,
 			nullptr,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		if (IsValid(Roach))
+		if (IsValid(Ant))
 		{
-			Roach->InitializeRoach(this, GroundLocation, SpawnDirection);
-			Roach->FinishSpawning(SpawnTransform);
-			ActiveRoach = Roach;
+			Ant->InitializeAnt(this, GroundLocation);
+			Ant->FinishSpawning(SpawnTransform);
+			ActiveAnts.Add(Ant);
 		}
 	}
 
-	ScheduleNextRoachSpawn();
+	ScheduleNextAntSpawn();
 }
 
 void AJTSRoachNestActor::UpdateMoonWrappedLogicalPosition()

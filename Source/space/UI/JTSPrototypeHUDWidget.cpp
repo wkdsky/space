@@ -21,6 +21,7 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/InteractionComponent.h"
@@ -239,6 +240,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 
 	BuildWidgetTree();
 	BindGameState();
+	BindPlayerHealth();
 	RefreshAvatarSelection();
 	RefreshEarthCollectionDurationText();
 
@@ -254,6 +256,8 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 
 void UJTSPrototypeHUDWidget::NativeDestruct()
 {
+	UnbindPlayerHealth();
+
 	if (AJTSGameState* const GameState = BoundGameState.Get())
 	{
 		GameState->OnGameplayPhaseChanged.RemoveDynamic(this, &UJTSPrototypeHUDWidget::HandleGameplayPhaseChanged);
@@ -491,6 +495,23 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		AddCanvasChild(AvatarCanvas, AvatarBlock, FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(106.0f, 106.0f));
 		UTextBlock* const AvatarLabel = MakeTextBlock(WidgetTree, TEXT("AvatarLabel"), TEXT("YOU"), 20.0f, FLinearColor::White, ETextJustify::Center);
 		AddCanvasChild(AvatarCanvas, AvatarLabel, FAnchors(0.0f, 0.0f), FVector2D(3.0f, 39.0f), FVector2D(100.0f, 30.0f));
+
+		PlayerHealthPanel = MakeBorder(WidgetTree, TEXT("PlayerHealthPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
+		AddCanvasChild(GameplayLayer, PlayerHealthPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 168.0f), FVector2D(164.0f, 48.0f));
+		UCanvasPanel* const PlayerHealthCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("PlayerHealthCanvas"));
+		if (PlayerHealthPanel != nullptr && PlayerHealthCanvas != nullptr)
+		{
+			PlayerHealthPanel->SetContent(PlayerHealthCanvas);
+			AddCanvasChild(PlayerHealthCanvas, MakeTextBlock(WidgetTree, TEXT("PlayerHealthLabel"), TEXT("HP"), 15.0f, FLinearColor(0.65f, 0.90f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(5.0f, 4.0f), FVector2D(26.0f, 21.0f));
+			PlayerHealthProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("PlayerHealthProgressBar"));
+			if (PlayerHealthProgressBar != nullptr)
+			{
+				PlayerHealthProgressBar->SetFillColorAndOpacity(FLinearColor(0.20f, 0.90f, 0.62f, 1.0f));
+			}
+			AddCanvasChild(PlayerHealthCanvas, PlayerHealthProgressBar, FAnchors(0.0f, 0.0f), FVector2D(31.0f, 7.0f), FVector2D(124.0f, 14.0f));
+			PlayerHealthAmountText = MakeTextBlock(WidgetTree, TEXT("PlayerHealthAmountText"), TEXT("10 / 10"), 13.0f, FLinearColor(0.88f, 0.95f, 1.0f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(PlayerHealthCanvas, PlayerHealthAmountText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 24.0f), FVector2D(145.0f, 18.0f), FVector2D(0.5f, 0.0f));
+		}
 
 		RocketIconCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RocketIconCanvas"));
 		AddCanvasChild(AvatarCanvas, RocketIconCanvas, FAnchors(1.0f, 1.0f), FVector2D(-42.0f, -42.0f), FVector2D(48.0f, 48.0f), FVector2D(1.0f, 1.0f));
@@ -862,7 +883,7 @@ void UJTSPrototypeHUDWidget::BuildWorkshopPanel()
 		TEXT("WorkshopKnifeCard"),
 		TEXT("KNIFE"),
 		TEXT("WEAPON"),
-		TEXT("ONE-HIT ROACHES AND NESTS"),
+		TEXT("ONE-HIT ANTS AND NESTS"),
 		ShopKnifeCostText,
 		ShopKnifeBuyButton);
 	ShopKnifeCardSlot = ShopKnifeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopKnifeCard->Slot) : nullptr;
@@ -876,7 +897,7 @@ void UJTSPrototypeHUDWidget::BuildWorkshopPanel()
 		TEXT("WorkshopAxeCard"),
 		TEXT("AXE"),
 		TEXT("WEAPON"),
-		TEXT("ONE-HIT ROACHES AND NESTS"),
+		TEXT("ONE-HIT ANTS AND NESTS"),
 		ShopAxeCostText,
 		ShopAxeBuyButton);
 	ShopAxeCardSlot = ShopAxeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopAxeCard->Slot) : nullptr;
@@ -967,11 +988,84 @@ void UJTSPrototypeHUDWidget::BindGameState()
 	}
 }
 
+void UJTSPrototypeHUDWidget::BindPlayerHealth()
+{
+	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
+	UJTSHealthComponent* const NewHealthComponent = IsValid(PlayerCharacter)
+		? PlayerCharacter->GetHealthComponent()
+		: nullptr;
+	if (BoundPlayerHealthComponent.Get() == NewHealthComponent)
+	{
+		if (IsValid(NewHealthComponent))
+		{
+			RefreshPlayerHealth(NewHealthComponent->GetHealth(), NewHealthComponent->GetMaxHealth());
+		}
+		return;
+	}
+
+	UnbindPlayerHealth();
+	BoundPlayerHealthComponent = NewHealthComponent;
+	if (IsValid(NewHealthComponent))
+	{
+		NewHealthComponent->OnHealthChanged.AddDynamic(this, &UJTSPrototypeHUDWidget::HandlePlayerHealthChanged);
+		RefreshPlayerHealth(NewHealthComponent->GetHealth(), NewHealthComponent->GetMaxHealth());
+	}
+	else
+	{
+		RefreshPlayerHealth(0.0f, 0.0f);
+	}
+}
+
+void UJTSPrototypeHUDWidget::UnbindPlayerHealth()
+{
+	if (UJTSHealthComponent* const PreviousHealthComponent = BoundPlayerHealthComponent.Get())
+	{
+		PreviousHealthComponent->OnHealthChanged.RemoveDynamic(this, &UJTSPrototypeHUDWidget::HandlePlayerHealthChanged);
+	}
+	BoundPlayerHealthComponent.Reset();
+}
+
+void UJTSPrototypeHUDWidget::RefreshPlayerHealth(float CurrentHealth, float MaxHealth)
+{
+	const bool bHasPlayerHealth = BoundPlayerHealthComponent.IsValid();
+	if (PlayerHealthPanel != nullptr)
+	{
+		PlayerHealthPanel->SetVisibility(bHasPlayerHealth ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+
+	const float HealthPercent = MaxHealth > KINDA_SMALL_NUMBER
+		? FMath::Clamp(CurrentHealth / MaxHealth, 0.0f, 1.0f)
+		: 0.0f;
+	if (PlayerHealthProgressBar != nullptr)
+	{
+		PlayerHealthProgressBar->SetPercent(HealthPercent);
+		PlayerHealthProgressBar->SetFillColorAndOpacity(HealthPercent <= 0.30f
+			? FLinearColor(1.0f, 0.30f, 0.18f, 1.0f)
+			: FLinearColor(0.20f, 0.90f, 0.62f, 1.0f));
+	}
+	if (PlayerHealthAmountText != nullptr)
+	{
+		PlayerHealthAmountText->SetText(FText::FromString(FString::Printf(
+			TEXT("%d / %d"),
+			FMath::RoundToInt(FMath::Max(0.0f, CurrentHealth)),
+			FMath::RoundToInt(FMath::Max(0.0f, MaxHealth)))));
+	}
+}
+
+void UJTSPrototypeHUDWidget::HandlePlayerHealthChanged(float CurrentHealth, float MaxHealth)
+{
+	RefreshPlayerHealth(CurrentHealth, MaxHealth);
+}
+
 void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase)
 {
 	CachedGameplayPhase = NewGameplayPhase;
 	const bool bEarthCollection = NewGameplayPhase == EJTSGameplayPhase::EarthCollection;
 	const bool bMoonExploration = NewGameplayPhase == EJTSGameplayPhase::MoonExploration;
+	if (bEarthCollection || bMoonExploration)
+	{
+		BindPlayerHealth();
+	}
 	if (!bMoonExploration && bMoonShopOpen)
 	{
 		CloseMoonShop();

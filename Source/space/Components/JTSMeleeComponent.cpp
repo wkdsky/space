@@ -2,14 +2,36 @@
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "GameFramework/DamageType.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/DamageType.h"
 #include "Kismet/GameplayStatics.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "TimerManager.h"
+
+namespace
+{
+	void AddOwnerAndAttachedActorsToIgnoreList(FCollisionQueryParams& QueryParams, const APawn* AttackingPawn)
+	{
+		if (!IsValid(AttackingPawn))
+		{
+			return;
+		}
+
+		QueryParams.AddIgnoredActor(AttackingPawn);
+
+		TArray<AActor*> AttachedActors;
+		AttackingPawn->GetAttachedActors(AttachedActors, true, true);
+		for (AActor* const AttachedActor : AttachedActors)
+		{
+			QueryParams.AddIgnoredActor(AttachedActor);
+		}
+	}
+}
 
 UJTSMeleeComponent::UJTSMeleeComponent()
 {
@@ -47,6 +69,7 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ClearAttackFailSafeTimer();
 
 	CurrentMeleeTarget = nullptr;
+	HitActorsThisSwing.Reset();
 	bAttackHeld = false;
 	bAttackBuffered = false;
 	bIsAttacking = false;
@@ -130,6 +153,8 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 		return;
 	}
 
+	// Every montage segment is one new swing. Repeated AttackHit notifies can never re-hit this set.
+	HitActorsThisSwing.Reset();
 	CurrentAttackType = AttackType;
 	bIsAttacking = true;
 	ResetAttackFailSafeTimer();
@@ -173,52 +198,78 @@ void UJTSMeleeComponent::EndAttackState()
 
 	bIsAttacking = false;
 	bAttackBuffered = false;
+	HitActorsThisSwing.Reset();
 }
 
 void UJTSMeleeComponent::PerformHitCheck()
 {
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 	UWorld* const World = GetWorld();
-	if (!bIsAttacking
-		|| !IsValid(AttackingPawn)
-		|| !IsValid(World)
-		|| AttackRange <= KINDA_SMALL_NUMBER
-		|| AttackRadius < 0.0f
-		|| AttackDamage <= 0.0f)
+	if (!bIsAttacking || !IsValid(AttackingPawn) || !IsValid(World) || PunchMaxTargets < 1)
 	{
 		return;
 	}
 
-	const FVector Forward = AttackingPawn->GetActorForwardVector().GetSafeNormal();
-	if (Forward.IsNearlyZero())
+	FVector CameraLocation;
+	FVector AimDirection;
+	if (!GetPlayerAimView(AttackingPawn, CameraLocation, AimDirection))
 	{
 		return;
 	}
 
-	const FVector TraceStart = AttackingPawn->GetActorLocation() + Forward * 40.0f;
-	const FVector TraceEnd = TraceStart + Forward * AttackRange;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSMeleeAttackTrace), false, AttackingPawn);
-	QueryParams.AddIgnoredActor(AttackingPawn);
+	const FVector AimTraceEnd = CameraLocation + AimDirection * FMath::Max(0.0f, MeleeAimTraceDistance);
+	if (bDebugMeleeAim)
+	{
+		DrawDebugLine(World, CameraLocation, AimTraceEnd, FColor::Cyan, false, 1.5f, 0, 1.5f);
+		DrawDebugSphere(World, AimTraceEnd, FMath::Max(1.0f, MeleeAimAssistRadius), 12, FColor::Cyan, false, 1.5f, 0, 0.75f);
+		DrawDebugSphere(World, AttackingPawn->GetActorLocation(), PunchRange, 24, FColor(255, 180, 0), false, 1.5f, 0, 0.5f);
+	}
 
-	FHitResult HitResult;
-	const FCollisionShape TraceShape = FCollisionShape::MakeSphere(AttackRadius);
-	if (!World->SweepSingleByChannel(HitResult, TraceStart, TraceEnd, FQuat::Identity, ECC_Visibility, TraceShape, QueryParams))
+	AActor* Candidate = nullptr;
+	FVector CandidateLocation = FVector::ZeroVector;
+	if (!FindBestAimCandidate(AttackingPawn, Candidate, CandidateLocation, false))
 	{
 		return;
 	}
 
-	AActor* const HitActor = HitResult.GetActor();
-	if (!IsValid(HitActor))
+	const FVector TargetLogicalLocation = Candidate->GetActorLocation();
+	const bool bWithinRange = IsWithinPunchRange(AttackingPawn, TargetLogicalLocation);
+	const bool bHasLineOfSight = bWithinRange && HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation);
+	if (bDebugMeleeAim)
+	{
+		const FColor CandidateColor = bWithinRange && bHasLineOfSight ? FColor::Yellow : FColor::Red;
+		DrawDebugSphere(World, CandidateLocation, 18.0f, 12, CandidateColor, false, 1.5f, 0, 1.5f);
+		DrawDebugLine(World, AttackingPawn->GetActorLocation(), TargetLogicalLocation, CandidateColor, false, 1.5f, 0, 1.5f);
+	}
+
+	if (!bWithinRange || !bHasLineOfSight || HitActorsThisSwing.Contains(Candidate))
 	{
 		return;
 	}
 
-	UGameplayStatics::ApplyDamage(
-		HitActor,
-		AttackDamage,
-		AttackingPawn->GetController(),
-		AttackingPawn,
-		UDamageType::StaticClass());
+	const EJTSMeleeAttackType AttackType = GetCurrentAttackType();
+	const float Damage = GetDamageForAttackType(AttackType);
+	const bool bApplied = ApplyAttackToTarget(Candidate, AttackingPawn, AttackType);
+	if (bApplied)
+	{
+		// PunchMaxTargets is intentionally clamped to one. Keeping a per-swing set also protects us from
+		// duplicate AttackHit notifies or overlapping trace frames.
+		HitActorsThisSwing.Add(Candidate);
+	}
+
+	if (bDebugMeleeAim)
+	{
+		const FColor FinalColor = bApplied ? FColor::Green : FColor::Red;
+		DrawDebugSphere(World, CandidateLocation, 24.0f, 12, FinalColor, false, 1.5f, 0, 2.0f);
+		DrawDebugString(
+			World,
+			CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
+			FString::Printf(TEXT("%s  Damage %.1f"), *GetNameSafe(Candidate), Damage),
+			nullptr,
+			FinalColor,
+			1.5f,
+			true);
+	}
 }
 
 bool UJTSMeleeComponent::TryAttack()
@@ -239,13 +290,22 @@ bool UJTSMeleeComponent::TryAttack()
 
 	RefreshMeleeTarget();
 	AActor* const Target = CurrentMeleeTarget.Get();
-	if (!IsValidMeleeTarget(Target, AttackingPawn))
+	if (!IsValidMeleeTarget(Target, AttackingPawn)
+		|| (bIsAttacking && HitActorsThisSwing.Contains(Target)))
 	{
 		return false;
 	}
 
 	const EJTSMeleeAttackType AttackType = GetCurrentAttackType();
-	IJTSMeleeTarget::Execute_ReceiveMeleeHit(Target, AttackingPawn, AttackType);
+	if (!ApplyAttackToTarget(Target, AttackingPawn, AttackType))
+	{
+		return false;
+	}
+	if (bIsAttacking)
+	{
+		HitActorsThisSwing.Add(Target);
+	}
+
 	NextAttackTime = CurrentTime + static_cast<double>(MoonGameMode->GetAttackCooldown());
 	RefreshMeleeTarget();
 	return true;
@@ -307,56 +367,87 @@ EJTSAttackType UJTSMeleeComponent::ResolveAttackType() const
 
 AActor* UJTSMeleeComponent::FindBestMeleeTarget(APawn* AttackingPawn) const
 {
+	AActor* Target = nullptr;
+	FVector TargetLocation = FVector::ZeroVector;
+	if (!FindBestAimCandidate(AttackingPawn, Target, TargetLocation, true)
+		|| !IsWithinPunchRange(AttackingPawn, Target != nullptr ? Target->GetActorLocation() : FVector::ZeroVector)
+		|| !HasMeleeLineOfSight(AttackingPawn, Target, TargetLocation))
+	{
+		return nullptr;
+	}
+
+	return Target;
+}
+
+bool UJTSMeleeComponent::FindBestAimCandidate(
+	APawn* AttackingPawn,
+	AActor*& OutTarget,
+	FVector& OutTargetLocation,
+	bool bRequireMeleeTargetInterface) const
+{
+	OutTarget = nullptr;
+	OutTargetLocation = FVector::ZeroVector;
+
 	UWorld* const World = GetWorld();
-	const AJTSMoonGameMode* const MoonGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr;
-	APlayerController* const PlayerController = IsValid(AttackingPawn)
-		? Cast<APlayerController>(AttackingPawn->GetController())
-		: nullptr;
-	if (!IsValid(AttackingPawn) || !IsValid(World) || !IsValid(MoonGameMode) || !IsValid(PlayerController))
-	{
-		return nullptr;
-	}
-
 	FVector CameraLocation;
-	FRotator CameraRotation;
-	PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-	const FVector CameraForward = CameraRotation.Vector().GetSafeNormal();
-	const float MoonAttackRange = MoonGameMode->GetAttackRange();
-	if (CameraForward.IsNearlyZero() || MoonAttackRange <= KINDA_SMALL_NUMBER)
+	FVector AimDirection;
+	if (!IsValid(AttackingPawn)
+		|| !IsValid(World)
+		|| !GetPlayerAimView(AttackingPawn, CameraLocation, AimDirection)
+		|| MeleeAimTraceDistance <= KINDA_SMALL_NUMBER
+		|| MeleeAimAssistRadius < 0.0f)
 	{
-		return nullptr;
+		return false;
 	}
 
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSMeleeTargetTrace), false, AttackingPawn);
-	QueryParams.AddIgnoredActor(AttackingPawn);
-	const FCollisionShape AimShape = FCollisionShape::MakeSphere(MoonGameMode->GetAttackAimRadius());
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSMeleeAimTrace), false, AttackingPawn);
+	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
+
 	TArray<FHitResult> HitResults;
-	const FVector TraceEnd = CameraLocation + CameraForward * MoonAttackRange;
+	const FCollisionShape AimShape = FCollisionShape::MakeSphere(MeleeAimAssistRadius);
+	const FVector TraceEnd = CameraLocation + AimDirection * MeleeAimTraceDistance;
 	if (!World->SweepMultiByChannel(HitResults, CameraLocation, TraceEnd, FQuat::Identity, ECC_Visibility, AimShape, QueryParams))
 	{
-		return nullptr;
+		return false;
 	}
 
-	AActor* BestTarget = nullptr;
-	float BestDistance = TNumericLimits<float>::Max();
-	const float AttackRangeSquared = FMath::Square(MoonAttackRange);
+	float BestAimAlignment = -1.0f;
+	float BestPawnDistanceSquared = TNumericLimits<float>::Max();
 	for (const FHitResult& HitResult : HitResults)
 	{
 		AActor* const Candidate = HitResult.GetActor();
-		if (!IsValidMeleeTarget(Candidate, AttackingPawn)
-			|| FVector::DistSquared(AttackingPawn->GetActorLocation(), Candidate->GetActorLocation()) > AttackRangeSquared)
+		const bool bIsValidCandidate = bRequireMeleeTargetInterface
+			? IsValidMeleeTarget(Candidate, AttackingPawn)
+			: IsValidDamageTarget(Candidate, AttackingPawn);
+		if (!bIsValidCandidate)
 		{
 			continue;
 		}
 
-		if (HitResult.Distance < BestDistance)
+		FVector CandidateLocation = HitResult.ImpactPoint;
+		if (CandidateLocation.IsNearlyZero())
 		{
-			BestTarget = Candidate;
-			BestDistance = HitResult.Distance;
+			CandidateLocation = Candidate->GetActorLocation();
+		}
+		FVector CameraToCandidate = CandidateLocation - CameraLocation;
+		if (CameraToCandidate.IsNearlyZero())
+		{
+			CameraToCandidate = Candidate->GetActorLocation() - CameraLocation;
+		}
+
+		const float AimAlignment = FVector::DotProduct(AimDirection, CameraToCandidate.GetSafeNormal());
+		const float PawnDistanceSquared = FVector::DistSquared(AttackingPawn->GetActorLocation(), Candidate->GetActorLocation());
+		if (AimAlignment > BestAimAlignment + KINDA_SMALL_NUMBER
+			|| (FMath::IsNearlyEqual(AimAlignment, BestAimAlignment) && PawnDistanceSquared < BestPawnDistanceSquared))
+		{
+			OutTarget = Candidate;
+			OutTargetLocation = CandidateLocation;
+			BestAimAlignment = AimAlignment;
+			BestPawnDistanceSquared = PawnDistanceSquared;
 		}
 	}
 
-	return BestTarget;
+	return IsValid(OutTarget);
 }
 
 bool UJTSMeleeComponent::IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const
@@ -366,6 +457,121 @@ bool UJTSMeleeComponent::IsValidMeleeTarget(AActor* Candidate, APawn* AttackingP
 		&& IsValid(AttackingPawn)
 		&& Candidate->GetClass()->ImplementsInterface(UJTSMeleeTarget::StaticClass())
 		&& IJTSMeleeTarget::Execute_CanReceiveMeleeHit(Candidate, AttackingPawn);
+}
+
+bool UJTSMeleeComponent::IsValidDamageTarget(AActor* Candidate, APawn* AttackingPawn) const
+{
+	if (!IsValid(Candidate) || Candidate == GetOwner() || !IsValid(AttackingPawn))
+	{
+		return false;
+	}
+
+	const bool bImplementsMeleeTarget = Candidate->GetClass()->ImplementsInterface(UJTSMeleeTarget::StaticClass());
+	if (bImplementsMeleeTarget && !IJTSMeleeTarget::Execute_CanReceiveMeleeHit(Candidate, AttackingPawn))
+	{
+		return false;
+	}
+
+	if (const UJTSHealthComponent* const HealthComponent = Candidate->FindComponentByClass<UJTSHealthComponent>())
+	{
+		return !HealthComponent->IsDead();
+	}
+
+	return bImplementsMeleeTarget;
+}
+
+bool UJTSMeleeComponent::GetPlayerAimView(APawn* AttackingPawn, FVector& OutCameraLocation, FVector& OutAimDirection) const
+{
+	OutCameraLocation = FVector::ZeroVector;
+	OutAimDirection = FVector::ZeroVector;
+	if (!IsValid(AttackingPawn))
+	{
+		return false;
+	}
+
+	FRotator CameraRotation;
+	if (APlayerController* const PlayerController = Cast<APlayerController>(AttackingPawn->GetController()))
+	{
+		// This is the active PlayerCameraManager viewpoint in both first- and third-person modes.
+		PlayerController->GetPlayerViewPoint(OutCameraLocation, CameraRotation);
+	}
+	else
+	{
+		OutCameraLocation = AttackingPawn->GetPawnViewLocation();
+		CameraRotation = AttackingPawn->GetViewRotation();
+	}
+
+	OutAimDirection = CameraRotation.Vector().GetSafeNormal();
+	return !OutAimDirection.IsNearlyZero();
+}
+
+bool UJTSMeleeComponent::IsWithinPunchRange(APawn* AttackingPawn, const FVector& TargetLocation) const
+{
+	return IsValid(AttackingPawn)
+		&& PunchRange > KINDA_SMALL_NUMBER
+		&& FVector::DistSquared(AttackingPawn->GetActorLocation(), TargetLocation) <= FMath::Square(PunchRange);
+}
+
+bool UJTSMeleeComponent::HasMeleeLineOfSight(APawn* AttackingPawn, AActor* Candidate, const FVector& TargetLocation) const
+{
+	UWorld* const World = GetWorld();
+	if (!IsValid(World) || !IsValid(AttackingPawn) || !IsValid(Candidate))
+	{
+		return false;
+	}
+
+	const FVector AttackOrigin = AttackingPawn->GetActorLocation();
+	if (FVector::DistSquared(AttackOrigin, TargetLocation) <= KINDA_SMALL_NUMBER)
+	{
+		return true;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSMeleeLineOfSight), false, AttackingPawn);
+	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
+	QueryParams.AddIgnoredActor(Candidate);
+
+	FHitResult BlockingHit;
+	return !World->LineTraceSingleByChannel(BlockingHit, AttackOrigin, TargetLocation, ECC_Visibility, QueryParams);
+}
+
+bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPawn, EJTSMeleeAttackType AttackType)
+{
+	if (!IsValidDamageTarget(Target, AttackingPawn))
+	{
+		return false;
+	}
+
+	if (Target->FindComponentByClass<UJTSHealthComponent>() != nullptr)
+	{
+		const float Damage = GetDamageForAttackType(AttackType);
+		return Damage > KINDA_SMALL_NUMBER
+			&& UGameplayStatics::ApplyDamage(Target, Damage, AttackingPawn->GetController(), AttackingPawn, UDamageType::StaticClass()) > 0.0f;
+	}
+
+	// Legacy Moon targets (for example resource/tool interactions) keep their existing interface path.
+	if (Target->GetClass()->ImplementsInterface(UJTSMeleeTarget::StaticClass()))
+	{
+		IJTSMeleeTarget::Execute_ReceiveMeleeHit(Target, AttackingPawn, AttackType);
+		return true;
+	}
+
+	return false;
+}
+
+float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType) const
+{
+	switch (AttackType)
+	{
+	case EJTSMeleeAttackType::Knife:
+		return FMath::Max(0.0f, KnifeDamage);
+
+	case EJTSMeleeAttackType::Axe:
+		return FMath::Max(0.0f, AxeDamage);
+
+	case EJTSMeleeAttackType::Punch:
+	default:
+		return FMath::Max(0.0f, PunchDamage);
+	}
 }
 
 bool UJTSMeleeComponent::IsMoonMeleeAvailable() const

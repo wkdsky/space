@@ -78,11 +78,11 @@ void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawn
 void AJTSMoonResourceSpawner::SetLandmarkExclusions(
 	AJTSSpacecraftActor* InSpacecraft,
 	const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
-	const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InRoachNestLandmarks)
+	const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InAntNestLandmarks)
 {
 	SpacecraftLandmark = InSpacecraft;
 	CorpseLandmarks = InCorpseLandmarks;
-	RoachNestLandmarks = InRoachNestLandmarks;
+	AntNestLandmarks = InAntNestLandmarks;
 }
 
 int32 AJTSMoonResourceSpawner::GenerateResources()
@@ -359,7 +359,7 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 			TraceParams.AddIgnoredActor(Corpse.Get());
 		}
 	}
-	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : RoachNestLandmarks)
+	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : AntNestLandmarks)
 	{
 		if (Nest.IsValid())
 		{
@@ -426,7 +426,7 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 		}
 	}
 
-	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : RoachNestLandmarks)
+	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : AntNestLandmarks)
 	{
 		if (Nest.IsValid()
 			&& IsCandidateInsideWrappedBounds(

@@ -40,7 +40,7 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionPadding = 500.0f;
 
-	/** Extra XY clearance added around fixed corpse and random roach-nest landmark bounds. */
+	/** Extra XY clearance added around fixed corpse and random Ant Nest landmark bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float LandmarkExclusionPadding = 400.0f;
 };
@@ -64,7 +64,7 @@ public:
 	void SetLandmarkExclusions(
 		AJTSSpacecraftActor* InSpacecraft,
 		const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
-		const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InRoachNestLandmarks);
+		const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InAntNestLandmarks);
 
 protected:
 	virtual void BeginPlay() override;
@@ -131,5 +131,5 @@ private:
 	/** Initialization-time landmark cache supplied by AJTSMoonGameMode before GenerateResources. */
 	TWeakObjectPtr<AJTSSpacecraftActor> SpacecraftLandmark;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
-	TArray<TWeakObjectPtr<AJTSRoachNestActor>> RoachNestLandmarks;
+	TArray<TWeakObjectPtr<AJTSRoachNestActor>> AntNestLandmarks;
 };

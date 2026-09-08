@@ -22,7 +22,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAttackStarted, EJTSAttackType, At
 
 /**
  * Owns the one camera-driven melee acquisition and attack path shared by first- and third-person views.
- * Moon GameMode remains the authority for range, aim forgiveness, and cooldown values.
+ * Attack timing remains compatible with Moon GameMode; aim and damage tuning live on this component.
  */
 UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSMeleeComponent : public UActorComponent
@@ -60,7 +60,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void FinishCurrentAttack();
 
-	/** Performs the melee sphere trace for an animation hit frame. */
+	/** Resolves one crosshair-aimed melee hit for an animation hit frame. */
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void PerformHitCheck();
 
@@ -78,13 +78,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Melee")
 	EJTSMeleeAttackType GetCurrentAttackType() const;
 
+	/** Damage is configured by the attacker/equipped weapon, never by the target receiving it. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Damage")
+	float GetDamageForAttackType(EJTSMeleeAttackType AttackType) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	AActor* FindBestMeleeTarget(APawn* AttackingPawn) const;
+	bool FindBestAimCandidate(APawn* AttackingPawn, AActor*& OutTarget, FVector& OutTargetLocation, bool bRequireMeleeTargetInterface) const;
 	bool IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const;
+	bool IsValidDamageTarget(AActor* Candidate, APawn* AttackingPawn) const;
+	bool GetPlayerAimView(APawn* AttackingPawn, FVector& OutCameraLocation, FVector& OutAimDirection) const;
+	bool IsWithinPunchRange(APawn* AttackingPawn, const FVector& TargetLocation) const;
+	bool HasMeleeLineOfSight(APawn* AttackingPawn, AActor* Candidate, const FVector& TargetLocation) const;
+	bool ApplyAttackToTarget(AActor* Target, APawn* AttackingPawn, EJTSMeleeAttackType AttackType);
 	bool IsMoonMeleeAvailable() const;
 	EJTSAttackType ResolveAttackType() const;
 	void BeginAttack(EJTSAttackType AttackType);
@@ -121,19 +131,51 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
 	EJTSAttackType CurrentAttackType = EJTSAttackType::Punch;
 
-	/** Forward distance, in centimeters, covered by the hit-frame sphere trace. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	/** Camera distance used only to acquire what lies under the screen-center crosshair. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MeleeAimTraceDistance = 1200.0f;
+
+	/** Small world-space forgiveness radius for low Moon Ants under the crosshair. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MeleeAimAssistRadius = 15.0f;
+
+	/** Actual contact reach measured from the player capsule, never from the third-person camera. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PunchRange = 160.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Damage", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float PunchDamage = 1.0f;
+
+	/** Retains the prototype's fast-kill Knife behavior while keeping damage owned by the attacker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Damage", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float KnifeDamage = 3.0f;
+
+	/** Retains the prototype's fast-kill Axe behavior while keeping damage owned by the attacker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Damage", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float AxeDamage = 3.0f;
+
+	/** Punches are intentionally single-target; this remains one for the current prototype. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "1", ClampMax = "1", UIMin = "1", UIMax = "1"))
+	int32 PunchMaxTargets = 1;
+
+	/** Draws crosshair acquisition, capsule reach, and the final target only at AttackHit notifies. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Debug", meta = (AllowPrivateAccess = "true"))
+	bool bDebugMeleeAim = false;
+
+	/** Serialized compatibility only. Replaced by MeleeAimTraceDistance and PunchRange. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MeleeAimTraceDistance and PunchRange."))
 	float AttackRange = 100.0f;
 
-	/** Radius, in centimeters, of the hit-frame sphere trace. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	/** Serialized compatibility only. Replaced by MeleeAimAssistRadius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MeleeAimAssistRadius."))
 	float AttackRadius = 35.0f;
 
-	/** Damage applied to the first blocking actor hit by the sphere trace. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	/** Serialized compatibility only. Replaced by PunchDamage, KnifeDamage, and AxeDamage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use the per-attack damage properties."))
 	float AttackDamage = 10.0f;
 
 	FTimerHandle TargetRefreshTimerHandle;
 	FTimerHandle AttackFailSafeTimerHandle;
+	TSet<TWeakObjectPtr<AActor>> HitActorsThisSwing;
 	double NextAttackTime = 0.0;
 };

@@ -11,6 +11,7 @@
 class AJTSSpacecraftActor;
 class UCameraComponent;
 class UJTSCarryComponent;
+class UJTSHealthComponent;
 class UJTSMeleeComponent;
 class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
@@ -42,6 +43,10 @@ public:
 	/** Returns this character's four-slot equipment loadout. */
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UJTSPlayerEquipmentComponent* GetEquipmentComponent() const;
+
+	/** Returns the reusable player health pool used by UE's standard damage path. */
+	UFUNCTION(BlueprintPure, Category = "Health")
+	UJTSHealthComponent* GetHealthComponent() const;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
@@ -176,9 +181,16 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlayerEquipmentComponent> EquipmentComponent;
 
+	/** Shared player health state. Future weapons, monsters, and hazards use this component. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSHealthComponent> HealthComponent;
+
 	/** One camera-agnostic Moon melee path for Punch, Knife, and Axe. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMeleeComponent> MeleeComponent;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlayerMaxHealth = 10.0f;
 
 	/** Legacy radial-gravity component retained for Blueprint compatibility; Moon fake worlds bypass it. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))

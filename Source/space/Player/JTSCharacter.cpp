@@ -25,6 +25,7 @@
 #include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
@@ -57,6 +58,7 @@ AJTSCharacter::AJTSCharacter()
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
 	EquipmentComponent = CreateDefaultSubobject<UJTSPlayerEquipmentComponent>(TEXT("EquipmentComponent"));
+	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
@@ -101,6 +103,11 @@ UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
 UJTSPlayerEquipmentComponent* AJTSCharacter::GetEquipmentComponent() const
 {
 	return EquipmentComponent.Get();
+}
+
+UJTSHealthComponent* AJTSCharacter::GetHealthComponent() const
+{
+	return HealthComponent.Get();
 }
 
 bool AJTSCharacter::IsFirstPersonView() const
@@ -308,6 +315,11 @@ void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
 void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (IsValid(HealthComponent))
+	{
+		HealthComponent->SetMaxHealth(PlayerMaxHealth, true);
+	}
 
 	ApplyCameraView();
 	BindGameState();

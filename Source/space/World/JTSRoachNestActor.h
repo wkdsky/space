@@ -13,7 +13,7 @@ class USceneComponent;
 class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
 
-/** A destructible Moon landmark that occasionally emits one real, short-lived roach actor. */
+/** Destructible Moon Ant Nest. The legacy native class name is retained for local asset compatibility. */
 UCLASS()
 class SPACE_API AJTSRoachNestActor : public AActor, public IJTSMeleeTarget
 {
@@ -23,6 +23,9 @@ public:
 	AJTSRoachNestActor();
 
 	void AdjustToGround(const FVector& GroundLocation);
+	void SetAntNestVisualScale(float InVisualScale);
+	/** Receives the GameMode-configured Ant class once; null intentionally selects the native fallback at spawn time. */
+	void SetAntActorClass(TSubclassOf<AJTSRoachActor> InAntActorClass);
 
 	virtual bool CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const override;
 	virtual void ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType) override;
@@ -37,24 +40,30 @@ protected:
 private:
 	const class AJTSMoonGameMode* GetMoonGameMode() const;
 	FVector GetVisualBoundsExtent() const;
-	bool ResolveRoachGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
-	void ScheduleNextRoachSpawn();
-	void TrySpawnRoach();
+	bool ResolveAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
+	float ChooseAntSpawnDistance(const class AJTSMoonGameMode& MoonGameMode) const;
+	void ScheduleNextAntSpawn();
+	void TrySpawnAnt();
 	void UpdateMoonWrappedLogicalPosition();
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Roach")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant|Nest")
 	TObjectPtr<USceneComponent> SceneRoot;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Roach", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Ant|Nest", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> NestMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> NestMaterial;
+	TObjectPtr<UMaterialInstanceDynamic> AntNestMaterial;
 
-	FTimerHandle RoachSpawnTimerHandle;
-	TWeakObjectPtr<AJTSRoachActor> ActiveRoach;
+	/** Explicitly supplied by AJTSMoonGameMode when this runtime Nest is created. */
+	UPROPERTY(Transient)
+	TSubclassOf<AJTSRoachActor> AntActorClass;
+
+	FTimerHandle AntSpawnTimerHandle;
+	TArray<TWeakObjectPtr<AJTSRoachActor>> ActiveAnts;
+	FVector BaseAntNestMeshScale = FVector(0.68f, 0.68f, 0.20f);
 	int32 PunchHitsRemaining = 3;
 };
