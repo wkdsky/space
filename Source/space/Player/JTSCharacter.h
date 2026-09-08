@@ -19,6 +19,7 @@ class UInteractionComponent;
 class UInputAction;
 class UInputComponent;
 class UInputMappingContext;
+class USceneComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 struct FInputActionValue;
@@ -44,6 +45,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
+
+	/** Current controller pitch normalized to the range consumed by character animation. */
+	UFUNCTION(BlueprintPure, Category = "Player|Aim")
+	float GetAimPitch() const;
 
 	/** The HUD queries this state to draw an equipment-slot hold ring. */
 	UFUNCTION(BlueprintPure, Category = "Equipment")
@@ -86,6 +91,7 @@ public:
 	void HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft);
 
 protected:
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_Controller() override;
@@ -111,6 +117,7 @@ private:
 	void HandleInteractCompleted(const FInputActionValue& Value);
 	void HandleInteractCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
+	void HandleAttackReleased(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotTwoStarted(const FInputActionValue& Value);
@@ -132,6 +139,7 @@ private:
 	bool IsGameplayInputBlocked() const;
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
+	void ApplyCameraPitchLimits();
 	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
 	bool FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
 
@@ -141,6 +149,10 @@ private:
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
 	static constexpr float BoardingHoldDuration = 2.0f;
+
+	/** Stable camera origin attached to the capsule; both views rotate around this eye-height point. */
+	UPROPERTY(VisibleAnywhere, Category = "Camera")
+	TObjectPtr<USceneComponent> CameraPivot;
 
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
@@ -172,19 +184,59 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
 
-	/** Camera socket offset used to keep the character left and below the centered crosshair. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true"))
-	FVector ThirdPersonShoulderOffset = FVector(0.0f, 90.0f, 80.0f);
+	/** Local height of the shared eye-level pivot above the capsule origin. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "200.0", UIMin = "0.0", UIMax = "150.0"))
+	float CameraPivotHeight = 72.0f;
 
-	/** Eye-level socket offset used while the spring arm is collapsed for first person. */
+	/** Third-person boom length measured from CameraPivot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "2000.0", UIMin = "0.0", UIMax = "800.0"))
+	float ThirdPersonArmLength = 400.0f;
+
+	/** Third-person shoulder offset. Its Z value is ignored so camera height always comes from CameraPivot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true"))
-	FVector FirstPersonCameraOffset = FVector(0.0f, 0.0f, 66.0f);
+	FVector ThirdPersonShoulderOffset = FVector(0.0f, 60.0f, 0.0f);
+
+	/** Retained for existing Blueprint defaults; first-person camera position now always comes from CameraPivot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "First-person camera height is controlled by CameraPivotHeight."))
+	FVector FirstPersonCameraOffset = FVector(0.0f, 0.0f, 0.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
 	float FirstPersonFOV = 90.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
 	float ThirdPersonFOV = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "-89.0", ClampMax = "0.0", UIMin = "-89.0", UIMax = "0.0"))
+	float ThirdPersonViewPitchMin = -60.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
+	float ThirdPersonViewPitchMax = 60.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "-89.0", ClampMax = "0.0", UIMin = "-89.0", UIMax = "0.0"))
+	float FirstPersonViewPitchMin = -85.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
+	float FirstPersonViewPitchMax = 85.0f;
+
+	/** Multiplies raw Enhanced Input MouseX exactly once before controller yaw is updated. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
+	float MouseSensitivityX = 0.07f;
+
+	/** Multiplies raw Enhanced Input MouseY exactly once before controller pitch is updated. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
+	float MouseSensitivityY = 0.07f;
+
+	/** Lowest controller pitch supplied to the character animation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "-90.0", ClampMax = "0.0", UIMin = "-90.0", UIMax = "0.0"))
+	float AimPitchMin = -85.0f;
+
+	/** Highest controller pitch supplied to the character animation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "90.0", UIMin = "0.0", UIMax = "90.0"))
+	float AimPitchMax = 85.0f;
+
+	/** Controller pitch normalized for the animation graph's upper-body aim adjustment. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Player|Aim", meta = (AllowPrivateAccess = "true"))
+	float AimPitch = 0.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float EquipmentHoldToDropDuration = 0.8f;

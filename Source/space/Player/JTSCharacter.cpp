@@ -3,9 +3,11 @@
 #include "JTSCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "CollisionShape.h"
 #include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
@@ -33,7 +35,7 @@
 
 AJTSCharacter::AJTSCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
@@ -59,12 +61,18 @@ AJTSCharacter::AJTSCharacter()
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
+	CameraPivot = CreateDefaultSubobject<USceneComponent>(TEXT("CameraPivot"));
+	CameraPivot->SetupAttachment(GetCapsuleComponent());
+	CameraPivot->SetRelativeLocation(FVector(0.0f, 0.0f, CameraPivotHeight));
+
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
-	CameraBoom->SetupAttachment(GetCapsuleComponent());
-	CameraBoom->TargetArmLength = 420.0f;
-	CameraBoom->SocketOffset = ThirdPersonShoulderOffset;
+	CameraBoom->SetupAttachment(CameraPivot);
+	CameraBoom->TargetArmLength = ThirdPersonArmLength;
+	CameraBoom->SocketOffset = FVector(ThirdPersonShoulderOffset.X, ThirdPersonShoulderOffset.Y, 0.0f);
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = true;
+	CameraBoom->bEnableCameraLag = false;
+	CameraBoom->bEnableCameraRotationLag = false;
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -98,6 +106,11 @@ UJTSPlayerEquipmentComponent* AJTSCharacter::GetEquipmentComponent() const
 bool AJTSCharacter::IsFirstPersonView() const
 {
 	return bFirstPersonView;
+}
+
+float AJTSCharacter::GetAimPitch() const
+{
+	return AimPitch;
 }
 
 int32 AJTSCharacter::GetEquipmentHoldSlotIndex() const
@@ -303,6 +316,18 @@ void AJTSCharacter::BeginPlay()
 	RegisterInputMappingContext();
 }
 
+void AJTSCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	const float ControllerPitch = Controller != nullptr
+		? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch)
+		: 0.0f;
+	const float MinimumAimPitch = FMath::Min(AimPitchMin, AimPitchMax);
+	const float MaximumAimPitch = FMath::Max(AimPitchMin, AimPitchMax);
+	AimPitch = FMath::Clamp(ControllerPitch, MinimumAimPitch, MaximumAimPitch);
+}
+
 void AJTSCharacter::ApplyThirdPersonCameraOffset()
 {
 	if (!bFirstPersonView)
@@ -316,6 +341,7 @@ void AJTSCharacter::PossessedBy(AController* NewController)
 	UnregisterInputMappingContext();
 	Super::PossessedBy(NewController);
 
+	ApplyCameraView();
 	RegisterInputMappingContext();
 }
 
@@ -324,6 +350,7 @@ void AJTSCharacter::OnRep_Controller()
 	UnregisterInputMappingContext();
 	Super::OnRep_Controller();
 
+	ApplyCameraView();
 	RegisterInputMappingContext();
 }
 
@@ -370,6 +397,8 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
+	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
+	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
 	if (EquipmentSlotActions.Num() == 4)
 	{
@@ -582,7 +611,7 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 {
 	if (!IsBoarded())
 	{
-		AddControllerYawInput(Value.Get<float>());
+		AddControllerYawInput(Value.Get<float>() * MouseSensitivityX);
 	}
 }
 
@@ -590,7 +619,8 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
 	if (!IsBoarded())
 	{
-		AddControllerPitchInput(-Value.Get<float>());
+		// MouseY is not negated in the Enhanced Input mapping, so retain the established pitch direction here.
+		AddControllerPitchInput(-Value.Get<float>() * MouseSensitivityY);
 	}
 }
 
@@ -699,8 +729,17 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 	{
 		return;
 	}
+	
+	MeleeComponent->AttackPressed();
+}
 
-	MeleeComponent->TryAttack();
+void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
+{
+	// Release must always be forwarded so a blocked UI or phase transition cannot leave the hold state stuck.
+	if (IsValid(MeleeComponent))
+	{
+		MeleeComponent->AttackReleased();
+	}
 }
 
 void AJTSCharacter::HandleToggleCameraStarted(const FInputActionValue& Value)
@@ -843,16 +882,38 @@ bool AJTSCharacter::IsGameplayInputBlocked() const
 	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsGameMenuOpen();
 }
 
-void AJTSCharacter::ApplyCameraView()
+void AJTSCharacter::ApplyCameraPitchLimits()
 {
-	if (CameraBoom == nullptr || FollowCamera == nullptr)
+	APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+	if (PlayerController == nullptr || PlayerController->PlayerCameraManager == nullptr)
 	{
 		return;
 	}
 
-	CameraBoom->SocketOffset = bFirstPersonView ? FirstPersonCameraOffset : ThirdPersonShoulderOffset;
-	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : 420.0f;
+	const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
+	const float RequestedPitchMax = bFirstPersonView ? FirstPersonViewPitchMax : ThirdPersonViewPitchMax;
+	PlayerController->PlayerCameraManager->ViewPitchMin = FMath::Min(RequestedPitchMin, RequestedPitchMax);
+	PlayerController->PlayerCameraManager->ViewPitchMax = FMath::Max(RequestedPitchMin, RequestedPitchMax);
+}
+
+void AJTSCharacter::ApplyCameraView()
+{
+	ApplyCameraPitchLimits();
+
+	if (CameraPivot == nullptr || CameraBoom == nullptr || FollowCamera == nullptr)
+	{
+		return;
+	}
+
+	CameraPivot->SetRelativeLocation(FVector(0.0f, 0.0f, CameraPivotHeight));
+	CameraBoom->SocketOffset = bFirstPersonView
+		? FVector::ZeroVector
+		: FVector(ThirdPersonShoulderOffset.X, ThirdPersonShoulderOffset.Y, 0.0f);
+	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : ThirdPersonArmLength;
+	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = !bFirstPersonView;
+	CameraBoom->bEnableCameraLag = false;
+	CameraBoom->bEnableCameraRotationLag = false;
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
 	if (GetMesh() != nullptr)
 	{
