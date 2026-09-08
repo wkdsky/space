@@ -2,6 +2,9 @@
 # Unreal Engine generated files
 # ==========================================
 
+Content/
+
+# Unreal generated
 Binaries/
 DerivedDataCache/
 Intermediate/
