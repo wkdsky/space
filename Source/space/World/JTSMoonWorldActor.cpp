@@ -5,7 +5,7 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "GameFramework/Pawn.h"
-#include "space/Modes/JTSMoonGameMode.h"
+#include "space/World/JTSMoonSurfaceController.h"
 
 namespace
 {
@@ -129,14 +129,10 @@ void AJTSMoonWorldActor::BeginPlay()
 	Super::BeginPlay();
 
 	bMissingCollectionLogged = false;
-	if (!IsMoonWorld())
+	if (IsMoonWorld())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("JTSMoonWorldActor is present outside AJTSMoonGameMode; its bend driver is disabled."));
-		SetActorTickEnabled(false);
-		return;
+		UpdateBendMaterialParameters();
 	}
-
-	UpdateBendMaterialParameters();
 }
 
 void AJTSMoonWorldActor::Tick(float DeltaSeconds)
@@ -147,8 +143,12 @@ void AJTSMoonWorldActor::Tick(float DeltaSeconds)
 
 bool AJTSMoonWorldActor::IsMoonWorld() const
 {
-	const UWorld* const World = GetWorld();
-	return World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr;
+	if (AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+	{
+		return Controller->OwnsSurfaceActor(this) && Controller->GetMoonWorldActor() == this;
+	}
+
+	return false;
 }
 
 float AJTSMoonWorldActor::SmoothClampBendDistance(

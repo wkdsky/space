@@ -9,6 +9,8 @@
 
 class AJTSEarthGameMode;
 class AJTSMoonGameMode;
+class AJTSMoonSurfaceController;
+class AJTSSpaceWorldGameMode;
 
 /** The gameplay phase currently active in the level. */
 UENUM(BlueprintType)
@@ -95,6 +97,8 @@ public:
 private:
 	friend class AJTSEarthGameMode;
 	friend class AJTSMoonGameMode;
+	friend class AJTSMoonSurfaceController;
+	friend class AJTSSpaceWorldGameMode;
 
 	void SetGameplayPhase(EJTSGameplayPhase NewGameplayPhase);
 	void SetFailureReason(EJTSFailureReason NewFailureReason);

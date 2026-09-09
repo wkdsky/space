@@ -38,6 +38,9 @@ public:
 	/** Applies the unpaused game-only input mode used by Earth collection. */
 	void ApplyEarthCollectionInputMode();
 
+	/** Applies the equivalent unpaused game-only mode for the persistent space-world prototype. */
+	void ApplySpaceWorldInputMode();
+
 	/** Opens the local Moon workshop and switches input to a click-capable modal mode. */
 	void OpenMoonShop(AJTSCharacter* InPlayer);
 	void CloseMoonShop();

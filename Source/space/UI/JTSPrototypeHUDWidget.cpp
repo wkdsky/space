@@ -15,8 +15,8 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Math/RotationMatrix.h"
@@ -38,6 +38,7 @@
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/UI/JTSCircularProgressWidget.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 
 namespace
 {
@@ -1626,12 +1627,17 @@ void UJTSPrototypeHUDWidget::RefreshMoonShop()
 		return;
 	}
 
-	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+		? SurfaceController->GetMoonSettings()
 		: nullptr;
 	AJTSCharacter* const PlayerCharacter = ShopPlayer.Get();
 	AJTSSpacecraftActor* const Spacecraft = ShopSpacecraft.Get();
-	if (!IsValid(MoonGameMode) || !IsValid(PlayerCharacter) || !IsValid(Spacecraft))
+	if (!IsValid(SurfaceController)
+		|| !SurfaceController->IsSurfaceGameplayInitialized()
+		|| !IsValid(MoonSettings)
+		|| !IsValid(PlayerCharacter)
+		|| !IsValid(Spacecraft))
 	{
 		auto DisableBuyButton = [](UButton* BuyButton)
 		{
@@ -1678,23 +1684,23 @@ void UJTSPrototypeHUDWidget::RefreshMoonShop()
 	};
 
 	RefreshItemCard(
-		MoonGameMode->GetPickaxeRockCost(),
+		MoonSettings->GetPickaxeRockCost(),
 		0,
 		ShopPickaxeCostText,
 		ShopPickaxeBuyButton);
 	RefreshItemCard(
-		MoonGameMode->GetKnifeRockCost(),
-		MoonGameMode->GetKnifeOreCost(),
+		MoonSettings->GetKnifeRockCost(),
+		MoonSettings->GetKnifeOreCost(),
 		ShopKnifeCostText,
 		ShopKnifeBuyButton);
 	RefreshItemCard(
-		MoonGameMode->GetAxeRockCost(),
-		MoonGameMode->GetAxeOreCost(),
+		MoonSettings->GetAxeRockCost(),
+		MoonSettings->GetAxeOreCost(),
 		ShopAxeCostText,
 		ShopAxeBuyButton);
 	RefreshItemCard(
-		MoonGameMode->GetBackpackRockCost(),
-		MoonGameMode->GetBackpackOreCost(),
+		MoonSettings->GetBackpackRockCost(),
+		MoonSettings->GetBackpackOreCost(),
 		ShopBackpackCostText,
 		ShopBackpackBuyButton);
 	RefreshWorkshopTabs();
@@ -1792,14 +1798,19 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopLayout()
 
 void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Spacecraft)
 {
-	const AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
+	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+		? SurfaceController->GetMoonSettings()
 		: nullptr;
 	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 	APlayerController* const PlayerController = GetOwningPlayer();
-	if (!IsValid(MoonGameMode)
+	if (!IsValid(SurfaceController)
+		|| !SurfaceController->IsSurfaceGameplayInitialized()
+		|| !IsValid(MoonSettings)
 		|| !IsValid(Spacecraft)
+		|| !SurfaceController->OwnsSurfaceActor(Spacecraft)
 		|| !IsValid(PlayerCharacter)
+		|| !SurfaceController->OwnsSurfaceActor(PlayerCharacter)
 		|| !IsValid(PlayerController)
 		|| bMoonShopOpen
 		|| bGameMenuOpen
@@ -1823,7 +1834,7 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	const FVector2D ShipLogicalPosition = WrapSubsystem->GetLogicalPositionFromWorld(ShipLocation);
 	const FVector2D WrappedDelta = WrapSubsystem->ShortestWrappedDelta2D(PlayerLogicalPosition, ShipLogicalPosition);
 	const float HorizontalDistance = WrappedDelta.Size();
-	if (HorizontalDistance < MoonGameMode->GetSpacecraftMarkerShowDistance())
+	if (HorizontalDistance < MoonSettings->GetSpacecraftMarkerShowDistance())
 	{
 		SetSpacecraftNavigationVisibility(false, false);
 		return;
@@ -1852,7 +1863,7 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	const float ForwardDot = FVector::DotProduct(ToNavigationAnchor.GetSafeNormal(), CameraMatrix.GetUnitAxis(EAxis::X));
 	FVector2D ProjectedLocation;
 	const bool bProjected = ProjectWorldToViewportWidget(VisualNavigationAnchor, ProjectedLocation);
-	const float BaseSafeInset = MoonGameMode->GetSpacecraftMarkerScreenSafeMargin();
+	const float BaseSafeInset = MoonSettings->GetSpacecraftMarkerScreenSafeMargin();
 	const float HysteresisInset = bSpacecraftWasOnScreen ? -12.0f : 12.0f;
 	const float SafeInset = FMath::Max(16.0f, BaseSafeInset + HysteresisInset);
 	const bool bOnScreen = bProjected
@@ -1899,7 +1910,7 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	}
 	EdgeDirection.Normalize();
 
-	const float SafeMargin = MoonGameMode->GetSpacecraftMarkerScreenSafeMargin();
+	const float SafeMargin = MoonSettings->GetSpacecraftMarkerScreenSafeMargin();
 	const FVector2D AvailableHalfExtent(
 		FMath::Max(1.0f, ViewportCenter.X - SafeMargin - 58.0f),
 		FMath::Max(1.0f, ViewportCenter.Y - SafeMargin - 181.0f));
@@ -2190,12 +2201,9 @@ void UJTSPrototypeHUDWidget::HandleWorkshopEquipmentTabClicked()
 
 void UJTSPrototypeHUDWidget::HandleBuyPickaxeClicked()
 {
-	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
-		: nullptr;
-	if (IsValid(MoonGameMode))
+	if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		MoonGameMode->TryCraftPickaxe(ShopPlayer.Get(), ShopSpacecraft.Get());
+		SurfaceController->TryCraftPickaxe(ShopPlayer.Get(), ShopSpacecraft.Get());
 	}
 
 	RefreshMoonShop();
@@ -2204,12 +2212,9 @@ void UJTSPrototypeHUDWidget::HandleBuyPickaxeClicked()
 
 void UJTSPrototypeHUDWidget::HandleBuyBackpackClicked()
 {
-	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
-		: nullptr;
-	if (IsValid(MoonGameMode))
+	if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		MoonGameMode->TryCraftBackpack(ShopPlayer.Get(), ShopSpacecraft.Get());
+		SurfaceController->TryCraftBackpack(ShopPlayer.Get(), ShopSpacecraft.Get());
 	}
 
 	RefreshMoonShop();
@@ -2218,12 +2223,9 @@ void UJTSPrototypeHUDWidget::HandleBuyBackpackClicked()
 
 void UJTSPrototypeHUDWidget::HandleBuyKnifeClicked()
 {
-	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
-		: nullptr;
-	if (IsValid(MoonGameMode))
+	if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		MoonGameMode->TryCraftKnife(ShopPlayer.Get(), ShopSpacecraft.Get());
+		SurfaceController->TryCraftKnife(ShopPlayer.Get(), ShopSpacecraft.Get());
 	}
 
 	RefreshMoonShop();
@@ -2232,12 +2234,9 @@ void UJTSPrototypeHUDWidget::HandleBuyKnifeClicked()
 
 void UJTSPrototypeHUDWidget::HandleBuyAxeClicked()
 {
-	AJTSMoonGameMode* const MoonGameMode = GetWorld() != nullptr
-		? GetWorld()->GetAuthGameMode<AJTSMoonGameMode>()
-		: nullptr;
-	if (IsValid(MoonGameMode))
+	if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		MoonGameMode->TryCraftAxe(ShopPlayer.Get(), ShopSpacecraft.Get());
+		SurfaceController->TryCraftAxe(ShopPlayer.Get(), ShopSpacecraft.Get());
 	}
 
 	RefreshMoonShop();
@@ -2292,21 +2291,25 @@ AJTSSpacecraftActor* UJTSPrototypeHUDWidget::FindSpacecraft() const
 	{
 		return nullptr;
 	}
-	if (AJTSMoonGameMode* const MoonGameMode = World->GetAuthGameMode<AJTSMoonGameMode>())
+	if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		if (AJTSSpacecraftActor* const MoonSpacecraft = MoonGameMode->GetSpacecraft())
+		if (AJTSSpacecraftActor* const MoonSpacecraft = SurfaceController->GetSpacecraft())
 		{
 			CachedSpacecraft = MoonSpacecraft;
 			return MoonSpacecraft;
 		}
+		return nullptr;
 	}
 
-	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
+	if (World->PersistentLevel != nullptr)
 	{
-		if (IsValid(*It))
+		for (AActor* const Actor : World->PersistentLevel->Actors)
 		{
-			CachedSpacecraft = *It;
-			return CachedSpacecraft.Get();
+			if (AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Actor); IsValid(Spacecraft))
+			{
+				CachedSpacecraft = Spacecraft;
+				return CachedSpacecraft.Get();
+			}
 		}
 	}
 

@@ -3,6 +3,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "CollisionQueryParams.h"
+#include "Engine/Level.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
@@ -19,6 +20,7 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -28,6 +30,11 @@ namespace
 	constexpr float PickupDropSpawnHeight = 85.0f;
 	constexpr float PickupDropHorizontalDamping = 3.5f;
 	constexpr float PickupDropMaximumDuration = 12.0f;
+
+	bool IsInCurrentMoonSurface(const AJTSMoonSurfaceController* SurfaceController, const AActor* Candidate)
+	{
+		return !IsValid(SurfaceController) || SurfaceController->OwnsSurfaceActor(Candidate);
+	}
 
 	FVector GetPickupGravityAcceleration(UWorld* World, APawn* SafetyPawn)
 	{
@@ -51,12 +58,13 @@ namespace
 	{
 		OutUpwardSpeed = DefaultPickupDropUpwardSpeed;
 		OutHorizontalSpeed = DefaultPickupDropHorizontalSpeed;
-		if (const AJTSMoonGameMode* const MoonGameMode = World != nullptr
-			? World->GetAuthGameMode<AJTSMoonGameMode>()
-			: nullptr)
+		if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(World))
 		{
-			OutUpwardSpeed = MoonGameMode->GetPickupDropUpwardSpeed();
-			OutHorizontalSpeed = MoonGameMode->GetPickupDropHorizontalSpeed();
+			if (const AJTSMoonGameMode* const MoonSettings = SurfaceController->GetMoonSettings())
+			{
+				OutUpwardSpeed = MoonSettings->GetPickupDropUpwardSpeed();
+				OutHorizontalSpeed = MoonSettings->GetPickupDropHorizontalSpeed();
+			}
 		}
 	}
 
@@ -182,6 +190,8 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 	{
 		Registry->GetRegisteredPickups(ExistingPickups);
 	}
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(
+		SourceActor != nullptr ? static_cast<const UObject*>(SourceActor) : static_cast<const UObject*>(SafetyPawn));
 
 	for (int32 AttemptIndex = 0; AttemptIndex < 12; ++AttemptIndex)
 	{
@@ -214,12 +224,11 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		}
 
 		bool bOverlapsShip = false;
-		for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+		auto DoesOverlapShip = [&CandidateXY, &bOverlapsShip](const AJTSSpacecraftActor* Spacecraft)
 		{
-			const AJTSSpacecraftActor* const Spacecraft = *ShipIt;
 			if (!IsValid(Spacecraft))
 			{
-				continue;
+				return;
 			}
 
 			const FBox ShipBounds = Spacecraft->GetResourceExclusionBounds();
@@ -231,6 +240,21 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 					&& FMath::Abs(CandidateXY.Y - ShipCenter.Y) <= ShipExtent.Y)
 				{
 					bOverlapsShip = true;
+					return;
+				}
+			}
+		};
+		if (IsValid(SurfaceController))
+		{
+			DoesOverlapShip(SurfaceController->GetSpacecraft());
+		}
+		else
+		{
+			for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+			{
+				DoesOverlapShip(*ShipIt);
+				if (bOverlapsShip)
+				{
 					break;
 				}
 			}
@@ -244,6 +268,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		for (const AJTSWorldPickupActor* const ExistingPickup : ExistingPickups)
 		{
 			if (IsValid(ExistingPickup)
+				&& IsInCurrentMoonSurface(SurfaceController, ExistingPickup)
 				&& FVector::DistSquared2D(CandidateXY, ExistingPickup->GetActorLocation()) < FMath::Square(60.0f))
 			{
 				bTooCloseToPickup = true;
@@ -264,23 +289,34 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		{
 			GroundTraceParams.AddIgnoredActor(SafetyPawn);
 		}
-		for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+		if (IsValid(SurfaceController))
 		{
-			if (IsValid(*ShipIt))
+			GroundTraceParams.AddIgnoredActor(SurfaceController->GetSpacecraft());
+			if (ULevel* const SurfaceLevel = SurfaceController->GetSurfaceLevel())
+			{
+				for (AActor* const Actor : SurfaceLevel->Actors)
+				{
+					if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
+					{
+						GroundTraceParams.AddIgnoredActor(Resource);
+					}
+				}
+			}
+		}
+		else
+		{
+			for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
 			{
 				GroundTraceParams.AddIgnoredActor(*ShipIt);
 			}
-		}
-		for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
-		{
-			if (IsValid(*ResourceIt))
+			for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
 			{
 				GroundTraceParams.AddIgnoredActor(*ResourceIt);
 			}
 		}
 		for (AJTSWorldPickupActor* const ExistingPickup : ExistingPickups)
 		{
-			if (IsValid(ExistingPickup))
+			if (IsValid(ExistingPickup) && IsInCurrentMoonSurface(SurfaceController, ExistingPickup))
 			{
 				GroundTraceParams.AddIgnoredActor(ExistingPickup);
 			}
@@ -311,6 +347,10 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 
 		Pickup->InitializeItem(NewItemType);
 		Pickup->FinishSpawning(SpawnTransform);
+		if (IsValid(SurfaceController))
+		{
+			SurfaceController->RegisterSurfaceRuntimeActor(Pickup);
+		}
 
 		const FVector GroundDirection = GravityAcceleration.IsNearlyZero()
 			? FVector::DownVector
@@ -691,17 +731,35 @@ void AJTSWorldPickupActor::BuildDropTraceIgnoredActors(AActor* SourceActor, APaw
 		return;
 	}
 
-	for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	if (IsValid(SurfaceController))
 	{
-		AddIgnoredActor(*ShipIt);
+		AddIgnoredActor(SurfaceController->GetSpacecraft());
+		if (ULevel* const SurfaceLevel = SurfaceController->GetSurfaceLevel())
+		{
+			for (AActor* const Actor : SurfaceLevel->Actors)
+			{
+				if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
+				{
+					AddIgnoredActor(Resource);
+				}
+			}
+		}
 	}
-	for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
+	else
 	{
-		AddIgnoredActor(*ResourceIt);
-	}
-	for (TActorIterator<APawn> PawnIt(World); PawnIt; ++PawnIt)
-	{
-		AddIgnoredActor(*PawnIt);
+		for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+		{
+			AddIgnoredActor(*ShipIt);
+		}
+		for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
+		{
+			AddIgnoredActor(*ResourceIt);
+		}
+		for (TActorIterator<APawn> PawnIt(World); PawnIt; ++PawnIt)
+		{
+			AddIgnoredActor(*PawnIt);
+		}
 	}
 }
 

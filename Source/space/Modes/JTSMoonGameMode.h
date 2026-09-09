@@ -14,6 +14,7 @@ class AJTSCharacter;
 class AJTSMoonCorpseActor;
 class AJTSRoachActor;
 class AJTSRoachNestActor;
+class AJTSMoonSurfaceController;
 class AJTSSpacecraftActor;
 enum class EJTSEquipmentType : uint8;
 
@@ -86,6 +87,11 @@ public:
 	/** Cached authoritative spacecraft used by Moon HUD and survival rules. */
 	UFUNCTION(BlueprintPure, Category = "Moon|Navigation")
 	AJTSSpacecraftActor* GetSpacecraft() const;
+
+	/** Legacy MoonPrototype's instance of the same runtime controller used by streamed MoonSurface. */
+	AJTSMoonSurfaceController* GetMoonSurfaceController() const;
+
+	const FJTSMoonResourceSpawnSettings& GetMoonResourceSpawnSettings() const;
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Navigation")
 	float GetSpacecraftMarkerShowDistance() const;
@@ -304,17 +310,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	void InitializeMoonResources();
-	void InitializeMoonRuntimeContent();
-	void InitializeMoonLandmarksAndAntNests();
-	AJTSMoonCorpseActor* FindLevelCorpseLandmark();
-	void ClearGeneratedAntNests();
-	bool IsAntNestCandidateFarFromShip(
-		const FVector2D& CandidateLogicalPosition,
-		const FVector2D& ShipLogicalPosition) const;
-	void ConsumeExpeditionSupplies();
-	bool TryBuyWorkshopEquipment(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft, EJTSEquipmentType EquipmentType);
-	static int32 GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit);
+	AJTSMoonSurfaceController* EnsureMoonSurfaceController();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Survival", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 CrewCount = 1;
@@ -570,16 +566,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Combat", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
 	int32 AntNestPunchHitsToDestroy = 3;
 
-	FTimerHandle ExpeditionConsumptionTimerHandle;
-	FTimerHandle MoonRuntimeInitializationTimerHandle;
-	double FoodConsumptionAccumulator = 0.0;
-	double WaterConsumptionAccumulator = 0.0;
-	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;
-	/** Selected once from level-placed corpse actors; never spawned or repositioned by this GameMode. */
-	TWeakObjectPtr<AJTSMoonCorpseActor> LevelMoonCorpseLandmark;
-	/** All valid level corpses found during the one-time lookup, used only for resource/Ant Nest exclusion. */
-	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CachedLevelMoonCorpseLandmarks;
-	TArray<TWeakObjectPtr<AJTSRoachNestActor>> GeneratedAntNests;
-	bool bLevelCorpseLandmarkSearchCompleted = false;
-	bool bMissingSpacecraftLogged = false;
+	/** Optional class for the legacy runtime actor. It shares its implementation with streamed MoonSurface. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Runtime", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSMoonSurfaceController> MoonSurfaceControllerClass;
+
+	TWeakObjectPtr<AJTSMoonSurfaceController> MoonSurfaceController;
 };

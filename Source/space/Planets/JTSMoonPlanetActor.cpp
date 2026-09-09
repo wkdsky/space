@@ -7,6 +7,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "space/Modes/JTSMoonGameMode.h"
+#include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -16,7 +18,8 @@ namespace
 
 AJTSMoonPlanetActor::AJTSMoonPlanetActor()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -42,14 +45,19 @@ void AJTSMoonPlanetActor::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (GetWorld() != nullptr && GetWorld()->GetAuthGameMode<AJTSMoonGameMode>() != nullptr)
+	if (!DisableForActiveMoonSurface())
 	{
-		if (PlanetMesh != nullptr)
-		{
-			PlanetMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		}
-		SetActorHiddenInGame(true);
-		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored in AJTSMoonGameMode. Use AJTSMoonWorldActor and AJTSMoonLoopGroundActor."));
+		SetActorTickEnabled(MayReceiveMoonSurfaceController());
+	}
+}
+
+void AJTSMoonPlanetActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (DisableForActiveMoonSurface() || !MayReceiveMoonSurfaceController())
+	{
+		SetActorTickEnabled(false);
 	}
 }
 
@@ -73,6 +81,36 @@ void AJTSMoonPlanetActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	UpdateVisualScale();
+}
+
+bool AJTSMoonPlanetActor::DisableForActiveMoonSurface()
+{
+	if (bDisabledForActiveMoonSurface)
+	{
+		return true;
+	}
+
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+		IsValid(SurfaceController) && SurfaceController->OwnsSurfaceActor(this))
+	{
+		if (PlanetMesh != nullptr)
+		{
+			PlanetMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+		SetActorHiddenInGame(true);
+		bDisabledForActiveMoonSurface = true;
+		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored on the active Moon surface. Use AJTSMoonWorldActor and AJTSMoonLoopGroundActor."));
+		return true;
+	}
+
+	return false;
+}
+
+bool AJTSMoonPlanetActor::MayReceiveMoonSurfaceController() const
+{
+	const UWorld* const World = GetWorld();
+	return AJTSSpaceWorldManager::FindSpaceWorldManager(this) != nullptr
+		|| (World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr);
 }
 
 void AJTSMoonPlanetActor::UpdateVisualScale()

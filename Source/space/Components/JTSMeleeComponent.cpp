@@ -13,6 +13,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Modes/JTSMoonGameMode.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSRoachActor.h"
 #include "TimerManager.h"
 
@@ -389,8 +390,9 @@ bool UJTSMeleeComponent::TryAttack()
 {
 	UWorld* const World = GetWorld();
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
-	const AJTSMoonGameMode* const MoonGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr;
-	if (!IsValid(AttackingPawn) || !IsValid(MoonGameMode) || !IsMoonMeleeAvailable())
+	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController) ? SurfaceController->GetMoonSettings() : nullptr;
+	if (!IsValid(AttackingPawn) || !IsValid(MoonSettings) || !IsMoonMeleeAvailable())
 	{
 		return false;
 	}
@@ -419,7 +421,7 @@ bool UJTSMeleeComponent::TryAttack()
 		HitActorsThisSwing.Add(Target);
 	}
 
-	NextAttackTime = CurrentTime + static_cast<double>(MoonGameMode->GetAttackCooldown());
+	NextAttackTime = CurrentTime + static_cast<double>(MoonSettings->GetAttackCooldown());
 	RefreshMeleeTarget();
 	return true;
 }
@@ -859,8 +861,10 @@ float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType)
 
 bool UJTSMeleeComponent::IsMoonMeleeAvailable() const
 {
-	const UWorld* const World = GetWorld();
-	return World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr;
+	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	return IsValid(SurfaceController)
+		&& SurfaceController->IsSurfaceGameplayInitialized()
+		&& SurfaceController->OwnsSurfaceActor(GetOwner());
 }
 
 void UJTSMeleeComponent::SetCurrentMeleeTarget(AActor* NewTarget)

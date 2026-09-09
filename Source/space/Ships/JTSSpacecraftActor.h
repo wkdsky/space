@@ -110,6 +110,9 @@ public:
 	/** Returns the active spacecraft storage, keyed by resource type. */
 	const TMap<EJTSResourceType, int32>& GetStorage() const;
 
+	/** Restores the existing GameInstance spacecraft snapshot once a Moon surface runtime owns this ship. */
+	void RestoreStorageForMoonTravel();
+
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
 	FOnShipResourcesChanged OnShipResourcesChanged;
@@ -140,9 +143,10 @@ protected:
 private:
 	bool IsEarthCollectionActive() const;
 	bool IsMoonExplorationActive() const;
+	bool IsSpaceWorldSurfaceActive() const;
+	bool IsMoonSurfaceRuntimeActive() const;
 	bool DepositPlayerResources(AJTSCharacter* Player);
 	void DepositResourcesFromOverlappingPlayers();
-	void RestoreStorageForMoonTravel();
 	void SaveStorageForMoonTravel() const;
 
 	/** Non-visual transform root for the temporary spacecraft actor. */
@@ -188,4 +192,6 @@ private:
 	/** Character currently inside the boarding trigger, if any. */
 	UPROPERTY(Transient)
 	TObjectPtr<AJTSCharacter> NearbyPlayer;
+
+	bool bPersistedStorageRestoreAttempted = false;
 };

@@ -30,9 +30,12 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
+	bool DisableForActiveMoonSurface();
+	bool MayReceiveMoonSurfaceController() const;
 	void UpdateVisualScale();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon Planet", meta = (AllowPrivateAccess = "true"))
@@ -43,4 +46,6 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Legacy|Moon Planet", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "PlanetRadius is retained for legacy assets and is not a Fake Moon gameplay parameter.", ClampMin = "1.0", UIMin = "1.0"))
 	float PlanetRadius = 3800.0f;
+
+	bool bDisabledForActiveMoonSurface = false;
 };

@@ -1,14 +1,15 @@
 #include "JTSMoonWrappedActorComponent.h"
 
 #include "Components/PrimitiveComponent.h"
-#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonWorldActor.h"
+#include "space/World/JTSSpaceWorldManager.h"
 
 UJTSMoonWrappedActorComponent::UJTSMoonWrappedActorComponent()
 {
@@ -66,7 +67,12 @@ void UJTSMoonWrappedActorComponent::BeginPlay()
 	}
 	else
 	{
-		SetComponentTickEnabled(false);
+		// Persistent player/ship actors can begin before L_MoonSurface finishes becoming visible.
+		// Keep the lightweight resolver alive only in worlds that can still register a Moon surface.
+		UWorld* const World = GetWorld();
+		const bool bMayReceiveMoonSurface = AJTSSpaceWorldManager::FindSpaceWorldManager(this) != nullptr
+			|| (World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr);
+		SetComponentTickEnabled(bMayReceiveMoonSurface);
 	}
 }
 
@@ -99,23 +105,17 @@ void UJTSMoonWrappedActorComponent::ResolveMoonWorld()
 		return;
 	}
 
-	AJTSMoonWorldActor* FoundFakeWorld = FakeWorld.Get();
-	if (!IsValid(FoundFakeWorld))
-	{
-		for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
-		{
-			if (IsValid(*It))
-			{
-				FoundFakeWorld = *It;
-				break;
-			}
-		}
-	}
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	AActor* const Owner = GetOwner();
+	AJTSMoonWorldActor* const FoundFakeWorld = IsValid(SurfaceController)
+		&& SurfaceController->OwnsSurfaceActor(Owner)
+		? SurfaceController->GetMoonWorldActor()
+		: nullptr;
 
 	FakeWorld = FoundFakeWorld;
 	WrapSubsystem = World->GetSubsystem<UJTSMoonWrapSubsystem>();
 	bMoonWrappingEnabled = IsValid(FoundFakeWorld)
-		&& World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
+		&& IsValid(SurfaceController)
 		&& WrapSubsystem.IsValid();
 	if (!bMoonWrappingEnabled)
 	{

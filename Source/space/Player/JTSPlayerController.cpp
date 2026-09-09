@@ -12,6 +12,7 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/World/JTSSpaceWorldManager.h"
 
 AJTSPlayerController::AJTSPlayerController()
 {
@@ -25,6 +26,11 @@ void AJTSPlayerController::BeginPlayingState()
 {
 	Super::BeginPlayingState();
 	BindGameState();
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		ApplySpaceWorldInputMode();
+	}
 
 	if (IsLocalController())
 	{
@@ -36,6 +42,11 @@ void AJTSPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 	BindGameState();
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		ApplySpaceWorldInputMode();
+	}
 }
 
 void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -139,6 +150,11 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 	SetIgnoreLookInput(false);
 }
 
+void AJTSPlayerController::ApplySpaceWorldInputMode()
+{
+	ApplyEarthCollectionInputMode();
+}
+
 void AJTSPlayerController::OpenMoonShop(AJTSCharacter* InPlayer)
 {
 	if (!IsLocalController() || !IsValid(InPlayer) || IsGameMenuOpen())
@@ -184,8 +200,12 @@ void AJTSPlayerController::CloseMoonShop()
 
 	if (IsLocalController())
 	{
-		const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-		if (IsValid(GameState))
+		if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+			IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+		{
+			ApplySpaceWorldInputMode();
+		}
+		else if (const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
 		{
 			ApplyInputModeForPhase(GameState->GetGameplayPhase());
 		}
@@ -248,7 +268,12 @@ void AJTSPlayerController::CloseGameMenu()
 	}
 
 	SetPause(false);
-	if (const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		ApplySpaceWorldInputMode();
+	}
+	else if (const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
 	{
 		ApplyInputModeForPhase(GameState->GetGameplayPhase());
 	}
@@ -293,6 +318,12 @@ bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 
 bool AJTSPlayerController::IsNormalGameplayPhase() const
 {
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		return true;
+	}
+
 	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
 	return IsValid(GameState) && (GameState->IsEarthCollectionActive() || GameState->IsMoonExploration());
 }
@@ -321,7 +352,15 @@ void AJTSPlayerController::BindGameState()
 
 	if (NewGameState != nullptr)
 	{
-		ApplyInputModeForPhase(NewGameState->GetGameplayPhase());
+		if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+			IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+		{
+			ApplySpaceWorldInputMode();
+		}
+		else
+		{
+			ApplyInputModeForPhase(NewGameState->GetGameplayPhase());
+		}
 	}
 }
 
@@ -419,5 +458,12 @@ void AJTSPlayerController::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGamep
 	{
 		CloseMoonShop();
 	}
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		ApplySpaceWorldInputMode();
+		return;
+	}
+
 	ApplyInputModeForPhase(NewGameplayPhase);
 }

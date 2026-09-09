@@ -56,7 +56,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
 	int32 GenerateResources();
 
-	/** Applies Moon GameMode balance values before this spawner generates its resources. */
+	/** Applies Moon surface runtime balance values before this spawner generates its resources. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
 	void ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings);
 
@@ -102,11 +102,11 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
 
-	/** Runtime copy of the Moon GameMode's spacecraft exclusion setting. */
+	/** Runtime copy of the Moon surface settings' spacecraft exclusion setting. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	float SpacecraftExclusionPadding = 0.0f;
 
-	/** Runtime copy of the Moon GameMode's corpse/nest landmark exclusion setting. */
+	/** Runtime copy of the Moon surface settings' corpse/nest landmark exclusion setting. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	float LandmarkExclusionPadding = 0.0f;
 
@@ -128,7 +128,7 @@ private:
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<AJTSWorldPickupActor>> GeneratedPickups;
 
-	/** Initialization-time landmark cache supplied by AJTSMoonGameMode before GenerateResources. */
+	/** Initialization-time landmark cache supplied by AJTSMoonSurfaceController before GenerateResources. */
 	TWeakObjectPtr<AJTSSpacecraftActor> SpacecraftLandmark;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
 	TArray<TWeakObjectPtr<AJTSRoachNestActor>> AntNestLandmarks;

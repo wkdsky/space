@@ -12,6 +12,7 @@
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "TimerManager.h"
 
 UInteractionComponent::UInteractionComponent()
@@ -142,10 +143,15 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 AActor* UInteractionComponent::FindBestWorldPickup(APawn* InteractingPawn)
 {
 	UWorld* const World = GetWorld();
-	const AJTSMoonGameMode* const MoonGameMode = World != nullptr
-		? World->GetAuthGameMode<AJTSMoonGameMode>()
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+		? SurfaceController->GetMoonSettings()
 		: nullptr;
-	if (!IsValid(InteractingPawn) || !IsValid(MoonGameMode))
+	if (!IsValid(InteractingPawn)
+		|| !IsValid(SurfaceController)
+		|| !SurfaceController->IsSurfaceGameplayInitialized()
+		|| !SurfaceController->OwnsSurfaceActor(InteractingPawn)
+		|| !IsValid(MoonSettings))
 	{
 		return nullptr;
 	}
@@ -173,16 +179,17 @@ AActor* UInteractionComponent::FindBestWorldPickup(APawn* InteractingPawn)
 		return nullptr;
 	}
 	const FVector2D ViewportCenter(static_cast<float>(ViewportWidth) * 0.5f, static_cast<float>(ViewportHeight) * 0.5f);
-	const float MaxDistance = MoonGameMode->GetPickupMaxDistance();
+	const float MaxDistance = MoonSettings->GetPickupMaxDistance();
 	const float MaxDistanceSquared = FMath::Square(MaxDistance);
 	const float ViewportScale = FMath::Max(0.1f, static_cast<float>(ViewportHeight) / 1080.0f);
-	const float AcquireRadiusSquared = FMath::Square(MoonGameMode->GetPickupAcquireRadius() * ViewportScale);
-	const float RetainRadiusSquared = FMath::Square(MoonGameMode->GetPickupRetainRadius() * ViewportScale);
-	const float AimRayRadiusSquared = FMath::Square(MoonGameMode->GetPickupAimRayRadius());
+	const float AcquireRadiusSquared = FMath::Square(MoonSettings->GetPickupAcquireRadius() * ViewportScale);
+	const float RetainRadiusSquared = FMath::Square(MoonSettings->GetPickupRetainRadius() * ViewportScale);
+	const float AimRayRadiusSquared = FMath::Square(MoonSettings->GetPickupAimRayRadius());
 
 	auto IsPickupCandidate = [
 		this,
 		World,
+		SurfaceController,
 		InteractingPawn,
 		PlayerController,
 		CameraLocation,
@@ -197,7 +204,9 @@ AActor* UInteractionComponent::FindBestWorldPickup(APawn* InteractingPawn)
 	{
 		OutScreenDistanceSquared = TNumericLimits<float>::Max();
 		OutWorldDistanceSquared = TNumericLimits<float>::Max();
-		if (!IsValidInteractable(Pickup, InteractingPawn))
+		if (!IsValid(SurfaceController)
+			|| !SurfaceController->OwnsSurfaceActor(Pickup)
+			|| !IsValidInteractable(Pickup, InteractingPawn))
 		{
 			return false;
 		}

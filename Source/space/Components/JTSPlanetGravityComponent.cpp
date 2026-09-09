@@ -2,12 +2,12 @@
 
 #include "JTSPlanetGravityComponent.h"
 
-#include "EngineUtils.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Planets/JTSMoonPlanetActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 
 UJTSPlanetGravityComponent::UJTSPlanetGravityComponent()
 {
@@ -19,7 +19,8 @@ void UJTSPlanetGravityComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (GetWorld() != nullptr && GetWorld()->GetAuthGameMode<AJTSMoonGameMode>() != nullptr)
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+		IsValid(SurfaceController) && SurfaceController->OwnsSurfaceActor(GetOwner()))
 	{
 		if (ACharacter* const Character = Cast<ACharacter>(GetOwner()))
 		{
@@ -29,7 +30,7 @@ void UJTSPlanetGravityComponent::BeginPlay()
 			}
 		}
 		SetComponentTickEnabled(false);
-		UE_LOG(LogTemp, Warning, TEXT("Legacy UJTSPlanetGravityComponent is bypassed in AJTSMoonGameMode."));
+		UE_LOG(LogTemp, Warning, TEXT("Legacy UJTSPlanetGravityComponent is bypassed on the active Moon surface."));
 		return;
 	}
 
@@ -44,6 +45,20 @@ void UJTSPlanetGravityComponent::TickComponent(
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+		IsValid(SurfaceController) && SurfaceController->OwnsSurfaceActor(GetOwner()))
+	{
+		if (ACharacter* const Character = Cast<ACharacter>(GetOwner()))
+		{
+			if (UCharacterMovementComponent* const MovementComponent = Character->GetCharacterMovement())
+			{
+				MovementComponent->SetGravityDirection(FVector::DownVector);
+			}
+		}
+		SetComponentTickEnabled(false);
+		return;
+	}
+
 	if (!MoonPlanet.IsValid())
 	{
 		FindMoonPlanet();
@@ -56,17 +71,18 @@ void UJTSPlanetGravityComponent::FindMoonPlanet()
 {
 	MoonPlanet.Reset();
 
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
+	const AActor* const Owner = GetOwner();
+	ULevel* const OwnerLevel = IsValid(Owner) ? Owner->GetLevel() : nullptr;
+	if (!IsValid(OwnerLevel))
 	{
 		return;
 	}
 
-	for (TActorIterator<AJTSMoonPlanetActor> It(World); It; ++It)
+	for (AActor* const Actor : OwnerLevel->Actors)
 	{
-		if (IsValid(*It))
+		if (AJTSMoonPlanetActor* const Planet = Cast<AJTSMoonPlanetActor>(Actor); IsValid(Planet))
 		{
-			MoonPlanet = *It;
+			MoonPlanet = Planet;
 			return;
 		}
 	}

@@ -1,7 +1,7 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 
 #include "CollisionQueryParams.h"
-#include "EngineUtils.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/PlatformTime.h"
@@ -14,7 +14,9 @@
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonCorpseActor.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSRoachNestActor.h"
+#include "space/World/JTSSpaceWorldManager.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 
@@ -56,8 +58,13 @@ void AJTSMoonResourceSpawner::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Moon GameMode applies its Blueprint balance values after all level actors have begun play.
-	if (GetWorld() == nullptr || GetWorld()->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	// MoonSurfaceController applies balance and landmark exclusions only after the active surface is visible.
+	// Standalone maps without either Moon runtime retain the old self-contained spawner behavior.
+	UWorld* const World = GetWorld();
+	const bool bMoonRuntimeWillInitialize = World != nullptr
+		&& (World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
+			|| AJTSSpaceWorldManager::FindSpaceWorldManager(this) != nullptr);
+	if (!bMoonRuntimeWillInitialize)
 	{
 		GenerateResources();
 	}
@@ -123,9 +130,12 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 
 	const float SafeRadius = FMath::Max(0.0f, Radius);
 	const FVector Origin = GetActorLocation();
-	const AJTSMoonGameMode* const MoonGameMode = World->GetAuthGameMode<AJTSMoonGameMode>();
-	const int32 LargeRockYieldUnits = IsValid(MoonGameMode) ? MoonGameMode->GetLargeRockTotalYieldUnits() : 6;
-	const int32 OreDepositYieldUnits = IsValid(MoonGameMode) ? MoonGameMode->GetOreDepositTotalYieldUnits() : 6;
+	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+		? SurfaceController->GetMoonSettings()
+		: World->GetAuthGameMode<AJTSMoonGameMode>();
+	const int32 LargeRockYieldUnits = IsValid(MoonSettings) ? MoonSettings->GetLargeRockTotalYieldUnits() : 6;
+	const int32 OreDepositYieldUnits = IsValid(MoonSettings) ? MoonSettings->GetOreDepositTotalYieldUnits() : 6;
 	int32 SpawnedCount = 0;
 	int32 RejectedLandmarkCount = 0;
 	int32 CandidateAttemptCount = 0;
@@ -341,13 +351,6 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 	{
 		TraceParams.AddIgnoredActor(LocalPlayerPawn);
 	}
-	for (TActorIterator<AJTSCharacter> PlayerIt(World); PlayerIt; ++PlayerIt)
-	{
-		if (IsValid(*PlayerIt))
-		{
-			TraceParams.AddIgnoredActor(*PlayerIt);
-		}
-	}
 	if (SpacecraftLandmark.IsValid())
 	{
 		TraceParams.AddIgnoredActor(SpacecraftLandmark.Get());
@@ -366,11 +369,14 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 			TraceParams.AddIgnoredActor(Nest.Get());
 		}
 	}
-	for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
+	if (ULevel* const SurfaceLevel = GetLevel())
 	{
-		if (IsValid(*ResourceIt))
+		for (AActor* const Actor : SurfaceLevel->Actors)
 		{
-			TraceParams.AddIgnoredActor(*ResourceIt);
+			if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
+			{
+				TraceParams.AddIgnoredActor(Resource);
+			}
 		}
 	}
 	for (const TObjectPtr<AJTSMoonResourceActor>& Resource : GeneratedResources)

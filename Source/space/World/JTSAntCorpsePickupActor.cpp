@@ -13,8 +13,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -418,10 +418,11 @@ void AJTSAntCorpsePickupActor::ResolveInitialSettledGroundLocation()
 		SettledLogicalPosition = FVector2D(CandidateGroundLocation.X, CandidateGroundLocation.Y);
 	}
 
-	if (const AJTSMoonGameMode* const MoonGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr)
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
 		FVector ResolvedGroundLocation;
-		if (MoonGameMode->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
+		if (SurfaceController->OwnsSurfaceActor(this)
+			&& SurfaceController->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
 		{
 			SettledGroundLocation = ResolvedGroundLocation;
 			return;
@@ -434,8 +435,8 @@ void AJTSAntCorpsePickupActor::ResolveInitialSettledGroundLocation()
 void AJTSAntCorpsePickupActor::ResolveFinalSettledGroundLocation()
 {
 	UWorld* const World = GetWorld();
-	const AJTSMoonGameMode* const MoonGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr;
-	if (!IsValid(MoonGameMode))
+	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	if (World == nullptr || !IsValid(SurfaceController) || !SurfaceController->OwnsSurfaceActor(this))
 	{
 		return;
 	}
@@ -454,7 +455,7 @@ void AJTSAntCorpsePickupActor::ResolveFinalSettledGroundLocation()
 	}
 
 	FVector ResolvedGroundLocation;
-	if (MoonGameMode->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
+	if (SurfaceController->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
 	{
 		SettledGroundLocation = ResolvedGroundLocation;
 	}

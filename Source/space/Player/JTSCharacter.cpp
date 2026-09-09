@@ -32,6 +32,7 @@
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSCharacter::AJTSCharacter()
@@ -693,10 +694,10 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	}
 	if (bMoonExplorationActive)
 	{
-	bInteractKeyHeld = false;
-	if (InteractionComponent != nullptr)
-	{
-		if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
+		bInteractKeyHeld = false;
+		if (InteractionComponent != nullptr)
+		{
+			if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
 			{
 				if (!InteractionTarget->IsA<AJTSSpacecraftActor>())
 				{
@@ -883,9 +884,15 @@ void AJTSCharacter::CompleteEquipmentSlotHold()
 bool AJTSCharacter::CanUseNormalGameplayInput() const
 {
 	return !IsBoarded()
-		&& BoundGameState.IsValid()
-		&& (BoundGameState->IsEarthCollectionActive() || BoundGameState->IsMoonExploration())
+		&& ((BoundGameState.IsValid() && (BoundGameState->IsEarthCollectionActive() || BoundGameState->IsMoonExploration()))
+			|| IsSpaceWorldSurfaceGameplayActive())
 		&& !IsGameplayInputBlocked();
+}
+
+bool AJTSCharacter::IsSpaceWorldSurfaceGameplayActive() const
+{
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	return IsValid(Manager) && Manager->IsSurfaceGameplayReady();
 }
 
 bool AJTSCharacter::IsGameplayInputBlocked() const
@@ -939,7 +946,8 @@ void AJTSCharacter::ApplyCameraView()
 
 void AJTSCharacter::BeginBoardingHold()
 {
-	if (bBoardingHoldActive || IsBoarded() || !BoundGameState.IsValid() || !BoundGameState->IsEarthCollectionActive())
+	const bool bCanBeginEarthBoarding = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	if (bBoardingHoldActive || IsBoarded() || !bCanBeginEarthBoarding)
 	{
 		return;
 	}
@@ -981,7 +989,10 @@ void AJTSCharacter::CompleteBoardingHold()
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
-	if (!BoundGameState.IsValid() || !BoundGameState->IsEarthCollectionActive() || !IsValid(Spacecraft) || !Spacecraft->IsPawnInBoardingRange(this))
+	const bool bCanCompleteEarthBoarding = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	if (!bCanCompleteEarthBoarding
+		|| !IsValid(Spacecraft)
+		|| !Spacecraft->IsPawnInBoardingRange(this))
 	{
 		CancelBoardingHold();
 		return;

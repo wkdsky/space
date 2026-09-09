@@ -142,6 +142,7 @@ private:
 	void CompleteEquipmentSlotHold();
 	bool CanUseNormalGameplayInput() const;
 	bool IsGameplayInputBlocked() const;
+	bool IsSpaceWorldSurfaceGameplayActive() const;
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();

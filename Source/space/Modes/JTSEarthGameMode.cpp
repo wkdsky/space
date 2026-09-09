@@ -395,10 +395,10 @@ void AJTSEarthGameMode::BeginMoonTravel()
 		return;
 	}
 
-	FString MoonLevelPackageName;
-	if (!ResolveMoonLevelPackageName(MoonLevelPackageName))
+	FString SpaceWorldLevelPackageName;
+	if (!ResolvePostEarthSpaceWorldLevelPackageName(SpaceWorldLevelPackageName))
 	{
-		UE_LOG(LogTemp, Error, TEXT("JumpToSpace EarthToMoon Travel Failed: MoonLevel is not configured."));
+		UE_LOG(LogTemp, Error, TEXT("JumpToSpace Earth launch travel failed: PostEarthSpaceWorldLevel is not configured."));
 		return;
 	}
 
@@ -414,8 +414,8 @@ void AJTSEarthGameMode::BeginMoonTravel()
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("JumpToSpace EarthToMoon Travel: Level=%s Delay=%.2f"),
-		*MoonLevelPackageName,
+		TEXT("JumpToSpace EarthToSpaceWorld Travel: Level=%s Delay=%.2f"),
+		*SpaceWorldLevelPackageName,
 		TransitionDelay);
 
 	if (TransitionDelay <= 0.0f)
@@ -434,28 +434,36 @@ void AJTSEarthGameMode::BeginMoonTravel()
 
 void AJTSEarthGameMode::TravelToMoon()
 {
-	FString MoonLevelPackageName;
-	if (!ResolveMoonLevelPackageName(MoonLevelPackageName))
+	FString SpaceWorldLevelPackageName;
+	if (!ResolvePostEarthSpaceWorldLevelPackageName(SpaceWorldLevelPackageName))
 	{
 		bMoonTravelScheduled = false;
-		UE_LOG(LogTemp, Error, TEXT("JumpToSpace EarthToMoon Travel Failed: MoonLevel is not configured."));
+		UE_LOG(LogTemp, Error, TEXT("JumpToSpace Earth launch travel failed: PostEarthSpaceWorldLevel is not configured."));
 		return;
 	}
 
-	UGameplayStatics::OpenLevel(this, FName(*MoonLevelPackageName));
+	UGameplayStatics::OpenLevel(this, FName(*SpaceWorldLevelPackageName));
 }
 
-bool AJTSEarthGameMode::ResolveMoonLevelPackageName(FString& OutPackageName) const
+bool AJTSEarthGameMode::ResolvePostEarthSpaceWorldLevelPackageName(FString& OutPackageName) const
 {
 	OutPackageName.Reset();
 
-	const FSoftObjectPath MoonLevelPath = MoonLevel.ToSoftObjectPath();
-	if (!MoonLevelPath.IsValid())
+	const FSoftObjectPath SpaceWorldLevelPath = PostEarthSpaceWorldLevel.ToSoftObjectPath();
+	if (SpaceWorldLevelPath.IsValid())
+	{
+		OutPackageName = SpaceWorldLevelPath.GetLongPackageName();
+		return !OutPackageName.IsEmpty();
+	}
+
+	const FSoftObjectPath LegacyMoonLevelPath = MoonLevel.ToSoftObjectPath();
+	if (!LegacyMoonLevelPath.IsValid())
 	{
 		return false;
 	}
 
-	OutPackageName = MoonLevelPath.GetLongPackageName();
+	UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Earth launch is using legacy MoonLevel. Configure PostEarthSpaceWorldLevel with L_SpaceWorld."));
+	OutPackageName = LegacyMoonLevelPath.GetLongPackageName();
 	return !OutPackageName.IsEmpty();
 }
 

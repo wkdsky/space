@@ -11,6 +11,7 @@
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSRoachActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSRoachNestActor::AJTSRoachNestActor()
@@ -173,8 +174,12 @@ void AJTSRoachNestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 const AJTSMoonGameMode* AJTSRoachNestActor::GetMoonGameMode() const
 {
-	const UWorld* const World = GetWorld();
-	return World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr;
+	if (const AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+	{
+		return Controller->OwnsSurfaceActor(this) ? Controller->GetMoonSettings() : nullptr;
+	}
+
+	return nullptr;
 }
 
 FVector AJTSRoachNestActor::GetVisualBoundsExtent() const
@@ -194,9 +199,13 @@ FVector AJTSRoachNestActor::GetVisualBoundsExtent() const
 
 bool AJTSRoachNestActor::ResolveAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const
 {
-	const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode();
-	return IsValid(MoonGameMode)
-		&& MoonGameMode->ResolveMoonGroundLocation(CandidateLocation, OutGroundLocation, this);
+	if (const AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+	{
+		return Controller->OwnsSurfaceActor(this)
+			&& Controller->ResolveMoonGroundLocation(CandidateLocation, OutGroundLocation, this);
+	}
+
+	return false;
 }
 
 float AJTSRoachNestActor::ChooseAntSpawnDistance(const AJTSMoonGameMode& MoonGameMode) const

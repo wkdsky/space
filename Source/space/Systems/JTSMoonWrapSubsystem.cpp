@@ -1,7 +1,7 @@
 #include "JTSMoonWrapSubsystem.h"
 
-#include "EngineUtils.h"
 #include "Engine/World.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonWorldActor.h"
 
 void UJTSMoonWrapSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -93,18 +93,12 @@ const AJTSMoonWorldActor* UJTSMoonWrapSubsystem::FindConfigurationActor() const
 		return ConfigurationActor.Get();
 	}
 
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
+	if (AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		return nullptr;
-	}
-
-	for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
-	{
-		if (IsValid(*It))
+		if (AJTSMoonWorldActor* const Configuration = Controller->GetMoonWorldActor())
 		{
-			ConfigurationActor = *It;
-			return *It;
+			ConfigurationActor = Configuration;
+			return Configuration;
 		}
 	}
 

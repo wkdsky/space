@@ -3,7 +3,6 @@
 #include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
-#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -14,8 +13,8 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "UObject/UnrealType.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonWorldActor.h"
 
 namespace
@@ -69,7 +68,6 @@ void AJTSMoonLoopGroundActor::BeginPlay()
 	if (!IsMoonWorld())
 	{
 		SetMoonWorldEnabled(false);
-		SetActorTickEnabled(false);
 		return;
 	}
 
@@ -170,18 +168,9 @@ void AJTSMoonLoopGroundActor::RebuildTiles()
 
 bool AJTSMoonLoopGroundActor::IsMoonWorld() const
 {
-	const UWorld* const World = GetWorld();
-	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	if (AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		return false;
-	}
-
-	for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
-	{
-		if (IsValid(*It))
-		{
-			return true;
-		}
+		return Controller->OwnsSurfaceActor(this) && IsValid(Controller->GetMoonWorldActor());
 	}
 
 	return false;
@@ -883,14 +872,11 @@ float AJTSMoonLoopGroundActor::GetVisualBoundsScale() const
 	const float BaseBoundsRadius = FMath::Sqrt(
 		FMath::Square(CachedMapSize.X * 0.5f)
 		+ FMath::Square(CachedMapSize.Y * 0.5f));
-	if (const UWorld* const World = GetWorld())
+	if (AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
-		for (TActorIterator<AJTSMoonWorldActor> It(World); It; ++It)
+		if (const AJTSMoonWorldActor* const MoonWorld = Controller->GetMoonWorldActor())
 		{
-			if (IsValid(*It))
-			{
-				return (*It)->GetRecommendedBoundsScale(BaseBoundsRadius);
-			}
+			return MoonWorld->GetRecommendedBoundsScale(BaseBoundsRadius);
 		}
 	}
 	return 1.25f;

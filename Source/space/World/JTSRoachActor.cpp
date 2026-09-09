@@ -22,6 +22,7 @@
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/UI/JTSHealthBarWidget.h"
 #include "space/World/JTSAntCorpsePickupActor.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSRoachNestActor.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -388,8 +389,12 @@ void AJTSRoachActor::Tick(float DeltaSeconds)
 
 const AJTSMoonGameMode* AJTSRoachActor::GetMoonGameMode() const
 {
-	const UWorld* const World = GetWorld();
-	return World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr;
+	if (const AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+	{
+		return Controller->OwnsSurfaceActor(this) ? Controller->GetMoonSettings() : nullptr;
+	}
+
+	return nullptr;
 }
 
 void AJTSRoachActor::RefreshVisualMode()
@@ -901,10 +906,11 @@ bool AJTSRoachActor::SpawnAntCorpse()
 		DeathGroundLocation.Y = DeathPhysicalPosition.Y;
 	}
 
-	if (const AJTSMoonGameMode* const MoonGameMode = GetMoonGameMode())
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
 		FVector ResolvedDeathGroundLocation;
-		if (MoonGameMode->ResolveMoonGroundLocation(DeathGroundLocation, ResolvedDeathGroundLocation, this))
+		if (SurfaceController->OwnsSurfaceActor(this)
+			&& SurfaceController->ResolveMoonGroundLocation(DeathGroundLocation, ResolvedDeathGroundLocation, this))
 		{
 			DeathGroundLocation = ResolvedDeathGroundLocation;
 		}
@@ -924,7 +930,7 @@ bool AJTSRoachActor::SpawnAntCorpse()
 	AJTSAntCorpsePickupActor* const CorpsePickup = World->SpawnActorDeferred<AJTSAntCorpsePickupActor>(
 		AJTSAntCorpsePickupActor::StaticClass(),
 		SpawnTransform,
-		nullptr,
+		this,
 		nullptr,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (!IsValid(CorpsePickup))

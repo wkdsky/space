@@ -15,6 +15,8 @@
 #include "space/Core/JTSGameState.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -138,12 +140,6 @@ void AJTSSpacecraftActor::BeginPlay()
 
 	DepositResourcesFromOverlappingPlayers();
 
-	if (World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
-		&& MoonWrappedActorComponent != nullptr
-		&& FakeMoonBendMaterial != nullptr)
-	{
-		MoonWrappedActorComponent->SetFakeMoonBendMaterial(FakeMoonBendMaterial);
-	}
 }
 
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -183,7 +179,10 @@ bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
-	if (!IsEarthCollectionActive() || !IsValid(Character) || HasBoardedPlayer() || !IsPawnInBoardingRange(Character))
+	if (!IsEarthCollectionActive()
+		|| !IsValid(Character)
+		|| HasBoardedPlayer()
+		|| !IsPawnInBoardingRange(Character))
 	{
 		return false;
 	}
@@ -201,7 +200,9 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
-	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive()) || !IsValid(Character) || BoardedPlayer.Get() != Character)
+	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive())
+		|| !IsValid(Character)
+		|| BoardedPlayer.Get() != Character)
 	{
 		return false;
 	}
@@ -447,6 +448,28 @@ bool AJTSSpacecraftActor::IsMoonExplorationActive() const
 	return IsValid(JTSGameState) && JTSGameState->IsMoonExploration();
 }
 
+bool AJTSSpacecraftActor::IsSpaceWorldSurfaceActive() const
+{
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	return IsValid(Manager) && Manager->IsSurfaceGameplayReady();
+}
+
+bool AJTSSpacecraftActor::IsMoonSurfaceRuntimeActive() const
+{
+	const UWorld* const World = GetWorld();
+	if (World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr)
+	{
+		return true;
+	}
+
+	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+	{
+		return SurfaceController->OwnsSurfaceActor(this);
+	}
+
+	return false;
+}
+
 bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 {
 	if (!IsValid(Player))
@@ -518,32 +541,41 @@ void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
 void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	if (World == nullptr || !IsMoonSurfaceRuntimeActive())
 	{
 		return;
 	}
 
-	UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
-	if (IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftStorage())
+	if (!bPersistedStorageRestoreAttempted)
 	{
-		Storage = GameInstance->GetPersistedSpacecraftStorage();
-		UE_LOG(
-			LogTemp,
-			Log,
-			TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d Organic=%d"),
-			GetResourceAmount(EJTSResourceType::Fuel),
-			static_cast<float>(GetResourceAmount(EJTSResourceType::Water)),
-			static_cast<float>(GetResourceAmount(EJTSResourceType::Food)),
-			GetResourceAmount(EJTSResourceType::Rock),
-			GetResourceAmount(EJTSResourceType::Ore),
-			GetResourceAmount(EJTSResourceType::Organic));
+		bPersistedStorageRestoreAttempted = true;
+		UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
+		if (IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftStorage())
+		{
+			Storage = GameInstance->GetPersistedSpacecraftStorage();
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d Organic=%d"),
+				GetResourceAmount(EJTSResourceType::Fuel),
+				static_cast<float>(GetResourceAmount(EJTSResourceType::Water)),
+				static_cast<float>(GetResourceAmount(EJTSResourceType::Food)),
+				GetResourceAmount(EJTSResourceType::Rock),
+				GetResourceAmount(EJTSResourceType::Ore),
+				GetResourceAmount(EJTSResourceType::Organic));
+		}
+	}
+
+	if (MoonWrappedActorComponent != nullptr && FakeMoonBendMaterial != nullptr)
+	{
+		MoonWrappedActorComponent->SetFakeMoonBendMaterial(FakeMoonBendMaterial);
 	}
 }
 
 void AJTSSpacecraftActor::SaveStorageForMoonTravel() const
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || World->GetAuthGameMode<AJTSMoonGameMode>() == nullptr)
+	if (World == nullptr || !IsMoonSurfaceRuntimeActive())
 	{
 		return;
 	}

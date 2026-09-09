@@ -99,7 +99,7 @@ private:
 	void StartLaunchSequence();
 	void BeginMoonTravel();
 	void TravelToMoon();
-	bool ResolveMoonLevelPackageName(FString& OutPackageName) const;
+	bool ResolvePostEarthSpaceWorldLevelPackageName(FString& OutPackageName) const;
 	AJTSGameState* GetJTSGameState() const;
 
 	/** Configurable Earth resource collection duration, in seconds. */
@@ -112,7 +112,11 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Flight", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float LaunchSequenceDuration = 2.0f;
 
-	/** Moon map selected by the Earth GameMode Blueprint. This remains unset in native C++ on purpose. */
+	/** Persistent SpaceWorld selected by the Earth GameMode Blueprint after a successful launch. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Transition", meta = (AllowPrivateAccess = "true"))
+	TSoftObjectPtr<UWorld> PostEarthSpaceWorldLevel;
+
+	/** Legacy fallback retained for old Earth Blueprint configuration. New projects must configure PostEarthSpaceWorldLevel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Transition", meta = (AllowPrivateAccess = "true"))
 	TSoftObjectPtr<UWorld> MoonLevel;
 
