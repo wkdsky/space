@@ -80,7 +80,7 @@ void AJTSSpaceWorldManager::InitializeCurrentPlanet()
 		UWorld* const World = GetWorld();
 		if (World == nullptr || InitialPlanetId.IsNone())
 		{
-			UE_LOG(LogTemp, Error, TEXT("Space World Manager requires InitialPlanet or InitialPlanetId before initial arrival can begin."));
+			UE_LOG(LogTemp, Error, TEXT("Space World Manager requires InitialPlanet or InitialPlanetId before SpaceFlight can begin."));
 			return;
 		}
 
@@ -149,6 +149,11 @@ void AJTSSpaceWorldManager::BeginInitialArrival()
 FOnJTSSpaceWorldInitialSurfaceLevelReady& AJTSSpaceWorldManager::OnInitialSurfaceLevelReady()
 {
 	return InitialSurfaceLevelReadyDelegate;
+}
+
+FOnJTSSpaceWorldLandingRequested& AJTSSpaceWorldManager::OnLandingRequested()
+{
+	return LandingRequestedDelegate;
 }
 
 AJTSPlanetAnchor* AJTSSpaceWorldManager::GetCurrentPlanet() const
@@ -328,6 +333,11 @@ AJTSMoonSurfaceController* AJTSSpaceWorldManager::GetCurrentSurfaceController() 
 	return IsValid(CurrentPlanet) ? GetSurfaceController(CurrentPlanet->GetPlanetId()) : nullptr;
 }
 
+AJTSMoonSurfaceController* AJTSSpaceWorldManager::EnsureCurrentSurfaceController()
+{
+	return EnsureSurfaceController(CurrentPlanet.Get());
+}
+
 void AJTSSpaceWorldManager::NotifySurfaceGameplayInitialized(AJTSMoonSurfaceController* Controller)
 {
 	if (Controller != nullptr && Controller == GetCurrentSurfaceController())
@@ -344,13 +354,8 @@ bool AJTSSpaceWorldManager::IsSurfaceGameplayReady() const
 		&& GetCurrentSurfaceController()->IsSurfaceGameplayInitialized();
 }
 
-void AJTSSpaceWorldManager::HandleFlightAltitude(float SurfaceAltitude)
+void AJTSSpaceWorldManager::HandleFlightAltitude(float ExteriorAltitude)
 {
-	if (!bEnableSurfaceUnload)
-	{
-		return;
-	}
-
 	AJTSPlanetAnchor* const Planet = CurrentPlanet.Get();
 	if (!IsValid(Planet))
 	{
@@ -358,16 +363,33 @@ void AJTSSpaceWorldManager::HandleFlightAltitude(float SurfaceAltitude)
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight
-		&& SurfaceAltitude >= Planet->GetSurfaceUnloadAltitude())
+		&& ExteriorAltitude <= Planet->GetApproachTransitionAltitude())
+	{
+		SetTravelState(EJTSSpaceTravelState::Approach);
+		RequestSurfaceLoad(Planet, true);
+	}
+	else if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight
+		&& bEnableSurfaceUnload
+		&& ExteriorAltitude >= Planet->GetSurfaceUnloadAltitude())
 	{
 		RequestSurfaceUnload(Planet);
 	}
-	else if ((CurrentTravelState == EJTSSpaceTravelState::Approach
+
+	if ((CurrentTravelState == EJTSSpaceTravelState::Approach
 			|| CurrentTravelState == EJTSSpaceTravelState::Landing
 			|| CurrentTravelState == EJTSSpaceTravelState::Surface)
-		&& SurfaceAltitude <= Planet->GetSurfaceLoadAltitude())
+		&& ExteriorAltitude <= Planet->GetSurfaceLoadAltitude())
 	{
 		RequestSurfaceLoad(Planet, true);
+	}
+
+	if (CurrentTravelState == EJTSSpaceTravelState::Approach
+		&& ExteriorAltitude <= Planet->GetLandingAssistAltitude()
+		&& IsSurfaceLevelLoaded(Planet)
+		&& IsSurfaceLevelVisible(Planet))
+	{
+		SetTravelState(EJTSSpaceTravelState::Landing);
+		LandingRequestedDelegate.Broadcast(Planet);
 	}
 }
 
@@ -493,12 +515,26 @@ void AJTSSpaceWorldManager::PollInitialSurfaceArrival()
 void AJTSSpaceWorldManager::LogDebugState() const
 {
 	const AJTSPlanetAnchor* const Planet = CurrentPlanet.Get();
-	const AJTSSpacecraftActor* const Spacecraft = GetCurrentSurfaceController() != nullptr
+	const AJTSSpacecraftActor* Spacecraft = GetCurrentSurfaceController() != nullptr
 		? GetCurrentSurfaceController()->GetSpacecraft()
 		: nullptr;
+	if (!IsValid(Spacecraft))
+	{
+		if (const UWorld* const World = GetWorld(); World != nullptr && World->PersistentLevel != nullptr)
+		{
+			for (AActor* const Actor : World->PersistentLevel->Actors)
+			{
+				if (const AJTSSpacecraftActor* const Candidate = Cast<AJTSSpacecraftActor>(Actor); IsValid(Candidate))
+				{
+					Spacecraft = Candidate;
+					break;
+				}
+			}
+		}
+	}
 
 	const float ShipAltitude = IsValid(Planet) && IsValid(Spacecraft)
-		? Planet->GetSurfaceAltitude(Spacecraft->GetActorLocation())
+		? Planet->GetExteriorAltitude(Spacecraft->GetActorLocation())
 		: 0.0f;
 	const ULevelStreamingDynamic* const SurfaceLevel = FindSurfaceStreamingLevel(Planet);
 	const TCHAR* const SurfaceState = !IsValid(SurfaceLevel)
@@ -514,7 +550,7 @@ void AJTSSpaceWorldManager::LogDebugState() const
 		? Planet->GetSurfaceLevel().ToSoftObjectPath().ToString()
 		: TEXT("None");
 
-	UE_LOG(LogTemp, Log, TEXT("Space World: State=%s Planet=%s ShipAltitude=%.1f PlanetRadius=%.1f Surface=%s (%s)"),
+	UE_LOG(LogTemp, Log, TEXT("Space World: State=%s Planet=%s ExteriorAltitude=%.1f PlanetRadius=%.1f Surface=%s (%s)"),
 		*StateName,
 		*PlanetName,
 		ShipAltitude,

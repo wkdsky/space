@@ -42,11 +42,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	int32 GetPersistedSpacecraftResourceAmount(EJTSResourceType ResourceType) const;
 
-	/** Returns whether a spacecraft storage snapshot is available for Moon arrival. */
+	/** Returns whether a spacecraft storage snapshot is available for the next persistent space-world travel. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	bool HasPersistedSpacecraftStorage() const;
 
-	/** Replaces the cross-level spacecraft storage snapshot after a successful launch. */
+	/** Replaces the cross-level spacecraft storage snapshot after a successful launch or active-space update. */
 	void SetPersistedSpacecraftStorage(const TMap<EJTSResourceType, int32>& NewStorage);
 
 	/** Returns the cross-level spacecraft storage snapshot. */

@@ -22,7 +22,8 @@ enum class EJTSGameplayPhase : uint8
 	EarthCaptureFailure = 3 UMETA(DisplayName = "Earth Capture Failure"),
 	MoonArrivalSuccess = 4 UMETA(DisplayName = "Moon Arrival Success"),
 	WaitingToStart = 5 UMETA(DisplayName = "Waiting To Start"),
-	MoonExploration = 6 UMETA(DisplayName = "Moon Exploration")
+	MoonExploration = 6 UMETA(DisplayName = "Moon Exploration"),
+	SpaceFlight = 7 UMETA(DisplayName = "Space Flight")
 };
 
 UENUM(BlueprintType)
@@ -79,6 +80,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Gameplay|Moon")
 	bool IsMoonExploration() const;
+
+	UFUNCTION(BlueprintPure, Category = "Gameplay|Flight")
+	bool IsSpaceFlight() const;
 
 	UFUNCTION(BlueprintPure, Category = "Gameplay|Outcome")
 	bool IsSuccessfulOutcome() const;

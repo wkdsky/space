@@ -325,7 +325,7 @@ bool AJTSPlayerController::IsNormalGameplayPhase() const
 	}
 
 	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-	return IsValid(GameState) && (GameState->IsEarthCollectionActive() || GameState->IsMoonExploration());
+	return IsValid(GameState) && (GameState->IsEarthCollectionActive() || GameState->IsMoonExploration() || GameState->IsSpaceFlight());
 }
 
 void AJTSPlayerController::BindGameState()
@@ -427,6 +427,10 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 
 	case EJTSGameplayPhase::MoonExploration:
 		ApplyEarthCollectionInputMode();
+		break;
+
+	case EJTSGameplayPhase::SpaceFlight:
+		ApplySpaceWorldInputMode();
 		break;
 
 	case EJTSGameplayPhase::EarthCollectionFinished:

@@ -16,6 +16,7 @@ class UObject;
 class USceneComponent;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpaceWorldInitialSurfaceLevelReady, AJTSMoonSurfaceController*);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpaceWorldLandingRequested, AJTSPlanetAnchor*);
 
 /** High-level state shared by the persistent space world and the flight component. */
 UENUM(BlueprintType)
@@ -52,6 +53,9 @@ public:
 
 	/** Native notification used by SpaceWorldGameMode to place persistent player and spacecraft actors after level visibility. */
 	FOnJTSSpaceWorldInitialSurfaceLevelReady& OnInitialSurfaceLevelReady();
+
+	/** Fired once when flight reaches a loaded surface's assisted-landing altitude. */
+	FOnJTSSpaceWorldLandingRequested& OnLandingRequested();
 
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	AJTSPlanetAnchor* GetCurrentPlanet() const;
@@ -90,13 +94,15 @@ public:
 	void UnregisterSurfaceController(AJTSMoonSurfaceController* Controller);
 	AJTSMoonSurfaceController* GetSurfaceController(FName PlanetId) const;
 	AJTSMoonSurfaceController* GetCurrentSurfaceController() const;
+	/** Returns the controller for the already loaded current surface, creating it when the streamed level has none. */
+	AJTSMoonSurfaceController* EnsureCurrentSurfaceController();
 	void NotifySurfaceGameplayInitialized(AJTSMoonSurfaceController* Controller);
 
 	UFUNCTION(BlueprintPure, Category = "Space World|Arrival")
 	bool IsSurfaceGameplayReady() const;
 
-	/** Called by flight code; only performs threshold streaming when explicitly enabled in the manager. */
-	void HandleFlightAltitude(float SurfaceAltitude);
+	/** Called by flight code after movement. The value is spherical exterior altitude, never local surface height. */
+	void HandleFlightAltitude(float ExteriorAltitude);
 
 protected:
 	virtual void BeginPlay() override;
@@ -153,6 +159,7 @@ private:
 	FTimerHandle DebugTimerHandle;
 	FTimerHandle InitialArrivalTimerHandle;
 	FOnJTSSpaceWorldInitialSurfaceLevelReady InitialSurfaceLevelReadyDelegate;
+	FOnJTSSpaceWorldLandingRequested LandingRequestedDelegate;
 	bool bInitialArrivalStarted = false;
 	bool bInitialSurfaceLevelReady = false;
 	bool bInitialSurfaceGameplayReady = false;

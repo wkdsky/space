@@ -358,6 +358,12 @@ void AJTSCharacter::PossessedBy(AController* NewController)
 	RegisterInputMappingContext();
 }
 
+void AJTSCharacter::UnPossessed()
+{
+	UnregisterInputMappingContext();
+	Super::UnPossessed();
+}
+
 void AJTSCharacter::OnRep_Controller()
 {
 	UnregisterInputMappingContext();

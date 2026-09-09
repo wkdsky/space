@@ -31,10 +31,16 @@ protected:
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
 
 private:
+	void TryStartSpaceFlight();
+	void HandleLandingRequested(class AJTSPlanetAnchor* Planet);
+	void HandleAssistedLandingCompleted();
+	void TryCompleteSurfaceArrival();
+	AJTSSpacecraftActor* CreateOrAdoptFlightSpacecraft();
+	bool BindPersistentSpacecraftToSurface(AJTSMoonSurfaceController* SurfaceController);
 	void HandleInitialSurfaceLevelReady(AJTSMoonSurfaceController* SurfaceController);
 	void TryCompleteInitialSurfaceArrival();
 	void PollSurfaceGameplayReady();
-	AJTSSpacecraftActor* FindPersistentSpacecraft() const;
+	AJTSSpacecraftActor* FindPersistentSpacecraft(bool& bOutConflict) const;
 	AJTSSpacecraftActor* CreateOrAdoptSurfaceSpacecraft(AJTSMoonSurfaceController* SurfaceController);
 	bool SpawnOrMovePlayer(AJTSMoonSurfaceController* SurfaceController);
 
@@ -44,9 +50,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Landing", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float AssistedLandingDuration = 2.0f;
+
 	TWeakObjectPtr<AJTSSpaceWorldManager> SpaceWorldManager;
 	TWeakObjectPtr<AJTSMoonSurfaceController> PendingSurfaceController;
 	TWeakObjectPtr<AJTSSpacecraftActor> PersistentSpacecraft;
 	FTimerHandle ArrivalRetryTimerHandle;
 	bool bPersistentActorsPlaced = false;
+	bool bFlightStarted = false;
+	bool bLandingInProgress = false;
+	bool bSurfaceArrivalCompleted = false;
 };

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSResourceTypes.h"
@@ -11,21 +11,32 @@
 #include "JTSSpacecraftActor.generated.h"
 
 class AJTSCharacter;
+class AController;
+class UBoxComponent;
+class UCameraComponent;
+class UEnhancedInputLocalPlayerSubsystem;
+class UInputAction;
+class UInputComponent;
+class UInputMappingContext;
 class UPrimitiveComponent;
 class USceneComponent;
 class USphereComponent;
+class USpringArmComponent;
 class UStaticMeshComponent;
+class UJTSSpacecraftFlightMovementComponent;
 class UJTSMoonWrappedActorComponent;
 class UMaterialInterface;
 struct FHitResult;
+struct FInputActionValue;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnShipResourcesChanged, int32, FuelCount, int32, WaterCount, int32, FoodCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShipBoostStateChanged, bool, bIsBoosting);
 
 /**
  * Receives player-carried resources and tracks the spacecraft's small Earth-stage inventory.
  */
 UCLASS()
-class SPACE_API AJTSSpacecraftActor : public AActor, public IInteractable
+class SPACE_API AJTSSpacecraftActor : public APawn, public IInteractable
 {
 	GENERATED_BODY()
 
@@ -58,6 +69,27 @@ public:
 
 	USceneComponent* GetBoardingPoint() const;
 	USceneComponent* GetExitPoint() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	UJTSSpacecraftFlightMovementComponent* GetFlightMovementComponent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	bool IsBoosting() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	float GetCurrentSpeed() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	float GetSpeedNormalized() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	float GetThrottleNormalized() const;
+
+	/** Called by SpaceWorld after a target planet is selected. */
+	void SetFlightTargetPlanet(class AJTSPlanetAnchor* Planet);
+
+	/** Hands movement over to the movement component's short landing sequence. */
+	bool BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds);
 
 	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
 	FBox GetResourceExclusionBounds() const;
@@ -110,16 +142,27 @@ public:
 	/** Returns the active spacecraft storage, keyed by resource type. */
 	const TMap<EJTSResourceType, int32>& GetStorage() const;
 
-	/** Restores the existing GameInstance spacecraft snapshot once a Moon surface runtime owns this ship. */
+	/** Restores the GameInstance snapshot once this ship becomes the active persistent runtime spacecraft. */
+	void RestorePersistentStorage();
+
+	/** Compatibility entry point for existing Moon surface code. */
 	void RestoreStorageForMoonTravel();
 
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
 	FOnShipResourcesChanged OnShipResourcesChanged;
 
+	/** Presentation hook for future thruster sound, VFX, and upgrade feedback. */
+	UPROPERTY(BlueprintAssignable, Category = "Ship|Flight")
+	FOnShipBoostStateChanged OnBoostStateChanged;
+
 protected:
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	UFUNCTION()
 	void HandleBoardingTriggerBeginOverlap(
@@ -141,21 +184,53 @@ protected:
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 private:
+	void InitializeFlightInput();
+	void RegisterFlightInputMappingContext();
+	void UnregisterFlightInputMappingContext();
+	void FlightMoveForward(const FInputActionValue& Value);
+	void FlightMoveRight(const FInputActionValue& Value);
+	void FlightMoveVertical(const FInputActionValue& Value);
+	void FlightRoll(const FInputActionValue& Value);
+	void FlightLookYaw(const FInputActionValue& Value);
+	void FlightLookPitch(const FInputActionValue& Value);
+	void FlightBoostStarted(const FInputActionValue& Value);
+	void FlightBoostStopped(const FInputActionValue& Value);
+	void FlightBrakeStarted(const FInputActionValue& Value);
+	void FlightBrakeStopped(const FInputActionValue& Value);
+	void UpdateFlightCamera(float DeltaSeconds);
+
+	UFUNCTION()
+	void HandleFlightBoostStateChanged(bool bIsBoosting);
 	bool IsEarthCollectionActive() const;
 	bool IsMoonExplorationActive() const;
 	bool IsSpaceWorldSurfaceActive() const;
+	bool IsSpaceWorldRuntimeActive() const;
 	bool IsMoonSurfaceRuntimeActive() const;
 	bool DepositPlayerResources(AJTSCharacter* Player);
 	void DepositResourcesFromOverlappingPlayers();
-	void SaveStorageForMoonTravel() const;
+	void SavePersistentStorage() const;
 
-	/** Non-visual transform root for the temporary spacecraft actor. */
+	/** Collision root moved by the flight component with Sweep enabled. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBoxComponent> FlightCollision;
+
+	/** Non-visual transform root for existing spacecraft content. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
 
 	/** Temporary visible primitive used until a spacecraft model is available. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> SpacecraftMesh;
+
+	/** Dedicated arcade flight movement. It owns all velocity, damping, boost, and collision movement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftFlightMovementComponent> FlightMovementComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USpringArmComponent> CameraBoom;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCameraComponent> FlightCamera;
 
 	/** Pawn-only overlap volume used for automatic deposits and boarding. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
@@ -181,6 +256,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float NavigationMarkerHeightOffset = 20.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
+	float NormalFlightFOV = 85.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
+	float BoostFlightFOV = 95.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float FlightFOVInterpolationSpeed = 5.0f;
+
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TMap<EJTSResourceType, int32> Storage;
@@ -192,6 +276,36 @@ private:
 	/** Character currently inside the boarding trigger, if any. */
 	UPROPERTY(Transient)
 	TObjectPtr<AJTSCharacter> NearbyPlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> FlightInputMappingContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightForwardAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightRightAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightVerticalAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightRollAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightLookYawAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightLookPitchAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightBoostAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightBrakeAction;
+
+	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
+	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;
 
 	bool bPersistedStorageRestoreAttempted = false;
 };

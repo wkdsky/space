@@ -35,6 +35,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	FVector GetExteriorCenter() const;
 
+	/** Signed distance from the spherical exterior. Positive values are outside the planet. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Exterior")
+	float GetExteriorAltitude(const FVector& WorldPosition) const;
+
+	/** Unit vector from WorldPosition toward the exterior center. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Exterior")
+	FVector GetDirectionToPlanet(const FVector& WorldPosition) const;
+
 	/** Returns the persistent-world actor manually assigned to render this planet, if any. */
 	UFUNCTION(BlueprintPure, Category = "Planet|Exterior")
 	AActor* GetExteriorVisualActor() const;
@@ -46,6 +54,10 @@ public:
 	/** The primary assisted-landing target. A later system may add multiple landing sites. */
 	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
 	FTransform GetLandingTransform() const;
+
+	/** The flight spawn entry for this planet; falls back to a position above its exterior sphere. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Approach")
+	FTransform GetApproachEntryTransform() const;
 
 	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
 	FVector SurfaceLocalToWorld(const FVector& SurfaceLocalPosition) const;
@@ -83,8 +95,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Travel")
 	float GetSurfaceLoadAltitude() const;
 
+	UFUNCTION(BlueprintPure, Category = "Planet|Approach")
+	float GetApproachTransitionAltitude() const;
+
 	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
 	float GetLandingApproachRange() const;
+
+	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
+	float GetLandingAssistAltitude() const;
 
 	UFUNCTION(BlueprintPure, Category = "Planet|State")
 	bool IsActivePlanet() const;
@@ -127,6 +145,20 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing", meta = (AllowPrivateAccess = "true"))
 	FTransform LandingAnchorTransform = FTransform::Identity;
 
+	/** Optional scene actor defining the direction and starting distance for a flight approach. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AActor> ApproachEntryAnchorActor;
+
+	/** Optional authored fallback. When disabled, a sphere-relative transform is generated automatically. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true"))
+	bool bUseApproachEntryTransform = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true", EditCondition = "bUseApproachEntryTransform"))
+	FTransform ApproachEntryTransform = FTransform::Identity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float DefaultApproachEntryDistance = 45000.0f;
+
 	/** Soft surface-world reference. No map path is hard-coded by native code. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true"))
 	TSoftObjectPtr<UWorld> SurfaceLevel;
@@ -143,8 +175,16 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Streaming", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float SurfaceLoadAltitude = 12000.0f;
 
+	/** Enter Approach and request the surface level at this spherical exterior altitude. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float ApproachTransitionAltitude = 20000.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float LandingApproachRange = 12000.0f;
+
+	/** At this exterior altitude, a visible loaded surface may take over with assisted landing. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float LandingAssistAltitude = 2500.0f;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet|State", meta = (AllowPrivateAccess = "true"))
 	bool bIsActivePlanet = false;

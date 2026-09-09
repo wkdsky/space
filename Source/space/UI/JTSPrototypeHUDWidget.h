@@ -57,6 +57,7 @@ private:
 	void UnbindSpacecraftResources();
 	void RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshGameplayHud();
+	void RefreshFlightHud();
 	void RefreshPlayerHealth(float CurrentHealth, float MaxHealth);
 	void RefreshShipResourcesSidebar();
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
@@ -181,6 +182,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> TimeText;
+
+	/** Compact SpaceWorld telemetry shown only while the spacecraft Pawn is possessed. */
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightTelemetryText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> StartRulesText;

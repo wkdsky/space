@@ -342,7 +342,7 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 	AJTSSpacecraftActor* const Spacecraft = GetSpacecraft();
 	if (IsValid(Spacecraft))
 	{
-		Spacecraft->RestoreStorageForMoonTravel();
+		Spacecraft->RestorePersistentStorage();
 	}
 	if (World == nullptr
 		|| !IsValid(MoonSettings)

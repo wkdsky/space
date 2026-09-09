@@ -2,20 +2,33 @@
 
 #include "space/Ships/JTSSpacecraftActor.h"
 
+#include "Camera/CameraComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "InputAction.h"
+#include "InputActionValue.h"
+#include "InputCoreTypes.h"
+#include "InputMappingContext.h"
+#include "InputModifiers.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -68,10 +81,26 @@ namespace
 
 AJTSSpacecraftActor::AJTSSpacecraftActor()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+	AutoPossessPlayer = EAutoReceiveInput::Disabled;
+	AutoPossessAI = EAutoPossessAI::Disabled;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+
+	FlightCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("FlightCollision"));
+	FlightCollision->SetupAttachment(SceneRoot);
+	FlightCollision->InitBoxExtent(FVector(150.0f, 100.0f, 75.0f));
+	FlightCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	FlightCollision->SetCollisionObjectType(ECC_Pawn);
+	FlightCollision->SetCollisionResponseToAllChannels(ECR_Block);
+	FlightCollision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	FlightCollision->SetGenerateOverlapEvents(false);
+	FlightCollision->SetCanEverAffectNavigation(false);
 
 	SpacecraftMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SpacecraftMesh"));
 	SpacecraftMesh->SetupAttachment(SceneRoot);
@@ -87,6 +116,25 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	{
 		SpacecraftMesh->SetStaticMesh(CubeMeshAsset.Object);
 	}
+
+	FlightMovementComponent = CreateDefaultSubobject<UJTSSpacecraftFlightMovementComponent>(TEXT("FlightMovementComponent"));
+	FlightMovementComponent->SetUpdatedComponent(SceneRoot);
+
+	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
+	CameraBoom->SetupAttachment(SceneRoot);
+	CameraBoom->TargetArmLength = 900.0f;
+	CameraBoom->SocketOffset = FVector(0.0f, 0.0f, 120.0f);
+	CameraBoom->bUsePawnControlRotation = false;
+	CameraBoom->bDoCollisionTest = true;
+	CameraBoom->bEnableCameraLag = true;
+	CameraBoom->CameraLagSpeed = 8.0f;
+	CameraBoom->bEnableCameraRotationLag = true;
+	CameraBoom->CameraRotationLagSpeed = 10.0f;
+
+	FlightCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FlightCamera"));
+	FlightCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
+	FlightCamera->bUsePawnControlRotation = false;
+	FlightCamera->SetFieldOfView(NormalFlightFOV);
 
 	BoardingTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("BoardingTrigger"));
 	BoardingTrigger->SetupAttachment(SceneRoot);
@@ -111,9 +159,20 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
 }
 
+void AJTSSpacecraftActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateFlightCamera(DeltaSeconds);
+}
+
 void AJTSSpacecraftActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (FlightMovementComponent != nullptr
+		&& !FlightMovementComponent->OnBoostStateChanged.IsAlreadyBound(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged))
+	{
+		FlightMovementComponent->OnBoostStateChanged.AddDynamic(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged);
+	}
 
 	if (!IsValid(BoardingTrigger))
 	{
@@ -131,7 +190,7 @@ void AJTSSpacecraftActor::BeginPlay()
 		return;
 	}
 
-	RestoreStorageForMoonTravel();
+	RestorePersistentStorage();
 
 	if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
 	{
@@ -139,12 +198,33 @@ void AJTSSpacecraftActor::BeginPlay()
 	}
 
 	DepositResourcesFromOverlappingPlayers();
+}
 
+void AJTSSpacecraftActor::PossessedBy(AController* NewController)
+{
+	UnregisterFlightInputMappingContext();
+	Super::PossessedBy(NewController);
+	RegisterFlightInputMappingContext();
+}
+
+void AJTSSpacecraftActor::UnPossessed()
+{
+	UnregisterFlightInputMappingContext();
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->ClearInput();
+	}
+	Super::UnPossessed();
 }
 
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	SaveStorageForMoonTravel();
+	UnregisterFlightInputMappingContext();
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->OnBoostStateChanged.RemoveDynamic(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged);
+	}
+	SavePersistentStorage();
 
 	if (UWorld* const World = GetWorld())
 	{
@@ -169,6 +249,234 @@ void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	NearbyPlayer = nullptr;
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+	InitializeFlightInput();
+	if (BoundFlightInputComponent.Get() == PlayerInputComponent)
+	{
+		RegisterFlightInputMappingContext();
+		return;
+	}
+
+	UEnhancedInputComponent* const EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent);
+	if (EnhancedInputComponent == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Jump to Space requires UEnhancedInputComponent for spacecraft flight input."));
+		return;
+	}
+
+	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveForward);
+	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveForward);
+	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveForward);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveVertical);
+	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveVertical);
+	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveVertical);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightLookYawAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightLookYaw);
+	EnhancedInputComponent->BindAction(FlightLookPitchAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightLookPitch);
+	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightBoostStarted);
+	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightBoostStopped);
+	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBoostStopped);
+	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightBrakeStarted);
+	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightBrakeStopped);
+	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBrakeStopped);
+
+	BoundFlightInputComponent = PlayerInputComponent;
+	RegisterFlightInputMappingContext();
+}
+
+void AJTSSpacecraftActor::InitializeFlightInput()
+{
+	if (FlightInputMappingContext != nullptr)
+	{
+		return;
+	}
+
+	FlightInputMappingContext = NewObject<UInputMappingContext>(this, TEXT("JTSFlightInputMappingContext"), RF_Transient);
+	FlightForwardAction = NewObject<UInputAction>(this, TEXT("FlightForwardAction"), RF_Transient);
+	FlightRightAction = NewObject<UInputAction>(this, TEXT("FlightRightAction"), RF_Transient);
+	FlightVerticalAction = NewObject<UInputAction>(this, TEXT("FlightVerticalAction"), RF_Transient);
+	FlightRollAction = NewObject<UInputAction>(this, TEXT("FlightRollAction"), RF_Transient);
+	FlightLookYawAction = NewObject<UInputAction>(this, TEXT("FlightLookYawAction"), RF_Transient);
+	FlightLookPitchAction = NewObject<UInputAction>(this, TEXT("FlightLookPitchAction"), RF_Transient);
+	FlightBoostAction = NewObject<UInputAction>(this, TEXT("FlightBoostAction"), RF_Transient);
+	FlightBrakeAction = NewObject<UInputAction>(this, TEXT("FlightBrakeAction"), RF_Transient);
+
+	FlightForwardAction->ValueType = EInputActionValueType::Axis1D;
+	FlightRightAction->ValueType = EInputActionValueType::Axis1D;
+	FlightVerticalAction->ValueType = EInputActionValueType::Axis1D;
+	FlightRollAction->ValueType = EInputActionValueType::Axis1D;
+	FlightLookYawAction->ValueType = EInputActionValueType::Axis1D;
+	FlightLookPitchAction->ValueType = EInputActionValueType::Axis1D;
+	FlightBoostAction->ValueType = EInputActionValueType::Boolean;
+	FlightBrakeAction->ValueType = EInputActionValueType::Boolean;
+
+	FlightInputMappingContext->MapKey(FlightForwardAction, EKeys::W);
+	FlightInputMappingContext->MapKey(FlightRightAction, EKeys::D);
+	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::SpaceBar);
+	FlightInputMappingContext->MapKey(FlightRollAction, EKeys::E);
+	FlightInputMappingContext->MapKey(FlightLookYawAction, EKeys::MouseX);
+	FlightInputMappingContext->MapKey(FlightLookPitchAction, EKeys::MouseY);
+	FlightInputMappingContext->MapKey(FlightBoostAction, EKeys::LeftShift);
+	FlightInputMappingContext->MapKey(FlightBrakeAction, EKeys::C);
+
+	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
+	{
+		FEnhancedActionKeyMapping& Mapping = FlightInputMappingContext->MapKey(Action, Key);
+		Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(FlightInputMappingContext));
+	};
+	AddNegatedMapping(FlightForwardAction, EKeys::S);
+	AddNegatedMapping(FlightRightAction, EKeys::A);
+	AddNegatedMapping(FlightVerticalAction, EKeys::LeftControl);
+	AddNegatedMapping(FlightRollAction, EKeys::Q);
+}
+
+void AJTSSpacecraftActor::RegisterFlightInputMappingContext()
+{
+	if (FlightInputMappingContext == nullptr)
+	{
+		return;
+	}
+
+	APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+	if (!IsValid(PlayerController) || !PlayerController->IsLocalController())
+	{
+		return;
+	}
+
+	ULocalPlayer* const LocalPlayer = PlayerController->GetLocalPlayer();
+	UEnhancedInputLocalPlayerSubsystem* const InputSubsystem = LocalPlayer != nullptr
+		? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()
+		: nullptr;
+	if (InputSubsystem == nullptr || RegisteredFlightInputSubsystem.Get() == InputSubsystem)
+	{
+		return;
+	}
+
+	UnregisterFlightInputMappingContext();
+	InputSubsystem->AddMappingContext(FlightInputMappingContext, 1);
+	RegisteredFlightInputSubsystem = InputSubsystem;
+}
+
+void AJTSSpacecraftActor::UnregisterFlightInputMappingContext()
+{
+	if (UEnhancedInputLocalPlayerSubsystem* const InputSubsystem = RegisteredFlightInputSubsystem.Get())
+	{
+		if (FlightInputMappingContext != nullptr)
+		{
+			InputSubsystem->RemoveMappingContext(FlightInputMappingContext);
+		}
+	}
+	RegisteredFlightInputSubsystem.Reset();
+}
+
+void AJTSSpacecraftActor::FlightMoveForward(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetForwardInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetStrafeInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightMoveVertical(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetVerticalInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightRoll(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetRollInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightLookYaw(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->AddYawInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightLookPitch(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->AddPitchInput(Value.Get<float>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightBoostStarted(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetBoosting(Value.Get<bool>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightBoostStopped(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetBoosting(false);
+	}
+}
+
+void AJTSSpacecraftActor::FlightBrakeStarted(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetBraking(Value.Get<bool>());
+	}
+}
+
+void AJTSSpacecraftActor::FlightBrakeStopped(const FInputActionValue& Value)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetBraking(false);
+	}
+}
+
+void AJTSSpacecraftActor::UpdateFlightCamera(float DeltaSeconds)
+{
+	if (FlightCamera == nullptr)
+	{
+		return;
+	}
+
+	const bool bShouldBoostFOV = FlightMovementComponent != nullptr && FlightMovementComponent->IsBoosting();
+	const float TargetFOV = bShouldBoostFOV ? BoostFlightFOV : NormalFlightFOV;
+	FlightCamera->SetFieldOfView(FMath::FInterpTo(
+		FlightCamera->FieldOfView,
+		TargetFOV,
+		DeltaSeconds,
+		FMath::Max(0.1f, FlightFOVInterpolationSpeed)));
+}
+
+void AJTSSpacecraftActor::HandleFlightBoostStateChanged(bool bIsBoosting)
+{
+	OnBoostStateChanged.Broadcast(bIsBoosting);
 }
 
 bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
@@ -248,6 +556,48 @@ USceneComponent* AJTSSpacecraftActor::GetBoardingPoint() const
 USceneComponent* AJTSSpacecraftActor::GetExitPoint() const
 {
 	return ExitPoint.Get();
+}
+
+UJTSSpacecraftFlightMovementComponent* AJTSSpacecraftActor::GetFlightMovementComponent() const
+{
+	return FlightMovementComponent.Get();
+}
+
+bool AJTSSpacecraftActor::IsBoosting() const
+{
+	return FlightMovementComponent != nullptr && FlightMovementComponent->IsBoosting();
+}
+
+float AJTSSpacecraftActor::GetCurrentSpeed() const
+{
+	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetCurrentSpeed() : 0.0f;
+}
+
+float AJTSSpacecraftActor::GetSpeedNormalized() const
+{
+	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetSpeedNormalized() : 0.0f;
+}
+
+float AJTSSpacecraftActor::GetThrottleNormalized() const
+{
+	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetThrottleNormalized() : 0.0f;
+}
+
+void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->SetTargetPlanet(Planet);
+	}
+}
+
+bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds)
+{
+	if (FlightMovementComponent != nullptr)
+	{
+		return FlightMovementComponent->BeginAssistedLanding(LandingTransform, DurationSeconds);
+	}
+	return false;
 }
 
 FBox AJTSSpacecraftActor::GetResourceExclusionBounds() const
@@ -357,7 +707,7 @@ bool AJTSSpacecraftActor::TryConsumeResourceAmounts(const TMap<EJTSResourceType,
 		}
 	}
 
-	SaveStorageForMoonTravel();
+	SavePersistentStorage();
 	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 	return true;
 }
@@ -424,7 +774,7 @@ bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, in
 		UE_LOG(LogTemp, Log, TEXT("Spacecraft Deposit: Type=%s Amount=%d"), GetResourceTypeName(Resource.Key), Resource.Value);
 	}
 
-	SaveStorageForMoonTravel();
+	SavePersistentStorage();
 	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 	return true;
 }
@@ -452,6 +802,11 @@ bool AJTSSpacecraftActor::IsSpaceWorldSurfaceActive() const
 {
 	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 	return IsValid(Manager) && Manager->IsSurfaceGameplayReady();
+}
+
+bool AJTSSpacecraftActor::IsSpaceWorldRuntimeActive() const
+{
+	return IsValid(AJTSSpaceWorldManager::FindSpaceWorldManager(this));
 }
 
 bool AJTSSpacecraftActor::IsMoonSurfaceRuntimeActive() const
@@ -538,10 +893,10 @@ void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
 	}
 }
 
-void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
+void AJTSSpacecraftActor::RestorePersistentStorage()
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || !IsMoonSurfaceRuntimeActive())
+	if (World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}
@@ -556,7 +911,7 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 			UE_LOG(
 				LogTemp,
 				Log,
-				TEXT("JumpToSpace Moon Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d Organic=%d"),
+				TEXT("JumpToSpace Persistent Spacecraft Storage Restored: Fuel=%d Water=%.1f Food=%.1f Rock=%d Ore=%d Organic=%d"),
 				GetResourceAmount(EJTSResourceType::Fuel),
 				static_cast<float>(GetResourceAmount(EJTSResourceType::Water)),
 				static_cast<float>(GetResourceAmount(EJTSResourceType::Food)),
@@ -572,10 +927,15 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 	}
 }
 
-void AJTSSpacecraftActor::SaveStorageForMoonTravel() const
+void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
+{
+	RestorePersistentStorage();
+}
+
+void AJTSSpacecraftActor::SavePersistentStorage() const
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || !IsMoonSurfaceRuntimeActive())
+	if (World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}

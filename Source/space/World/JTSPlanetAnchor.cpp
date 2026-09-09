@@ -4,6 +4,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "Math/RotationMatrix.h"
 
 AJTSPlanetAnchor::AJTSPlanetAnchor()
 {
@@ -28,6 +29,17 @@ FVector AJTSPlanetAnchor::GetExteriorCenter() const
 	return ExteriorCenter;
 }
 
+float AJTSPlanetAnchor::GetExteriorAltitude(const FVector& WorldPosition) const
+{
+	return FVector::Distance(WorldPosition, GetExteriorCenter()) - GetPlanetRadius();
+}
+
+FVector AJTSPlanetAnchor::GetDirectionToPlanet(const FVector& WorldPosition) const
+{
+	const FVector Direction = GetExteriorCenter() - WorldPosition;
+	return Direction.IsNearlyZero() ? -GetSurfaceUpVector() : Direction.GetSafeNormal();
+}
+
 AActor* AJTSPlanetAnchor::GetExteriorVisualActor() const
 {
 	return ExteriorVisualActor.Get();
@@ -41,6 +53,23 @@ FTransform AJTSPlanetAnchor::GetSurfaceFrameTransform() const
 FTransform AJTSPlanetAnchor::GetLandingTransform() const
 {
 	return IsValid(LandingAnchorActor) ? LandingAnchorActor->GetActorTransform() : LandingAnchorTransform;
+}
+
+FTransform AJTSPlanetAnchor::GetApproachEntryTransform() const
+{
+	if (IsValid(ApproachEntryAnchorActor))
+	{
+		return ApproachEntryAnchorActor->GetActorTransform();
+	}
+	if (bUseApproachEntryTransform)
+	{
+		return ApproachEntryTransform;
+	}
+
+	const FVector SurfaceUp = GetSurfaceUpVector().GetSafeNormal();
+	const FVector EntryLocation = GetExteriorCenter() + SurfaceUp * (GetPlanetRadius() + FMath::Max(0.0f, DefaultApproachEntryDistance));
+	const FVector ForwardToPlanet = GetDirectionToPlanet(EntryLocation);
+	return FTransform(FRotationMatrix::MakeFromX(ForwardToPlanet).ToQuat(), EntryLocation);
 }
 
 FVector AJTSPlanetAnchor::SurfaceLocalToWorld(const FVector& SurfaceLocalPosition) const
@@ -103,9 +132,19 @@ float AJTSPlanetAnchor::GetSurfaceLoadAltitude() const
 	return FMath::Max(0.0f, SurfaceLoadAltitude);
 }
 
+float AJTSPlanetAnchor::GetApproachTransitionAltitude() const
+{
+	return FMath::Max(GetSurfaceLoadAltitude(), ApproachTransitionAltitude);
+}
+
 float AJTSPlanetAnchor::GetLandingApproachRange() const
 {
 	return FMath::Max(0.0f, LandingApproachRange);
+}
+
+float AJTSPlanetAnchor::GetLandingAssistAltitude() const
+{
+	return FMath::Max(0.0f, LandingAssistAltitude);
 }
 
 bool AJTSPlanetAnchor::IsActivePlanet() const

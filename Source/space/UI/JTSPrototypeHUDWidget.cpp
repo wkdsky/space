@@ -39,6 +39,8 @@
 #include "space/UI/JTSCircularProgressWidget.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSpaceWorldManager.h"
 
 namespace
 {
@@ -284,6 +286,11 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	const bool bSpaceFlightActive = BoundGameState.IsValid() && BoundGameState->IsSpaceFlight();
+	if (bSpaceFlightActive)
+	{
+		RefreshFlightHud();
+	}
 	if (bEarthCollectionActive || bMoonExplorationActive)
 	{
 		RefreshGameplayHud();
@@ -493,6 +500,15 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			TimeText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
 		}
 		AddCanvasChild(GameplayLayer, TimeText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 28.0f), FVector2D(280.0f, 58.0f), FVector2D(0.5f, 0.0f));
+
+		FlightTelemetryText = MakeTextBlock(
+			WidgetTree,
+			TEXT("FlightTelemetryText"),
+			TEXT("SPD 0 m/s\nMOON 0 m"),
+			18.0f,
+			FLinearColor(0.70f, 0.92f, 1.0f, 1.0f),
+			ETextJustify::Right);
+		AddCanvasChild(GameplayLayer, FlightTelemetryText, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 28.0f), FVector2D(300.0f, 120.0f), FVector2D(1.0f, 0.0f));
 
 		PlayerCardPanel = MakeBorder(WidgetTree, TEXT("PlayerCardPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
 		AddCanvasChild(GameplayLayer, PlayerCardPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 28.0f), FVector2D(276.0f, 106.0f));
@@ -1216,6 +1232,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	CachedGameplayPhase = NewGameplayPhase;
 	const bool bEarthCollection = NewGameplayPhase == EJTSGameplayPhase::EarthCollection;
 	const bool bMoonExploration = NewGameplayPhase == EJTSGameplayPhase::MoonExploration;
+	const bool bSpaceFlight = NewGameplayPhase == EJTSGameplayPhase::SpaceFlight;
 	if (bEarthCollection || bMoonExploration)
 	{
 		BindPlayerHealth();
@@ -1231,15 +1248,24 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 
 	ApplyLayerVisibility(StartMenuLayer, NewGameplayPhase == EJTSGameplayPhase::WaitingToStart && !bSettingsVisible);
 	ApplyLayerVisibility(SettingsLayer, NewGameplayPhase == EJTSGameplayPhase::WaitingToStart && bSettingsVisible);
-	ApplyLayerVisibility(GameplayLayer, bEarthCollection || bMoonExploration);
+	ApplyLayerVisibility(GameplayLayer, bEarthCollection || bMoonExploration || bSpaceFlight);
 	ApplyLayerVisibility(LaunchingLayer, NewGameplayPhase == EJTSGameplayPhase::Launching);
 	ApplyLayerVisibility(ResultLayer, NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess);
 	ApplyLayerVisibility(FuelToMoonPanel, bEarthCollection);
 	ApplyLayerVisibility(TimeText, bEarthCollection);
+	ApplyLayerVisibility(FlightTelemetryText, bSpaceFlight);
+	ApplyLayerVisibility(PlayerCardPanel, bEarthCollection || bMoonExploration);
 	ApplyLayerVisibility(InventoryPanel, bEarthCollection || bMoonExploration);
+	ApplyLayerVisibility(EquipmentPanel, false);
+	ApplyLayerVisibility(RightSidebarPanel, bEarthCollection || bMoonExploration);
+	ApplyLayerVisibility(ShipResourcesPanel, bEarthCollection || bMoonExploration);
 	ApplyLayerVisibility(InteractionPromptText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
 	ApplyLayerVisibility(CrosshairText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
 	ApplyLayerVisibility(GameplayHelpText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
+	if (!bEarthCollection && !bMoonExploration)
+	{
+		SetBoardingProgressVisible(false);
+	}
 	if (!bMoonExploration || bMoonShopOpen || bGameMenuOpen)
 	{
 		SetSpacecraftNavigationVisibility(false, false);
@@ -1257,6 +1283,10 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	{
 		RefreshGameplayHud();
 	}
+	else if (bSpaceFlight)
+	{
+		RefreshFlightHud();
+	}
 	else
 	{
 		SetBoardingProgressVisible(false);
@@ -1265,6 +1295,47 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 			TimeText->SetRenderScale(FVector2D(1.0f, 1.0f));
 		}
 	}
+}
+
+void UJTSPrototypeHUDWidget::RefreshFlightHud()
+{
+	if (FlightTelemetryText == nullptr || !BoundGameState.IsValid() || !BoundGameState->IsSpaceFlight())
+	{
+		return;
+	}
+
+	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr);
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const AJTSPlanetAnchor* const Planet = IsValid(Manager) ? Manager->GetCurrentPlanet() : nullptr;
+	if (!IsValid(Spacecraft) || !IsValid(Planet))
+	{
+		FlightTelemetryText->SetText(FText::FromString(TEXT("FLIGHT SYSTEM\nACQUIRING TARGET")));
+		return;
+	}
+
+	const int32 SpeedMetersPerSecond = FMath::Max(0, FMath::RoundToInt(Spacecraft->GetCurrentSpeed() / 100.0f));
+	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(Planet->GetExteriorAltitude(Spacecraft->GetActorLocation()) / 100.0f));
+	FString StateLine;
+	switch (Manager->GetCurrentTravelState())
+	{
+	case EJTSSpaceTravelState::Landing:
+		StateLine = TEXT("LANDING");
+		break;
+
+	case EJTSSpaceTravelState::Approach:
+		StateLine = TEXT("APPROACH");
+		break;
+
+	default:
+		StateLine = Spacecraft->IsBoosting() ? TEXT("BOOST") : TEXT("SPACE FLIGHT");
+		break;
+	}
+
+	FlightTelemetryText->SetText(FText::FromString(FString::Printf(
+		TEXT("SPD %d m/s\nMOON %d m\n%s"),
+		SpeedMetersPerSecond,
+		AltitudeMeters,
+		*StateLine)));
 }
 
 void UJTSPrototypeHUDWidget::RefreshGameplayHud()
