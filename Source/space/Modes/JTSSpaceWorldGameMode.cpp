@@ -122,24 +122,28 @@ void AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter()
 	AJTSPlanetAnchor* const Planet = SpaceWorldManager->GetCurrentPlanet();
 	if (IsValid(World) && IsValid(Planet) && Planet->HasGameplaySurface())
 	{
-		if (!bInitialGroundedSpacecraftInitialized)
-		{
-			bInitialGroundedSpacecraftInitialized = TrySpawnInitialGroundedSpacecraft(Planet);
-		}
-
 		if (!bInitialSurfaceCharacterSpawned && IsValid(PlayerController))
 		{
 			bInitialSurfaceCharacterSpawned = SpawnAndSnapCharacter(PlayerController, Planet);
-			if (bInitialSurfaceCharacterSpawned)
-			{
-				SpaceWorldManager->SetSurfaceGameplayReady(true);
-				if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
-				{
-					JTSPlayerController->ApplySpaceWorldInputMode();
-				}
+		}
 
-				UE_LOG(LogTemp, Log, TEXT("SpaceWorld initial surface character spawned on real planet %s."), *Planet->GetPlanetId().ToString());
+		AJTSCharacter* const Character = IsValid(PlayerController)
+			? Cast<AJTSCharacter>(PlayerController->GetPawn())
+			: nullptr;
+		if (bInitialSurfaceCharacterSpawned && !bInitialGroundedSpacecraftInitialized)
+		{
+			bInitialGroundedSpacecraftInitialized = TrySpawnInitialGroundedSpacecraft(Planet, Character);
+		}
+
+		if (bInitialSurfaceCharacterSpawned && bInitialGroundedSpacecraftInitialized)
+		{
+			SpaceWorldManager->SetSurfaceGameplayReady(true);
+			if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+			{
+				JTSPlayerController->ApplySpaceWorldInputMode();
 			}
+
+			UE_LOG(LogTemp, Log, TEXT("SpaceWorld initial player and spacecraft are ready on real planet %s."), *Planet->GetPlanetId().ToString());
 		}
 	}
 
@@ -264,15 +268,98 @@ bool AJTSSpaceWorldGameMode::SpawnAndSnapCharacter(APlayerController* PlayerCont
 	return Character->SnapToPlanetSurface(Planet, SpawnReferenceTransform.GetLocation());
 }
 
-bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet)
+bool AJTSSpaceWorldGameMode::ResolveInitialSpacecraftLandingTransform(
+	AJTSPlanetAnchor* Planet,
+	const AJTSCharacter* Character,
+	FTransform& OutLandingSurfaceTransform) const
 {
-	if (!IsValid(Planet))
+	if (!IsValid(Planet)
+		|| !IsValid(Character)
+		|| !Planet->GetLandingSurfaceTransform(OutLandingSurfaceTransform))
+	{
+		return false;
+	}
+
+	const float MinimumPlayerDistance = FMath::Max(1.0f, InitialSpacecraftMinimumPlayerDistance);
+	if (Planet->ApproximateSurfaceArcDistance(
+		Character->GetActorLocation(),
+		OutLandingSurfaceTransform.GetLocation()) >= MinimumPlayerDistance)
+	{
+		return true;
+	}
+
+	FJTSPlanetSurfaceFrame PlayerSurfaceFrame;
+	const FVector LandingForward = OutLandingSurfaceTransform.GetUnitAxis(EAxis::X);
+	if (!Planet->GetSurfaceFrameAt(Character->GetActorLocation(), LandingForward, PlayerSurfaceFrame))
+	{
+		return false;
+	}
+
+	const FVector SurfaceUp = PlayerSurfaceFrame.Up.GetSafeNormal();
+	FVector PreferredDirection = FVector::VectorPlaneProject(LandingForward, SurfaceUp).GetSafeNormal();
+	if (PreferredDirection.IsNearlyZero())
+	{
+		PreferredDirection = PlayerSurfaceFrame.Forward.GetSafeNormal();
+	}
+	FVector PerpendicularDirection = FVector::CrossProduct(SurfaceUp, PreferredDirection).GetSafeNormal();
+	if (PerpendicularDirection.IsNearlyZero())
+	{
+		PerpendicularDirection = PlayerSurfaceFrame.Right.GetSafeNormal();
+	}
+
+	const FVector CandidateDirections[] = {
+		PreferredDirection,
+		PerpendicularDirection,
+		-PreferredDirection,
+		-PerpendicularDirection
+	};
+	for (const FVector& CandidateDirection : CandidateDirections)
+	{
+		if (CandidateDirection.IsNearlyZero())
+		{
+			continue;
+		}
+
+		const FVector PlayerRadialUp = Planet->GetRadialUpVector(PlayerSurfaceFrame.Location);
+		const FVector CandidateTangentDirection = FVector::VectorPlaneProject(CandidateDirection, PlayerRadialUp).GetSafeNormal();
+		const FVector RotationAxis = FVector::CrossProduct(PlayerRadialUp, CandidateTangentDirection).GetSafeNormal();
+		if (CandidateTangentDirection.IsNearlyZero() || RotationAxis.IsNearlyZero())
+		{
+			continue;
+		}
+
+		// Move by an arc, not a straight tangent offset. A tangent offset always resolves to a
+		// slightly shorter geodesic distance on a sphere and can therefore fail the safety test.
+		const float CandidateArcDistance = MinimumPlayerDistance + FMath::Max(50.0f, MinimumPlayerDistance * 0.10f);
+		const FVector CandidateRadialDirection = FQuat(
+			RotationAxis,
+			Planet->ArcDistanceToAngleRadians(CandidateArcDistance)).RotateVector(PlayerRadialUp).GetSafeNormal();
+		const FVector CandidateReferenceLocation = Planet->GetPlanetCenter()
+			+ CandidateRadialDirection * Planet->GetApproximateRadius();
+
+		FJTSPlanetSurfaceFrame CandidateSurfaceFrame;
+		if (!Planet->GetSurfaceFrameAt(CandidateReferenceLocation, PreferredDirection, CandidateSurfaceFrame)
+			|| Planet->ApproximateSurfaceArcDistance(Character->GetActorLocation(), CandidateSurfaceFrame.Location) < MinimumPlayerDistance)
+		{
+			continue;
+		}
+
+		OutLandingSurfaceTransform = CandidateSurfaceFrame.Transform;
+		return true;
+	}
+
+	return false;
+}
+
+bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet, const AJTSCharacter* Character)
+{
+	if (!IsValid(Planet) || !IsValid(Character))
 	{
 		return false;
 	}
 
 	FTransform LandingSurfaceTransform;
-	if (!Planet->GetLandingSurfaceTransform(LandingSurfaceTransform))
+	if (!ResolveInitialSpacecraftLandingTransform(Planet, Character, LandingSurfaceTransform))
 	{
 		return false;
 	}

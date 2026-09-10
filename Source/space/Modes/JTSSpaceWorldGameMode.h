@@ -9,6 +9,7 @@
 #include "JTSSpaceWorldGameMode.generated.h"
 
 class AJTSPlanetAnchor;
+class AJTSCharacter;
 class AJTSSpaceWorldManager;
 class AJTSSpacecraftActor;
 class APlayerController;
@@ -37,7 +38,11 @@ private:
 	void ScheduleInitialSurfaceSpawnRetry(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
 	void LogInitialSurfaceInitializationFailure(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
 	bool SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
-	bool TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet);
+	bool TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet, const AJTSCharacter* Character);
+	bool ResolveInitialSpacecraftLandingTransform(
+		AJTSPlanetAnchor* Planet,
+		const AJTSCharacter* Character,
+		FTransform& OutLandingSurfaceTransform) const;
 	AJTSSpacecraftActor* FindExistingGameplaySpacecraft();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
@@ -46,6 +51,14 @@ private:
 	/** Class used for the single persistent spacecraft parked on the authored landing surface. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
+
+	/**
+	 * Minimum real-surface separation between the GameMode-spawned player and parked spacecraft.
+	 * The authored Planet landing anchor remains the preferred location; this is only a safe fallback
+	 * when that anchor resolves too close to the player spawn.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float InitialSpacecraftMinimumPlayerDistance = 900.0f;
 
 	/** Retained for serialized Blueprint defaults until real-mesh landing is implemented with spacecraft code. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|LegacyFlight", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", DeprecatedProperty, DeprecationMessage = "Assisted landing is deferred to the real-mesh spacecraft phase."))

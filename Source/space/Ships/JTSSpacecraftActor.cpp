@@ -290,6 +290,7 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightBrakeStarted);
 	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightBrakeStopped);
 	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBrakeStopped);
+	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightDisembarkStarted);
 
 	BoundFlightInputComponent = PlayerInputComponent;
 	RegisterFlightInputMappingContext();
@@ -311,6 +312,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightLookPitchAction = NewObject<UInputAction>(this, TEXT("FlightLookPitchAction"), RF_Transient);
 	FlightBoostAction = NewObject<UInputAction>(this, TEXT("FlightBoostAction"), RF_Transient);
 	FlightBrakeAction = NewObject<UInputAction>(this, TEXT("FlightBrakeAction"), RF_Transient);
+	FlightDisembarkAction = NewObject<UInputAction>(this, TEXT("FlightDisembarkAction"), RF_Transient);
 
 	FlightForwardAction->ValueType = EInputActionValueType::Axis1D;
 	FlightRightAction->ValueType = EInputActionValueType::Axis1D;
@@ -320,6 +322,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightLookPitchAction->ValueType = EInputActionValueType::Axis1D;
 	FlightBoostAction->ValueType = EInputActionValueType::Boolean;
 	FlightBrakeAction->ValueType = EInputActionValueType::Boolean;
+	FlightDisembarkAction->ValueType = EInputActionValueType::Boolean;
 
 	FlightInputMappingContext->MapKey(FlightForwardAction, EKeys::W);
 	FlightInputMappingContext->MapKey(FlightRightAction, EKeys::D);
@@ -329,6 +332,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightInputMappingContext->MapKey(FlightLookPitchAction, EKeys::MouseY);
 	FlightInputMappingContext->MapKey(FlightBoostAction, EKeys::LeftShift);
 	FlightInputMappingContext->MapKey(FlightBrakeAction, EKeys::C);
+	FlightInputMappingContext->MapKey(FlightDisembarkAction, EKeys::F);
 
 	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
 	{
@@ -398,6 +402,11 @@ void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightMoveVertical(const FInputActionValue& Value)
 {
+	if (Value.Get<float>() > KINDA_SMALL_NUMBER && IsSpaceWorldSurfaceActive())
+	{
+		BeginSurfaceTakeoff();
+	}
+
 	if (FlightMovementComponent != nullptr)
 	{
 		FlightMovementComponent->SetVerticalInput(Value.Get<float>());
@@ -460,6 +469,19 @@ void AJTSSpacecraftActor::FlightBrakeStopped(const FInputActionValue& Value)
 	}
 }
 
+void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
+{
+	if (!Value.Get<bool>() || !IsGroundedOnPlanet())
+	{
+		return;
+	}
+
+	if (AJTSCharacter* const Character = BoardedPlayer.Get())
+	{
+		TryDisembarkPlayer(Character);
+	}
+}
+
 void AJTSSpacecraftActor::UpdateFlightCamera(float DeltaSeconds)
 {
 	if (FlightCamera == nullptr)
@@ -489,10 +511,20 @@ bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
-	if (!IsEarthCollectionActive()
+	const bool bEarthCollectionActive = IsEarthCollectionActive();
+	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
+	if ((!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
 		|| !IsValid(Character)
 		|| HasBoardedPlayer()
 		|| !IsPawnInBoardingRange(Character))
+	{
+		return false;
+	}
+
+	APlayerController* const PlayerController = bSpaceWorldSurfaceActive
+		? Cast<APlayerController>(Character->GetController())
+		: nullptr;
+	if (bSpaceWorldSurfaceActive && !IsValid(PlayerController))
 	{
 		return false;
 	}
@@ -504,22 +536,58 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 
 	BoardedPlayer = Character;
 	NearbyPlayer = Character;
+	if (!bSpaceWorldSurfaceActive)
+	{
+		// Preserve Earth collection's existing hold-to-board state. Earth launch flow owns its
+		// transition and intentionally does not hand direct spacecraft control to the player.
+		return true;
+	}
+
+	PlayerController->Possess(this);
+	if (GetController() != PlayerController)
+	{
+		BoardedPlayer = nullptr;
+		NearbyPlayer = nullptr;
+		Character->ExitBoardedState(this);
+		if (PlayerController->GetPawn() != Character)
+		{
+			PlayerController->Possess(Character);
+		}
+		return false;
+	}
+
 	return true;
 }
 
 bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
-	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive())
+	APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+	const bool bPlayerIsDriving = IsValid(PlayerController) && PlayerController->GetPawn() == this;
+	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
+	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive() && !bSpaceWorldSurfaceActive)
 		|| !IsValid(Character)
 		|| BoardedPlayer.Get() != Character)
 	{
 		return false;
 	}
+	if (bPlayerIsDriving && (!bSpaceWorldSurfaceActive || !IsGroundedOnPlanet()))
+	{
+		// Airborne ejection is intentionally outside this first surface-flight slice.
+		return false;
+	}
 
 	BoardedPlayer = nullptr;
 	NearbyPlayer = nullptr;
+	if (bPlayerIsDriving)
+	{
+		PlayerController->UnPossess();
+	}
 	Character->ExitBoardedState(this);
+	if (bPlayerIsDriving && IsValid(PlayerController))
+	{
+		PlayerController->Possess(Character);
+	}
 	return true;
 }
 
@@ -614,10 +682,35 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 
 	if (FlightMovementComponent != nullptr)
 	{
+		FlightMovementComponent->SetTargetPlanet(InPlanetAnchor);
 		FlightMovementComponent->ClearInput();
 		FlightMovementComponent->StopMovementImmediately();
 		FlightMovementComponent->Deactivate();
 	}
+}
+
+bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
+{
+	if (!IsSpaceWorldSurfaceActive() || !IsGroundedOnPlanet())
+	{
+		return false;
+	}
+
+	AJTSPlanetAnchor* const Planet = GroundedPlanet.Get();
+	if (!IsValid(Planet))
+	{
+		return false;
+	}
+
+	SetFlightTargetPlanet(Planet);
+	ClearGroundedPlanet();
+	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+	{
+		Manager->SetTravelState(EJTSSpaceTravelState::Takeoff);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Spacecraft %s began surface takeoff from %s."), *GetName(), *Planet->GetPlanetId().ToString());
+	return true;
 }
 
 void AJTSSpacecraftActor::ClearGroundedPlanet()
@@ -744,9 +837,14 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 		return FText::FromString(TEXT("[E] EXIT"));
 	}
 
+	if (IsSpaceWorldSurfaceActive() || IsEarthCollectionActive())
+	{
+		return FText::FromString(TEXT("HOLD [E] BOARD"));
+	}
+
 	return IsMoonExplorationActive()
 		? FText::FromString(TEXT("[E] WORKSHOP"))
-		: FText::FromString(TEXT("HOLD [E] BOARD"));
+		: FText::GetEmpty();
 }
 
 void AJTSSpacecraftActor::Interact_Implementation(APawn* /*InteractingPawn*/)

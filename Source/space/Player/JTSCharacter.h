@@ -27,6 +27,17 @@ class UStaticMeshComponent;
 struct FInputActionValue;
 struct FJTSPlanetSurfaceFrame;
 
+/** Selects how a character's body follows the camera while it is standing on a real spherical planet. */
+UENUM(BlueprintType)
+enum class EJTSPlanetBodyFacingMode : uint8
+{
+	/** Third-person action control: yaw follows the local gravity-relative camera tangent immediately. */
+	FaceCamera UMETA(DisplayName = "Face Camera"),
+
+	/** Conventional free-look control: body yaw follows movement direction in the local surface tangent. */
+	OrientToMovement UMETA(DisplayName = "Orient To Movement")
+};
+
 /**
  * First playable native character for Jump to Space.
  */
@@ -246,6 +257,13 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlanetBodyTurnInterpolationSpeed = 12.0f;
+
+	/**
+	 * Blueprint-selectable third-person body behavior for real spherical planets only. Earth and the
+	 * legacy flat Moon retain CharacterMovement's normal bOrientRotationToMovement behavior.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true"))
+	EJTSPlanetBodyFacingMode PlanetBodyFacingMode = EJTSPlanetBodyFacingMode::FaceCamera;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDebugPlanetSurface = false;

@@ -97,9 +97,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
 	void SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor);
 
-	/** Restores normal flight-component activation for a future explicit takeoff path. */
+	/** Restores normal flight-component activation after leaving a parked real-planet surface. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
 	void ClearGroundedPlanet();
+
+	/** Starts the minimal SpaceWorld surface takeoff and hands travel-state progression to SpaceWorldManager. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
+	bool BeginSurfaceTakeoff();
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Surface")
 	AJTSPlanetAnchor* GetGroundedPlanet() const;
@@ -221,6 +225,7 @@ private:
 	void FlightBoostStopped(const FInputActionValue& Value);
 	void FlightBrakeStarted(const FInputActionValue& Value);
 	void FlightBrakeStopped(const FInputActionValue& Value);
+	void FlightDisembarkStarted(const FInputActionValue& Value);
 	void UpdateFlightCamera(float DeltaSeconds);
 
 	UFUNCTION()
@@ -331,6 +336,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightBrakeAction;
+
+	/** Available only while a player is driving a grounded SpaceWorld spacecraft. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightDisembarkAction;
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;

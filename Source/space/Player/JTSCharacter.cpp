@@ -783,6 +783,9 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 		const float YawDeltaRadians = FMath::DegreesToRadians(Value.Get<float>() * MouseSensitivityX);
 		PlanetCameraTangentForward = FQuat(LocalUp, YawDeltaRadians).RotateVector(PlanetCameraTangentForward).GetSafeNormal();
 		UpdatePlanetCameraFrame(LocalUp, 0.0f);
+		// The real-planet camera owns an absolute local frame. Apply the configured body behavior in
+		// this input path as well, so FaceCamera does not wait for the next actor tick.
+		UpdatePlanetBodyOrientation(LocalUp, 0.0f);
 		return;
 	}
 
@@ -871,13 +874,16 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceGameplayActive();
 	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
-	if (bEarthCollectionActive && IsValid(Spacecraft) && Spacecraft->IsPawnInBoardingRange(this))
+	if ((bEarthCollectionActive || bSpaceWorldSurfaceActive)
+		&& IsValid(Spacecraft)
+		&& Spacecraft->IsPawnInBoardingRange(this))
 	{
 		BeginBoardingHold();
 		return;
 	}
-	if (bMoonExplorationActive)
+	if (bMoonExplorationActive && !bSpaceWorldSurfaceActive)
 	{
 		bInteractKeyHeld = false;
 		if (InteractionComponent != nullptr)
@@ -1129,8 +1135,10 @@ void AJTSCharacter::UpdatePlanetGameplayFrame(float DeltaSeconds)
 		return;
 	}
 
+	// Keep the camera frame current before evaluating FaceCamera body yaw. Both frames still use the
+	// planet-local up vector, so this does not introduce World-Z orientation into SpaceWorld.
+	UpdatePlanetCameraFrame(DesiredUp, DeltaSeconds);
 	UpdatePlanetBodyOrientation(DesiredUp, DeltaSeconds);
-	UpdatePlanetCameraFrame(LastPlanetUp, DeltaSeconds);
 
 	if (bDebugPlanetSurface && IsValid(GameplayPlanet))
 	{
@@ -1167,7 +1175,14 @@ void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float 
 		LastPlanetUp = TargetUp;
 	}
 
-	if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	if (PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
+	{
+		// Do not enable bUseControllerRotationYaw here: controller rotation also contains the
+		// gravity-relative pitch/roll used by the absolute camera. Only the local tangent yaw belongs
+		// to the character body.
+		PlanetBodyForward = GetStablePlanetTangent(LastPlanetUp, PlanetCameraTangentForward);
+	}
+	else if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
 		const FVector TangentVelocity = FVector::VectorPlaneProject(MovementComponent->Velocity, LastPlanetUp);
 		if (TangentVelocity.SizeSquared() > FMath::Square(5.0f))
@@ -1309,8 +1324,9 @@ void AJTSCharacter::ApplyCameraView()
 
 void AJTSCharacter::BeginBoardingHold()
 {
-	const bool bCanBeginEarthBoarding = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
-	if (bBoardingHoldActive || IsBoarded() || !bCanBeginEarthBoarding)
+	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
+	if (bBoardingHoldActive || IsBoarded() || !bCanBeginBoarding)
 	{
 		return;
 	}
@@ -1352,8 +1368,9 @@ void AJTSCharacter::CompleteBoardingHold()
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
-	const bool bCanCompleteEarthBoarding = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
-	if (!bCanCompleteEarthBoarding
+	const bool bCanCompleteBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
+	if (!bCanCompleteBoarding
 		|| !IsValid(Spacecraft)
 		|| !Spacecraft->IsPawnInBoardingRange(this))
 	{
