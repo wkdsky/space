@@ -8,14 +8,15 @@
 
 #include "JTSSpaceWorldGameMode.generated.h"
 
+class AJTSPlanetAnchor;
 class AJTSSpaceWorldManager;
-class AJTSMoonSurfaceController;
 class AJTSSpacecraftActor;
 class APlayerController;
 
 /**
- * Persistent-world ruleset. It owns the one player and persistent spacecraft instance;
- * a loaded surface controller owns Moon-only runtime initialization and placement data.
+ * Persistent SpaceWorld startup rules. It chooses the player spawn and binds that character to
+ * the configured real gameplay planet. Planet math, Moon-specific surface gameplay, and flight
+ * behavior remain in their own systems.
  */
 UCLASS()
 class SPACE_API AJTSSpaceWorldGameMode : public AGameModeBase
@@ -31,34 +32,28 @@ protected:
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
 
 private:
-	void TryStartSpaceFlight();
-	void HandleLandingRequested(class AJTSPlanetAnchor* Planet);
-	void HandleAssistedLandingCompleted();
-	void TryCompleteSurfaceArrival();
-	AJTSSpacecraftActor* CreateOrAdoptFlightSpacecraft();
-	bool BindPersistentSpacecraftToSurface(AJTSMoonSurfaceController* SurfaceController);
-	void HandleInitialSurfaceLevelReady(AJTSMoonSurfaceController* SurfaceController);
-	void TryCompleteInitialSurfaceArrival();
-	void PollSurfaceGameplayReady();
-	AJTSSpacecraftActor* FindPersistentSpacecraft(bool& bOutConflict) const;
-	AJTSSpacecraftActor* CreateOrAdoptSurfaceSpacecraft(AJTSMoonSurfaceController* SurfaceController);
-	bool SpawnOrMovePlayer(AJTSMoonSurfaceController* SurfaceController);
+	AJTSSpaceWorldManager* FindOrCreateSpaceWorldManager();
+	void TrySpawnInitialSurfaceCharacter();
+	bool SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
+	bool TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet);
+	AJTSSpacecraftActor* FindExistingGameplaySpacecraft();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpaceWorldManager> SpaceWorldManagerClass;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
+	/** Class used for the single persistent spacecraft parked on the authored landing surface. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Landing", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	/** Retained for serialized Blueprint defaults until real-mesh landing is implemented with spacecraft code. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|LegacyFlight", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", DeprecatedProperty, DeprecationMessage = "Assisted landing is deferred to the real-mesh spacecraft phase."))
 	float AssistedLandingDuration = 2.0f;
 
 	TWeakObjectPtr<AJTSSpaceWorldManager> SpaceWorldManager;
-	TWeakObjectPtr<AJTSMoonSurfaceController> PendingSurfaceController;
-	TWeakObjectPtr<AJTSSpacecraftActor> PersistentSpacecraft;
-	FTimerHandle ArrivalRetryTimerHandle;
-	bool bPersistentActorsPlaced = false;
-	bool bFlightStarted = false;
-	bool bLandingInProgress = false;
-	bool bSurfaceArrivalCompleted = false;
+	FTimerHandle SurfaceSpawnRetryTimerHandle;
+	bool bInitialSurfaceCharacterSpawned = false;
+	bool bInitialGroundedSpacecraftInitialized = false;
+	bool bLoggedSurfaceSnapFailure = false;
+	bool bLoggedLandingAnchorFailure = false;
+	bool bLoggedMultipleSpacecraft = false;
 };

@@ -21,9 +21,9 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 #include "space/World/JTSMoonWorldActor.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSRoachActor.h"
 #include "space/World/JTSRoachNestActor.h"
-#include "space/World/JTSSpaceWorldManager.h"
 
 namespace
 {
@@ -52,23 +52,13 @@ AJTSMoonSurfaceController::AJTSMoonSurfaceController()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	MoonGameplaySettingsClass = AJTSMoonGameMode::StaticClass();
+	MoonCorpseClass = AJTSMoonCorpseActor::StaticClass();
 }
 
 AJTSMoonSurfaceController* AJTSMoonSurfaceController::FindMoonSurfaceController(
 	const UObject* WorldContextObject,
 	FName RequestedPlanetId)
 {
-	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(WorldContextObject))
-	{
-		const FName PlanetIdToFind = !RequestedPlanetId.IsNone()
-			? RequestedPlanetId
-			: (IsValid(Manager->GetCurrentPlanet()) ? Manager->GetCurrentPlanet()->GetPlanetId() : NAME_None);
-		if (AJTSMoonSurfaceController* const Controller = Manager->GetSurfaceController(PlanetIdToFind))
-		{
-			return Controller;
-		}
-	}
-
 	const UWorld* const World = WorldContextObject != nullptr ? WorldContextObject->GetWorld() : nullptr;
 	if (const AJTSMoonGameMode* const LegacyGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr)
 	{
@@ -192,6 +182,69 @@ void AJTSMoonSurfaceController::RegisterSurfaceRuntimeActor(AActor* RuntimeActor
 	RegisteredSurfaceRuntimeActors.AddUnique(RuntimeActor);
 }
 
+AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnCorpseAtPlanetSurfaceAnchor(
+	AJTSPlanetSurfaceAnchor* InCorpseSurfaceAnchor)
+{
+	if (RealSurfaceMoonCorpse.IsValid())
+	{
+		return RealSurfaceMoonCorpse.Get();
+	}
+
+	if (!IsValid(InCorpseSurfaceAnchor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s received an invalid real-surface corpse anchor."), *GetName());
+		return nullptr;
+	}
+
+	FTransform SurfaceTransform;
+	if (!InCorpseSurfaceAnchor->GetSurfaceTransform(SurfaceTransform))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s could not resolve corpse anchor %s on a real gameplay mesh."),
+			*GetName(), *InCorpseSurfaceAnchor->GetName());
+		return nullptr;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+
+	TSubclassOf<AJTSMoonCorpseActor> CorpseClass = MoonCorpseClass;
+	if (CorpseClass == nullptr)
+	{
+		CorpseClass = AJTSMoonCorpseActor::StaticClass();
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Name = TEXT("JTSRealSurfaceMoonCorpse");
+	SpawnParameters.OverrideLevel = GetLevel();
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AJTSMoonCorpseActor* const Corpse = World->SpawnActor<AJTSMoonCorpseActor>(CorpseClass, SurfaceTransform, SpawnParameters);
+	if (!IsValid(Corpse))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s could not spawn its real-surface corpse."), *GetName());
+		return nullptr;
+	}
+
+	if (!Corpse->SnapToPlanetSurfaceAnchor(InCorpseSurfaceAnchor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s failed to snap corpse %s to its real surface anchor."),
+			*GetName(), *Corpse->GetName());
+		Corpse->Destroy();
+		return nullptr;
+	}
+
+	RealSurfaceMoonCorpse = Corpse;
+	RegisterSurfaceRuntimeActor(Corpse);
+	return Corpse;
+}
+
+AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnConfiguredCorpseAtPlanetSurfaceAnchor()
+{
+	return SpawnCorpseAtPlanetSurfaceAnchor(CorpseSurfaceAnchor.Get());
+}
+
 AJTSMoonWorldActor* AJTSMoonSurfaceController::GetMoonWorldActor() const
 {
 	if (IsValid(MoonWorldActor))
@@ -276,10 +329,6 @@ void AJTSMoonSurfaceController::BeginPlay()
 		MoonWrap->RefreshConfiguration();
 	}
 
-	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
-	{
-		Manager->RegisterSurfaceController(this);
-	}
 }
 
 void AJTSMoonSurfaceController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -290,15 +339,11 @@ void AJTSMoonSurfaceController::EndPlay(const EEndPlayReason::Type EndPlayReason
 		World->GetTimerManager().ClearTimer(SurfaceInitializationTimerHandle);
 	}
 
-	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
-	{
-		Manager->UnregisterSurfaceController(this);
-	}
-
 	ClearGeneratedAntNests();
 	CachedSpacecraft.Reset();
 	CachedMoonWorld.Reset();
 	LevelMoonCorpseLandmark.Reset();
+	RealSurfaceMoonCorpse.Reset();
 	CachedLevelMoonCorpseLandmarks.Reset();
 	RegisteredSurfaceRuntimeActors.Reset();
 	bLevelCorpseLandmarkSearchCompleted = false;
@@ -395,10 +440,6 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 	}
 
 	bSurfaceGameplayInitialized = true;
-	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
-	{
-		Manager->NotifySurfaceGameplayInitialized(this);
-	}
 	return true;
 }
 

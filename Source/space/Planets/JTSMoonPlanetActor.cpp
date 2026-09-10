@@ -73,8 +73,7 @@ FVector AJTSMoonPlanetActor::GetPlanetCenter() const
 
 FVector AJTSMoonPlanetActor::GetGravityDirection(const FVector& WorldLocation) const
 {
-	const FVector ToPlanetCenter = GetPlanetCenter() - WorldLocation;
-	return ToPlanetCenter.IsNearlyZero() ? FVector::DownVector : ToPlanetCenter.GetSafeNormal();
+	return (GetPlanetCenter() - WorldLocation).GetSafeNormal();
 }
 
 void AJTSMoonPlanetActor::OnConstruction(const FTransform& Transform)
@@ -99,7 +98,7 @@ bool AJTSMoonPlanetActor::DisableForActiveMoonSurface()
 		}
 		SetActorHiddenInGame(true);
 		bDisabledForActiveMoonSurface = true;
-		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored on the active Moon surface. Use AJTSMoonWorldActor and AJTSMoonLoopGroundActor."));
+		UE_LOG(LogTemp, Warning, TEXT("Legacy AJTSMoonPlanetActor is ignored on the active Fake Moon surface; real gameplay planets use AJTSPlanetAnchor with a mesh surface."));
 		return true;
 	}
 

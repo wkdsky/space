@@ -19,6 +19,7 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Math/RotationMatrix.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
@@ -29,6 +30,7 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -593,11 +595,105 @@ void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
 
 bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds)
 {
+	ClearGroundedPlanet();
 	if (FlightMovementComponent != nullptr)
 	{
 		return FlightMovementComponent->BeginAssistedLanding(LandingTransform, DurationSeconds);
 	}
 	return false;
+}
+
+void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
+{
+	GroundedPlanet = InPlanetAnchor;
+	bIsGroundedOnPlanet = IsValid(InPlanetAnchor);
+	if (!bIsGroundedOnPlanet)
+	{
+		return;
+	}
+
+	if (FlightMovementComponent != nullptr)
+	{
+		FlightMovementComponent->ClearInput();
+		FlightMovementComponent->StopMovementImmediately();
+		FlightMovementComponent->Deactivate();
+	}
+}
+
+void AJTSSpacecraftActor::ClearGroundedPlanet()
+{
+	GroundedPlanet = nullptr;
+	bIsGroundedOnPlanet = false;
+	if (FlightMovementComponent != nullptr && !FlightMovementComponent->IsActive())
+	{
+		FlightMovementComponent->Activate(true);
+	}
+}
+
+AJTSPlanetAnchor* AJTSSpacecraftActor::GetGroundedPlanet() const
+{
+	return bIsGroundedOnPlanet ? GroundedPlanet.Get() : nullptr;
+}
+
+bool AJTSSpacecraftActor::IsGroundedOnPlanet() const
+{
+	return bIsGroundedOnPlanet && IsValid(GroundedPlanet);
+}
+
+bool AJTSSpacecraftActor::SnapSpacecraftToSurfaceTransform(
+	AJTSPlanetAnchor* InPlanetAnchor,
+	const FTransform& SurfaceTransform)
+{
+	if (!IsValid(InPlanetAnchor) || !InPlanetAnchor->HasGameplaySurface())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s has no valid real gameplay planet."), *GetName());
+		return false;
+	}
+
+	const FVector SurfaceUp = SurfaceTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	FVector SurfaceForward = FVector::VectorPlaneProject(SurfaceTransform.GetUnitAxis(EAxis::X), SurfaceUp).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s received an invalid surface frame on %s."),
+			*GetName(), *InPlanetAnchor->GetPlanetId().ToString());
+		return false;
+	}
+	if (SurfaceForward.IsNearlyZero())
+	{
+		SurfaceForward = InPlanetAnchor->ProjectDirectionToSurfaceTangent(GetActorForwardVector(), SurfaceTransform.GetLocation());
+	}
+
+	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
+	const FVector GroundedLocation = SurfaceTransform.GetLocation()
+		+ SurfaceUp * FMath::Max(0.0f, ShipGroundClearance);
+	SetActorLocationAndRotation(
+		GroundedLocation,
+		SurfaceRotation,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	SetGroundedPlanet(InPlanetAnchor);
+	return true;
+}
+
+bool AJTSSpacecraftActor::SnapSpacecraftToSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor)
+{
+	if (!IsValid(SurfaceAnchor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s received an invalid landing anchor."), *GetName());
+		return false;
+	}
+
+	AJTSPlanetAnchor* const Planet = SurfaceAnchor->GetPlanetAnchor();
+	FTransform SurfaceTransform;
+	if (!IsValid(Planet) || !SurfaceAnchor->GetSurfaceTransform(SurfaceTransform))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s could not resolve landing anchor %s."),
+			*GetName(), *SurfaceAnchor->GetName());
+		return false;
+	}
+
+	return SnapSpacecraftToSurfaceTransform(Planet, SurfaceTransform);
 }
 
 FBox AJTSSpacecraftActor::GetResourceExclusionBounds() const

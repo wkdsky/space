@@ -11,6 +11,8 @@
 #include "JTSSpacecraftActor.generated.h"
 
 class AJTSCharacter;
+class AJTSPlanetAnchor;
+class AJTSPlanetSurfaceAnchor;
 class AController;
 class UBoxComponent;
 class UCameraComponent;
@@ -90,6 +92,28 @@ public:
 
 	/** Hands movement over to the movement component's short landing sequence. */
 	bool BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds);
+
+	/** Marks this persistent spacecraft as parked on one real gameplay planet and disables flight movement. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
+	void SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor);
+
+	/** Restores normal flight-component activation for a future explicit takeoff path. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
+	void ClearGroundedPlanet();
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Surface")
+	AJTSPlanetAnchor* GetGroundedPlanet() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Surface")
+	bool IsGroundedOnPlanet() const;
+
+	/** Places the ship above a resolved real-mesh surface frame. The transform's local Z is the impact normal. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
+	bool SnapSpacecraftToSurfaceTransform(AJTSPlanetAnchor* InPlanetAnchor, const FTransform& SurfaceTransform);
+
+	/** Resolves an authored anchor, then parks this ship on that real gameplay surface. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
+	bool SnapSpacecraftToSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor);
 
 	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
 	FBox GetResourceExclusionBounds() const;
@@ -256,6 +280,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float NavigationMarkerHeightOffset = 20.0f;
 
+	/** Root clearance above a real collision surface while this spacecraft is grounded. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float ShipGroundClearance = 90.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
 	float NormalFlightFOV = 85.0f;
 
@@ -306,6 +334,13 @@ private:
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;
+
+	/** Transient real-planet parking state. Earth and Legacy Fake Moon spacecraft leave this unset. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> GroundedPlanet;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
+	bool bIsGroundedOnPlanet = false;
 
 	bool bPersistedStorageRestoreAttempted = false;
 };

@@ -6,9 +6,11 @@
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionShape.h"
 #include "CollisionQueryParams.h"
+#include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -32,6 +34,7 @@
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -54,7 +57,6 @@ AJTSCharacter::AJTSCharacter()
 	MovementComponent->MinAnalogWalkSpeed = 20.0f;
 	MovementComponent->BrakingDecelerationWalking = 2000.0f;
 	MovementComponent->GravityScale = 1.0f;
-	MovementComponent->SetGravityDirection(FVector::DownVector);
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
@@ -114,6 +116,131 @@ UJTSHealthComponent* AJTSCharacter::GetHealthComponent() const
 bool AJTSCharacter::IsFirstPersonView() const
 {
 	return bFirstPersonView;
+}
+
+void AJTSCharacter::SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor)
+{
+	if (GameplayPlanet.Get() != InPlanetAnchor)
+	{
+		GameplayPlanet = InPlanetAnchor;
+		bPlanetFrameInitialized = false;
+		bPlanetCameraFrameInitialized = false;
+		PlanetCameraPitch = 0.0f;
+	}
+
+	if (IsValid(PlanetGravityComponent))
+	{
+		PlanetGravityComponent->SetPlanetAnchor(InPlanetAnchor);
+	}
+}
+
+AJTSPlanetAnchor* AJTSCharacter::GetGameplayPlanet() const
+{
+	return GameplayPlanet.Get();
+}
+
+bool AJTSCharacter::SnapToPlanetSurface(AJTSPlanetAnchor* InPlanetAnchor, const FVector& TraceReferenceLocation)
+{
+	if (!IsValid(InPlanetAnchor) || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	SetGameplayPlanet(InPlanetAnchor);
+
+	FJTSPlanetSurfaceFrame SurfaceFrame;
+	FVector SurfaceLocation;
+	if (!FindSafeCharacterSurfaceLocation(
+		InPlanetAnchor,
+		TraceReferenceLocation,
+		GetActorForwardVector(),
+		nullptr,
+		SurfaceLocation,
+		&SurfaceFrame))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SurfaceSnapFailed: %s on %s."), *GetName(), *InPlanetAnchor->GetPlanetId().ToString());
+		return false;
+	}
+
+	const FVector SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Planet surface snap received an invalid collision normal for %s on %s."), *GetName(), *InPlanetAnchor->GetPlanetId().ToString());
+		return false;
+	}
+
+	const FVector GravityUp = GetDesiredPlanetUp();
+	const FVector SurfaceForward = GetStablePlanetTangent(GravityUp, SurfaceFrame.Forward);
+	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+
+	SetActorLocationAndRotation(SurfaceLocation, SurfaceRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	LastPlanetUp = GravityUp;
+	PlanetBodyForward = SurfaceForward;
+	PlanetCameraTangentForward = SurfaceForward;
+	LastPlanetCameraUp = GravityUp;
+	bPlanetFrameInitialized = true;
+	bPlanetCameraFrameInitialized = true;
+
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->Velocity = FVector::ZeroVector;
+		MovementComponent->SetMovementMode(MOVE_Walking);
+	}
+
+	return true;
+}
+
+bool AJTSCharacter::FindSafeCharacterSurfaceLocation(
+	AJTSPlanetAnchor* InPlanetAnchor,
+	const FVector& TraceReferenceLocation,
+	const FVector& PreferredForward,
+	const AActor* AdditionalIgnoredActor,
+	FVector& OutLocation,
+	FJTSPlanetSurfaceFrame* OutSurfaceFrame) const
+{
+	if (!IsValid(InPlanetAnchor) || !InPlanetAnchor->HasGameplaySurface() || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FJTSPlanetSurfaceFrame SurfaceFrame;
+	if (!InPlanetAnchor->GetSurfaceFrameAt(TraceReferenceLocation, PreferredForward, SurfaceFrame)
+		|| SurfaceFrame.Up.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector SurfaceLocation = SurfaceFrame.Location
+		+ SurfaceFrame.Up * (GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + PlanetSurfaceSnapClearance);
+	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSCharacterPlanetSurfacePlacement), false, this);
+	PlacementParams.AddIgnoredActor(this);
+	if (IsValid(AdditionalIgnoredActor))
+	{
+		PlacementParams.AddIgnoredActor(AdditionalIgnoredActor);
+	}
+
+	if (World->OverlapBlockingTestByChannel(
+		SurfaceLocation,
+		SurfaceFrame.Transform.GetRotation(),
+		ECC_Pawn,
+		GetCapsuleComponent()->GetCollisionShape(),
+		PlacementParams))
+	{
+		return false;
+	}
+
+	OutLocation = SurfaceLocation;
+	if (OutSurfaceFrame != nullptr)
+	{
+		*OutSurfaceFrame = SurfaceFrame;
+	}
+	return true;
 }
 
 float AJTSCharacter::GetAimPitch() const
@@ -333,9 +460,15 @@ void AJTSCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	const float ControllerPitch = Controller != nullptr
-		? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch)
-		: 0.0f;
+	const bool bUsingRealPlanetFrame = IsRealPlanetGameplayActive();
+	if (bUsingRealPlanetFrame)
+	{
+		UpdatePlanetGameplayFrame(DeltaSeconds);
+	}
+
+	const float ControllerPitch = bUsingRealPlanetFrame
+		? PlanetCameraPitch
+		: (Controller != nullptr ? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch) : 0.0f);
 	const float MinimumAimPitch = FMath::Min(AimPitchMin, AimPitchMax);
 	const float MaximumAimPitch = FMath::Max(AimPitchMin, AimPitchMax);
 	AimPitch = FMath::Clamp(ControllerPitch, MinimumAimPitch, MaximumAimPitch);
@@ -615,6 +748,18 @@ void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& Out
 {
 	OutForward = FVector::ForwardVector;
 	OutRight = FVector::RightVector;
+	if (IsRealPlanetGameplayActive())
+	{
+		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
+		OutForward = GetStablePlanetTangent(LocalUp, GetPlanetCameraForward(LocalUp));
+		OutRight = FVector::CrossProduct(LocalUp, OutForward).GetSafeNormal();
+		if (OutRight.IsNearlyZero())
+		{
+			OutRight = GetStablePlanetTangent(LocalUp, FVector::RightVector);
+		}
+		return;
+	}
+
 	if (Controller == nullptr)
 	{
 		return;
@@ -628,6 +773,21 @@ void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& Out
 
 void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 {
+	if (IsBoarded())
+	{
+		return;
+	}
+
+	if (IsRealPlanetGameplayActive())
+	{
+		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
+		PlanetCameraTangentForward = GetStablePlanetTangent(LocalUp, PlanetCameraTangentForward);
+		const float YawDeltaRadians = FMath::DegreesToRadians(Value.Get<float>() * MouseSensitivityX);
+		PlanetCameraTangentForward = FQuat(LocalUp, YawDeltaRadians).RotateVector(PlanetCameraTangentForward).GetSafeNormal();
+		UpdatePlanetCameraFrame(LocalUp, 0.0f);
+		return;
+	}
+
 	if (!IsBoarded())
 	{
 		AddControllerYawInput(Value.Get<float>() * MouseSensitivityX);
@@ -636,6 +796,25 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 
 void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
+	if (IsBoarded())
+	{
+		return;
+	}
+
+	if (IsRealPlanetGameplayActive())
+	{
+		const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
+		const float RequestedPitchMax = bFirstPersonView ? FirstPersonViewPitchMax : ThirdPersonViewPitchMax;
+		// Retain the established mouse-Y direction while keeping pitch in the local gravity-relative frame.
+		PlanetCameraPitch = FMath::Clamp(
+			PlanetCameraPitch - Value.Get<float>() * MouseSensitivityY,
+			FMath::Min(RequestedPitchMin, RequestedPitchMax),
+			FMath::Max(RequestedPitchMin, RequestedPitchMax));
+		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
+		UpdatePlanetCameraFrame(LocalUp, 0.0f);
+		return;
+	}
+
 	if (!IsBoarded())
 	{
 		// MouseY is not negated in the Enhanced Input mapping, so retain the established pitch direction here.
@@ -660,6 +839,8 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 {
 	if (!IsBoarded())
 	{
+		// UE 5.8 CharacterMovement applies JumpZVelocity along LocalUp when custom gravity is active.
+		// Keep the standard Jump path; do not inject a World-Z LaunchCharacter impulse.
 		Jump();
 	}
 }
@@ -901,6 +1082,174 @@ bool AJTSCharacter::IsSpaceWorldSurfaceGameplayActive() const
 	return IsValid(Manager) && Manager->IsSurfaceGameplayReady();
 }
 
+bool AJTSCharacter::IsRealPlanetGameplayActive() const
+{
+	const AJTSPlanetAnchor* const Planet = GameplayPlanet.Get();
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	return IsValid(Planet) && IsValid(Manager) && Manager->IsPlanetGameplayActive(Planet);
+}
+
+FVector AJTSCharacter::GetDesiredPlanetUp() const
+{
+	if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement();
+		IsValid(MovementComponent))
+	{
+		const FVector GravityDirection = MovementComponent->GetGravityDirection();
+		if (!GravityDirection.IsNearlyZero())
+		{
+			return -GravityDirection.GetSafeNormal();
+		}
+	}
+
+	return GetActorUpVector().GetSafeNormal();
+}
+
+FVector AJTSCharacter::GetStablePlanetTangent(const FVector& UpVector, const FVector& PreferredDirection) const
+{
+	const FVector SafeUp = UpVector.GetSafeNormal();
+	FVector Tangent = FVector::VectorPlaneProject(PreferredDirection, SafeUp).GetSafeNormal();
+	if (!Tangent.IsNearlyZero())
+	{
+		return Tangent;
+	}
+
+	// This is a fallback only; normal movement and camera orientation are parallel-transported from prior frames.
+	const FVector ReferenceAxis = FMath::Abs(SafeUp.Z) < 0.9f ? FVector::UpVector : FVector::ForwardVector;
+	Tangent = FVector::CrossProduct(ReferenceAxis, SafeUp).GetSafeNormal();
+	if (Tangent.IsNearlyZero())
+	{
+		Tangent = FVector::CrossProduct(FVector::RightVector, SafeUp).GetSafeNormal();
+	}
+	return Tangent;
+}
+
+void AJTSCharacter::UpdatePlanetGameplayFrame(float DeltaSeconds)
+{
+	const FVector DesiredUp = GetDesiredPlanetUp();
+	if (DesiredUp.IsNearlyZero())
+	{
+		return;
+	}
+
+	UpdatePlanetBodyOrientation(DesiredUp, DeltaSeconds);
+	UpdatePlanetCameraFrame(LastPlanetUp, DeltaSeconds);
+
+	if (bDebugPlanetSurface && IsValid(GameplayPlanet))
+	{
+		const FVector CharacterLocation = GetActorLocation();
+		DrawDebugLine(GetWorld(), CharacterLocation, GameplayPlanet->GetPlanetCenter(), FColor::Cyan, false, -1.0f, 0, 1.0f);
+		DrawDebugDirectionalArrow(GetWorld(), CharacterLocation, CharacterLocation + LastPlanetUp * 220.0f, 30.0f, FColor::Green, false, -1.0f, 0, 1.5f);
+		DrawDebugString(
+			GetWorld(),
+			CharacterLocation + LastPlanetUp * 150.0f,
+			FString::Printf(TEXT("Planet=%s  ApproxAltitude=%.1f"),
+				*GameplayPlanet->GetPlanetId().ToString(),
+				GameplayPlanet->GetApproximateAltitude(CharacterLocation)),
+			nullptr,
+			FColor::White,
+			0.0f,
+			true,
+			1.0f);
+	}
+}
+
+void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float DeltaSeconds)
+{
+	const FVector TargetUp = DesiredUp.GetSafeNormal();
+	if (!bPlanetFrameInitialized)
+	{
+		LastPlanetUp = TargetUp;
+		PlanetBodyForward = GetStablePlanetTangent(TargetUp, GetActorForwardVector());
+		bPlanetFrameInitialized = true;
+	}
+	else
+	{
+		const FQuat ParallelTransport = FQuat::FindBetweenNormals(LastPlanetUp, TargetUp);
+		PlanetBodyForward = GetStablePlanetTangent(TargetUp, ParallelTransport.RotateVector(PlanetBodyForward));
+		LastPlanetUp = TargetUp;
+	}
+
+	if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		const FVector TangentVelocity = FVector::VectorPlaneProject(MovementComponent->Velocity, LastPlanetUp);
+		if (TangentVelocity.SizeSquared() > FMath::Square(5.0f))
+		{
+			const FVector DesiredForward = TangentVelocity.GetSafeNormal();
+			const FQuat BodyTurn = FQuat::FindBetweenNormals(PlanetBodyForward, DesiredForward);
+			const float TurnAlpha = FMath::Clamp(DeltaSeconds * PlanetBodyTurnInterpolationSpeed, 0.0f, 1.0f);
+			PlanetBodyForward = GetStablePlanetTangent(
+				LastPlanetUp,
+				FQuat::Slerp(FQuat::Identity, BodyTurn, TurnAlpha).RotateVector(PlanetBodyForward));
+		}
+	}
+
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+	SetActorRotation(FRotationMatrix::MakeFromXZ(PlanetBodyForward, LastPlanetUp).ToQuat());
+}
+
+void AJTSCharacter::UpdatePlanetCameraFrame(const FVector& CurrentUp, float DeltaSeconds)
+{
+	static_cast<void>(DeltaSeconds);
+
+	const FVector SafeUp = CurrentUp.GetSafeNormal();
+	if (SafeUp.IsNearlyZero() || !IsValid(CameraBoom))
+	{
+		return;
+	}
+
+	if (!bPlanetCameraFrameInitialized)
+	{
+		PlanetCameraTangentForward = GetStablePlanetTangent(SafeUp, PlanetBodyForward);
+		LastPlanetCameraUp = SafeUp;
+		bPlanetCameraFrameInitialized = true;
+	}
+	else
+	{
+		const FQuat ParallelTransport = FQuat::FindBetweenNormals(LastPlanetCameraUp, SafeUp);
+		PlanetCameraTangentForward = GetStablePlanetTangent(SafeUp, ParallelTransport.RotateVector(PlanetCameraTangentForward));
+		LastPlanetCameraUp = SafeUp;
+	}
+
+	const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
+	const float RequestedPitchMax = bFirstPersonView ? FirstPersonViewPitchMax : ThirdPersonViewPitchMax;
+	PlanetCameraPitch = FMath::Clamp(
+		PlanetCameraPitch,
+		FMath::Min(RequestedPitchMin, RequestedPitchMax),
+		FMath::Max(RequestedPitchMin, RequestedPitchMax));
+
+	const FVector CameraForward = GetPlanetCameraForward(SafeUp);
+	const FQuat CameraRotation = FRotationMatrix::MakeFromXZ(CameraForward, SafeUp).ToQuat();
+	CameraBoom->bUsePawnControlRotation = false;
+	CameraBoom->SetUsingAbsoluteRotation(true);
+	CameraBoom->SetWorldRotation(CameraRotation);
+
+	if (Controller != nullptr)
+	{
+		// Control rotation is output for camera rays and aim only; it never drives capsule/body orientation here.
+		Controller->SetControlRotation(CameraRotation.Rotator());
+	}
+
+	if (bDebugPlanetCamera)
+	{
+		const FVector CameraOrigin = CameraPivot != nullptr ? CameraPivot->GetComponentLocation() : GetActorLocation();
+		DrawDebugDirectionalArrow(GetWorld(), CameraOrigin, CameraOrigin + CameraForward * 260.0f, 32.0f, FColor::Yellow, false, -1.0f, 0, 1.5f);
+		DrawDebugDirectionalArrow(GetWorld(), CameraOrigin, CameraOrigin + SafeUp * 180.0f, 28.0f, FColor::Blue, false, -1.0f, 0, 1.0f);
+	}
+}
+
+FVector AJTSCharacter::GetPlanetCameraForward(const FVector& CurrentUp) const
+{
+	const FVector TangentForward = GetStablePlanetTangent(CurrentUp, PlanetCameraTangentForward);
+	const FVector CameraRight = FVector::CrossProduct(CurrentUp, TangentForward).GetSafeNormal();
+	if (CameraRight.IsNearlyZero())
+	{
+		return TangentForward;
+	}
+
+	// UE's local right axis rotates the forward vector downward for positive angles, hence the sign.
+	return FQuat(CameraRight, FMath::DegreesToRadians(-PlanetCameraPitch)).RotateVector(TangentForward).GetSafeNormal();
+}
+
 bool AJTSCharacter::IsGameplayInputBlocked() const
 {
 	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
@@ -935,10 +1284,20 @@ void AJTSCharacter::ApplyCameraView()
 		? FVector::ZeroVector
 		: FVector(ThirdPersonShoulderOffset.X, ThirdPersonShoulderOffset.Y, 0.0f);
 	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : ThirdPersonArmLength;
-	CameraBoom->bUsePawnControlRotation = true;
+	const bool bUseRealPlanetCamera = IsRealPlanetGameplayActive();
+	CameraBoom->bUsePawnControlRotation = !bUseRealPlanetCamera;
+	CameraBoom->SetUsingAbsoluteRotation(bUseRealPlanetCamera);
 	CameraBoom->bDoCollisionTest = !bFirstPersonView;
 	CameraBoom->bEnableCameraLag = false;
 	CameraBoom->bEnableCameraRotationLag = false;
+	if (bUseRealPlanetCamera)
+	{
+		UpdatePlanetCameraFrame(bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp(), 0.0f);
+	}
+	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->bOrientRotationToMovement = true;
+	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
 	if (GetMesh() != nullptr)
 	{
@@ -1020,9 +1379,37 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 	if (bMoveToExitPoint)
 	{
 		FVector DisembarkLocation;
-		if (FindSafeDisembarkLocation(Spacecraft, DisembarkLocation))
+		FJTSPlanetSurfaceFrame DisembarkSurfaceFrame;
+		if (FindSafeDisembarkLocation(Spacecraft, DisembarkLocation, &DisembarkSurfaceFrame))
 		{
-			SetActorLocation(DisembarkLocation, false, nullptr, ETeleportType::TeleportPhysics);
+			AJTSPlanetAnchor* const GroundedPlanet = IsValid(Spacecraft) ? Spacecraft->GetGroundedPlanet() : nullptr;
+			const bool bOnRealPlanet = IsValid(GroundedPlanet) && GroundedPlanet->HasGameplaySurface();
+			FQuat DisembarkRotation = GetActorQuat();
+			FVector GravityUp = FVector::UpVector;
+			FVector SurfaceForward = DisembarkSurfaceFrame.Forward;
+			if (bOnRealPlanet)
+			{
+				SetGameplayPlanet(GroundedPlanet);
+				GravityUp = GetDesiredPlanetUp();
+				SurfaceForward = GetStablePlanetTangent(GravityUp, DisembarkSurfaceFrame.Forward);
+				DisembarkRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+			}
+			SetActorLocationAndRotation(
+				DisembarkLocation,
+				DisembarkRotation,
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+
+			if (bOnRealPlanet)
+			{
+				LastPlanetUp = GravityUp;
+				PlanetBodyForward = SurfaceForward;
+				PlanetCameraTangentForward = SurfaceForward;
+				LastPlanetCameraUp = GravityUp;
+				bPlanetFrameInitialized = true;
+				bPlanetCameraFrameInitialized = true;
+			}
 		}
 	}
 
@@ -1047,7 +1434,171 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 	}
 }
 
-bool AJTSCharacter::FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const
+bool AJTSCharacter::FindSafeDisembarkLocation(
+	AJTSSpacecraftActor* Spacecraft,
+	FVector& OutLocation,
+	FJTSPlanetSurfaceFrame* OutSurfaceFrame) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	if (AJTSPlanetAnchor* const GroundedPlanet = Spacecraft->GetGroundedPlanet())
+	{
+		if (!GroundedPlanet->HasGameplaySurface())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s has an invalid gameplay planet for disembark."), *Spacecraft->GetName());
+			return false;
+		}
+
+		return FindGroundedSpacecraftDisembarkLocation(Spacecraft, GroundedPlanet, OutLocation, OutSurfaceFrame);
+	}
+
+	return FindLegacySafeDisembarkLocation(Spacecraft, OutLocation);
+}
+
+bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
+	AJTSSpacecraftActor* Spacecraft,
+	AJTSPlanetAnchor* Planet,
+	FVector& OutLocation,
+	FJTSPlanetSurfaceFrame* OutSurfaceFrame) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(Planet) || !IsValid(GetCapsuleComponent()))
+	{
+		return false;
+	}
+
+	const FTransform ShipSurfaceTransform = Spacecraft->GetActorTransform();
+	const FVector SurfaceUp = ShipSurfaceTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	FVector SurfaceForward = FVector::VectorPlaneProject(
+		ShipSurfaceTransform.GetUnitAxis(EAxis::X),
+		SurfaceUp).GetSafeNormal();
+	if (SurfaceForward.IsNearlyZero())
+	{
+		SurfaceForward = Planet->ProjectDirectionToSurfaceTangent(
+			Spacecraft->GetActorForwardVector(),
+			Spacecraft->GetActorLocation());
+	}
+	if (SurfaceUp.IsNearlyZero() || SurfaceForward.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s has an invalid local surface frame for disembark."), *Spacecraft->GetName());
+		return false;
+	}
+
+	FVector SurfaceRight = FVector::CrossProduct(SurfaceUp, SurfaceForward).GetSafeNormal();
+	if (SurfaceRight.IsNearlyZero())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s could not construct a local surface right vector."), *Spacecraft->GetName());
+		return false;
+	}
+	SurfaceForward = FVector::CrossProduct(SurfaceRight, SurfaceUp).GetSafeNormal();
+
+	const FVector ShipLocation = Spacecraft->GetActorLocation();
+	FVector RequestedExitLocation = ShipLocation;
+	if (USceneComponent* const ExitPoint = Spacecraft->GetExitPoint())
+	{
+		RequestedExitLocation = ExitPoint->GetComponentLocation();
+	}
+
+	FVector ExitDirection = FVector::VectorPlaneProject(RequestedExitLocation - ShipLocation, SurfaceUp).GetSafeNormal();
+	if (ExitDirection.IsNearlyZero())
+	{
+		// The current ship exit point is authored on its negative local-right side.
+		ExitDirection = -SurfaceRight;
+	}
+
+	FVector ShipExtent(180.0f, 180.0f, 90.0f);
+	if (const UBoxComponent* const FlightCollision = Spacecraft->FindComponentByClass<UBoxComponent>())
+	{
+		ShipExtent = FlightCollision->GetScaledBoxExtent();
+	}
+
+	auto GetProjectedShipExtent = [&SurfaceForward, &SurfaceRight, &SurfaceUp, &ShipExtent](const FVector& Direction)
+	{
+		return FMath::Abs(FVector::DotProduct(Direction, SurfaceForward)) * ShipExtent.X
+			+ FMath::Abs(FVector::DotProduct(Direction, SurfaceRight)) * ShipExtent.Y
+			+ FMath::Abs(FVector::DotProduct(Direction, SurfaceUp)) * ShipExtent.Z;
+	};
+
+	const float CapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const float CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const FVector RequestedTangentOffset = FVector::VectorPlaneProject(RequestedExitLocation - ShipLocation, SurfaceUp);
+	const float RequestedDistance = FMath::Max(0.0f, FVector::DotProduct(RequestedTangentOffset, ExitDirection));
+	const float StartDistance = FMath::Max(
+		GetProjectedShipExtent(ExitDirection) + CapsuleRadius + 32.0f,
+		RequestedDistance);
+	const float RequestedHeight = FMath::Abs(FVector::DotProduct(RequestedExitLocation - ShipLocation, SurfaceUp));
+	const float SurfaceHeightOffset = FMath::Max(
+		ShipExtent.Z + CapsuleHalfHeight + 80.0f,
+		RequestedHeight + CapsuleHalfHeight + 80.0f);
+
+	TArray<FVector> CandidateDirections;
+	auto AddCandidateDirection = [&CandidateDirections](const FVector& Direction)
+	{
+		const FVector SafeDirection = Direction.GetSafeNormal();
+		if (SafeDirection.IsNearlyZero()
+			|| CandidateDirections.ContainsByPredicate([&SafeDirection](const FVector& ExistingDirection)
+			{
+				return FVector::DotProduct(ExistingDirection, SafeDirection) > 0.999f;
+			}))
+		{
+			return;
+		}
+		CandidateDirections.Add(SafeDirection);
+	};
+
+	AddCandidateDirection(ExitDirection);
+	AddCandidateDirection(SurfaceRight);
+	AddCandidateDirection(-SurfaceRight);
+	AddCandidateDirection(SurfaceForward);
+	AddCandidateDirection(-SurfaceForward);
+	AddCandidateDirection(SurfaceRight + SurfaceForward);
+	AddCandidateDirection(SurfaceRight - SurfaceForward);
+	AddCandidateDirection(-SurfaceRight + SurfaceForward);
+	AddCandidateDirection(-SurfaceRight - SurfaceForward);
+
+	constexpr int32 SearchDistanceRings = 3;
+	constexpr float SearchDistanceStep = 140.0f;
+	for (int32 DistanceRing = 0; DistanceRing < SearchDistanceRings; ++DistanceRing)
+	{
+		for (const FVector& CandidateDirection : CandidateDirections)
+		{
+			const float CandidateDistance = FMath::Max(
+				StartDistance + SearchDistanceStep * static_cast<float>(DistanceRing),
+				GetProjectedShipExtent(CandidateDirection) + CapsuleRadius + 32.0f);
+			const FVector CandidateReferenceLocation = ShipLocation
+				+ CandidateDirection * CandidateDistance
+				+ SurfaceUp * SurfaceHeightOffset;
+
+			FVector CandidateLocation;
+			FJTSPlanetSurfaceFrame CandidateSurfaceFrame;
+			if (!FindSafeCharacterSurfaceLocation(
+				Planet,
+				CandidateReferenceLocation,
+				SurfaceForward,
+				nullptr,
+				CandidateLocation,
+				&CandidateSurfaceFrame))
+			{
+				continue;
+			}
+
+			OutLocation = CandidateLocation;
+			if (OutSurfaceFrame != nullptr)
+			{
+				*OutSurfaceFrame = CandidateSurfaceFrame;
+			}
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft disembark candidates exhausted for %s on planet %s."),
+		*Spacecraft->GetName(), *Planet->GetPlanetId().ToString());
+	return false;
+}
+
+bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const
 {
 	if (!IsValid(Spacecraft) || !IsValid(GetCapsuleComponent()))
 	{

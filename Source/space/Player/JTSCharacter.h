@@ -9,6 +9,7 @@
 #include "JTSCharacter.generated.h"
 
 class AJTSSpacecraftActor;
+class AJTSPlanetAnchor;
 class UCameraComponent;
 class UJTSCarryComponent;
 class UJTSHealthComponent;
@@ -24,6 +25,7 @@ class USceneComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 struct FInputActionValue;
+struct FJTSPlanetSurfaceFrame;
 
 /**
  * First playable native character for Jump to Space.
@@ -50,6 +52,17 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
+
+	/** Binds this character to an explicit real gameplay planet. Earth and Legacy Fake Moon leave this unset. */
+	UFUNCTION(BlueprintCallable, Category = "Planet")
+	void SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor);
+
+	UFUNCTION(BlueprintPure, Category = "Planet")
+	AJTSPlanetAnchor* GetGameplayPlanet() const;
+
+	/** Uses the real gameplay mesh collision to place the capsule just above the surface. */
+	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
+	bool SnapToPlanetSurface(AJTSPlanetAnchor* InPlanetAnchor, const FVector& TraceReferenceLocation);
 
 	/** Current controller pitch normalized to the range consumed by character animation. */
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
@@ -144,11 +157,34 @@ private:
 	bool CanUseNormalGameplayInput() const;
 	bool IsGameplayInputBlocked() const;
 	bool IsSpaceWorldSurfaceGameplayActive() const;
+	bool IsRealPlanetGameplayActive() const;
+	void UpdatePlanetGameplayFrame(float DeltaSeconds);
+	FVector GetDesiredPlanetUp() const;
+	FVector GetStablePlanetTangent(const FVector& UpVector, const FVector& PreferredDirection) const;
+	void UpdatePlanetBodyOrientation(const FVector& DesiredUp, float DeltaSeconds);
+	void UpdatePlanetCameraFrame(const FVector& CurrentUp, float DeltaSeconds);
+	FVector GetPlanetCameraForward(const FVector& CurrentUp) const;
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
 	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
-	bool FindSafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
+	bool FindSafeCharacterSurfaceLocation(
+		AJTSPlanetAnchor* InPlanetAnchor,
+		const FVector& TraceReferenceLocation,
+		const FVector& PreferredForward,
+		const AActor* AdditionalIgnoredActor,
+		FVector& OutLocation,
+		FJTSPlanetSurfaceFrame* OutSurfaceFrame = nullptr) const;
+	bool FindSafeDisembarkLocation(
+		AJTSSpacecraftActor* Spacecraft,
+		FVector& OutLocation,
+		FJTSPlanetSurfaceFrame* OutSurfaceFrame = nullptr) const;
+	bool FindGroundedSpacecraftDisembarkLocation(
+		AJTSSpacecraftActor* Spacecraft,
+		AJTSPlanetAnchor* Planet,
+		FVector& OutLocation,
+		FJTSPlanetSurfaceFrame* OutSurfaceFrame) const;
+	bool FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
 
 	UFUNCTION()
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
@@ -194,9 +230,28 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;
 
-	/** Legacy radial-gravity component retained for Blueprint compatibility; Moon fake worlds bypass it. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Fake Moon uses standard World-Z gravity."))
+	/** Applies UE CharacterMovement custom gravity only while a real gameplay planet is active. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
+
+	/** Explicit real-planet ownership. This prevents a character from selecting the first planet in the world. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> GameplayPlanet;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float PlanetSurfaceSnapClearance = 6.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlanetOrientationInterpolationSpeed = 14.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlanetBodyTurnInterpolationSpeed = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Debug", meta = (AllowPrivateAccess = "true"))
+	bool bDebugPlanetSurface = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Debug", meta = (AllowPrivateAccess = "true"))
+	bool bDebugPlanetCamera = false;
 
 	/** Local height of the shared eye-level pivot above the capsule origin. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "200.0", UIMin = "0.0", UIMax = "150.0"))
@@ -303,6 +358,13 @@ private:
 	bool bInteractKeyHeld = false;
 	bool bEquipmentHoldCompleted = false;
 	bool bFirstPersonView = false;
+	bool bPlanetFrameInitialized = false;
+	bool bPlanetCameraFrameInitialized = false;
+	FVector LastPlanetUp = FVector::UpVector;
+	FVector PlanetBodyForward = FVector::ForwardVector;
+	FVector PlanetCameraTangentForward = FVector::ForwardVector;
+	FVector LastPlanetCameraUp = FVector::UpVector;
+	float PlanetCameraPitch = 0.0f;
 	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 	bool bPreviousDebugVisualVisible = true;
 	bool bPreviousMeshVisible = true;

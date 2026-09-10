@@ -4,21 +4,20 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 
 #include "JTSSpaceWorldManager.generated.h"
 
+class AActor;
 class AJTSPlanetAnchor;
-class AJTSMoonGameMode;
-class AJTSMoonSurfaceController;
 class ULevel;
 class ULevelStreamingDynamic;
 class UObject;
 class USceneComponent;
 
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpaceWorldInitialSurfaceLevelReady, AJTSMoonSurfaceController*);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpaceWorldLandingRequested, AJTSPlanetAnchor*);
 
-/** High-level state shared by the persistent space world and the flight component. */
+/** High-level state shared by the persistent SpaceWorld, the character, and future flight code. */
 UENUM(BlueprintType)
 enum class EJTSSpaceTravelState : uint8
 {
@@ -30,9 +29,9 @@ enum class EJTSSpaceTravelState : uint8
 };
 
 /**
- * Small persistent-world coordinator for the current logical planet, travel state,
- * and explicit surface streaming requests. It intentionally owns no resource,
- * combat, inventory, or Moon-surface gameplay.
+ * Persistent-world coordinator for real gameplay planets, current travel state, and optional
+ * planet content streaming. It deliberately does not know Moon-only gameplay, Fake Moon wrapping,
+ * or AJTSMoonSurfaceController.
  */
 UCLASS(BlueprintType)
 class SPACE_API AJTSSpaceWorldManager : public AActor
@@ -42,20 +41,26 @@ class SPACE_API AJTSSpaceWorldManager : public AActor
 public:
 	AJTSSpaceWorldManager();
 
-	/** Finds the single manager in the supplied world's persistent level. */
+	/** Finds the single persistent-world manager using a small cache after its first lookup. */
 	static AJTSSpaceWorldManager* FindSpaceWorldManager(const UObject* WorldContextObject);
 
-	/** Resolves CurrentPlanet from the explicitly configured anchor or an exact InitialPlanetId match. */
+	/** Registers a persistent or activated gameplay planet. Duplicate non-empty PlanetId values are rejected. */
+	bool RegisterPlanet(AJTSPlanetAnchor* Planet);
+	void UnregisterPlanet(AJTSPlanetAnchor* Planet);
+
+	/** Resolves CurrentPlanet from InitialPlanet or an exact InitialPlanetId match in the registered planet set. */
 	void InitializeCurrentPlanet();
 
-	/** Starts the one-time SpaceWorld arrival path and waits for the configured surface to be loaded and visible. */
-	void BeginInitialArrival();
+	UFUNCTION(BlueprintPure, Category = "Space World|Planets")
+	AJTSPlanetAnchor* FindPlanetById(FName PlanetId);
 
-	/** Native notification used by SpaceWorldGameMode to place persistent player and spacecraft actors after level visibility. */
-	FOnJTSSpaceWorldInitialSurfaceLevelReady& OnInitialSurfaceLevelReady();
+	/** Finds the nearest registered real gameplay planet. Never relies on world actor iteration order. */
+	UFUNCTION(BlueprintPure, Category = "Space World|Planets")
+	AJTSPlanetAnchor* FindNearestGameplayPlanet(const FVector& WorldPosition, bool bRequireGravityInfluence = true);
 
-	/** Fired once when flight reaches a loaded surface's assisted-landing altitude. */
-	FOnJTSSpaceWorldLandingRequested& OnLandingRequested();
+	/** Resolves a surface actor/attachment first, then falls back to the nearest active gameplay planet. */
+	UFUNCTION(BlueprintPure, Category = "Space World|Planets")
+	AJTSPlanetAnchor* FindPlanetOwningActor(const AActor* Actor);
 
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	AJTSPlanetAnchor* GetCurrentPlanet() const;
@@ -66,59 +71,61 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	bool IsSurfaceState() const;
 
+	/**
+	 * True while this exact CurrentPlanet is in Surface state. Gravity intentionally does not depend
+	 * on mesh trace/snap readiness: a bound Surface character must retain radial gravity even when a
+	 * surface trace fails.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Space World|State")
+	bool IsPlanetGameplayActive(const AJTSPlanetAnchor* Planet) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Space World|State")
 	void SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet);
 
 	UFUNCTION(BlueprintCallable, Category = "Space World|State")
 	void SetTravelState(EJTSSpaceTravelState NewTravelState);
 
-	/** Explicitly creates or re-enables a dynamic streaming instance for a planet's soft surface world. */
-	UFUNCTION(BlueprintCallable, Category = "Space World|Streaming")
-	bool RequestSurfaceLoad(AJTSPlanetAnchor* Planet, bool bMakeVisible = true);
+	/** Set by the GameMode once the initial Character has been snapped; this gates startup/input readiness, never gravity. */
+	void SetSurfaceGameplayReady(bool bReady);
 
-	/** Explicitly requests unload. Automatic unload remains disabled by default. */
-	UFUNCTION(BlueprintCallable, Category = "Space World|Streaming")
-	bool RequestSurfaceUnload(AJTSPlanetAnchor* Planet);
-
-	UFUNCTION(BlueprintPure, Category = "Space World|Streaming")
-	bool IsSurfaceLevelLoaded(const AJTSPlanetAnchor* Planet) const;
-
-	UFUNCTION(BlueprintPure, Category = "Space World|Streaming")
-	bool IsSurfaceLevelVisible(const AJTSPlanetAnchor* Planet) const;
-
-	/** Returns the loaded streaming level for a planet, if it is currently available. */
-	ULevel* GetLoadedSurfaceLevel(const AJTSPlanetAnchor* Planet) const;
-
-	/** Surface controller registration is scoped by stable PlanetId, never by a world-wide first actor search. */
-	void RegisterSurfaceController(AJTSMoonSurfaceController* Controller);
-	void UnregisterSurfaceController(AJTSMoonSurfaceController* Controller);
-	AJTSMoonSurfaceController* GetSurfaceController(FName PlanetId) const;
-	AJTSMoonSurfaceController* GetCurrentSurfaceController() const;
-	/** Returns the controller for the already loaded current surface, creating it when the streamed level has none. */
-	AJTSMoonSurfaceController* EnsureCurrentSurfaceController();
-	void NotifySurfaceGameplayInitialized(AJTSMoonSurfaceController* Controller);
-
-	UFUNCTION(BlueprintPure, Category = "Space World|Arrival")
+	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	bool IsSurfaceGameplayReady() const;
 
-	/** Called by flight code after movement. The value is spherical exterior altitude, never local surface height. */
-	void HandleFlightAltitude(float ExteriorAltitude);
+	/** Optional future content streaming for a planet. It is not a flat surface-level dependency. */
+	UFUNCTION(BlueprintCallable, Category = "Space World|Content")
+	bool RequestPlanetContentLoad(AJTSPlanetAnchor* Planet, bool bMakeVisible = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Space World|Content")
+	bool RequestPlanetContentUnload(AJTSPlanetAnchor* Planet);
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Content")
+	bool IsPlanetContentLoaded(const AJTSPlanetAnchor* Planet) const;
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Content")
+	bool IsPlanetContentVisible(const AJTSPlanetAnchor* Planet) const;
+
+	ULevel* GetLoadedPlanetContentLevel(const AJTSPlanetAnchor* Planet) const;
+
+	/** Fired once when flight reaches an eligible real planet landing range. */
+	FOnJTSSpaceWorldLandingRequested& OnLandingRequested();
+
+	/** Called by future flight code after movement; the value is centre-relative approximate altitude. */
+	void HandleFlightAltitude(float ApproximateAltitude);
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	FName GetStreamingKey(const AJTSPlanetAnchor* Planet) const;
-	ULevelStreamingDynamic* FindSurfaceStreamingLevel(const AJTSPlanetAnchor* Planet) const;
-	AJTSMoonSurfaceController* EnsureSurfaceController(AJTSPlanetAnchor* Planet);
-	void PollInitialSurfaceArrival();
+	void RegisterPersistentPlanetAnchors();
+	FName GetPlanetKey(const AJTSPlanetAnchor* Planet) const;
+	ULevelStreamingDynamic* FindPlanetContentStreamingLevel(const AJTSPlanetAnchor* Planet) const;
 	void LogDebugState() const;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
 
-	/** Optional explicit initial planet. If unset, InitialPlanetId must match exactly one persistent-level PlanetAnchor. */
+	/** Optional explicit initial planet. If unset, InitialPlanetId must match exactly one registered anchor. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> InitialPlanet;
 
@@ -134,33 +141,21 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
 	EJTSSpaceTravelState CurrentTravelState = EJTSSpaceTravelState::Surface;
 
-	/** Prototype safety switch. It is deliberately false so MoonSurface remains loaded during first flight checks. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Streaming", meta = (AllowPrivateAccess = "true"))
-	bool bEnableSurfaceUnload = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Content", meta = (AllowPrivateAccess = "true"))
+	bool bEnablePlanetContentUnload = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDebugSpaceTravel = false;
 
-	/** Strong references to the dynamic streaming requests, keyed by stable PlanetId. */
+	/** Strong references keep optional streaming requests alive; actors themselves are held by their levels. */
 	UPROPERTY(Transient)
-	TMap<FName, TObjectPtr<ULevelStreamingDynamic>> SurfaceStreamingLevels;
+	TMap<FName, TObjectPtr<ULevelStreamingDynamic>> PlanetContentStreamingLevels;
 
-	/** Controllers are registered by logical planet rather than discovered from all actors in the persistent world. */
-	UPROPERTY(Transient)
-	TMap<FName, TObjectPtr<AJTSMoonSurfaceController>> SurfaceControllers;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
-	TSubclassOf<AJTSMoonSurfaceController> MoonSurfaceControllerClass;
-
-	/** Uses the existing Moon GameMode Blueprint only as reusable balance/configuration data for a dynamic surface controller. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
-	TSubclassOf<AJTSMoonGameMode> MoonGameplaySettingsClass;
+	/** Small cached registry. It is populated by persistent-level discovery once and activation registration thereafter. */
+	TMap<FName, TWeakObjectPtr<AJTSPlanetAnchor>> PlanetRegistry;
 
 	FTimerHandle DebugTimerHandle;
-	FTimerHandle InitialArrivalTimerHandle;
-	FOnJTSSpaceWorldInitialSurfaceLevelReady InitialSurfaceLevelReadyDelegate;
 	FOnJTSSpaceWorldLandingRequested LandingRequestedDelegate;
-	bool bInitialArrivalStarted = false;
-	bool bInitialSurfaceLevelReady = false;
-	bool bInitialSurfaceGameplayReady = false;
+	bool bPlanetRegistryInitialized = false;
+	bool bSurfaceGameplayReady = false;
 };

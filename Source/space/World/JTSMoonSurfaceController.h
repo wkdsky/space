@@ -14,6 +14,7 @@ class AJTSMoonCorpseActor;
 class AJTSMoonGameMode;
 class AJTSMoonWorldActor;
 class AJTSPlanetAnchor;
+class AJTSPlanetSurfaceAnchor;
 class AJTSRoachActor;
 class AJTSRoachNestActor;
 class AJTSSpacecraftActor;
@@ -21,8 +22,9 @@ class ULevel;
 enum class EJTSEquipmentType : uint8;
 
 /**
- * Runtime owner for one loaded Moon gameplay surface. It deliberately keeps level rules and
- * configured balance in AJTSMoonGameMode (or its CDO), while owning only the live surface work.
+ * Moon-specific gameplay controller. L_MoonPrototype keeps using it for Legacy Fake Moon runtime;
+ * a later migration will reuse its Moon balance/initialization role for real-mesh Moon content.
+ * It is intentionally not a planet definition, gravity owner, camera owner, or streaming authority.
  */
 UCLASS(BlueprintType)
 class SPACE_API AJTSMoonSurfaceController : public AActor
@@ -32,7 +34,7 @@ class SPACE_API AJTSMoonSurfaceController : public AActor
 public:
 	AJTSMoonSurfaceController();
 
-	/** Resolves the controller registered for the current Moon surface without scanning unrelated planet actors. */
+	/** Resolves the Legacy Moon controller through AJTSMoonGameMode without scanning planet actors. */
 	static AJTSMoonSurfaceController* FindMoonSurfaceController(const UObject* WorldContextObject, FName RequestedPlanetId = NAME_None);
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Surface")
@@ -50,13 +52,13 @@ public:
 	/** Legacy L_MoonPrototype path: supplies the active GameMode as the settings source. */
 	void ConfigureLegacyRuntime(AJTSMoonGameMode* InLegacyGameMode);
 
-	/** Persistent-world path: binds this streamed instance to its logical PlanetAnchor. */
+	/** Legacy flat-streamed compatibility path only. Real gameplay planets no longer use this binding. */
 	void SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet);
 
-	/** Supplies the legacy Moon GameMode Blueprint CDO used as balance data by a dynamically created controller. */
+	/** Supplies the legacy Moon GameMode Blueprint CDO used as a transitional balance-data source. */
 	void SetMoonGameplaySettingsClass(TSubclassOf<AJTSMoonGameMode> InMoonGameplaySettingsClass);
 
-	/** Returns the active settings source. In SpaceWorld this is the configured Moon GameMode class default object. */
+	/** Returns the transitional Moon balance source; later migration will replace the GameMode CDO with Moon settings data. */
 	const AJTSMoonGameMode* GetMoonSettings() const;
 
 	/** The one Moon-surface ship found in this controller's streamed level, or explicitly supplied by SpaceWorldGameMode. */
@@ -64,6 +66,14 @@ public:
 	void SetSurfaceSpacecraft(AJTSSpacecraftActor* InSpacecraft);
 	/** Registers the persistent player/ship owned by SpaceWorldGameMode as part of this active surface. */
 	void RegisterSurfaceRuntimeActor(AActor* RuntimeActor);
+
+	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes ants or resources. */
+	UFUNCTION(BlueprintCallable, Category = "Moon|Real Surface")
+	AJTSMoonCorpseActor* SpawnCorpseAtPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* InCorpseSurfaceAnchor);
+
+	/** Uses the controller's optional real-mesh corpse anchor. */
+	UFUNCTION(BlueprintCallable, Category = "Moon|Real Surface")
+	AJTSMoonCorpseActor* SpawnConfiguredCorpseAtPlanetSurfaceAnchor();
 
 	/** Resolves the placed Fake Moon configuration only inside this surface level. */
 	AJTSMoonWorldActor* GetMoonWorldActor() const;
@@ -76,7 +86,7 @@ public:
 	FTransform GetSurfacePlayerSpawnTransform(const FTransform& FallbackTransform) const;
 	FTransform GetSurfaceSpacecraftSpawnTransform(const FTransform& FallbackTransform) const;
 
-	/** Shared Moon terrain trace used by Ants, nests, and Ant corpse placement. */
+	/** Legacy Fake Moon World-Z terrain trace used by Ants, nests, and Ant corpse placement. */
 	bool ResolveMoonGroundLocation(
 		const FVector& CandidateLocation,
 		FVector& OutGroundLocation,
@@ -138,11 +148,19 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Surface|Arrival", meta = (AllowPrivateAccess = "true", EditCondition = "bUseSurfaceSpacecraftSpawnTransform"))
 	FTransform SurfaceSpacecraftSpawnTransform = FTransform::Identity;
 
+	/** Real Planet_3 content only: an authored anchor replaces legacy fixed XY/World-Z corpse placement. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetSurfaceAnchor> CorpseSurfaceAnchor;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;
+
 	TWeakObjectPtr<AJTSMoonGameMode> LegacySettingsSource;
 	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;
 	mutable TWeakObjectPtr<AJTSMoonWorldActor> CachedMoonWorld;
 	TWeakObjectPtr<AJTSMoonCorpseActor> LevelMoonCorpseLandmark;
+	TWeakObjectPtr<AJTSMoonCorpseActor> RealSurfaceMoonCorpse;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CachedLevelMoonCorpseLandmarks;
 	TArray<TWeakObjectPtr<AJTSRoachNestActor>> GeneratedAntNests;
 	TArray<TWeakObjectPtr<AActor>> RegisteredSurfaceRuntimeActors;

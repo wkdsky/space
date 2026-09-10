@@ -2,16 +2,15 @@
 
 #include "space/Modes/JTSSpaceWorldGameMode.h"
 
-#include "Engine/Level.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerStart.h"
 #include "GameFramework/PlayerController.h"
 #include "space/Core/JTSGameState.h"
-#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/UI/JTSPrototypeHUD.h"
-#include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
@@ -31,64 +30,32 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
-	// L_SpaceWorld begins as an active flight chapter. MoonExploration is set only after
-	// assisted landing has spawned the surface character and initialized the controller.
-	if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
-	{
-		JTSGameState->SetFailureReason(EJTSFailureReason::None);
-		JTSGameState->SetGameplayPhase(EJTSGameplayPhase::SpaceFlight);
-	}
-
-	AJTSSpaceWorldManager* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	AJTSSpaceWorldManager* const Manager = FindOrCreateSpaceWorldManager();
 	if (!IsValid(Manager))
 	{
-		TSubclassOf<AJTSSpaceWorldManager> ManagerClass = SpaceWorldManagerClass;
-		if (ManagerClass == nullptr)
-		{
-			ManagerClass = AJTSSpaceWorldManager::StaticClass();
-		}
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Name = TEXT("JTSSpaceWorldManager");
-		SpawnParameters.OverrideLevel = World->PersistentLevel;
-		Manager = World->SpawnActor<AJTSSpaceWorldManager>(ManagerClass, FTransform::Identity, SpawnParameters);
-	}
-
-	if (!IsValid(Manager))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SpaceWorldGameMode could not create its SpaceWorldManager."));
+		UE_LOG(LogTemp, Error, TEXT("SpaceWorldGameMode could not create or find its SpaceWorldManager."));
 		return;
 	}
 
 	SpaceWorldManager = Manager;
 	Manager->InitializeCurrentPlanet();
-	Manager->OnInitialSurfaceLevelReady().AddUObject(this, &AJTSSpaceWorldGameMode::HandleInitialSurfaceLevelReady);
-	Manager->OnLandingRequested().AddUObject(this, &AJTSSpaceWorldGameMode::HandleLandingRequested);
-	TryStartSpaceFlight();
+	Manager->SetTravelState(EJTSSpaceTravelState::Surface);
+
+	if (UWorld* const World = GetWorld())
+	{
+		if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
+		{
+			JTSGameState->SetFailureReason(EJTSFailureReason::None);
+			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::MoonExploration);
+		}
+	}
+
+	TrySpawnInitialSurfaceCharacter();
 }
 
 void AJTSSpaceWorldGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (SpaceWorldManager.IsValid())
-	{
-		SpaceWorldManager->OnInitialSurfaceLevelReady().RemoveAll(this);
-		SpaceWorldManager->OnLandingRequested().RemoveAll(this);
-	}
-	if (AJTSSpacecraftActor* const Spacecraft = PersistentSpacecraft.Get())
-	{
-		if (UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent())
-		{
-			FlightMovement->OnAssistedLandingCompleted.RemoveAll(this);
-		}
-	}
-	GetWorldTimerManager().ClearTimer(ArrivalRetryTimerHandle);
-	PendingSurfaceController.Reset();
-	PersistentSpacecraft.Reset();
+	GetWorldTimerManager().ClearTimer(SurfaceSpawnRetryTimerHandle);
 	SpaceWorldManager.Reset();
 
 	Super::EndPlay(EndPlayReason);
@@ -97,393 +64,209 @@ void AJTSSpaceWorldGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AJTSSpaceWorldGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
 {
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
-	TryStartSpaceFlight();
+	TrySpawnInitialSurfaceCharacter();
 }
 
-void AJTSSpaceWorldGameMode::TryStartSpaceFlight()
+AJTSSpaceWorldManager* AJTSSpaceWorldGameMode::FindOrCreateSpaceWorldManager()
 {
-	if (bFlightStarted || !SpaceWorldManager.IsValid())
+	if (AJTSSpaceWorldManager* const ExistingManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
-		return;
+		return ExistingManager;
 	}
 
 	UWorld* const World = GetWorld();
-	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
-	AJTSPlanetAnchor* const Planet = SpaceWorldManager->GetCurrentPlanet();
-	if (!IsValid(World) || !IsValid(PlayerController) || !IsValid(Planet))
-	{
-		if (World != nullptr)
-		{
-			World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryStartSpaceFlight, 0.05f, false);
-		}
-		return;
-	}
-
-	AJTSSpacecraftActor* const Spacecraft = CreateOrAdoptFlightSpacecraft();
-	if (!IsValid(Spacecraft))
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryStartSpaceFlight, 0.05f, false);
-		return;
-	}
-
-	if (APawn* const ExistingPawn = PlayerController->GetPawn())
-	{
-		PlayerController->UnPossess();
-		if (ExistingPawn != Spacecraft)
-		{
-			ExistingPawn->Destroy();
-		}
-	}
-
-	Spacecraft->SetActorTransform(Planet->GetApproachEntryTransform(), false, nullptr, ETeleportType::TeleportPhysics);
-	Spacecraft->SetFlightTargetPlanet(Planet);
-	if (UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent())
-	{
-		FlightMovement->OnAssistedLandingCompleted.RemoveAll(this);
-		FlightMovement->OnAssistedLandingCompleted.AddUObject(this, &AJTSSpaceWorldGameMode::HandleAssistedLandingCompleted);
-	}
-
-	PlayerController->Possess(Spacecraft);
-	SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::SpaceFlight);
-	bFlightStarted = true;
-	UE_LOG(LogTemp, Log, TEXT("SpaceWorld Flight Started: Planet=%s EntryAltitude=%.1f"),
-		*Planet->GetPlanetId().ToString(),
-		Planet->GetExteriorAltitude(Spacecraft->GetActorLocation()));
-	if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
-	{
-		JTSPlayerController->ApplySpaceWorldInputMode();
-	}
-}
-
-void AJTSSpaceWorldGameMode::HandleLandingRequested(AJTSPlanetAnchor* Planet)
-{
-	if (bLandingInProgress || !SpaceWorldManager.IsValid() || Planet != SpaceWorldManager->GetCurrentPlanet())
-	{
-		return;
-	}
-
-	AJTSSpacecraftActor* const Spacecraft = PersistentSpacecraft.Get();
-	if (!IsValid(Spacecraft))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SpaceWorld cannot begin assisted landing because its persistent spacecraft is missing."));
-		return;
-	}
-	UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent();
-	if (!IsValid(FlightMovement))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SpaceWorld cannot begin assisted landing because the spacecraft flight movement component is missing."));
-		return;
-	}
-
-	if (!Spacecraft->BeginAssistedLanding(Planet->GetLandingTransform(), AssistedLandingDuration))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SpaceWorld assisted landing could not start; returning to Approach."));
-		SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Approach);
-		return;
-	}
-
-	bLandingInProgress = true;
-	UE_LOG(LogTemp, Log, TEXT("SpaceWorld Assisted Landing Started: Planet=%s Altitude=%.1f Duration=%.1fs"),
-		*Planet->GetPlanetId().ToString(),
-		Planet->GetExteriorAltitude(Spacecraft->GetActorLocation()),
-		AssistedLandingDuration);
-}
-
-void AJTSSpaceWorldGameMode::HandleAssistedLandingCompleted()
-{
-	if (!bLandingInProgress || !SpaceWorldManager.IsValid())
-	{
-		return;
-	}
-
-	bLandingInProgress = false;
-	SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
-	UE_LOG(LogTemp, Log, TEXT("SpaceWorld Assisted Landing Completed."));
-	TryCompleteSurfaceArrival();
-}
-
-void AJTSSpaceWorldGameMode::TryCompleteSurfaceArrival()
-{
-	if (bSurfaceArrivalCompleted || !SpaceWorldManager.IsValid())
-	{
-		return;
-	}
-
-	UWorld* const World = GetWorld();
-	AJTSPlanetAnchor* const Planet = SpaceWorldManager->GetCurrentPlanet();
-	if (!IsValid(World) || !IsValid(Planet)
-		|| !SpaceWorldManager->IsSurfaceLevelLoaded(Planet)
-		|| !SpaceWorldManager->IsSurfaceLevelVisible(Planet))
-	{
-		if (World != nullptr)
-		{
-			World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteSurfaceArrival, 0.05f, false);
-		}
-		return;
-	}
-
-	AJTSMoonSurfaceController* const SurfaceController = SpaceWorldManager->EnsureCurrentSurfaceController();
-	if (!IsValid(SurfaceController) || !BindPersistentSpacecraftToSurface(SurfaceController))
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteSurfaceArrival, 0.05f, false);
-		return;
-	}
-
-	if (!SpawnOrMovePlayer(SurfaceController))
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteSurfaceArrival, 0.05f, false);
-		return;
-	}
-
-	bSurfaceArrivalCompleted = true;
-	PendingSurfaceController = SurfaceController;
-	UE_LOG(LogTemp, Log, TEXT("SpaceWorld Surface Arrival: Persistent spacecraft retained; spawning surface character."));
-	SurfaceController->RequestSurfaceGameplayInitialization();
-	PollSurfaceGameplayReady();
-}
-
-AJTSSpacecraftActor* AJTSSpaceWorldGameMode::CreateOrAdoptFlightSpacecraft()
-{
-	bool bPersistentSpacecraftConflict = false;
-	AJTSSpacecraftActor* Spacecraft = FindPersistentSpacecraft(bPersistentSpacecraftConflict);
-	if (bPersistentSpacecraftConflict)
-	{
-		return nullptr;
-	}
-	if (IsValid(Spacecraft))
-	{
-		PersistentSpacecraft = Spacecraft;
-		Spacecraft->RestorePersistentStorage();
-		return Spacecraft;
-	}
-
-	UWorld* const World = GetWorld();
-	AJTSPlanetAnchor* const Planet = SpaceWorldManager.IsValid() ? SpaceWorldManager->GetCurrentPlanet() : nullptr;
-	TSubclassOf<AJTSSpacecraftActor> SpawnClass = SpacecraftClass;
-	if (SpawnClass == nullptr)
-	{
-		SpawnClass = AJTSSpacecraftActor::StaticClass();
-	}
-	if (!IsValid(World) || !IsValid(Planet) || SpawnClass == nullptr)
-	{
-		return nullptr;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Name = TEXT("JTSPersistentSpacecraft");
-	SpawnParameters.OverrideLevel = World->PersistentLevel;
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Spacecraft = World->SpawnActor<AJTSSpacecraftActor>(SpawnClass, Planet->GetApproachEntryTransform(), SpawnParameters);
-	if (IsValid(Spacecraft))
-	{
-		PersistentSpacecraft = Spacecraft;
-		Spacecraft->RestorePersistentStorage();
-	}
-	return Spacecraft;
-}
-
-bool AJTSSpaceWorldGameMode::BindPersistentSpacecraftToSurface(AJTSMoonSurfaceController* SurfaceController)
-{
-	AJTSSpacecraftActor* const Spacecraft = PersistentSpacecraft.Get();
-	if (!IsValid(SurfaceController) || !IsValid(Spacecraft))
-	{
-		return false;
-	}
-
-	AJTSSpacecraftActor* const SurfaceSpacecraft = SurfaceController->GetSpacecraft();
-	if (IsValid(SurfaceSpacecraft) && SurfaceSpacecraft != Spacecraft)
-	{
-		UE_LOG(LogTemp, Error, TEXT("MoonSurface contains a second spacecraft. Remove it so L_SpaceWorld can retain its single persistent spacecraft."));
-		return false;
-	}
-
-	SurfaceController->SetSurfaceSpacecraft(Spacecraft);
-	return true;
-}
-
-void AJTSSpaceWorldGameMode::HandleInitialSurfaceLevelReady(AJTSMoonSurfaceController* SurfaceController)
-{
-	PendingSurfaceController = SurfaceController;
-	TryCompleteInitialSurfaceArrival();
-}
-
-void AJTSSpaceWorldGameMode::TryCompleteInitialSurfaceArrival()
-{
-	if (bPersistentActorsPlaced)
-	{
-		PollSurfaceGameplayReady();
-		return;
-	}
-
-	AJTSMoonSurfaceController* const SurfaceController = PendingSurfaceController.Get();
-	UWorld* const World = GetWorld();
-	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
-	if (!IsValid(SurfaceController) || !IsValid(PlayerController) || !SpaceWorldManager.IsValid())
-	{
-		if (World != nullptr)
-		{
-			World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteInitialSurfaceArrival, 0.05f, false);
-		}
-		return;
-	}
-
-	AJTSSpacecraftActor* const Spacecraft = CreateOrAdoptSurfaceSpacecraft(SurfaceController);
-	if (!IsValid(Spacecraft))
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteInitialSurfaceArrival, 0.05f, false);
-		return;
-	}
-
-	if (!SpawnOrMovePlayer(SurfaceController))
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TryCompleteInitialSurfaceArrival, 0.05f, false);
-		return;
-	}
-
-	bPersistentActorsPlaced = true;
-	SurfaceController->RequestSurfaceGameplayInitialization();
-	PollSurfaceGameplayReady();
-}
-
-void AJTSSpaceWorldGameMode::PollSurfaceGameplayReady()
-{
-	AJTSMoonSurfaceController* const SurfaceController = PendingSurfaceController.Get();
-	UWorld* const World = GetWorld();
-	if (!IsValid(SurfaceController) || World == nullptr)
-	{
-		return;
-	}
-
-	if (!SurfaceController->IsSurfaceGameplayInitialized())
-	{
-		World->GetTimerManager().SetTimer(ArrivalRetryTimerHandle, this, &AJTSSpaceWorldGameMode::PollSurfaceGameplayReady, 0.05f, false);
-		return;
-	}
-
-	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(World->GetFirstPlayerController()))
-	{
-		PlayerController->ApplySpaceWorldInputMode();
-	}
-}
-
-AJTSSpacecraftActor* AJTSSpaceWorldGameMode::FindPersistentSpacecraft(bool& bOutConflict) const
-{
-	bOutConflict = false;
-	if (PersistentSpacecraft.IsValid())
-	{
-		return PersistentSpacecraft.Get();
-	}
-
-	const UWorld* const World = GetWorld();
 	if (World == nullptr || World->PersistentLevel == nullptr)
 	{
 		return nullptr;
 	}
 
-	AJTSSpacecraftActor* Result = nullptr;
-	for (AActor* const Actor : World->PersistentLevel->Actors)
+	TSubclassOf<AJTSSpaceWorldManager> ManagerClass = SpaceWorldManagerClass;
+	if (ManagerClass == nullptr)
 	{
-		AJTSSpacecraftActor* const Candidate = Cast<AJTSSpacecraftActor>(Actor);
-		if (!IsValid(Candidate))
-		{
-			continue;
-		}
-
-		if (IsValid(Result))
-		{
-			bOutConflict = true;
-			UE_LOG(LogTemp, Error, TEXT("L_SpaceWorld has more than one persistent spacecraft actor; SpaceWorld cannot choose a unique flight pawn."));
-			return nullptr;
-		}
-		Result = Candidate;
+		ManagerClass = AJTSSpaceWorldManager::StaticClass();
 	}
 
-	return Result;
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Name = TEXT("JTSSpaceWorldManager");
+	SpawnParameters.OverrideLevel = World->PersistentLevel;
+	return World->SpawnActor<AJTSSpaceWorldManager>(ManagerClass, FTransform::Identity, SpawnParameters);
 }
 
-AJTSSpacecraftActor* AJTSSpaceWorldGameMode::CreateOrAdoptSurfaceSpacecraft(AJTSMoonSurfaceController* SurfaceController)
+void AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter()
 {
-	if (!IsValid(SurfaceController))
+	if (bInitialSurfaceCharacterSpawned || !SpaceWorldManager.IsValid())
 	{
-		return nullptr;
+		return;
 	}
 
-	AJTSSpacecraftActor* const SurfaceSpacecraft = SurfaceController->GetSpacecraft();
-	bool bPersistentSpacecraftConflict = false;
-	AJTSSpacecraftActor* const ExistingPersistentSpacecraft = FindPersistentSpacecraft(bPersistentSpacecraftConflict);
-	if (bPersistentSpacecraftConflict)
+	UWorld* const World = GetWorld();
+	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
+	AJTSPlanetAnchor* const Planet = SpaceWorldManager->GetCurrentPlanet();
+	if (!IsValid(World) || !IsValid(PlayerController) || !IsValid(Planet) || !Planet->HasGameplaySurface())
 	{
-		return nullptr;
-	}
-	if (IsValid(SurfaceSpacecraft) && IsValid(ExistingPersistentSpacecraft) && SurfaceSpacecraft != ExistingPersistentSpacecraft)
-	{
-		UE_LOG(LogTemp, Error, TEXT("Moon arrival found both a streamed-surface spacecraft and a persistent spacecraft. Remove one to preserve a single ship."));
-		return nullptr;
+		if (World != nullptr)
+		{
+			World->GetTimerManager().SetTimer(SurfaceSpawnRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter, 0.05f, false);
+		}
+		return;
 	}
 
-	AJTSSpacecraftActor* Spacecraft = IsValid(SurfaceSpacecraft) ? SurfaceSpacecraft : ExistingPersistentSpacecraft;
+	if (!bInitialGroundedSpacecraftInitialized)
+	{
+		bInitialGroundedSpacecraftInitialized = TrySpawnInitialGroundedSpacecraft(Planet);
+	}
+
+	if (!SpawnAndSnapCharacter(PlayerController, Planet))
+	{
+		if (!bLoggedSurfaceSnapFailure)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SpaceWorld initial character is waiting for a valid real mesh surface trace on planet %s."), *Planet->GetPlanetId().ToString());
+			bLoggedSurfaceSnapFailure = true;
+		}
+		World->GetTimerManager().SetTimer(SurfaceSpawnRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter, 0.05f, false);
+		return;
+	}
+
+	bInitialSurfaceCharacterSpawned = true;
+	SpaceWorldManager->SetSurfaceGameplayReady(true);
+	if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+	{
+		JTSPlayerController->ApplySpaceWorldInputMode();
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("SpaceWorld initial surface character spawned on real planet %s."), *Planet->GetPlanetId().ToString());
+}
+
+bool AJTSSpaceWorldGameMode::SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet)
+{
+	if (!IsValid(PlayerController) || !IsValid(Planet))
+	{
+		return false;
+	}
+
+	AActor* const PlayerStart = FindPlayerStart(PlayerController);
+	const FTransform SpawnReferenceTransform = IsValid(PlayerStart)
+		? PlayerStart->GetActorTransform()
+		: Planet->GetLandingTransform();
+
+	AJTSCharacter* Character = Cast<AJTSCharacter>(PlayerController->GetPawn());
+	if (!IsValid(Character))
+	{
+		if (APawn* const ExistingPawn = PlayerController->GetPawn())
+		{
+			PlayerController->UnPossess();
+			ExistingPawn->Destroy();
+		}
+
+		RestartPlayerAtTransform(PlayerController, SpawnReferenceTransform);
+		Character = Cast<AJTSCharacter>(PlayerController->GetPawn());
+	}
+
+	if (!IsValid(Character))
+	{
+		return false;
+	}
+
+	Character->SetGameplayPlanet(Planet);
+	return Character->SnapToPlanetSurface(Planet, SpawnReferenceTransform.GetLocation());
+}
+
+bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet)
+{
+	if (!IsValid(Planet))
+	{
+		return false;
+	}
+
+	FTransform LandingSurfaceTransform;
+	if (!Planet->GetLandingSurfaceTransform(LandingSurfaceTransform))
+	{
+		if (!bLoggedLandingAnchorFailure)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SpaceWorld initial spacecraft is waiting for a valid real-surface LandingAnchorActor on planet %s."),
+				*Planet->GetPlanetId().ToString());
+			bLoggedLandingAnchorFailure = true;
+		}
+		return false;
+	}
+
+	AJTSSpacecraftActor* Spacecraft = FindExistingGameplaySpacecraft();
+	bool bSpawnedSpacecraft = false;
 	if (!IsValid(Spacecraft))
 	{
 		UWorld* const World = GetWorld();
-		AJTSPlanetAnchor* const Planet = SpaceWorldManager.IsValid() ? SpaceWorldManager->GetCurrentPlanet() : nullptr;
-		TSubclassOf<AJTSSpacecraftActor> SpawnClass = SpacecraftClass;
-		if (SpawnClass == nullptr)
+		if (World == nullptr || World->PersistentLevel == nullptr)
 		{
-			SpawnClass = AJTSSpacecraftActor::StaticClass();
+			return false;
 		}
-		if (World == nullptr || !IsValid(Planet) || SpawnClass == nullptr)
+
+		TSubclassOf<AJTSSpacecraftActor> ShipClass = SpacecraftClass;
+		if (ShipClass == nullptr)
 		{
-			return nullptr;
+			ShipClass = AJTSSpacecraftActor::StaticClass();
 		}
 
 		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Name = TEXT("JTSPersistentSpacecraft");
+		SpawnParameters.Name = TEXT("JTSGameplaySpacecraft");
 		SpawnParameters.OverrideLevel = World->PersistentLevel;
 		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Spacecraft = World->SpawnActor<AJTSSpacecraftActor>(
-			SpawnClass,
-			SurfaceController->GetSurfaceSpacecraftSpawnTransform(Planet->GetLandingTransform()),
-			SpawnParameters);
+		Spacecraft = World->SpawnActor<AJTSSpacecraftActor>(ShipClass, LandingSurfaceTransform, SpawnParameters);
+		bSpawnedSpacecraft = IsValid(Spacecraft);
 	}
 
 	if (!IsValid(Spacecraft))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("SpaceWorld could not create its persistent gameplay spacecraft."));
+		return false;
+	}
+
+	Spacecraft->RestorePersistentStorage();
+	if (!Spacecraft->SnapSpacecraftToSurfaceTransform(Planet, LandingSurfaceTransform))
+	{
+		if (bSpawnedSpacecraft)
+		{
+			Spacecraft->Destroy();
+		}
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("SpaceWorld persistent spacecraft grounded on real planet %s without possession."),
+		*Planet->GetPlanetId().ToString());
+	return true;
+}
+
+AJTSSpacecraftActor* AJTSSpaceWorldGameMode::FindExistingGameplaySpacecraft()
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
 		return nullptr;
 	}
 
-	PersistentSpacecraft = Spacecraft;
-	SurfaceController->SetSurfaceSpacecraft(Spacecraft);
-	Spacecraft->RestorePersistentStorage();
-	return Spacecraft;
-}
-
-bool AJTSSpaceWorldGameMode::SpawnOrMovePlayer(AJTSMoonSurfaceController* SurfaceController)
-{
-	UWorld* const World = GetWorld();
-	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
-	AJTSPlanetAnchor* const Planet = SpaceWorldManager.IsValid() ? SpaceWorldManager->GetCurrentPlanet() : nullptr;
-	if (!IsValid(SurfaceController) || !IsValid(PlayerController) || !IsValid(Planet))
+	TArray<AJTSSpacecraftActor*> SpacecraftActors;
+	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
 	{
-		return false;
-	}
-
-	if (APawn* const ExistingPawn = PlayerController->GetPawn())
-	{
-		PlayerController->UnPossess();
-		if (ExistingPawn != PersistentSpacecraft.Get())
+		if (AJTSSpacecraftActor* const Candidate = *It; IsValid(Candidate))
 		{
-			ExistingPawn->Destroy();
+			SpacecraftActors.Add(Candidate);
 		}
 	}
 
-	RestartPlayerAtTransform(PlayerController, SurfaceController->GetSurfacePlayerSpawnTransform(Planet->GetLandingTransform()));
-	APawn* const SpawnedPawn = PlayerController->GetPawn();
-	if (!IsValid(SpawnedPawn))
+	if (SpacecraftActors.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("SpaceWorld Moon arrival could not spawn the player at the configured surface transform."));
-		return false;
+		return nullptr;
 	}
 
-	SurfaceController->RegisterSurfaceRuntimeActor(SpawnedPawn);
-	return true;
+	SpacecraftActors.Sort([](const AJTSSpacecraftActor& Left, const AJTSSpacecraftActor& Right)
+	{
+		return Left.GetPathName() < Right.GetPathName();
+	});
+	if (SpacecraftActors.Num() > 1 && !bLoggedMultipleSpacecraft)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SpaceWorld found %d gameplay spacecraft actors; using %s and not spawning another."),
+			SpacecraftActors.Num(), *GetNameSafe(SpacecraftActors[0]));
+		bLoggedMultipleSpacecraft = true;
+	}
+
+	return SpacecraftActors[0];
 }

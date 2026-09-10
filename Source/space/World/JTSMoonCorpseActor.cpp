@@ -6,6 +6,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
+#include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -111,6 +112,12 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicMaterialAsset.Succeeded())
+	{
+		BasicPrototypeMaterial = BasicMaterialAsset.Object;
+	}
+
 	if (FakeMoonBendMaterialAsset.Succeeded())
 	{
 		for (UStaticMeshComponent* Component : {
@@ -123,19 +130,15 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 			}
 		}
 	}
-	else
+	else if (BasicPrototypeMaterial != nullptr)
 	{
-		static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BasicMaterialAsset.Succeeded())
+		for (UStaticMeshComponent* Component : {
+			SkullMesh.Get(), TorsoClothingMesh.Get(), HipClothingMesh.Get(), LeftArmBoneMesh.Get(),
+			RightArmBoneMesh.Get(), LeftLegBoneMesh.Get(), RightLegBoneMesh.Get()})
 		{
-			for (UStaticMeshComponent* Component : {
-				SkullMesh.Get(), TorsoClothingMesh.Get(), HipClothingMesh.Get(), LeftArmBoneMesh.Get(),
-				RightArmBoneMesh.Get(), LeftLegBoneMesh.Get(), RightLegBoneMesh.Get()})
+			if (IsValid(Component))
 			{
-				if (IsValid(Component))
-				{
-					Component->SetMaterial(0, BasicMaterialAsset.Object);
-				}
+				Component->SetMaterial(0, BasicPrototypeMaterial);
 			}
 		}
 	}
@@ -143,6 +146,11 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 
 void AJTSMoonCorpseActor::AdjustToGround(const FVector& GroundLocation)
 {
+	if (bUsesRealPlanetSurfacePlacement)
+	{
+		return;
+	}
+
 	const FBox Bounds = GetComponentsBoundingBox(true);
 	if (Bounds.IsValid)
 	{
@@ -151,6 +159,41 @@ void AJTSMoonCorpseActor::AdjustToGround(const FVector& GroundLocation)
 		SetActorLocation(AdjustedLocation, false, nullptr, ETeleportType::TeleportPhysics);
 		UpdateMoonWrappedLogicalPosition();
 	}
+}
+
+bool AJTSMoonCorpseActor::SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor)
+{
+	if (!IsValid(SurfaceAnchor))
+	{
+		return false;
+	}
+
+	FTransform SurfaceTransform;
+	if (!SurfaceAnchor->GetSurfaceTransform(SurfaceTransform))
+	{
+		return false;
+	}
+
+	const FVector SurfaceUp = SurfaceTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero())
+	{
+		return false;
+	}
+
+	DisableLegacyMoonPresentation();
+	SetActorLocationAndRotation(
+		SurfaceTransform.GetLocation() + SurfaceUp * FMath::Max(0.0f, PlanetSurfaceClearance),
+		SurfaceTransform.GetRotation(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+	ApplyPrototypeMaterials();
+	return true;
+}
+
+bool AJTSMoonCorpseActor::IsUsingRealPlanetSurfacePlacement() const
+{
+	return bUsesRealPlanetSurfacePlacement;
 }
 
 void AJTSMoonCorpseActor::BeginPlay()
@@ -175,8 +218,35 @@ void AJTSMoonCorpseActor::ApplyPrototypeMaterials()
 
 void AJTSMoonCorpseActor::UpdateMoonWrappedLogicalPosition()
 {
-	if (MoonWrappedActorComponent != nullptr && MoonWrappedActorComponent->IsMoonWrappingEnabled())
+	if (!bUsesRealPlanetSurfacePlacement
+		&& MoonWrappedActorComponent != nullptr
+		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
 	{
 		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
+	}
+}
+
+void AJTSMoonCorpseActor::DisableLegacyMoonPresentation()
+{
+	bUsesRealPlanetSurfacePlacement = true;
+	if (MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+		MoonWrappedActorComponent->SetComponentTickEnabled(false);
+	}
+
+	if (BasicPrototypeMaterial == nullptr)
+	{
+		return;
+	}
+
+	for (UStaticMeshComponent* Component : {
+		SkullMesh.Get(), TorsoClothingMesh.Get(), HipClothingMesh.Get(), LeftArmBoneMesh.Get(),
+		RightArmBoneMesh.Get(), LeftLegBoneMesh.Get(), RightLegBoneMesh.Get()})
+	{
+		if (IsValid(Component))
+		{
+			Component->SetMaterial(0, BasicPrototypeMaterial);
+		}
 	}
 }

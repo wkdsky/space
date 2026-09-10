@@ -11,7 +11,7 @@ class USceneComponent;
 class UStaticMeshComponent;
 
 /** Legacy spherical Moon actor retained only so existing Blueprint references remain loadable. */
-UCLASS(meta = (DeprecatedNode, DeprecationMessage = "Legacy spherical Moon gameplay is retired; use AJTSMoonWorldActor."))
+UCLASS(meta = (DeprecatedNode, DeprecationMessage = "Legacy spherical Moon gameplay is retained only for compatibility; use AJTSPlanetAnchor with a manually placed real gameplay surface mesh."))
 class SPACE_API AJTSMoonPlanetActor : public AActor
 {
 	GENERATED_BODY()

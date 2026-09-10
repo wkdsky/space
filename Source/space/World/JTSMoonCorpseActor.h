@@ -8,6 +8,8 @@
 class USceneComponent;
 class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
+class UMaterialInterface;
+class AJTSPlanetSurfaceAnchor;
 
 /**
  * Runtime-only Moon event landmark: a visibly human, clothed skeleton assembled from prototype primitives.
@@ -24,12 +26,19 @@ public:
 	/** Aligns the complete lying figure to a validated Moon ground hit. */
 	void AdjustToGround(const FVector& GroundLocation);
 
+	/** Places this landmark once on an authored real-planet surface anchor and disables Fake Moon presentation. */
+	bool SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor);
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Real Surface")
+	bool IsUsingRealPlanetSurfacePlacement() const;
+
 protected:
 	virtual void BeginPlay() override;
 
 private:
 	void ApplyPrototypeMaterials();
 	void UpdateMoonWrappedLogicalPosition();
+	void DisableLegacyMoonPresentation();
 
 	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -58,4 +67,13 @@ private:
 	/** Keeps the event landmark at the nearest periodic physical image in Moon Wrap worlds. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
+
+	/** The non-WPO material used by the real gameplay-planet placement path. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> BasicPrototypeMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float PlanetSurfaceClearance = 2.0f;
+
+	bool bUsesRealPlanetSurfacePlacement = false;
 };
