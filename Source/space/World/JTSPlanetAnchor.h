@@ -93,7 +93,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	FVector GetPlanetCenter() const;
 
-	/** Coarse radius for UI, altitude approximation, approach, arc distance, and candidate radial traces; never authoritative ground or gravity direction. */
+	/** Coarse radius for UI, altitude approximation, approach, arc distance, and a lower bound for radial trace coverage; never authoritative ground or gravity direction. */
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	float GetApproximateRadius() const;
 
@@ -143,7 +143,7 @@ public:
 	float GetApproximateAltitude(const FVector& WorldPosition) const;
 
 	/**
-	 * Traces from outside the mesh toward PlanetCenter and accepts only the configured gameplay surface.
+	 * Traces across the configured gameplay mesh and accepts its real collision surface.
 	 * This intentionally uses mesh collision rather than an approximate-radius sphere.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
@@ -277,8 +277,7 @@ public:
 	void SetActivePlanet(bool bInIsActivePlanet);
 
 private:
-	bool TraceRadialDirectionToSurface(const FVector& RadialDirection, float OuterTraceRadius, FJTSPlanetSurfaceHit& OutSurfaceHit) const;
-	bool IsGameplaySurfaceComponent(const UPrimitiveComponent* Candidate) const;
+	bool TraceRadialDirectionToSurface(const FVector& RadialDirection, float CandidateDistance, FJTSPlanetSurfaceHit& OutSurfaceHit) const;
 	FVector GetFallbackTangent(const FVector& UpVector) const;
 	FTransform BuildSurfaceTransform(const FJTSPlanetSurfaceHit& SurfaceHit, const FVector& PreferredForward) const;
 
@@ -305,6 +304,7 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", UseComponentPicker, AllowAnyActor))
 	TObjectPtr<UPrimitiveComponent> GameplaySurfaceComponent;
 
+	/** Retained for serialized Blueprint/API compatibility. Configured real planets use a direct GameplaySurfaceComponent trace instead of a world channel trace. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true"))
 	TEnumAsByte<ECollisionChannel> SurfaceTraceChannel = ECC_Visibility;
 

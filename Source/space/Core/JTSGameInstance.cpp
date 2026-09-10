@@ -2,6 +2,8 @@
 
 #include "JTSGameInstance.h"
 
+#include "space/Ships/JTSSpacecraftActor.h"
+
 namespace
 {
 	int32 GetResourceAmount(const TMap<EJTSResourceType, int32>& Storage, EJTSResourceType ResourceType)
@@ -17,6 +19,7 @@ void UJTSGameInstance::Init()
 
 	SelectedAvatarColor = EJTSAvatarColor::Blue;
 	PersistedSpacecraftStorage.Reset();
+	PersistedSpacecraftClass = nullptr;
 	bHasPersistedSpacecraftStorage = false;
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space GameInstance initialized."));
 }
@@ -84,12 +87,28 @@ void UJTSGameInstance::ClearPersistedSpacecraftStorage()
 {
 	const bool bHadStorage = bHasPersistedSpacecraftStorage || !PersistedSpacecraftStorage.IsEmpty();
 	PersistedSpacecraftStorage.Reset();
+	PersistedSpacecraftClass = nullptr;
 	bHasPersistedSpacecraftStorage = false;
 
 	if (bHadStorage)
 	{
 		OnExpeditionSuppliesChanged.Broadcast(0.0f, 0.0f);
 	}
+}
+
+void UJTSGameInstance::SetPersistedSpacecraftClass(TSubclassOf<AJTSSpacecraftActor> NewSpacecraftClass)
+{
+	PersistedSpacecraftClass = NewSpacecraftClass;
+}
+
+TSubclassOf<AJTSSpacecraftActor> UJTSGameInstance::GetPersistedSpacecraftClass() const
+{
+	return PersistedSpacecraftClass;
+}
+
+bool UJTSGameInstance::HasPersistedSpacecraftClass() const
+{
+	return PersistedSpacecraftClass.Get() != nullptr;
 }
 
 float UJTSGameInstance::GetExpeditionFood() const

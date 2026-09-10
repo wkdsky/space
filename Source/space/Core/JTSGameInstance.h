@@ -8,6 +8,8 @@
 
 #include "JTSGameInstance.generated.h"
 
+class AJTSSpacecraftActor;
+
 UENUM(BlueprintType)
 enum class EJTSAvatarColor : uint8
 {
@@ -52,8 +54,17 @@ public:
 	/** Returns the cross-level spacecraft storage snapshot. */
 	const TMap<EJTSResourceType, int32>& GetPersistedSpacecraftStorage() const;
 
-	/** Clears the completed or failed mission's spacecraft storage before a new Earth run. */
+	/** Clears the completed or failed mission's travel spacecraft snapshot, including storage and class, before a new Earth run. */
 	void ClearPersistedSpacecraftStorage();
+
+	/** Stores the runtime spacecraft class used for the current Earth-to-SpaceWorld travel. */
+	void SetPersistedSpacecraftClass(TSubclassOf<AJTSSpacecraftActor> NewSpacecraftClass);
+
+	/** Returns the runtime spacecraft class snapshot for the current travel, when one exists. */
+	TSubclassOf<AJTSSpacecraftActor> GetPersistedSpacecraftClass() const;
+
+	/** Returns whether the current travel has an actual Earth spacecraft class snapshot. */
+	bool HasPersistedSpacecraftClass() const;
 
 	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
 	float GetExpeditionFood() const;
@@ -86,6 +97,10 @@ private:
 	/** Travel-only snapshot. The active spacecraft owns the live Storage in each level. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TMap<EJTSResourceType, int32> PersistedSpacecraftStorage;
+
+	/** Travel-only class snapshot. This preserves the actual Earth spacecraft Blueprint across OpenLevel. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ship|Travel", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSSpacecraftActor> PersistedSpacecraftClass;
 
 	bool bHasPersistedSpacecraftStorage = false;
 };

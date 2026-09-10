@@ -186,10 +186,10 @@ bool AJTSPlanetAnchor::TraceToSurface(const FVector& WorldPosition, FJTSPlanetSu
 {
 	const FVector PlanetCenter = GetPlanetCenter();
 	const FVector RadialDirection = GetRadialUpVector(WorldPosition);
-	const float OuterTraceRadius = FMath::Max(
-		FVector::Distance(WorldPosition, PlanetCenter) + FMath::Max(1.0f, SurfaceTraceOuterPadding),
-		GetApproximateRadius() + FMath::Max(1.0f, SurfaceTraceOuterPadding));
-	return TraceRadialDirectionToSurface(RadialDirection, OuterTraceRadius, OutSurfaceHit);
+	return TraceRadialDirectionToSurface(
+		RadialDirection,
+		FVector::Distance(WorldPosition, PlanetCenter),
+		OutSurfaceHit);
 }
 
 bool AJTSPlanetAnchor::ProjectPointToSurface(const FVector& WorldPosition, FJTSPlanetSurfaceHit& OutSurfaceHit) const
@@ -324,7 +324,7 @@ bool AJTSPlanetAnchor::RandomPointInSurfaceCap(
 		+ (TangentX * FMath::Cos(Azimuth) + TangentY * FMath::Sin(Azimuth)) * SineOfAngle).GetSafeNormal();
 	return TraceRadialDirectionToSurface(
 		CandidateDirection,
-		GetApproximateRadius() + FMath::Max(1.0f, SurfaceTraceOuterPadding),
+		GetApproximateRadius(),
 		OutSurfaceHit);
 }
 
@@ -350,7 +350,7 @@ FTransform AJTSPlanetAnchor::GetLandingTransform() const
 	}
 
 	const FVector LandingCandidate = GetPlanetCenter()
-		+ GetActorUpVector().GetSafeNormal() * (GetApproximateRadius() + FMath::Max(1.0f, SurfaceTraceOuterPadding));
+		+ GetActorUpVector().GetSafeNormal() * GetApproximateRadius();
 	FJTSPlanetSurfaceHit SurfaceHit;
 	return TraceToSurface(LandingCandidate, SurfaceHit)
 		? BuildSurfaceTransform(SurfaceHit, GetActorForwardVector())
@@ -525,105 +525,80 @@ void AJTSPlanetAnchor::SetActivePlanet(bool bInIsActivePlanet)
 
 bool AJTSPlanetAnchor::TraceRadialDirectionToSurface(
 	const FVector& RadialDirection,
-	float OuterTraceRadius,
+	float CandidateDistance,
 	FJTSPlanetSurfaceHit& OutSurfaceHit) const
 {
+	UPrimitiveComponent* const SurfaceComponent = GetGameplaySurfaceComponent();
+	if (!IsValid(SurfaceComponent)
+		|| SurfaceComponent->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+	{
+		ResetSurfaceHit(OutSurfaceHit, FVector::ZeroVector, FVector::ZeroVector);
+		return false;
+	}
+
 	const FVector SafeRadialDirection = RadialDirection.IsNearlyZero()
 		? GetActorUpVector().GetSafeNormal()
 		: RadialDirection.GetSafeNormal();
 	const FVector PlanetCenter = GetPlanetCenter();
-	const float SafeOuterTraceRadius = FMath::Max(GetApproximateRadius() + 1.0f, OuterTraceRadius);
+	const float BoundsOuterRadius = FVector::Distance(PlanetCenter, SurfaceComponent->Bounds.Origin)
+		+ SurfaceComponent->Bounds.SphereRadius;
+	const float SafeOuterTraceRadius = FMath::Max(
+		FMath::Max(BoundsOuterRadius, GetApproximateRadius()),
+		FMath::Max(0.0f, CandidateDistance))
+		+ FMath::Max(1.0f, SurfaceTraceOuterPadding);
 	const FVector TraceStart = PlanetCenter + SafeRadialDirection * SafeOuterTraceRadius;
-	const FVector TraceEnd = PlanetCenter;
+	const FVector TraceEnd = PlanetCenter - SafeRadialDirection * SafeOuterTraceRadius;
 	ResetSurfaceHit(OutSurfaceHit, TraceStart, TraceEnd);
 
-	if (!HasGameplaySurface())
-	{
-		return false;
-	}
-
 	UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return false;
-	}
-	if (bDebugPlanetSurface)
+	if (bDebugPlanetSurface && World != nullptr)
 	{
 		DrawDebugLine(World, TraceStart, TraceEnd, FColor::Cyan, false, -1.0f, 0, 0.75f);
 	}
 
 	FCollisionQueryParams TraceParameters(SCENE_QUERY_STAT(JTSPlanetSurfaceTrace), true, this);
 	TraceParameters.bTraceComplex = true;
-	TraceParameters.AddIgnoredActor(this);
 
-	TArray<FHitResult> TraceHits;
-	if (!World->LineTraceMultiByChannel(
-		TraceHits,
-		TraceStart,
-		TraceEnd,
-		SurfaceTraceChannel,
-		TraceParameters))
+	FHitResult TraceHit;
+	if (!SurfaceComponent->LineTraceComponent(TraceHit, TraceStart, TraceEnd, TraceParameters)
+		|| !TraceHit.bBlockingHit)
 	{
 		return false;
 	}
 
-	for (const FHitResult& TraceHit : TraceHits)
+	FVector ImpactNormal = TraceHit.ImpactNormal.GetSafeNormal();
+	if (ImpactNormal.IsNearlyZero())
 	{
-		if (!TraceHit.bBlockingHit || !IsGameplaySurfaceComponent(TraceHit.GetComponent()))
-		{
-			continue;
-		}
-
-		FVector ImpactNormal = TraceHit.ImpactNormal.GetSafeNormal();
-		if (ImpactNormal.IsNearlyZero())
-		{
-			ImpactNormal = TraceHit.Normal.GetSafeNormal();
-		}
-		const FVector RadialUpAtImpact = (TraceHit.ImpactPoint - PlanetCenter).GetSafeNormal();
-		if (!ImpactNormal.IsNearlyZero() && !RadialUpAtImpact.IsNearlyZero()
-			&& FVector::DotProduct(ImpactNormal, RadialUpAtImpact) < 0.0f)
-		{
-			ImpactNormal *= -1.0f;
-		}
-
-		OutSurfaceHit.bBlockingHit = true;
-		OutSurfaceHit.ImpactPoint = TraceHit.ImpactPoint;
-		OutSurfaceHit.ImpactNormal = ImpactNormal.IsNearlyZero() ? RadialUpAtImpact : ImpactNormal;
-		OutSurfaceHit.Distance = FVector::Distance(TraceStart, TraceHit.ImpactPoint);
-		OutSurfaceHit.HitActor = TraceHit.GetActor();
-		OutSurfaceHit.HitComponent = TraceHit.GetComponent();
-		if (bDebugPlanetSurface)
-		{
-			DrawDebugDirectionalArrow(
-				World,
-				TraceHit.ImpactPoint,
-				TraceHit.ImpactPoint + OutSurfaceHit.ImpactNormal * 150.0f,
-				24.0f,
-				FColor::Green,
-				false,
-				-1.0f,
-				0,
-				1.0f);
-		}
-		return true;
+		ImpactNormal = TraceHit.Normal.GetSafeNormal();
+	}
+	const FVector RadialUpAtImpact = (TraceHit.ImpactPoint - PlanetCenter).GetSafeNormal();
+	if (!ImpactNormal.IsNearlyZero() && !RadialUpAtImpact.IsNearlyZero()
+		&& FVector::DotProduct(ImpactNormal, RadialUpAtImpact) < 0.0f)
+	{
+		ImpactNormal *= -1.0f;
 	}
 
-	return false;
-}
-
-bool AJTSPlanetAnchor::IsGameplaySurfaceComponent(const UPrimitiveComponent* Candidate) const
-{
-	if (!IsValid(Candidate) || Candidate->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+	OutSurfaceHit.bBlockingHit = true;
+	OutSurfaceHit.ImpactPoint = TraceHit.ImpactPoint;
+	OutSurfaceHit.ImpactNormal = ImpactNormal.IsNearlyZero() ? RadialUpAtImpact : ImpactNormal;
+	OutSurfaceHit.Distance = FVector::Distance(TraceStart, TraceHit.ImpactPoint);
+	OutSurfaceHit.HitActor = SurfaceComponent->GetOwner();
+	OutSurfaceHit.HitComponent = SurfaceComponent;
+	if (bDebugPlanetSurface && World != nullptr)
 	{
-		return false;
+		DrawDebugDirectionalArrow(
+			World,
+			TraceHit.ImpactPoint,
+			TraceHit.ImpactPoint + OutSurfaceHit.ImpactNormal * 150.0f,
+			24.0f,
+			FColor::Green,
+			false,
+			-1.0f,
+			0,
+			1.0f);
 	}
+	return true;
 
-	if (IsValid(GameplaySurfaceComponent))
-	{
-		return Candidate == GameplaySurfaceComponent.Get();
-	}
-
-	return IsValid(GameplaySurfaceActor) && Candidate->GetOwner() == GameplaySurfaceActor.Get();
 }
 
 FVector AJTSPlanetAnchor::GetFallbackTangent(const FVector& UpVector) const

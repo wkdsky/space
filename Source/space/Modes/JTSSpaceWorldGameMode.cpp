@@ -6,6 +6,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/PlayerController.h"
+#include "space/Core/JTSGameInstance.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -13,6 +14,12 @@
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
+
+namespace
+{
+	constexpr float InitialSurfaceSpawnRetryInterval = 0.10f;
+	constexpr int32 MaxInitialSurfaceSpawnRetries = 5;
+}
 
 AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 {
@@ -29,6 +36,15 @@ AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 void AJTSSpaceWorldGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	bInitialSurfaceCharacterSpawned = false;
+	bInitialGroundedSpacecraftInitialized = false;
+	InitialSurfaceSpawnRetryCount = 0;
+	bInitialSurfaceSpawnRetryExhausted = false;
+	bLoggedSurfaceSnapFailure = false;
+	bLoggedLandingAnchorFailure = false;
+	bLoggedMultipleSpacecraft = false;
+	GetWorldTimerManager().ClearTimer(SurfaceSpawnRetryTimerHandle);
 
 	AJTSSpaceWorldManager* const Manager = FindOrCreateSpaceWorldManager();
 	if (!IsValid(Manager))
@@ -94,7 +110,9 @@ AJTSSpaceWorldManager* AJTSSpaceWorldGameMode::FindOrCreateSpaceWorldManager()
 
 void AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter()
 {
-	if (bInitialSurfaceCharacterSpawned || !SpaceWorldManager.IsValid())
+	if (bInitialSurfaceSpawnRetryExhausted
+		|| (bInitialSurfaceCharacterSpawned && bInitialGroundedSpacecraftInitialized)
+		|| !SpaceWorldManager.IsValid())
 	{
 		return;
 	}
@@ -102,39 +120,114 @@ void AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter()
 	UWorld* const World = GetWorld();
 	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
 	AJTSPlanetAnchor* const Planet = SpaceWorldManager->GetCurrentPlanet();
-	if (!IsValid(World) || !IsValid(PlayerController) || !IsValid(Planet) || !Planet->HasGameplaySurface())
+	if (IsValid(World) && IsValid(Planet) && Planet->HasGameplaySurface())
+	{
+		if (!bInitialGroundedSpacecraftInitialized)
+		{
+			bInitialGroundedSpacecraftInitialized = TrySpawnInitialGroundedSpacecraft(Planet);
+		}
+
+		if (!bInitialSurfaceCharacterSpawned && IsValid(PlayerController))
+		{
+			bInitialSurfaceCharacterSpawned = SpawnAndSnapCharacter(PlayerController, Planet);
+			if (bInitialSurfaceCharacterSpawned)
+			{
+				SpaceWorldManager->SetSurfaceGameplayReady(true);
+				if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+				{
+					JTSPlayerController->ApplySpaceWorldInputMode();
+				}
+
+				UE_LOG(LogTemp, Log, TEXT("SpaceWorld initial surface character spawned on real planet %s."), *Planet->GetPlanetId().ToString());
+			}
+		}
+	}
+
+	if (bInitialSurfaceCharacterSpawned && bInitialGroundedSpacecraftInitialized)
 	{
 		if (World != nullptr)
 		{
-			World->GetTimerManager().SetTimer(SurfaceSpawnRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter, 0.05f, false);
+			World->GetTimerManager().ClearTimer(SurfaceSpawnRetryTimerHandle);
 		}
 		return;
 	}
 
-	if (!bInitialGroundedSpacecraftInitialized)
-	{
-		bInitialGroundedSpacecraftInitialized = TrySpawnInitialGroundedSpacecraft(Planet);
-	}
+	ScheduleInitialSurfaceSpawnRetry(PlayerController, Planet);
+}
 
-	if (!SpawnAndSnapCharacter(PlayerController, Planet))
+void AJTSSpaceWorldGameMode::ScheduleInitialSurfaceSpawnRetry(APlayerController* PlayerController, AJTSPlanetAnchor* Planet)
+{
+	UWorld* const World = GetWorld();
+	if (World == nullptr || bInitialSurfaceSpawnRetryExhausted)
 	{
-		if (!bLoggedSurfaceSnapFailure)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("SpaceWorld initial character is waiting for a valid real mesh surface trace on planet %s."), *Planet->GetPlanetId().ToString());
-			bLoggedSurfaceSnapFailure = true;
-		}
-		World->GetTimerManager().SetTimer(SurfaceSpawnRetryTimerHandle, this, &AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter, 0.05f, false);
 		return;
 	}
 
-	bInitialSurfaceCharacterSpawned = true;
-	SpaceWorldManager->SetSurfaceGameplayReady(true);
-	if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+	FTimerManager& TimerManager = World->GetTimerManager();
+	if (TimerManager.IsTimerActive(SurfaceSpawnRetryTimerHandle))
 	{
-		JTSPlayerController->ApplySpaceWorldInputMode();
+		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("SpaceWorld initial surface character spawned on real planet %s."), *Planet->GetPlanetId().ToString());
+	if (InitialSurfaceSpawnRetryCount >= MaxInitialSurfaceSpawnRetries)
+	{
+		TimerManager.ClearTimer(SurfaceSpawnRetryTimerHandle);
+		bInitialSurfaceSpawnRetryExhausted = true;
+		LogInitialSurfaceInitializationFailure(PlayerController, Planet);
+		return;
+	}
+
+	++InitialSurfaceSpawnRetryCount;
+	TimerManager.SetTimer(
+		SurfaceSpawnRetryTimerHandle,
+		this,
+		&AJTSSpaceWorldGameMode::TrySpawnInitialSurfaceCharacter,
+		InitialSurfaceSpawnRetryInterval,
+		false);
+}
+
+void AJTSSpaceWorldGameMode::LogInitialSurfaceInitializationFailure(
+	APlayerController* PlayerController,
+	AJTSPlanetAnchor* Planet)
+{
+	const FString PlanetId = IsValid(Planet) ? Planet->GetPlanetId().ToString() : TEXT("<unresolved>");
+	const FString CharacterName = IsValid(PlayerController)
+		? GetNameSafe(PlayerController->GetPawn())
+		: TEXT("<unresolved>");
+	const AActor* const PlayerStart = IsValid(PlayerController) ? FindPlayerStart(PlayerController) : nullptr;
+	const FVector TraceReferenceLocation = IsValid(PlayerStart)
+		? PlayerStart->GetActorLocation()
+		: (IsValid(Planet) ? Planet->GetLandingTransform().GetLocation() : FVector::ZeroVector);
+	const FString SurfaceActorName = IsValid(Planet) ? GetNameSafe(Planet->GetGameplaySurfaceActor()) : TEXT("<unresolved>");
+	const FString SurfaceComponentName = IsValid(Planet) ? GetNameSafe(Planet->GetGameplaySurfaceComponent()) : TEXT("<unresolved>");
+
+	if (!bInitialSurfaceCharacterSpawned && !bLoggedSurfaceSnapFailure)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("SpaceWorld initial character surface placement failed after %d retries. PlanetId=%s Character=%s TraceReferenceLocation=%s GameplaySurfaceActor=%s GameplaySurfaceComponent=%s."),
+			MaxInitialSurfaceSpawnRetries,
+			*PlanetId,
+			*CharacterName,
+			*TraceReferenceLocation.ToCompactString(),
+			*SurfaceActorName,
+			*SurfaceComponentName);
+		bLoggedSurfaceSnapFailure = true;
+	}
+
+	if (!bInitialGroundedSpacecraftInitialized && !bLoggedLandingAnchorFailure)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("SpaceWorld initial spacecraft grounding failed after %d retries. PlanetId=%s GameplaySurfaceActor=%s GameplaySurfaceComponent=%s."),
+			MaxInitialSurfaceSpawnRetries,
+			*PlanetId,
+			*SurfaceActorName,
+			*SurfaceComponentName);
+		bLoggedLandingAnchorFailure = true;
+	}
 }
 
 bool AJTSSpaceWorldGameMode::SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet)
@@ -181,12 +274,6 @@ bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor*
 	FTransform LandingSurfaceTransform;
 	if (!Planet->GetLandingSurfaceTransform(LandingSurfaceTransform))
 	{
-		if (!bLoggedLandingAnchorFailure)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("SpaceWorld initial spacecraft is waiting for a valid real-surface LandingAnchorActor on planet %s."),
-				*Planet->GetPlanetId().ToString());
-			bLoggedLandingAnchorFailure = true;
-		}
 		return false;
 	}
 
@@ -200,7 +287,16 @@ bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor*
 			return false;
 		}
 
-		TSubclassOf<AJTSSpacecraftActor> ShipClass = SpacecraftClass;
+		TSubclassOf<AJTSSpacecraftActor> ShipClass;
+		if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
+			IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftClass())
+		{
+			ShipClass = GameInstance->GetPersistedSpacecraftClass();
+		}
+		if (ShipClass == nullptr)
+		{
+			ShipClass = SpacecraftClass;
+		}
 		if (ShipClass == nullptr)
 		{
 			ShipClass = AJTSSpacecraftActor::StaticClass();
@@ -216,7 +312,6 @@ bool AJTSSpaceWorldGameMode::TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor*
 
 	if (!IsValid(Spacecraft))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SpaceWorld could not create its persistent gameplay spacecraft."));
 		return false;
 	}
 

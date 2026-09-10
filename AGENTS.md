@@ -1,69 +1,231 @@
 # Jump to Space - Codex Instructions
 
 
-## Project Overview
+# Design Principles
 
-Project:
-Jump to Space
-
-Engine:
-Unreal Engine 5.8
-
-Language:
-C++ gameplay systems.
-Blueprints are allowed for presentation and editor setup.
-
-Genre:
-Space exploration / repair / upgrade / travel.
+- 保持系统职责单一，避免大型类承担多个职责。
+- C++负责通用规则和系统能力。
+- Blueprint负责具体项目配置、资产选择和关卡实例设置。
+- 不要将关卡配置、资源配置、具体Actor引用硬编码到C++。
+- 优先使用 Composition、Component、Subsystem、Interface。
 
 
-## Core Gameplay Loop
+# C++ and Blueprint Rules
 
-Current vertical slice:
+## C++
 
-Earth Base
+负责：
+
+- Gameplay规则
+- 系统逻辑
+- 数据结构
+- 通用接口
+- Runtime行为
+
+
+## Blueprint
+
+负责：
+
+- GameMode实例配置
+- Level配置
+- Player Blueprint选择
+- Spacecraft Blueprint选择
+- Planet具体参数配置
+- 美术和表现调整
+
+
+Blueprint用于配置C++提供的能力，不替代核心系统。
+
+
+# Gameplay Architecture
+
+
+## Flow Layer
+
+### GameMode
+
+负责：
+
+- 游戏阶段流程
+- 玩家出生
+- 飞船创建
+- 当前玩法初始化
+- 使用Blueprint配置
+
+
+例如：
+
+Earth GameMode：
+- 收集阶段
+- 发射流程
+- 保存旅行数据
+
+
+Space Entry GameMode：
+- 第一次进入SpaceWorld时初始化玩家、飞船、Planet状态
+
+
+Planet Gameplay GameMode：
+- 管理具体星球玩法配置
+
+
+
+## World Layer
+
+
+### SpaceWorldManager
+
+负责：
+
+- SpaceWorld状态管理
+- Planet注册
+- 当前Planet查询
+- Planet Streaming
+- Travel状态
+
+
+### PlanetAnchor
+
+负责：
+
+- 真实球体定义
+- Planet中心
+- Surface查询
+- Planet重力来源
+- Landing相关数据
+
+
+
+## Vehicle Layer
+
+
+### SpacecraftActor
+
+负责：
+
+- 飞行
+- 推进
+- 转向
+- 起飞
+- 着陆
+- 飞船状态
+
+
+飞船生成和出生位置由GameMode决定。
+
+
+## Gameplay Layer
+
+
+### SurfaceController
+
+负责：
+
+具体Planet地表玩法。
+
+例如Moon：
+
+- 资源生成
+- 矿脉
+- 生物
+- 巢穴
+- POI
+- 地表事件
+
+
+不同Planet可以拥有不同SurfaceController。
+
+
+## Entity Layer
+
+
+### Character
+
+负责：
+
+- 玩家控制
+- 移动
+- 交互
+- 装备
+
+
+### Item / Resource
+
+负责：
+
+- 物品自身数据
+- 交互行为
+
+
+# Planet Rules
+
+所有真实Planet使用球面规则。
+
+重力方向：
+
+Planet Center → Actor位置
+
+不要使用固定World-Z重力。
+
+Surface逻辑基于真实Mesh Surface。
+
+
+# World Structure
+
+SpaceWorld是长期存在的通用宇宙玩法空间。
+
+不要设计：
+
+Earth地图 → Moon地图 → Mars地图
+
+
+正确：
+
+Earth
+
 ↓
-Explore and collect resources
+
+SpaceWorld
+
 ↓
-Repair spaceship
+
+Current Planet
+
 ↓
-Enter spaceship
-↓
-Launch
-↓
-Travel to first planet
-↓
-Explore and upgrade
+
+Planet Gameplay
 
 
-Do not implement future systems unless requested.
+# Project Structure
+
+推荐：
+
+Characters/
+
+Components/
+
+Systems/
+
+World/
+
+Planets/
+
+Ships/
+
+Items/
+
+UI/
 
 
-## Build Rules
-
-Codex may compile the Unreal project when implementing C++ changes.
-
-Before compiling:
-- Close Unreal Editor if required.
-- Use the project's existing Unreal Build configuration.
-
-Do not repeatedly rebuild without fixing errors.
-
-Do not modify unrelated files just to make compilation pass.
-
-If compilation fails:
-- Analyze the first meaningful error.
-- Fix the root cause.
-- Retry.
-
-Avoid Live Coding builds.
+保持目录与职责对应。
 
 
-## Unreal C++ Rules
+# Unreal C++ Rules
 
-Follow UE5 C++ conventions.
+遵循UE5 C++规范。
 
-Use:
+使用：
 
 - UCLASS
 - USTRUCT
@@ -73,113 +235,74 @@ Use:
 - UFUNCTION
 
 
-Naming:
+命名：
 
-A = Actor classes
+A = Actor
 
-U = UObject classes
+U = UObject
 
-F = Structs
+F = Struct
 
-E = Enums
-
-
-Prefer:
-
-- Composition
-- Components
-- Subsystems
-- Interfaces
+E = Enum
 
 
-Avoid:
+避免：
 
-- Giant classes
-- Putting all gameplay inside Character
-- Excessive Tick usage
-- Premature abstraction
-
-
-## Architecture
-
-Keep systems separated.
-
-Preferred systems:
-
-Characters/
-Components/
-Systems/
-World/
-UI/
-Items/
-Ships/
-Planets/
+- 巨型类
+- 大量Tick
+- 无必要抽象
+- 无关重构
 
 
-Do not create new large frameworks.
+# Code Changes
 
-Do not introduce:
+新增系统前说明：
 
-- Gameplay Ability System
-- Mass
-- Multiplayer replication
-
-unless explicitly requested.
+1. 目的
+2. 职责
+3. 依赖
 
 
-## Code Changes
+保持修改范围最小。
 
-Before creating new systems:
-
-Explain briefly:
-
-1. Purpose
-2. Responsibility
-3. Dependencies
+不要修改无关代码。
 
 
-Make minimal changes.
+# Unreal Assets
 
-Do not refactor unrelated code.
-
-
-## Unreal Assets
-
-Do not manually edit:
+不要直接修改：
 
 - uasset
 - umap
 
-If editor work is required:
 
-1. Create C++ foundation.
-2. Explain remaining editor steps.
+需要编辑器操作时：
 
-
-## Validation
-
-After implementation report:
-
-1. Changed files
-2. What was implemented
-3. Unreal Editor steps
-4. Possible compile problems
+说明具体Editor步骤。
 
 
-## Current Goal
+# Build Rules
 
-Create a playable prototype:
+允许编译项目验证C++修改。
 
-Player
-↓
-Earth base
-↓
-Repair spaceship
-↓
-Launch
-↓
-Reach first planet
+编译：
+
+- 使用项目现有Build配置。
+- 必要时关闭Unreal Editor。
+- 避免Live Coding导致的问题。
 
 
-Keep implementation simple.
-Avoid premature systems.
+编译失败：
+
+- 优先解决第一个有效错误。
+- 不通过修改无关文件绕过问题。
+
+
+# Validation Report
+
+完成后报告：
+
+1. 修改文件
+2. 实现内容
+3. Editor需要操作的步骤
+4. 编译结果

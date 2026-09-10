@@ -34,6 +34,8 @@ protected:
 private:
 	AJTSSpaceWorldManager* FindOrCreateSpaceWorldManager();
 	void TrySpawnInitialSurfaceCharacter();
+	void ScheduleInitialSurfaceSpawnRetry(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
+	void LogInitialSurfaceInitializationFailure(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
 	bool SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
 	bool TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet);
 	AJTSSpacecraftActor* FindExistingGameplaySpacecraft();
@@ -42,7 +44,7 @@ private:
 	TSubclassOf<AJTSSpaceWorldManager> SpaceWorldManagerClass;
 
 	/** Class used for the single persistent spacecraft parked on the authored landing surface. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
 	/** Retained for serialized Blueprint defaults until real-mesh landing is implemented with spacecraft code. */
@@ -53,6 +55,8 @@ private:
 	FTimerHandle SurfaceSpawnRetryTimerHandle;
 	bool bInitialSurfaceCharacterSpawned = false;
 	bool bInitialGroundedSpacecraftInitialized = false;
+	int32 InitialSurfaceSpawnRetryCount = 0;
+	bool bInitialSurfaceSpawnRetryExhausted = false;
 	bool bLoggedSurfaceSnapFailure = false;
 	bool bLoggedLandingAnchorFailure = false;
 	bool bLoggedMultipleSpacecraft = false;

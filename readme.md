@@ -26,3 +26,11 @@ SpaceWorldManager
 SurfaceController
 负责：
     地表玩法
+
+ue热重载：ctrl + alt + f11
+
+
+
+Get-ChildItem "C:\Users\coner\.codex" -Recurse -File |
+Where-Object { $_.Name -like "*01a08935-03ad-7043-ae0f-42629ad41b81*" } |
+Copy-Item -Destination "C:\Users\coner\codexbackup"

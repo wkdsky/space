@@ -158,14 +158,12 @@ bool AJTSCharacter::SnapToPlanetSurface(AJTSPlanetAnchor* InPlanetAnchor, const 
 		SurfaceLocation,
 		&SurfaceFrame))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SurfaceSnapFailed: %s on %s."), *GetName(), *InPlanetAnchor->GetPlanetId().ToString());
 		return false;
 	}
 
 	const FVector SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	if (SurfaceUp.IsNearlyZero())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Planet surface snap received an invalid collision normal for %s on %s."), *GetName(), *InPlanetAnchor->GetPlanetId().ToString());
 		return false;
 	}
 

@@ -56,14 +56,12 @@ bool AJTSPlanetSurfaceAnchor::SnapToPlanetSurface()
 	AJTSPlanetAnchor* const Planet = GetPlanetAnchor();
 	if (!IsValid(Planet) || !Planet->HasGameplaySurface())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Planet surface anchor %s could not resolve a valid gameplay planet."), *GetName());
 		return false;
 	}
 
 	FTransform SurfaceTransform;
 	if (!BuildSurfaceTransform(SurfaceTransform))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Planet surface anchor %s failed to snap to %s."), *GetName(), *Planet->GetPlanetId().ToString());
 		return false;
 	}
 

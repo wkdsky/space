@@ -361,6 +361,7 @@ void AJTSEarthGameMode::ResolveLaunchOutcome()
 				Spacecraft->GetFuelCount());
 
 			GameInstance->SetPersistedSpacecraftStorage(Spacecraft->GetStorage());
+			GameInstance->SetPersistedSpacecraftClass(Spacecraft->GetClass());
 			UE_LOG(
 				LogTemp,
 				Log,
