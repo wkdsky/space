@@ -85,7 +85,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Space World|State")
 	void SetTravelState(EJTSSpaceTravelState NewTravelState);
 
-	/** Set by the GameMode once the initial Character has been snapped; this gates startup/input readiness, never gravity. */
+	/** Set by the landing flow once initial gameplay actors exist; this gates startup/input readiness, never gravity. */
 	void SetSurfaceGameplayReady(bool bReady);
 
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
@@ -158,4 +158,5 @@ private:
 	FOnJTSSpaceWorldLandingRequested LandingRequestedDelegate;
 	bool bPlanetRegistryInitialized = false;
 	bool bSurfaceGameplayReady = false;
+	bool bLandingEligibilityAnnounced = false;
 };

@@ -4,20 +4,21 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
-#include "TimerManager.h"
 
 #include "JTSSpaceWorldGameMode.generated.h"
 
-class AJTSPlanetAnchor;
 class AJTSCharacter;
+class AJTSPlanetLandingManager;
 class AJTSSpaceWorldManager;
 class AJTSSpacecraftActor;
 class APlayerController;
 
 /**
- * Persistent SpaceWorld startup rules. It chooses the player spawn and binds that character to
- * the configured real gameplay planet. Planet math, Moon-specific surface gameplay, and flight
- * behavior remain in their own systems.
+ * Flow-layer entry point for persistent SpaceWorld gameplay.
+ *
+ * This class selects Blueprint-configured manager/vehicle classes and starts an arrival sequence.
+ * It deliberately owns neither surface placement nor LandingSite validation: those responsibilities
+ * live in AJTSPlanetLandingManager and AJTSPlanetLandingSite.
  */
 UCLASS()
 class SPACE_API AJTSSpaceWorldGameMode : public AGameModeBase
@@ -27,6 +28,9 @@ class SPACE_API AJTSSpaceWorldGameMode : public AGameModeBase
 public:
 	AJTSSpaceWorldGameMode();
 
+	/** Called by AJTSCharacter when health reaches zero. Only a landed associated spacecraft permits respawn. */
+	void HandlePlayerCharacterDeath(AJTSCharacter* Character);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -34,43 +38,21 @@ protected:
 
 private:
 	AJTSSpaceWorldManager* FindOrCreateSpaceWorldManager();
-	void TrySpawnInitialSurfaceCharacter();
-	void ScheduleInitialSurfaceSpawnRetry(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
-	void LogInitialSurfaceInitializationFailure(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
-	bool SpawnAndSnapCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
-	bool TrySpawnInitialGroundedSpacecraft(AJTSPlanetAnchor* Planet, const AJTSCharacter* Character);
-	bool ResolveInitialSpacecraftLandingTransform(
-		AJTSPlanetAnchor* Planet,
-		const AJTSCharacter* Character,
-		FTransform& OutLandingSurfaceTransform) const;
-	AJTSSpacecraftActor* FindExistingGameplaySpacecraft();
+	AJTSPlanetLandingManager* FindOrCreatePlanetLandingManager();
+	void StartInitialLandingSequence(APlayerController* PlayerController);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpaceWorldManager> SpaceWorldManagerClass;
 
-	/** Class used for the single persistent spacecraft parked on the authored landing surface. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true"))
+	/** Blueprint-configurable runtime coordinator for arrival, LandingSite registry, and respawn queries. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSPlanetLandingManager> PlanetLandingManagerClass;
+
+	/** Default vehicle only; a GameInstance persisted vehicle class still wins at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
-	/**
-	 * Minimum real-surface separation between the GameMode-spawned player and parked spacecraft.
-	 * The authored Planet landing anchor remains the preferred location; this is only a safe fallback
-	 * when that anchor resolves too close to the player spawn.
-	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float InitialSpacecraftMinimumPlayerDistance = 900.0f;
-
-	/** Retained for serialized Blueprint defaults until real-mesh landing is implemented with spacecraft code. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|LegacyFlight", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", DeprecatedProperty, DeprecationMessage = "Assisted landing is deferred to the real-mesh spacecraft phase."))
-	float AssistedLandingDuration = 2.0f;
-
 	TWeakObjectPtr<AJTSSpaceWorldManager> SpaceWorldManager;
-	FTimerHandle SurfaceSpawnRetryTimerHandle;
-	bool bInitialSurfaceCharacterSpawned = false;
-	bool bInitialGroundedSpacecraftInitialized = false;
-	int32 InitialSurfaceSpawnRetryCount = 0;
-	bool bInitialSurfaceSpawnRetryExhausted = false;
-	bool bLoggedSurfaceSnapFailure = false;
-	bool bLoggedLandingAnchorFailure = false;
-	bool bLoggedMultipleSpacecraft = false;
+	TWeakObjectPtr<AJTSPlanetLandingManager> PlanetLandingManager;
+	TSet<TWeakObjectPtr<APlayerController>> StartedLandingSequences;
 };

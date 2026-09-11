@@ -4,14 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "space/Components/JTSSpacecraftGroundProbeComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSResourceTypes.h"
+#include "space/World/JTSPlanetLandingTypes.h"
 
 #include "JTSSpacecraftActor.generated.h"
 
 class AJTSCharacter;
 class AJTSPlanetAnchor;
+class AJTSPlanetLandingSite;
 class AJTSPlanetSurfaceAnchor;
 class AController;
 class UBoxComponent;
@@ -75,6 +78,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	UJTSSpacecraftFlightMovementComponent* GetFlightMovementComponent() const;
 
+	UFUNCTION(BlueprintPure, Category = "Ship|Ground Probe")
+	UJTSSpacecraftGroundProbeComponent* GetGroundProbeComponent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Ground Probe")
+	FJTSSpacecraftGroundInfo GetGroundInfo() const;
+
+	/** Refreshes the independent ground probe. LandingManager supplies rule-specific probe lengths. */
+	bool RefreshGroundInfo(AJTSPlanetAnchor* Planet, float MaxProbeDistance = 0.0f);
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Camera")
+	USpringArmComponent* GetFlightCameraBoom() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Camera")
+	UCameraComponent* GetFlightCamera() const;
+
+	/** Ensures the ship uses its exterior driving camera rather than a cockpit/legacy camera component. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Camera")
+	void ActivateFlightCameraThirdPerson();
+
+	/** Adjusts the driving camera boom length. Positive wheel input zooms in. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Camera")
+	void AdjustFlightCameraDistance(float ScrollAmount);
+
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	bool IsBoosting() const;
 
@@ -90,7 +116,35 @@ public:
 	/** Called by SpaceWorld after a target planet is selected. */
 	void SetFlightTargetPlanet(class AJTSPlanetAnchor* Planet);
 
-	/** Hands movement over to the movement component's short landing sequence. */
+	/** Configures an independently spawned arrival craft to fly under a specific planet's gravity. */
+	void InitializeForPlanetArrival(AJTSPlanetAnchor* Planet);
+
+	/** Starts an explicit developer-authorized landing request. Flying itself never depends on LandingSite. */
+	UFUNCTION(BlueprintCallable, Category = "Ship|Landing")
+	bool RequestLanding();
+
+	/** Called only by AJTSPlanetLandingManager after Site-union and surface validation succeed. */
+	bool BeginLandingAssist(const FJTSPlanetLandingValidationResult& ValidationResult, float DurationSeconds);
+
+	/** Cancels a pending request/assist and returns the craft to normal Flying state. */
+	void CancelLandingRequest(EJTSLandingValidationFailure Failure);
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	EJTSSpacecraftFlightState GetFlightState() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	bool IsLanded() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	EJTSLandingValidationFailure GetLastLandingFailure() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	AJTSPlanetAnchor* GetLandedPlanet() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	AJTSPlanetAnchor* GetFlightPlanet() const;
+
+	/** Compatibility entry point for callers that already resolved a surface-aligned landing transform. */
 	bool BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds);
 
 	/** Marks this persistent spacecraft as parked on one real gameplay planet and disables flight movement. */
@@ -118,6 +172,25 @@ public:
 	/** Resolves an authored anchor, then parks this ship on that real gameplay surface. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
 	bool SnapSpacecraftToSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor);
+
+	/** Tests the flight collision hull at a candidate landing transform without moving the ship. */
+	bool CanOccupyLandingTransform(const FTransform& LandingTransform) const;
+
+	/** Hull support distance plus configured ground clearance along the supplied surface-up direction. */
+	float GetLandingCollisionClearance(const FVector& SurfaceUp) const;
+	float GetLandingCollisionClearance() const;
+	/** Computes hull support using the requested future ship orientation instead of the current flight attitude. */
+	float GetLandingCollisionClearanceForRotation(const FQuat& ShipRotation, const FVector& SurfaceUp) const;
+
+	/** Resolves the documented landed-ship respawn result through the PlanetLandingManager. */
+	bool GetPlayerRespawnTransform(FJTSPlayerRespawnTransformResult& OutResult) const;
+	bool GetTopRespawnTransform(FTransform& OutTransform) const;
+	bool GetExitRespawnTransform(FTransform& OutTransform) const;
+
+	float GetPlayerRespawnSearchRadius() const;
+	float GetPlayerRespawnCapsuleRadius() const;
+	float GetPlayerRespawnCapsuleHalfHeight() const;
+	float GetPlayerRespawnClearance() const;
 
 	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
 	FBox GetResourceExclusionBounds() const;
@@ -221,12 +294,18 @@ private:
 	void FlightRoll(const FInputActionValue& Value);
 	void FlightLookYaw(const FInputActionValue& Value);
 	void FlightLookPitch(const FInputActionValue& Value);
+	void FlightCameraZoom(const FInputActionValue& Value);
 	void FlightBoostStarted(const FInputActionValue& Value);
 	void FlightBoostStopped(const FInputActionValue& Value);
 	void FlightBrakeStarted(const FInputActionValue& Value);
 	void FlightBrakeStopped(const FInputActionValue& Value);
+	void FlightLandingStarted(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
+	void InitializeFlightCameraDistance();
 	void UpdateFlightCamera(float DeltaSeconds);
+	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
+	void HandleAssistedLandingCompleted();
+	void HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure);
 
 	UFUNCTION()
 	void HandleFlightBoostStateChanged(bool bIsBoosting);
@@ -237,6 +316,8 @@ private:
 	bool IsMoonSurfaceRuntimeActive() const;
 	bool DepositPlayerResources(AJTSCharacter* Player);
 	void DepositResourcesFromOverlappingPlayers();
+	/** Reconciles occupants once after all startup BeginPlay calls have completed. */
+	void ReconcileInitialBoardingOverlaps();
 	void SavePersistentStorage() const;
 
 	/** Collision root moved by the flight component with Sweep enabled. */
@@ -255,7 +336,16 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftFlightMovementComponent> FlightMovementComponent;
 
+	/** Surface-query component used by LandingAssist and Landed checks; it never moves the spacecraft. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Ground Probe", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftGroundProbeComponent> GroundProbeComponent;
+
+	/** Dedicated driving boom, attached to the ship rather than any planet frame. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USpringArmComponent> FlightCameraBoom;
+
+	/** Serialized compatibility alias for existing spacecraft Blueprints. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use FlightCameraBoom."))
 	TObjectPtr<USpringArmComponent> CameraBoom;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
@@ -285,9 +375,22 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float NavigationMarkerHeightOffset = 20.0f;
 
-	/** Root clearance above a real collision surface while this spacecraft is grounded. */
+	/** Small anti-z-fighting clearance above a real collision surface while this spacecraft is grounded. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float ShipGroundClearance = 90.0f;
+	float ShipGroundClearance = 2.0f;
+
+	/** Search extent for a respawn inside the union of nearby legal landing areas. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlayerRespawnSearchRadius = 1200.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlayerRespawnCapsuleRadius = 42.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float PlayerRespawnCapsuleHalfHeight = 96.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float PlayerRespawnClearance = 20.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
 	float NormalFlightFOV = 85.0f;
@@ -297,6 +400,18 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float FlightFOVInterpolationSpeed = 5.0f;
+
+	/** Closest driving camera distance selectable with the mouse wheel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "3000.0", UIMin = "0.0", UIMax = "1600.0"))
+	float FlightCameraMinArmLength = 500.0f;
+
+	/** Furthest driving camera distance selectable with the mouse wheel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "5000.0", UIMin = "900.0", UIMax = "3200.0"))
+	float FlightCameraMaxArmLength = 2400.0f;
+
+	/** Camera-boom change, in centimeters, for one mouse-wheel step. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "500.0"))
+	float FlightCameraZoomStep = 120.0f;
 
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
@@ -332,10 +447,17 @@ private:
 	TObjectPtr<UInputAction> FlightLookPitchAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightCameraZoomAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightBoostAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightBrakeAction;
+
+	/** Default landing-request binding; projects can replace the presentation/input layer in Blueprint. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightLandingAction;
 
 	/** Available only while a player is driving a grounded SpaceWorld spacecraft. */
 	UPROPERTY(Transient)
@@ -351,5 +473,25 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	bool bIsGroundedOnPlanet = false;
 
+	/** Planet that supplies free-flight gravity. It stays valid while the craft is Flying. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> FlightPlanet;
+
+	/** Site whose accepted rule set produced the current landed state. Null for legacy surface snaps. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetLandingSite> ActiveLandingSite;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	EJTSSpacecraftFlightState FlightState = EJTSSpacecraftFlightState::Flying;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	EJTSLandingValidationFailure LastLandingFailure = EJTSLandingValidationFailure::None;
+
+	TWeakObjectPtr<AJTSPlanetLandingSite> PendingLandingSite;
+	FTransform PendingLandingTransform = FTransform::Identity;
+	float PendingLandingClearance = 0.0f;
+	float CurrentFlightCameraArmLength = 0.0f;
+
 	bool bPersistedStorageRestoreAttempted = false;
+	bool bFlightCameraDistanceInitialized = false;
 };

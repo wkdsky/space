@@ -77,10 +77,10 @@ bool UJTSPlanetGravityComponent::CanUseSurfacePlanetGravity(
 	const AJTSSpaceWorldManager* Manager,
 	const AJTSPlanetAnchor* Planet) const
 {
-	// Surface gravity is a state invariant, not a mesh-trace, approximate-radius, or range query.
-	return IsValid(Manager)
-		&& IsValid(Planet)
-		&& Manager->IsPlanetGameplayActive(Planet);
+	// Gravity belongs to the explicit character-to-planet binding. Arrival/streaming state and a
+	// successful ground trace must never decide whether a spawned character can fall naturally.
+	static_cast<void>(Manager);
+	return IsValid(Planet) && Planet->IsGravityEnabled();
 }
 
 void UJTSPlanetGravityComponent::UpdatePlanetGravity()
@@ -101,11 +101,7 @@ void UJTSPlanetGravityComponent::UpdatePlanetGravity()
 		RestoreWorldGravity();
 		const TCHAR* const Reason = !IsValid(Planet)
 			? TEXT("NoBoundPlanet")
-			: !IsValid(Manager)
-				? TEXT("NoSpaceWorldManager")
-				: Manager->GetCurrentPlanet() != Planet
-					? TEXT("PlanetIsNotCurrent")
-					: TEXT("TravelStateIsNotSurface");
+			: TEXT("PlanetGravityDisabled");
 		LogGravityDebug(Character, MovementComponent, Manager, Planet, FVector::ZeroVector, false, Reason);
 		return;
 	}

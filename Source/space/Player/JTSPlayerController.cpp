@@ -10,6 +10,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "space/Modes/JTSEarthGameMode.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
 #include "space/World/JTSSpaceWorldManager.h"
@@ -20,6 +21,11 @@ AJTSPlayerController::AJTSPlayerController()
 	bShowMouseCursor = false;
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
+}
+
+bool AJTSPlayerController::IsLookYAxisInverted() const
+{
+	return bInvertLookYAxis;
 }
 
 void AJTSPlayerController::BeginPlayingState()
@@ -153,6 +159,37 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 void AJTSPlayerController::ApplySpaceWorldInputMode()
 {
 	ApplyEarthCollectionInputMode();
+}
+
+void AJTSPlayerController::SetSpacecraftCameraViewTarget(AJTSSpacecraftActor* Spacecraft)
+{
+	if (!IsLocalController() || !IsValid(Spacecraft))
+	{
+		return;
+	}
+
+	Spacecraft->ActivateFlightCameraThirdPerson();
+	SetViewTargetWithBlend(
+		Spacecraft,
+		FMath::Max(0.0f, SpacecraftCameraBlendTime),
+		VTBlend_Cubic,
+		1.0f,
+		false);
+}
+
+void AJTSPlayerController::RestoreCharacterCameraViewTarget(AJTSCharacter* CharacterPawn)
+{
+	if (!IsLocalController() || !IsValid(CharacterPawn))
+	{
+		return;
+	}
+
+	SetViewTargetWithBlend(
+		CharacterPawn,
+		FMath::Max(0.0f, SpacecraftCameraBlendTime),
+		VTBlend_Cubic,
+		1.0f,
+		false);
 }
 
 void AJTSPlayerController::OpenMoonShop(AJTSCharacter* InPlayer)

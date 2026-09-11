@@ -7,6 +7,8 @@
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Math/RotationMatrix.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
@@ -117,9 +119,12 @@ void UJTSSpacecraftFlightMovementComponent::ClearInput()
 	SetBoostState(false);
 }
 
-bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(const FTransform& TargetTransform, float DurationSeconds)
+bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
+	AJTSPlanetAnchor* Planet,
+	float LandingClearance,
+	float DurationSeconds)
 {
-	if (!IsValid(UpdatedComponent))
+	if (!IsValid(UpdatedComponent) || !IsValid(Planet))
 	{
 		return false;
 	}
@@ -127,11 +132,40 @@ bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(const FTransfor
 	ClearInput();
 	bAssistedLanding = true;
 	Velocity = FVector::ZeroVector;
-	AssistedLandingStart = UpdatedComponent->GetComponentTransform();
-	AssistedLandingTarget = TargetTransform;
-	AssistedLandingDuration = FMath::Max(0.1f, DurationSeconds > 0.0f ? DurationSeconds : DefaultLandingDuration);
+	TargetPlanet = Planet;
+	AssistedLandingClearance = FMath::Max(0.0f, LandingClearance);
+	AssistedLandingDescentSpeed = AssistedLandingMaximumDescentSpeed;
+	if (AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
+	{
+		const FJTSSpacecraftGroundInfo GroundInfo = Spacecraft->GetGroundInfo();
+		if (GroundInfo.bHasGround)
+		{
+			const float DesiredDuration = FMath::Max(
+				0.1f,
+				DurationSeconds > 0.0f ? DurationSeconds : DefaultLandingDuration);
+			const float HeightToLose = FMath::Max(0.0f, GroundInfo.DockingHeight - AssistedLandingClearance);
+			AssistedLandingDescentSpeed = FMath::Clamp(
+				HeightToLose / DesiredDuration,
+				AssistedLandingMinimumDescentSpeed,
+				AssistedLandingMaximumDescentSpeed);
+		}
+	}
 	AssistedLandingElapsed = 0.0f;
 	return true;
+}
+
+void UJTSSpacecraftFlightMovementComponent::CancelAssistedLanding()
+{
+	if (!bAssistedLanding)
+	{
+		return;
+	}
+
+	bAssistedLanding = false;
+	ClearInput();
+	Velocity = FVector::ZeroVector;
+	AssistedLandingClearance = 0.0f;
+	AssistedLandingDescentSpeed = 0.0f;
 }
 
 bool UJTSSpacecraftFlightMovementComponent::IsBoosting() const
@@ -187,21 +221,91 @@ void UJTSSpacecraftFlightMovementComponent::SetTargetPlanet(AJTSPlanetAnchor* Ne
 
 void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 {
-	AssistedLandingElapsed += DeltaTime;
-	const float Progress = FMath::Clamp(AssistedLandingElapsed / FMath::Max(0.1f, AssistedLandingDuration), 0.0f, 1.0f);
-	const float SmoothedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, Progress, 2.0f);
-	const FTransform CurrentTransform = UpdatedComponent->GetComponentTransform();
-	const FVector TargetLocation = FMath::Lerp(AssistedLandingStart.GetLocation(), AssistedLandingTarget.GetLocation(), SmoothedProgress);
-	const FQuat TargetRotation = FQuat::Slerp(AssistedLandingStart.GetRotation(), AssistedLandingTarget.GetRotation(), SmoothedProgress);
-	const FVector Delta = TargetLocation - CurrentTransform.GetLocation();
-	FHitResult Hit;
-	MoveWithCollisionSweep(Delta, TargetRotation, Hit);
-	Velocity = (UpdatedComponent->GetComponentLocation() - CurrentTransform.GetLocation())
-		/ FMath::Max(DeltaTime, KINDA_SMALL_NUMBER);
-
-	if (Progress >= 1.0f)
+	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+	AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	if (!IsValid(Spacecraft) || !IsValid(Planet))
 	{
-		CompleteAssistedLanding();
+		FailAssistedLanding(EJTSLandingValidationFailure::NoPlanet);
+		return;
+	}
+
+	if (!Spacecraft->RefreshGroundInfo(Planet))
+	{
+		FailAssistedLanding(EJTSLandingValidationFailure::NoSurface);
+		return;
+	}
+
+	const FJTSSpacecraftGroundInfo GroundInfo = Spacecraft->GetGroundInfo();
+	const FVector SurfaceUp = GroundInfo.SurfaceNormal.GetSafeNormal();
+	if (!GroundInfo.bHasGround || SurfaceUp.IsNearlyZero())
+	{
+		FailAssistedLanding(EJTSLandingValidationFailure::NoSurface);
+		return;
+	}
+
+	FVector SurfaceForward = FVector::VectorPlaneProject(Spacecraft->GetActorForwardVector(), SurfaceUp).GetSafeNormal();
+	if (SurfaceForward.IsNearlyZero())
+	{
+		SurfaceForward = GroundInfo.SurfaceTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
+	}
+	if (SurfaceForward.IsNearlyZero())
+	{
+		FVector FallbackRight;
+		SurfaceUp.FindBestAxisVectors(SurfaceForward, FallbackRight);
+	}
+
+	const FQuat DesiredRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
+	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
+	const float RotationAlpha = FMath::Clamp(
+		1.0f - FMath::Exp(-FMath::Max(0.1f, AssistedLandingRotationInterpolationSpeed) * DeltaTime),
+		0.0f,
+		1.0f);
+	const FQuat NewRotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
+	const FVector TargetLocation = GroundInfo.GroundLocation + SurfaceUp * AssistedLandingClearance;
+	const float HeightError = GroundInfo.DockingHeight - AssistedLandingClearance;
+	const float CurrentAlignment = FMath::Clamp(
+		FVector::DotProduct(Spacecraft->GetActorUpVector().GetSafeNormal(), SurfaceUp),
+		-1.0f,
+		1.0f);
+	const float AlignmentFactor = FMath::Clamp((CurrentAlignment + 1.0f) * 0.5f, 0.15f, 1.0f);
+	const float DesiredNormalSpeed = FMath::Clamp(
+		HeightError * 2.0f,
+		-AssistedLandingMaximumDescentSpeed * 0.5f,
+		AssistedLandingDescentSpeed * AlignmentFactor);
+	const FVector DesiredVelocity = -SurfaceUp * DesiredNormalSpeed;
+	Velocity = FMath::VInterpConstantTo(
+		Velocity,
+		DesiredVelocity,
+		DeltaTime,
+		FMath::Max(1.0f, AssistedLandingVelocityResponse));
+
+	const float CompletionCosine = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(LandingCompletionAlignmentDegrees, 0.0f, 90.0f)));
+	const float NewAlignment = FVector::DotProduct(NewRotation.GetAxisZ().GetSafeNormal(), SurfaceUp);
+	const bool bAtLandingHeight = FMath::Abs(HeightError) <= LandingContactTolerance;
+	if (bAtLandingHeight && NewAlignment >= CompletionCosine)
+	{
+		FHitResult FinalMoveHit;
+		MoveWithCollisionSweep(TargetLocation - UpdatedComponent->GetComponentLocation(), DesiredRotation, FinalMoveHit);
+		if (FVector::DistSquared(UpdatedComponent->GetComponentLocation(), TargetLocation)
+			<= FMath::Square(FMath::Max(2.0f, LandingContactTolerance * 1.5f)))
+		{
+			CompleteAssistedLanding();
+			return;
+		}
+	}
+
+	FHitResult Hit;
+	MoveWithCollisionSweep(Velocity * DeltaTime, NewRotation, Hit);
+	if (Hit.IsValidBlockingHit())
+	{
+		Velocity = FVector::ZeroVector;
+	}
+
+	AssistedLandingElapsed += DeltaTime;
+	if (AssistedLandingElapsed >= FMath::Max(1.0f, AssistedLandingTimeout))
+	{
+		FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked);
 	}
 }
 
@@ -215,12 +319,42 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 	{
 		Velocity = FMath::VInterpTo(Velocity, FVector::ZeroVector, DeltaTime, FMath::Max(0.0f, InertialDampeningRate));
 	}
+	ApplyPlanetGravity(DeltaTime);
 
 	FHitResult Hit;
 	MoveWithCollisionSweep(Velocity * DeltaTime, UpdatedComponent->GetComponentQuat(), Hit);
 	if (Hit.IsValidBlockingHit())
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
+	}
+}
+
+void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
+{
+	if (!bApplyPlanetaryGravity || DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	APawn* const OwningPawn = GetPawnOwner();
+	if (!IsValid(Planet) || !IsValid(OwningPawn)
+		|| !Planet->IsGravityEnabled()
+		|| !Planet->IsWithinGravityInfluence(OwningPawn->GetActorLocation()))
+	{
+		return;
+	}
+
+	const FVector GravityDirection = Planet->GetGravityDirection(OwningPawn->GetActorLocation());
+	if (GravityDirection.IsNearlyZero())
+	{
+		return;
+	}
+
+	Velocity += GravityDirection * Planet->GetGravityStrength() * DeltaTime;
+	if (MaximumPlanetGravitySpeed > 0.0f)
+	{
+		Velocity = Velocity.GetClampedToMaxSize(MaximumPlanetGravitySpeed);
 	}
 }
 
@@ -234,11 +368,10 @@ void UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime)
 
 	const float TurnMultiplier = bBoosting ? FMath::Max(0.0f, EffectiveStats.BoostTurnMultiplier) : 1.0f;
 	const float YawDelta = PendingYawInput * MouseLookSensitivity * EffectiveStats.YawRate * TurnMultiplier * DeltaTime;
-	const float PitchDelta = -PendingPitchInput * MouseLookSensitivity * EffectiveStats.PitchRate * TurnMultiplier * DeltaTime;
-	const float RollTarget = RollInput * 75.0f;
-	const float CurrentRoll = FRotator::NormalizeAxis(OwningPawn->GetActorRotation().Roll);
-	const float DesiredRoll = FMath::FInterpTo(CurrentRoll, RollTarget, DeltaTime, FMath::Max(0.1f, RollReturnRate));
-	const float RollDelta = FMath::Clamp(DesiredRoll - CurrentRoll, -EffectiveStats.RollRate * DeltaTime, EffectiveStats.RollRate * DeltaTime);
+	const float PitchDelta = PendingPitchInput * MouseLookSensitivity * EffectiveStats.PitchRate * TurnMultiplier * DeltaTime;
+	// Roll is an angular velocity about the spacecraft's local forward axis. Do not derive it from
+	// FRotator::Roll or a finite target angle: those turn a held Q/E input into a bounded bank.
+	const float RollDelta = RollInput * EffectiveStats.RollRate * DeltaTime;
 	OwningPawn->AddActorLocalRotation(FRotator(PitchDelta, YawDelta, RollDelta));
 	PendingYawInput = 0.0f;
 	PendingPitchInput = 0.0f;
@@ -264,11 +397,24 @@ void UJTSSpacecraftFlightMovementComponent::CompleteAssistedLanding()
 	bAssistedLanding = false;
 	ClearInput();
 	Velocity = FVector::ZeroVector;
+	AssistedLandingClearance = 0.0f;
+	AssistedLandingDescentSpeed = 0.0f;
 	OnAssistedLandingCompleted.Broadcast();
+}
+
+void UJTSSpacecraftFlightMovementComponent::FailAssistedLanding(EJTSLandingValidationFailure Failure)
+{
+	bAssistedLanding = false;
+	ClearInput();
+	Velocity = FVector::ZeroVector;
+	AssistedLandingClearance = 0.0f;
+	AssistedLandingDescentSpeed = 0.0f;
+	OnAssistedLandingFailed.Broadcast(Failure);
 }
 
 bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit)
 {
+	OutHit = FHitResult();
 	if (!IsValid(UpdatedComponent))
 	{
 		return false;

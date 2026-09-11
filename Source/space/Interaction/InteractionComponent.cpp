@@ -63,6 +63,9 @@ void UInteractionComponent::RefreshInteractable()
 bool UInteractionComponent::TryInteract()
 {
 	APawn* const InteractingPawn = Cast<APawn>(GetOwner());
+	// E can be pressed between timer passes. Refresh here so interaction always uses the direction
+	// the player is looking at when the input is actually committed.
+	RefreshInteractable();
 	AActor* const Target = GetCurrentInteractable();
 	if (!IsValidInteractable(Target, InteractingPawn))
 	{
@@ -90,6 +93,33 @@ FText UInteractionComponent::GetCurrentInteractionPrompt() const
 	return IInteractable::Execute_GetInteractionPrompt(Target, InteractingPawn);
 }
 
+bool UInteractionComponent::IsInteractableInView(AActor* Candidate) const
+{
+	APawn* const InteractingPawn = Cast<APawn>(GetOwner());
+	if (!IsValidInteractable(Candidate, InteractingPawn))
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FVector ViewForward;
+	if (!TryGetInteractionView(InteractingPawn, ViewLocation, ViewForward))
+	{
+		return false;
+	}
+
+	float ViewAlignment = 0.0f;
+	float PawnDistanceSquared = 0.0f;
+	return IsInteractionTargetVisible(
+		InteractingPawn,
+		Candidate,
+		ViewLocation,
+		ViewForward,
+		InteractionViewHalfAngleDegrees,
+		ViewAlignment,
+		PawnDistanceSquared);
+}
+
 AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 {
 	UWorld* const World = GetWorld();
@@ -101,6 +131,13 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 	if (AActor* const PickupTarget = FindBestWorldPickup(InteractingPawn))
 	{
 		return PickupTarget;
+	}
+
+	FVector ViewLocation;
+	FVector ViewForward;
+	if (!TryGetInteractionView(InteractingPawn, ViewLocation, ViewForward))
+	{
+		return nullptr;
 	}
 
 	TArray<FOverlapResult> OverlapResults;
@@ -119,19 +156,60 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 		return nullptr;
 	}
 
+	const float RetainHalfAngle = FMath::Max(
+		InteractionViewHalfAngleDegrees,
+		InteractionRetainViewHalfAngleDegrees);
+	if (AActor* const StickyTarget = CurrentInteractable.Get();
+		IsValidInteractable(StickyTarget, InteractingPawn))
+	{
+		float StickyAlignment = 0.0f;
+		float StickyDistanceSquared = 0.0f;
+		if (IsInteractionTargetVisible(
+			InteractingPawn,
+			StickyTarget,
+			ViewLocation,
+			ViewForward,
+			RetainHalfAngle,
+			StickyAlignment,
+			StickyDistanceSquared))
+		{
+			return StickyTarget;
+		}
+	}
+
 	AActor* BestTarget = nullptr;
+	float BestViewAlignment = -1.0f;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
+	TSet<AActor*> EvaluatedCandidates;
 	for (const FOverlapResult& OverlapResult : OverlapResults)
 	{
 		AActor* const Candidate = OverlapResult.GetActor();
-		if (!IsValidInteractable(Candidate, InteractingPawn))
+		if (EvaluatedCandidates.Contains(Candidate) || !IsValidInteractable(Candidate, InteractingPawn))
+		{
+			continue;
+		}
+		EvaluatedCandidates.Add(Candidate);
+
+		float ViewAlignment = 0.0f;
+		float DistanceSquared = 0.0f;
+		if (!IsInteractionTargetVisible(
+			InteractingPawn,
+			Candidate,
+			ViewLocation,
+			ViewForward,
+			InteractionViewHalfAngleDegrees,
+			ViewAlignment,
+			DistanceSquared))
 		{
 			continue;
 		}
 
-		const float DistanceSquared = FVector::DistSquared(InteractingPawn->GetActorLocation(), Candidate->GetActorLocation());
-		if (DistanceSquared < BestDistanceSquared)
+		// Screen/aim alignment determines intent; distance only breaks near-identical angles.
+		const bool bBetterAlignment = ViewAlignment > BestViewAlignment + KINDA_SMALL_NUMBER;
+		const bool bEquivalentAlignment = FMath::IsNearlyEqual(ViewAlignment, BestViewAlignment, KINDA_SMALL_NUMBER);
+		if (bBetterAlignment || (bEquivalentAlignment && DistanceSquared < BestDistanceSquared))
 		{
+			BestViewAlignment = ViewAlignment;
 			BestDistanceSquared = DistanceSquared;
 			BestTarget = Candidate;
 		}
@@ -294,6 +372,125 @@ bool UInteractionComponent::IsValidInteractable(AActor* Candidate, APawn* Intera
 		&& IsValid(InteractingPawn)
 		&& Candidate->GetClass()->ImplementsInterface(UInteractable::StaticClass())
 		&& IInteractable::Execute_CanInteract(Candidate, InteractingPawn);
+}
+
+bool UInteractionComponent::TryGetInteractionView(
+	APawn* InteractingPawn,
+	FVector& OutViewLocation,
+	FVector& OutViewForward) const
+{
+	if (!IsValid(InteractingPawn))
+	{
+		return false;
+	}
+
+	OutViewLocation = InteractingPawn->GetActorLocation();
+	OutViewForward = InteractingPawn->GetActorForwardVector().GetSafeNormal();
+	if (const APlayerController* const PlayerController = Cast<APlayerController>(InteractingPawn->GetController()))
+	{
+		if (const APlayerCameraManager* const CameraManager = PlayerController->PlayerCameraManager)
+		{
+			OutViewLocation = CameraManager->GetCameraLocation();
+			OutViewForward = CameraManager->GetCameraRotation().Vector().GetSafeNormal();
+		}
+	}
+
+	return !OutViewForward.IsNearlyZero();
+}
+
+bool UInteractionComponent::IsInteractionTargetVisible(
+	APawn* InteractingPawn,
+	AActor* Candidate,
+	const FVector& ViewLocation,
+	const FVector& ViewForward,
+	float ViewHalfAngleDegrees,
+	float& OutViewAlignment,
+	float& OutPawnDistanceSquared) const
+{
+	OutViewAlignment = -1.0f;
+	OutPawnDistanceSquared = TNumericLimits<float>::Max();
+	if (!IsValid(InteractingPawn) || !IsValid(Candidate))
+	{
+		return false;
+	}
+
+	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate);
+	OutPawnDistanceSquared = FVector::DistSquared(InteractingPawn->GetActorLocation(), TargetLocation);
+	if (OutPawnDistanceSquared > FMath::Square(InteractionRadius))
+	{
+		return false;
+	}
+
+	const FVector ToTarget = TargetLocation - ViewLocation;
+	const float ViewDistance = ToTarget.Size();
+	if (ViewDistance <= KINDA_SMALL_NUMBER)
+	{
+		OutViewAlignment = 1.0f;
+		return true;
+	}
+
+	OutViewAlignment = FVector::DotProduct(ViewForward, ToTarget / ViewDistance);
+	const float ClampedHalfAngle = FMath::Clamp(ViewHalfAngleDegrees, 1.0f, 89.0f);
+	const float MinimumAlignment = FMath::Cos(FMath::DegreesToRadians(ClampedHalfAngle));
+	if (OutViewAlignment < MinimumAlignment)
+	{
+		return false;
+	}
+
+	return HasInteractionLineOfSight(InteractingPawn, Candidate, ViewLocation, TargetLocation);
+}
+
+bool UInteractionComponent::HasInteractionLineOfSight(
+	APawn* InteractingPawn,
+	AActor* Candidate,
+	const FVector& ViewLocation,
+	const FVector& TargetLocation) const
+{
+	if (!bRequireInteractionLineOfSight)
+	{
+		return true;
+	}
+
+	UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractionLineOfSight), false, InteractingPawn);
+	QueryParams.AddIgnoredActor(InteractingPawn);
+	FHitResult VisibilityHit;
+	if (!World->LineTraceSingleByChannel(
+		VisibilityHit,
+		ViewLocation,
+		TargetLocation,
+		ECC_Visibility,
+		QueryParams)
+		|| !VisibilityHit.bBlockingHit)
+	{
+		return true;
+	}
+
+	if (VisibilityHit.GetActor() == Candidate)
+	{
+		return true;
+	}
+
+	// Some small pickup meshes intentionally have no Visibility collision. Treat a hit at the
+	// requested target point as visible, while still rejecting geometry that blocks the ray earlier.
+	constexpr float TargetPointTolerance = 18.0f;
+	return FVector::DistSquared(VisibilityHit.ImpactPoint, TargetLocation) <= FMath::Square(TargetPointTolerance);
+}
+
+FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* Candidate) const
+{
+	if (!IsValid(Candidate))
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FBox CandidateBounds = Candidate->GetComponentsBoundingBox(true);
+	return CandidateBounds.IsValid ? CandidateBounds.GetCenter() : Candidate->GetActorLocation();
 }
 
 void UInteractionComponent::SetCurrentInteractable(AActor* NewTarget)

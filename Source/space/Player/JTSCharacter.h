@@ -64,12 +64,27 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
 
+	/** Adjusts the third-person camera boom length. Positive wheel input zooms in. */
+	UFUNCTION(BlueprintCallable, Category = "Player|Camera")
+	void AdjustThirdPersonCameraDistance(float ScrollAmount);
+
 	/** Binds this character to an explicit real gameplay planet. Earth and Legacy Fake Moon leave this unset. */
 	UFUNCTION(BlueprintCallable, Category = "Planet")
 	void SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor);
 
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	AJTSPlanetAnchor* GetGameplayPlanet() const;
+
+	/** Initializes the local planet/body/camera frame without tracing or moving the character. */
+	UFUNCTION(BlueprintCallable, Category = "Planet")
+	void InitializePlanetFrame();
+
+	/** Begins normal CharacterMovement falling after gravity and the local frame have been bound. */
+	UFUNCTION(BlueprintCallable, Category = "Planet")
+	void BeginPlanetFalling();
+
+	UFUNCTION(BlueprintPure, Category = "Planet|Gravity")
+	bool IsPlanetGravityEnabled() const;
 
 	/** Uses the real gameplay mesh collision to place the capsule just above the surface. */
 	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
@@ -144,11 +159,13 @@ private:
 	void StopSprint(const FInputActionValue& Value);
 	void HandleJumpStarted(const FInputActionValue& Value);
 	void HandleInteractStarted(const FInputActionValue& Value);
+	void HandleInteractTriggered(const FInputActionValue& Value);
 	void HandleInteractCompleted(const FInputActionValue& Value);
 	void HandleInteractCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
+	void HandleCameraZoom(const FInputActionValue& Value);
 	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotTwoStarted(const FInputActionValue& Value);
 	void HandleEquipmentSlotThreeStarted(const FInputActionValue& Value);
@@ -158,9 +175,10 @@ private:
 	void HandleEquipmentSlotThreeReleased(const FInputActionValue& Value);
 	void HandleEquipmentSlotFourReleased(const FInputActionValue& Value);
 
-	void BeginBoardingHold();
+	bool BeginBoardingHold();
 	void CancelBoardingHold();
 	void CompleteBoardingHold();
+	AJTSSpacecraftActor* GetCurrentBoardingSpacecraft();
 	void BeginEquipmentSlotHold(int32 SlotIndex);
 	void EndEquipmentSlotHold(int32 SlotIndex);
 	void CancelEquipmentSlotHold();
@@ -175,6 +193,7 @@ private:
 	void UpdatePlanetBodyOrientation(const FVector& DesiredUp, float DeltaSeconds);
 	void UpdatePlanetCameraFrame(const FVector& CurrentUp, float DeltaSeconds);
 	FVector GetPlanetCameraForward(const FVector& CurrentUp) const;
+	void InitializeThirdPersonCameraDistance();
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
@@ -200,10 +219,11 @@ private:
 	UFUNCTION()
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
+	UFUNCTION()
+	void HandleHealthDeath(AController* InstigatorController, AActor* DamageCauser);
+
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
-	static constexpr float BoardingHoldDuration = 2.0f;
-
 	/** Stable camera origin attached to the capsule; both views rotate around this eye-height point. */
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
 	TObjectPtr<USceneComponent> CameraPivot;
@@ -240,6 +260,10 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;
+
+	/** Seconds E must be held while in a spacecraft boarding trigger before the player boards. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float BoardingHoldDuration = 2.0f;
 
 	/** Applies UE CharacterMovement custom gravity only while a real gameplay planet is active. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true"))
@@ -278,6 +302,18 @@ private:
 	/** Third-person boom length measured from CameraPivot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "2000.0", UIMin = "0.0", UIMax = "800.0"))
 	float ThirdPersonArmLength = 400.0f;
+
+	/** Closest third-person camera distance selectable with the mouse wheel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "2000.0", UIMin = "0.0", UIMax = "800.0"))
+	float ThirdPersonCameraMinArmLength = 220.0f;
+
+	/** Furthest third-person camera distance selectable with the mouse wheel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "3000.0", UIMin = "400.0", UIMax = "1600.0"))
+	float ThirdPersonCameraMaxArmLength = 1000.0f;
+
+	/** Camera-boom change, in centimeters, for one mouse-wheel step. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "300.0"))
+	float ThirdPersonCameraZoomStep = 80.0f;
 
 	/** Third-person shoulder offset. Its Z value is ignored so camera height always comes from CameraPivot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true"))
@@ -359,6 +395,9 @@ private:
 	TObjectPtr<UInputAction> ToggleCameraAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> CameraZoomAction;
+
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInputAction>> EquipmentSlotActions;
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredInputSubsystem;
@@ -366,6 +405,7 @@ private:
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 	TWeakObjectPtr<AJTSSpacecraftActor> NearbySpacecraft;
 	TWeakObjectPtr<AJTSSpacecraftActor> BoardedSpacecraft;
+	TWeakObjectPtr<AJTSSpacecraftActor> BoardingSpacecraft;
 
 	FTimerHandle BoardingHoldTimerHandle;
 	FTimerHandle EquipmentHoldTimerHandle;
@@ -376,6 +416,7 @@ private:
 	bool bInteractKeyHeld = false;
 	bool bEquipmentHoldCompleted = false;
 	bool bFirstPersonView = false;
+	bool bThirdPersonCameraDistanceInitialized = false;
 	bool bPlanetFrameInitialized = false;
 	bool bPlanetCameraFrameInitialized = false;
 	FVector LastPlanetUp = FVector::UpVector;
@@ -383,6 +424,7 @@ private:
 	FVector PlanetCameraTangentForward = FVector::ForwardVector;
 	FVector LastPlanetCameraUp = FVector::UpVector;
 	float PlanetCameraPitch = 0.0f;
+	float CurrentThirdPersonCameraArmLength = 0.0f;
 	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 	bool bPreviousDebugVisualVisible = true;
 	bool bPreviousMeshVisible = true;

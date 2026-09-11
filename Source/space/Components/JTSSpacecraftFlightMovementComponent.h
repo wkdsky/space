@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PawnMovementComponent.h"
+#include "space/World/JTSPlanetLandingTypes.h"
 
 #include "JTSSpacecraftFlightMovementComponent.generated.h"
 
@@ -57,6 +58,7 @@ struct SPACE_API FJTSSpacecraftFlightStats
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftBoostStateChanged, bool, bIsBoosting);
 DECLARE_MULTICAST_DELEGATE(FOnJTSSpacecraftAssistedLandingCompleted);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingFailed, EJTSLandingValidationFailure);
 
 /** Lightweight target-velocity flight movement for the persistent spacecraft Pawn. */
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))
@@ -80,8 +82,14 @@ public:
 	void SetBraking(bool bNewBraking);
 	void ClearInput();
 
-	/** Starts the smooth, collision-aware arrival sequence at a planet landing transform. */
-	bool BeginAssistedLanding(const FTransform& TargetTransform, float DurationSeconds);
+	/**
+	 * Starts a ground-probe-driven landing. The movement component continuously resolves real surface
+	 * data rather than interpolating to a fixed transform authored in level space.
+	 */
+	bool BeginAssistedLanding(AJTSPlanetAnchor* Planet, float LandingClearance, float DurationSeconds);
+
+	/** Ends an unfinished controlled landing without reporting a successful touchdown. */
+	void CancelAssistedLanding();
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	bool IsBoosting() const;
@@ -118,6 +126,7 @@ public:
 	FOnJTSSpacecraftBoostStateChanged OnBoostStateChanged;
 
 	FOnJTSSpacecraftAssistedLandingCompleted OnAssistedLandingCompleted;
+	FOnJTSSpacecraftAssistedLandingFailed OnAssistedLandingFailed;
 
 protected:
 	/** Base tuning is stable; EffectiveStats is the runtime upgrade-adjusted copy. */
@@ -130,21 +139,49 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float InertialDampeningRate = 1.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float RollReturnRate = 5.0f;
-
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Input", meta = (ClampMin = "0.001", UIMin = "0.001"))
 	float MouseLookSensitivity = 0.08f;
 
+	/** Fallback desired descent duration used to derive a controlled initial vertical speed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float DefaultLandingDuration = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingMinimumDescentSpeed = 120.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingMaximumDescentSpeed = 700.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
+	float AssistedLandingRotationInterpolationSpeed = 5.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingVelocityResponse = 1800.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float LandingContactTolerance = 12.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", ClampMax = "90.0", UIMin = "0.0", UIMax = "45.0"))
+	float LandingCompletionAlignmentDegrees = 6.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingTimeout = 20.0f;
+
+	/** While a planet is bound, normal flight receives the planet's radial acceleration. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Gravity", meta = (AllowPrivateAccess = "true"))
+	bool bApplyPlanetaryGravity = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Gravity", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MaximumPlanetGravitySpeed = 12000.0f;
 
 private:
 	void TickAssistedLanding(float DeltaTime);
 	void TickFlight(float DeltaTime);
+	void ApplyPlanetGravity(float DeltaTime);
 	void UpdateRotation(float DeltaTime);
 	void SubmitExteriorAltitude();
 	void CompleteAssistedLanding();
+	void FailAssistedLanding(EJTSLandingValidationFailure Failure);
 	bool MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit);
 
 	FVector BuildTargetVelocity() const;
@@ -158,9 +195,8 @@ private:
 	bool bBoosting = false;
 	bool bBraking = false;
 	bool bAssistedLanding = false;
-	FTransform AssistedLandingStart = FTransform::Identity;
-	FTransform AssistedLandingTarget = FTransform::Identity;
-	float AssistedLandingDuration = 2.0f;
+	float AssistedLandingClearance = 0.0f;
+	float AssistedLandingDescentSpeed = 0.0f;
 	float AssistedLandingElapsed = 0.0f;
 	TWeakObjectPtr<AJTSPlanetAnchor> TargetPlanet;
 };

@@ -9,6 +9,7 @@
 #include "JTSPlayerController.generated.h"
 
 class AJTSCharacter;
+class AJTSSpacecraftActor;
 struct FInputKeyEventArgs;
 
 /**
@@ -41,6 +42,18 @@ public:
 	/** Applies the equivalent unpaused game-only mode for the persistent space-world prototype. */
 	void ApplySpaceWorldInputMode();
 
+	/** Explicitly uses the possessed spacecraft's FlightCamera rather than retaining the character view target. */
+	UFUNCTION(BlueprintCallable, Category = "Spacecraft|Camera")
+	void SetSpacecraftCameraViewTarget(AJTSSpacecraftActor* Spacecraft);
+
+	/** Restores the character's own camera after a grounded spacecraft disembark. */
+	UFUNCTION(BlueprintCallable, Category = "Spacecraft|Camera")
+	void RestoreCharacterCameraViewTarget(AJTSCharacter* CharacterPawn);
+
+	/** Shared look preference used by character and spacecraft mouse-pitch input. */
+	UFUNCTION(BlueprintPure, Category = "Player|Input")
+	bool IsLookYAxisInverted() const;
+
 	/** Opens the local Moon workshop and switches input to a click-capable modal mode. */
 	void OpenMoonShop(AJTSCharacter* InPlayer);
 	void CloseMoonShop();
@@ -66,4 +79,11 @@ private:
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spacecraft|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float SpacecraftCameraBlendTime = 0.35f;
+
+	/** Off by default: moving the mouse up looks/steers up, matching the usual first/third-person convention. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input", meta = (AllowPrivateAccess = "true"))
+	bool bInvertLookYAxis = false;
 };

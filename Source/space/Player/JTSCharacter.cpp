@@ -32,6 +32,7 @@
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Interaction/InteractionComponent.h"
+#include "space/Modes/JTSSpaceWorldGameMode.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -118,6 +119,23 @@ bool AJTSCharacter::IsFirstPersonView() const
 	return bFirstPersonView;
 }
 
+void AJTSCharacter::AdjustThirdPersonCameraDistance(float ScrollAmount)
+{
+	if (bFirstPersonView || CameraBoom == nullptr || FMath::IsNearlyZero(ScrollAmount))
+	{
+		return;
+	}
+
+	InitializeThirdPersonCameraDistance();
+	const float MinimumArmLength = FMath::Min(ThirdPersonCameraMinArmLength, ThirdPersonCameraMaxArmLength);
+	const float MaximumArmLength = FMath::Max(ThirdPersonCameraMinArmLength, ThirdPersonCameraMaxArmLength);
+	CurrentThirdPersonCameraArmLength = FMath::Clamp(
+		CurrentThirdPersonCameraArmLength - ScrollAmount * FMath::Max(1.0f, ThirdPersonCameraZoomStep),
+		MinimumArmLength,
+		MaximumArmLength);
+	CameraBoom->TargetArmLength = CurrentThirdPersonCameraArmLength;
+}
+
 void AJTSCharacter::SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 {
 	if (GameplayPlanet.Get() != InPlanetAnchor)
@@ -137,6 +155,44 @@ void AJTSCharacter::SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 AJTSPlanetAnchor* AJTSCharacter::GetGameplayPlanet() const
 {
 	return GameplayPlanet.Get();
+}
+
+void AJTSCharacter::InitializePlanetFrame()
+{
+	AJTSPlanetAnchor* const Planet = GameplayPlanet.Get();
+	if (!IsValid(Planet))
+	{
+		return;
+	}
+
+	const FVector PlanetUp = Planet->GetRadialUpVector(GetActorLocation()).GetSafeNormal();
+	if (PlanetUp.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FVector PlanetForward = GetStablePlanetTangent(PlanetUp, GetActorForwardVector());
+	SetActorRotation(FRotationMatrix::MakeFromXZ(PlanetForward, PlanetUp).ToQuat());
+	LastPlanetUp = PlanetUp;
+	PlanetBodyForward = PlanetForward;
+	PlanetCameraTangentForward = PlanetForward;
+	LastPlanetCameraUp = PlanetUp;
+	bPlanetFrameInitialized = true;
+	bPlanetCameraFrameInitialized = true;
+	UpdatePlanetCameraFrame(PlanetUp, 0.0f);
+}
+
+void AJTSCharacter::BeginPlanetFalling()
+{
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->SetMovementMode(MOVE_Falling);
+	}
+}
+
+bool AJTSCharacter::IsPlanetGravityEnabled() const
+{
+	return IsValid(PlanetGravityComponent) && PlanetGravityComponent->IsUsingPlanetGravity();
 }
 
 bool AJTSCharacter::SnapToPlanetSurface(AJTSPlanetAnchor* InPlanetAnchor, const FVector& TraceReferenceLocation)
@@ -297,7 +353,8 @@ float AJTSCharacter::GetBoardingHoldProgress() const
 	}
 
 	return FMath::Clamp(
-		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - BoardingHoldStartTime) / static_cast<double>(BoardingHoldDuration)),
+		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - BoardingHoldStartTime)
+			/ static_cast<double>(FMath::Max(0.1f, BoardingHoldDuration))),
 		0.0f,
 		1.0f);
 }
@@ -309,7 +366,7 @@ float AJTSCharacter::GetBoardingHoldRemainingTime() const
 		return 0.0f;
 	}
 
-	return FMath::Max(0.0f, BoardingHoldDuration * (1.0f - GetBoardingHoldProgress()));
+	return FMath::Max(0.0f, FMath::Max(0.1f, BoardingHoldDuration) * (1.0f - GetBoardingHoldProgress()));
 }
 
 bool AJTSCharacter::IsBoarded() const
@@ -340,6 +397,12 @@ void AJTSCharacter::NotifySpacecraftEntered(AJTSSpacecraftActor* Spacecraft)
 	}
 
 	NearbySpacecraft = Spacecraft;
+	// A startup overlap can arrive after Enhanced Input has already observed a held E key.
+	// Re-evaluate the same view-gated boarding path once the known nearby candidate is available.
+	if (bInteractKeyHeld && !bBoardingHoldActive)
+	{
+		BeginBoardingHold();
+	}
 }
 
 void AJTSCharacter::NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft)
@@ -445,8 +508,13 @@ void AJTSCharacter::BeginPlay()
 	if (IsValid(HealthComponent))
 	{
 		HealthComponent->SetMaxHealth(PlayerMaxHealth, true);
+		if (!HealthComponent->OnDeath.IsAlreadyBound(this, &AJTSCharacter::HandleHealthDeath))
+		{
+			HealthComponent->OnDeath.AddDynamic(this, &AJTSCharacter::HandleHealthDeath);
+		}
 	}
 
+	InitializeThirdPersonCameraDistance();
 	ApplyCameraView();
 	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
@@ -511,6 +579,10 @@ void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	CancelEquipmentSlotHold();
 	UnbindGameState();
 	UnregisterInputMappingContext();
+	if (IsValid(HealthComponent))
+	{
+		HealthComponent->OnDeath.RemoveDynamic(this, &AJTSCharacter::HandleHealthDeath);
+	}
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -544,12 +616,14 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleInteractTriggered);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
+	EnhancedInputComponent->BindAction(CameraZoomAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleCameraZoom);
 	if (EquipmentSlotActions.Num() == 4)
 	{
 		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotOneStarted);
@@ -587,6 +661,7 @@ void AJTSCharacter::InitializeInput()
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
 	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
+	CameraZoomAction = NewObject<UInputAction>(this, TEXT("CameraZoomAction"), RF_Transient);
 	EquipmentSlotActions.Reset();
 	for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
 	{
@@ -602,6 +677,7 @@ void AJTSCharacter::InitializeInput()
 	InteractAction->ValueType = EInputActionValueType::Boolean;
 	AttackAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
+	CameraZoomAction->ValueType = EInputActionValueType::Axis1D;
 	for (UInputAction* const EquipmentSlotAction : EquipmentSlotActions)
 	{
 		EquipmentSlotAction->ValueType = EInputActionValueType::Boolean;
@@ -616,6 +692,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
 	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
+	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
 	if (EquipmentSlotActions.Num() == 4)
 	{
 		InputMappingContext->MapKey(EquipmentSlotActions[0], EKeys::One);
@@ -806,9 +883,12 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 	{
 		const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
 		const float RequestedPitchMax = bFirstPersonView ? FirstPersonViewPitchMax : ThirdPersonViewPitchMax;
-		// Retain the established mouse-Y direction while keeping pitch in the local gravity-relative frame.
+		const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
+		const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
+		// Positive local camera pitch means look up. The default mouse mapping is therefore direct;
+		// inversion remains a player-controller preference rather than a hidden engine-side sign flip.
 		PlanetCameraPitch = FMath::Clamp(
-			PlanetCameraPitch - Value.Get<float>() * MouseSensitivityY,
+			PlanetCameraPitch + Value.Get<float>() * MouseSensitivityY * PitchDirection,
 			FMath::Min(RequestedPitchMin, RequestedPitchMax),
 			FMath::Max(RequestedPitchMin, RequestedPitchMax));
 		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
@@ -818,8 +898,9 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 
 	if (!IsBoarded())
 	{
-		// MouseY is not negated in the Enhanced Input mapping, so retain the established pitch direction here.
-		AddControllerPitchInput(-Value.Get<float>() * MouseSensitivityY);
+		const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
+		const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
+		AddControllerPitchInput(Value.Get<float>() * MouseSensitivityY * PitchDirection);
 	}
 }
 
@@ -875,17 +956,25 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceGameplayActive();
-	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
-	if ((bEarthCollectionActive || bSpaceWorldSurfaceActive)
-		&& IsValid(Spacecraft)
-		&& Spacecraft->IsPawnInBoardingRange(this))
+	if (bEarthCollectionActive || bSpaceWorldSurfaceActive)
 	{
-		BeginBoardingHold();
+		if (BeginBoardingHold())
+		{
+			return;
+		}
+
+		// Preserve the held-key state until release. If the pawn-only boarding overlap finishes
+		// initializing this frame, NotifySpacecraftEntered will retry the same directional test.
+		if (InteractionComponent != nullptr)
+		{
+			InteractionComponent->TryInteract();
+		}
 		return;
 	}
 	if (bMoonExplorationActive && !bSpaceWorldSurfaceActive)
 	{
 		bInteractKeyHeld = false;
+		AJTSSpacecraftActor* const NearbyShip = NearbySpacecraft.Get();
 		if (InteractionComponent != nullptr)
 		{
 			if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
@@ -898,7 +987,7 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 			}
 		}
 
-		if (IsValid(Spacecraft) && Spacecraft->IsPawnInBoardingRange(this))
+		if (IsValid(NearbyShip) && NearbyShip->IsPawnInBoardingRange(this))
 		{
 			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 			{
@@ -913,6 +1002,32 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	{
 		InteractionComponent->TryInteract();
 	}
+}
+
+void AJTSCharacter::HandleInteractTriggered(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (IsGameplayInputBlocked() || IsBoarded())
+	{
+		return;
+	}
+
+	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
+	if (!bCanBeginBoarding || bBoardingHoldActive)
+	{
+		return;
+	}
+	if (bInteractKeyHeld)
+	{
+		return;
+	}
+
+	// Enhanced Input can begin evaluating a key that was already held while a startup overlap or
+	// mapping context was still initializing. Re-evaluate only the hold-to-board path here; ordinary
+	// interactions remain one-shot in HandleInteractStarted.
+	bInteractKeyHeld = true;
+	BeginBoardingHold();
 }
 
 void AJTSCharacter::HandleInteractCompleted(const FInputActionValue& Value)
@@ -955,6 +1070,16 @@ void AJTSCharacter::HandleToggleCameraStarted(const FInputActionValue& Value)
 
 	bFirstPersonView = !bFirstPersonView;
 	ApplyCameraView();
+}
+
+void AJTSCharacter::HandleCameraZoom(const FInputActionValue& Value)
+{
+	if (!CanUseNormalGameplayInput())
+	{
+		return;
+	}
+
+	AdjustThirdPersonCameraDistance(Value.Get<float>());
 }
 
 void AJTSCharacter::HandleEquipmentSlotOneStarted(const FInputActionValue& Value)
@@ -1089,8 +1214,7 @@ bool AJTSCharacter::IsSpaceWorldSurfaceGameplayActive() const
 bool AJTSCharacter::IsRealPlanetGameplayActive() const
 {
 	const AJTSPlanetAnchor* const Planet = GameplayPlanet.Get();
-	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	return IsValid(Planet) && IsValid(Manager) && Manager->IsPlanetGameplayActive(Planet);
+	return IsValid(Planet) && IsPlanetGravityEnabled();
 }
 
 FVector AJTSCharacter::GetDesiredPlanetUp() const
@@ -1283,6 +1407,19 @@ void AJTSCharacter::ApplyCameraPitchLimits()
 	PlayerController->PlayerCameraManager->ViewPitchMax = FMath::Max(RequestedPitchMin, RequestedPitchMax);
 }
 
+void AJTSCharacter::InitializeThirdPersonCameraDistance()
+{
+	if (bThirdPersonCameraDistanceInitialized)
+	{
+		return;
+	}
+
+	const float MinimumArmLength = FMath::Min(ThirdPersonCameraMinArmLength, ThirdPersonCameraMaxArmLength);
+	const float MaximumArmLength = FMath::Max(ThirdPersonCameraMinArmLength, ThirdPersonCameraMaxArmLength);
+	CurrentThirdPersonCameraArmLength = FMath::Clamp(ThirdPersonArmLength, MinimumArmLength, MaximumArmLength);
+	bThirdPersonCameraDistanceInitialized = true;
+}
+
 void AJTSCharacter::ApplyCameraView()
 {
 	ApplyCameraPitchLimits();
@@ -1291,12 +1428,13 @@ void AJTSCharacter::ApplyCameraView()
 	{
 		return;
 	}
+	InitializeThirdPersonCameraDistance();
 
 	CameraPivot->SetRelativeLocation(FVector(0.0f, 0.0f, CameraPivotHeight));
 	CameraBoom->SocketOffset = bFirstPersonView
 		? FVector::ZeroVector
 		: FVector(ThirdPersonShoulderOffset.X, ThirdPersonShoulderOffset.Y, 0.0f);
-	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : ThirdPersonArmLength;
+	CameraBoom->TargetArmLength = bFirstPersonView ? 0.0f : CurrentThirdPersonCameraArmLength;
 	const bool bUseRealPlanetCamera = IsRealPlanetGameplayActive();
 	CameraBoom->bUsePawnControlRotation = !bUseRealPlanetCamera;
 	CameraBoom->SetUsingAbsoluteRotation(bUseRealPlanetCamera);
@@ -1322,30 +1460,32 @@ void AJTSCharacter::ApplyCameraView()
 	}
 }
 
-void AJTSCharacter::BeginBoardingHold()
+bool AJTSCharacter::BeginBoardingHold()
 {
 	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
 		|| IsSpaceWorldSurfaceGameplayActive();
 	if (bBoardingHoldActive || IsBoarded() || !bCanBeginBoarding)
 	{
-		return;
+		return false;
 	}
 
-	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	AJTSSpacecraftActor* const Spacecraft = GetCurrentBoardingSpacecraft();
 	UWorld* const World = GetWorld();
 	if (!IsValid(Spacecraft) || World == nullptr || !Spacecraft->IsPawnInBoardingRange(this))
 	{
-		return;
+		return false;
 	}
 
 	bBoardingHoldActive = true;
+	BoardingSpacecraft = Spacecraft;
 	BoardingHoldStartTime = static_cast<double>(World->GetTimeSeconds());
 	World->GetTimerManager().SetTimer(
 		BoardingHoldTimerHandle,
 		this,
 		&AJTSCharacter::CompleteBoardingHold,
-		BoardingHoldDuration,
+		FMath::Max(0.1f, BoardingHoldDuration),
 		false);
+	return true;
 }
 
 void AJTSCharacter::CancelBoardingHold()
@@ -1357,6 +1497,7 @@ void AJTSCharacter::CancelBoardingHold()
 
 	bBoardingHoldActive = false;
 	BoardingHoldStartTime = 0.0;
+	BoardingSpacecraft = nullptr;
 }
 
 void AJTSCharacter::CompleteBoardingHold()
@@ -1367,12 +1508,12 @@ void AJTSCharacter::CompleteBoardingHold()
 		return;
 	}
 
-	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	AJTSSpacecraftActor* const Spacecraft = BoardingSpacecraft.Get();
 	const bool bCanCompleteBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
 		|| IsSpaceWorldSurfaceGameplayActive();
 	if (!bCanCompleteBoarding
 		|| !IsValid(Spacecraft)
-		|| !Spacecraft->IsPawnInBoardingRange(this))
+		|| GetCurrentBoardingSpacecraft() != Spacecraft)
 	{
 		CancelBoardingHold();
 		return;
@@ -1384,6 +1525,37 @@ void AJTSCharacter::CompleteBoardingHold()
 	{
 		bInteractKeyHeld = false;
 	}
+}
+
+AJTSSpacecraftActor* AJTSCharacter::GetCurrentBoardingSpacecraft()
+{
+	if (!IsValid(InteractionComponent))
+	{
+		return nullptr;
+	}
+
+	InteractionComponent->RefreshInteractable();
+	AActor* const CurrentInteractionTarget = InteractionComponent->GetCurrentInteractable();
+	if (AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(CurrentInteractionTarget))
+	{
+		return Spacecraft->IsPawnInBoardingRange(this) ? Spacecraft : nullptr;
+	}
+
+	// BoardingTrigger owns the authoritative proximity state. Some Blueprint spacecraft collision
+	// setups deliberately do not enter the generic all-object overlap scan, so use that known
+	// candidate only after it passes the exact same camera cone and Visibility test as other targets.
+	if (!IsValid(CurrentInteractionTarget))
+	{
+		if (AJTSSpacecraftActor* const NearbyShip = NearbySpacecraft.Get();
+			IsValid(NearbyShip)
+			&& NearbyShip->IsPawnInBoardingRange(this)
+			&& InteractionComponent->IsInteractableInView(NearbyShip))
+		{
+			return NearbyShip;
+		}
+	}
+
+	return nullptr;
 }
 
 void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint)
@@ -1735,6 +1907,20 @@ void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhas
 		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 		{
 			PlayerController->CloseMoonShop();
+		}
+	}
+}
+
+void AJTSCharacter::HandleHealthDeath(AController* InstigatorController, AActor* DamageCauser)
+{
+	static_cast<void>(InstigatorController);
+	static_cast<void>(DamageCauser);
+
+	if (UWorld* const World = GetWorld())
+	{
+		if (AJTSSpaceWorldGameMode* const SpaceWorldGameMode = World->GetAuthGameMode<AJTSSpaceWorldGameMode>())
+		{
+			SpaceWorldGameMode->HandlePlayerCharacterDeath(this);
 		}
 	}
 }

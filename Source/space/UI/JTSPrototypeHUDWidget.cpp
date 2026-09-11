@@ -26,6 +26,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Core/JTSGameInstance.h"
+#include "space/Interaction/IInteractable.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Interaction/JTSMeleeTarget.h"
 #include "space/Items/JTSResourcePickupActor.h"
@@ -40,6 +41,7 @@
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
 namespace
@@ -287,12 +289,16 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	const bool bSpaceFlightActive = BoundGameState.IsValid() && BoundGameState->IsSpaceFlight();
-	if (bSpaceFlightActive)
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bSpaceWorldSurfaceActive = IsValid(SpaceWorldManager) && SpaceWorldManager->IsSurfaceGameplayReady();
+	if (bEarthCollectionActive || bMoonExplorationActive || bSpaceWorldSurfaceActive)
 	{
-		RefreshFlightHud();
-	}
-	if (bEarthCollectionActive || bMoonExplorationActive)
-	{
+		if (bSpaceWorldSurfaceActive)
+		{
+			// SpaceWorld uses a persistent world rather than a GameState phase, so keep the shared
+			// gameplay layer available for the nearby-ship prompt and hold-to-board feedback.
+			ApplyLayerVisibility(GameplayLayer, true);
+		}
 		RefreshGameplayHud();
 		if (bMoonShopOpen)
 		{
@@ -317,7 +323,7 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 				RefreshMoonShop();
 			}
 		}
-		if (bEarthCollectionActive)
+		if (bEarthCollectionActive || bSpaceWorldSurfaceActive)
 		{
 			RefreshBoardingProgress();
 		}
@@ -336,9 +342,21 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 			TimeText->SetRenderScale(FVector2D(PulseScale, PulseScale));
 		}
 	}
+
+	const bool bDrivingSpacecraft = IsValid(Cast<AJTSSpacecraftActor>(
+		GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr));
+	if (bSpaceFlightActive || bDrivingSpacecraft)
+	{
+		// Run after character HUD refresh so the active vehicle owns its own instructions and state.
+		SetBoardingProgressVisible(false);
+		RefreshFlightHud();
+	}
 	else
 	{
-		SetBoardingProgressVisible(false);
+		if (!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
+		{
+			SetBoardingProgressVisible(false);
+		}
 		if (TimeText != nullptr)
 		{
 			TimeText->SetRenderScale(FVector2D(1.0f, 1.0f));
@@ -813,8 +831,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
 
-		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
-		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(560.0f, 28.0f), FVector2D(1.0f, 1.0f));
+		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA    WHEEL: ZOOM"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
+		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(760.0f, 52.0f), FVector2D(1.0f, 1.0f));
 	}
 
 	if (LaunchingLayer != nullptr)
@@ -1299,53 +1317,100 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 
 void UJTSPrototypeHUDWidget::RefreshFlightHud()
 {
-	if (FlightTelemetryText == nullptr || !BoundGameState.IsValid() || !BoundGameState->IsSpaceFlight())
+	if (FlightTelemetryText == nullptr)
 	{
 		return;
 	}
 
-	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr);
-	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	const AJTSPlanetAnchor* const Planet = IsValid(Manager) ? Manager->GetCurrentPlanet() : nullptr;
-	if (!IsValid(Spacecraft) || !IsValid(Planet))
+	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(
+		GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr);
+	const bool bLegacySpaceFlight = BoundGameState.IsValid() && BoundGameState->IsSpaceFlight();
+	if (!IsValid(Spacecraft))
 	{
-		FlightTelemetryText->SetText(FText::FromString(TEXT("FLIGHT SYSTEM\nACQUIRING TARGET")));
+		if (!bLegacySpaceFlight)
+		{
+			ApplyLayerVisibility(FlightTelemetryText, false);
+			return;
+		}
+
+		ApplyLayerVisibility(FlightTelemetryText, true);
+		FlightTelemetryText->SetText(FText::FromString(TEXT("FLIGHT SYSTEM\nACQUIRING SPACECRAFT")));
+		return;
+	}
+
+	ApplyLayerVisibility(FlightTelemetryText, true);
+	ApplyLayerVisibility(GameplayHelpText, true);
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const AJTSPlanetAnchor* const Planet = IsValid(Spacecraft->GetFlightPlanet())
+		? Spacecraft->GetFlightPlanet()
+		: (IsValid(Manager) ? Manager->GetCurrentPlanet() : nullptr);
+	if (!IsValid(Planet))
+	{
+		FlightTelemetryText->SetText(FText::FromString(TEXT("SPACECRAFT\nACQUIRING PLANET FRAME")));
 		return;
 	}
 
 	const int32 SpeedMetersPerSecond = FMath::Max(0, FMath::RoundToInt(Spacecraft->GetCurrentSpeed() / 100.0f));
-	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(Planet->GetExteriorAltitude(Spacecraft->GetActorLocation()) / 100.0f));
+	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(Planet->GetApproximateAltitude(Spacecraft->GetActorLocation()) / 100.0f));
+	const EJTSSpacecraftFlightState FlightState = Spacecraft->GetFlightState();
+	const AJTSPlanetLandingManager* const LandingManager = AJTSPlanetLandingManager::FindPlanetLandingManager(this);
+	const bool bLandingAvailable = FlightState == EJTSSpacecraftFlightState::Flying
+		&& IsValid(LandingManager)
+		&& LandingManager->IsLandingAvailable(Spacecraft);
 	FString StateLine;
-	switch (Manager->GetCurrentTravelState())
+	FLinearColor StateColor(0.70f, 0.92f, 1.0f, 1.0f);
+	switch (FlightState)
 	{
-	case EJTSSpaceTravelState::Landing:
-		StateLine = TEXT("LANDING");
+	case EJTSSpacecraftFlightState::LandingAssist:
+		StateLine = TEXT("LANDING ASSIST\nALIGNING TO SURFACE");
+		StateColor = FLinearColor(1.0f, 0.84f, 0.32f, 1.0f);
 		break;
 
-	case EJTSSpaceTravelState::Approach:
-		StateLine = TEXT("APPROACH");
+	case EJTSSpacecraftFlightState::Landed:
+		StateLine = TEXT("LANDED\nSURFACE LOCK ACTIVE");
+		StateColor = FLinearColor(0.35f, 1.0f, 0.68f, 1.0f);
 		break;
 
+	case EJTSSpacecraftFlightState::LandingRequest:
+		StateLine = TEXT("CHECKING LANDING ZONE");
+		StateColor = FLinearColor(1.0f, 0.84f, 0.32f, 1.0f);
+		break;
+
+	case EJTSSpacecraftFlightState::Flying:
 	default:
-		StateLine = Spacecraft->IsBoosting() ? TEXT("BOOST") : TEXT("SPACE FLIGHT");
+		StateLine = bLandingAvailable
+			? TEXT("LANDING AVAILABLE")
+			: TEXT("CANNOT LAND HERE");
+		StateColor = bLandingAvailable
+			? FLinearColor(0.35f, 1.0f, 0.68f, 1.0f)
+			: FLinearColor(1.0f, 0.48f, 0.38f, 1.0f);
 		break;
 	}
 
 	FlightTelemetryText->SetText(FText::FromString(FString::Printf(
-		TEXT("SPD %d m/s\nMOON %d m\n%s"),
+		TEXT("SPD %d m/s\nALT %d m\n%s"),
 		SpeedMetersPerSecond,
 		AltitudeMeters,
 		*StateLine)));
+	FlightTelemetryText->SetColorAndOpacity(FSlateColor(StateColor));
+	if (GameplayHelpText != nullptr)
+	{
+		GameplayHelpText->SetText(FText::FromString(
+			TEXT("W/S THROTTLE    A/D STRAFE    MOUSE CONTROL    WHEEL ZOOM\nSPACE/CTRL VERTICAL    SHIFT BOOST    L LANDING    F EXIT")));
+	}
 }
 
 void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 {
-	if (!BoundGameState.IsValid())
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bSpaceWorldSurfaceActive = IsValid(SpaceWorldManager) && SpaceWorldManager->IsSurfaceGameplayReady();
+	if (!BoundGameState.IsValid() && !bSpaceWorldSurfaceActive)
 	{
 		return;
 	}
 
-	const bool bEarthCollection = BoundGameState->IsEarthCollectionActive();
+	const bool bEarthCollection = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	const bool bMoonExploration = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	if (bEarthCollection && TimeText != nullptr)
 	{
 		const float RemainingTime = BoundGameState->GetEarthCollectionRemainingTime();
@@ -1358,13 +1423,18 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	RefreshInventorySlots();
 	RefreshEquipmentSlots();
 	RefreshInteractionPrompt();
-	const bool bShowGameplayAiming = (BoundGameState->IsEarthCollectionActive() || BoundGameState->IsMoonExploration())
+	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
 		&& !bMoonShopOpen
 		&& !bGameMenuOpen
 		&& PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded();
 	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming);
 	ApplyLayerVisibility(GameplayHelpText, bShowGameplayAiming);
+	if (GameplayHelpText != nullptr && bShowGameplayAiming)
+	{
+		GameplayHelpText->SetText(FText::FromString(
+			TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA    WHEEL: ZOOM")));
+	}
 
 	AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
 	BindSpacecraftResources();
@@ -1640,7 +1710,8 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 
 			if (!bHasPromptAnchor)
 			{
-				if (const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>())
+				const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>();
+				if (InteractionComponent != nullptr)
 				{
 					if (AActor* const Target = InteractionComponent->GetCurrentInteractable())
 					{
@@ -1671,7 +1742,23 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 						}
 					}
 				}
+
+				// The ship's pawn-only boarding trigger is authoritative for nearby-ship state. It is
+				// intentionally independent from generic object-overlap discovery, but must still pass
+				// the shared camera-cone and Visibility policy before receiving a prompt.
+				if (!bHasPromptAnchor)
+				{
+					if (AJTSSpacecraftActor* const NearbySpacecraft = PlayerCharacter->GetNearbySpacecraft();
+						IsValid(NearbySpacecraft) && InteractionComponent->IsInteractableInView(NearbySpacecraft))
+					{
+						PromptText = IInteractable::Execute_GetInteractionPrompt(NearbySpacecraft, PlayerCharacter);
+						TargetName = FText::FromString(TEXT("SPACECRAFT"));
+						PromptAnchor = NearbySpacecraft->GetNavigationMarkerWorldLocation();
+						bHasPromptAnchor = !PromptText.IsEmpty();
+					}
+				}
 			}
+
 		}
 	}
 
@@ -2029,8 +2116,10 @@ void UJTSPrototypeHUDWidget::SetSpacecraftNavigationVisibility(bool bShowWorldMa
 void UJTSPrototypeHUDWidget::RefreshBoardingProgress()
 {
 	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
-	const bool bShowProgress = BoundGameState.IsValid()
-		&& BoundGameState->IsEarthCollectionActive()
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bSpaceWorldSurfaceActive = IsValid(SpaceWorldManager) && SpaceWorldManager->IsSurfaceGameplayReady();
+	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
+	const bool bShowProgress = (bEarthCollectionActive || bSpaceWorldSurfaceActive)
 		&& PlayerCharacter != nullptr
 		&& PlayerCharacter->IsBoardingHoldActive();
 	if (!bShowProgress)

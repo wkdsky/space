@@ -152,6 +152,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
 	bool ProjectPointToSurface(const FVector& WorldPosition, FJTSPlanetSurfaceHit& OutSurfaceHit) const;
 
+	/**
+	 * Performs a short, local trace in the current radial gravity direction. Unlike TraceToSurface,
+	 * this never crosses the entire planet and is therefore suitable for landing checks, caves, pits,
+	 * uneven terrain, and future procedural collision.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
+	bool ProbeSurfaceAlongGravity(
+		const FVector& StartLocation,
+		float MaxDistance,
+		FJTSPlanetSurfaceHit& OutSurfaceHit) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
 	bool GetSurfaceNormalAt(const FVector& WorldPosition, FVector& OutSurfaceNormal) const;
 
@@ -159,6 +170,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
 	bool GetSurfaceFrameAt(
 		const FVector& WorldPosition,
+		const FVector& PreferredForward,
+		FJTSPlanetSurfaceFrame& OutSurfaceFrame) const;
+
+	/** Builds a real-mesh surface frame from a local gravity-direction probe. */
+	UFUNCTION(BlueprintCallable, Category = "Planet|Surface")
+	bool GetSurfaceFrameAlongGravity(
+		const FVector& StartLocation,
+		float MaxDistance,
 		const FVector& PreferredForward,
 		FJTSPlanetSurfaceFrame& OutSurfaceFrame) const;
 
@@ -277,6 +296,12 @@ public:
 	void SetActivePlanet(bool bInIsActivePlanet);
 
 private:
+	/**
+	 * Queries only the configured real gameplay surface. The component trace is preferred, with a
+	 * collision-object world trace as a fallback for meshes whose collision is only exposed through
+	 * the physics scene.
+	 */
+	bool TraceGameplaySurfaceSegment(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutTraceHit) const;
 	bool TraceRadialDirectionToSurface(const FVector& RadialDirection, float CandidateDistance, FJTSPlanetSurfaceHit& OutSurfaceHit) const;
 	FVector GetFallbackTangent(const FVector& UpVector) const;
 	FTransform BuildSurfaceTransform(const FJTSPlanetSurfaceHit& SurfaceHit, const FVector& PreferredForward) const;
@@ -300,7 +325,7 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AActor> GameplaySurfaceActor;
 
-	/** Optional precise component override when GameplaySurfaceActor has more than one collision primitive. */
+	/** Preferred component when GameplaySurfaceActor has more than one collision primitive. If it cannot answer a surface trace, sibling collision components on the configured actor are tried automatically. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", UseComponentPicker, AllowAnyActor))
 	TObjectPtr<UPrimitiveComponent> GameplaySurfaceComponent;
 

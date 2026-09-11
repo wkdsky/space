@@ -198,7 +198,9 @@ AJTSPlanetAnchor* AJTSSpaceWorldManager::FindNearestGameplayPlanet(const FVector
 			continue;
 		}
 
-		if (!Planet->HasGameplaySurface()
+		// Planet selection is a gravity/space query. Terrain collision may stream later and must not
+		// prevent a craft from binding to the planet or continuing its natural descent.
+		if (!Planet->IsGravityEnabled()
 			|| (bRequireGravityInfluence && !Planet->IsWithinGravityInfluence(WorldPosition)))
 		{
 			continue;
@@ -282,6 +284,7 @@ void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 
 	CurrentPlanet = NewCurrentPlanet;
 	bSurfaceGameplayReady = false;
+	bLandingEligibilityAnnounced = false;
 
 	if (AJTSPlanetAnchor* const ActivePlanet = CurrentPlanet.Get())
 	{
@@ -303,6 +306,14 @@ void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
 	}
 
 	CurrentTravelState = NewTravelState;
+	if (CurrentTravelState == EJTSSpaceTravelState::Approach)
+	{
+		bLandingEligibilityAnnounced = false;
+	}
+	else if (CurrentTravelState != EJTSSpaceTravelState::Landing)
+	{
+		bLandingEligibilityAnnounced = false;
+	}
 	if (CurrentTravelState != EJTSSpaceTravelState::Surface)
 	{
 		bSurfaceGameplayReady = false;
@@ -319,7 +330,7 @@ void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
 
 void AJTSSpaceWorldManager::SetSurfaceGameplayReady(bool bReady)
 {
-	bSurfaceGameplayReady = bReady && IsValid(CurrentPlanet) && IsSurfaceState() && CurrentPlanet->HasGameplaySurface();
+	bSurfaceGameplayReady = bReady && IsValid(CurrentPlanet) && IsSurfaceState();
 }
 
 bool AJTSSpaceWorldManager::IsSurfaceGameplayReady() const
@@ -426,9 +437,12 @@ void AJTSSpaceWorldManager::HandleFlightAltitude(float ApproximateAltitude)
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::Approach
-		&& ApproximateAltitude <= Planet->GetLandingAssistAltitude())
+		&& ApproximateAltitude <= Planet->GetLandingAssistAltitude()
+		&& !bLandingEligibilityAnnounced)
 	{
-		SetTravelState(EJTSSpaceTravelState::Landing);
+		// Reaching an altitude only makes landing *eligible*. A concrete LandingSite union query
+		// plus vehicle/surface validation is the only path that may transition to Landing.
+		bLandingEligibilityAnnounced = true;
 		LandingRequestedDelegate.Broadcast(Planet);
 	}
 }
