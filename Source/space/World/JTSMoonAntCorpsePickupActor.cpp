@@ -16,6 +16,7 @@
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -248,10 +249,23 @@ FVector AJTSMoonAntCorpsePickupActor::GetInteractionAnchorWorldLocation() const
 {
 	if (const UPrimitiveComponent* const ActiveVisual = GetActiveCorpseVisual(); IsValid(ActiveVisual) && ActiveVisual->IsRegistered())
 	{
+		if (bUsingRealPlanetSurfaceForPop)
+		{
+			const FVector CorpseSurfaceUp = GetCorpseSurfaceUp(ActiveVisual->Bounds.Origin);
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				ActiveVisual,
+				GetActorLocation(),
+				CorpseSurfaceUp,
+				VisualBounds))
+			{
+				return VisualBounds.HighestPoint + CorpseSurfaceUp * 18.0f;
+			}
+		}
+
 		const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		const float SurfaceExtent = bUsingRealPlanetSurfaceForPop ? PhysicalExtent.Size() : PhysicalExtent.Z;
-		return ActiveVisual->Bounds.Origin + GetCorpseSurfaceUp(ActiveVisual->Bounds.Origin) * (SurfaceExtent + 18.0f);
+		return ActiveVisual->Bounds.Origin + GetCorpseSurfaceUp(ActiveVisual->Bounds.Origin) * (PhysicalExtent.Z + 18.0f);
 	}
 
 	return Super::GetInteractionAnchorWorldLocation();
@@ -389,7 +403,17 @@ void AJTSMoonAntCorpsePickupActor::RecalculateGroundSupport()
 	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
 	if (bUsingRealPlanetSurfaceForPop)
 	{
-		GroundSupportHeight = FMath::Max(1.0f, PhysicalExtent.Size() + 1.0f);
+		FJTSSurfaceVisualProjectionBounds VisualBounds;
+		const FVector CorpseSurfaceUp = GetCorpseSurfaceUp(GetActorLocation());
+		if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+			ActiveVisual,
+			GetActorLocation(),
+			CorpseSurfaceUp,
+			VisualBounds))
+		{
+			GroundSupportHeight = VisualBounds.GetRootToLowestSupport()
+				+ JTSSurfacePlacementBounds::DefaultSurfaceClearance;
+		}
 		UpdateInteractionCollider();
 		return;
 	}
@@ -516,6 +540,9 @@ void AJTSMoonAntCorpsePickupActor::PlaceAtSettledGroundLocation()
 		if (Planet->GetSurfaceFrameAt(SettledGroundLocation, GetActorForwardVector(), SurfaceFrame))
 		{
 			PlaceOnPlanetSurface(Planet, SettledGroundLocation, SurfaceFrame.Forward);
+			// PlaceOnPlanetSurface aligns the shared pickup root. Recalculate after that final rotation so
+			// this lying copied visual, including its local offset and side flip, supplies the real support.
+			RecalculateGroundSupport();
 			SetActorLocation(
 				SurfaceFrame.Location + SurfaceFrame.Up * GroundSupportHeight,
 				false,

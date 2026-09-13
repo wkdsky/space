@@ -10,6 +10,7 @@
 #include "GameFramework/Pawn.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSWorldPickupActor.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
@@ -416,7 +417,13 @@ bool UInteractionComponent::IsInteractionTargetVisible(
 
 	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate);
 	OutPawnDistanceSquared = FVector::DistSquared(InteractingPawn->GetActorLocation(), TargetLocation);
-	if (OutPawnDistanceSquared > FMath::Square(InteractionRadius))
+	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate);
+	const bool bUsesBoardingProximity = IsValid(Spacecraft)
+		&& Spacecraft->IsPawnInBoardingRange(InteractingPawn);
+	// The spacecraft first proves its own mesh-sized boarding/workshop proximity. Do not then
+	// reject that same candidate against the generic 360 cm pickup/resource radius; camera cone and
+	// Visibility LOS still run below for every candidate.
+	if (!bUsesBoardingProximity && OutPawnDistanceSquared > FMath::Square(InteractionRadius))
 	{
 		return false;
 	}
@@ -487,6 +494,13 @@ FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* C
 	if (!IsValid(Candidate))
 	{
 		return FVector::ZeroVector;
+	}
+
+	if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate))
+	{
+		const APawn* const InteractingPawn = Cast<APawn>(GetOwner());
+		return Spacecraft->GetBoardingInteractionTargetWorldLocation(
+			IsValid(InteractingPawn) ? InteractingPawn->GetActorLocation() : Candidate->GetActorLocation());
 	}
 
 	const FBox CandidateBounds = Candidate->GetComponentsBoundingBox(true);

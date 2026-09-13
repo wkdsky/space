@@ -25,6 +25,7 @@
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonAntNestActor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -205,10 +206,22 @@ FVector AJTSMoonAntActor::GetMeleeTargetAnchorWorldLocation_Implementation() con
 {
 	if (UPrimitiveComponent* const ActiveVisual = GetActiveVisualComponent(); IsValid(ActiveVisual) && ActiveVisual->IsRegistered())
 	{
+		if (IsUsingRealPlanetSurface())
+		{
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				ActiveVisual,
+				GetActorLocation(),
+				SurfaceUp,
+				VisualBounds))
+			{
+				return VisualBounds.HighestPoint + SurfaceUp * 14.0f;
+			}
+		}
+
 		const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		const float SurfaceExtent = IsUsingRealPlanetSurface() ? PhysicalExtent.Size() : PhysicalExtent.Z;
-		return ActiveVisual->Bounds.Origin + SurfaceUp * (SurfaceExtent + 14.0f);
+		return ActiveVisual->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 14.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * (GroundSupportHeight + 14.0f);
@@ -568,8 +581,21 @@ void AJTSMoonAntActor::RecalculateGroundMetrics()
 	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
 	if (IsUsingRealPlanetSurface())
 	{
-		GroundSupportHeight = FMath::Max(1.0f, PhysicalExtent.Size());
-		BurrowDepth = FMath::Max(4.0f, GroundSupportHeight * 2.0f + 2.0f);
+		FJTSSurfaceVisualProjectionBounds VisualBounds;
+		if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+			ActiveVisual,
+			GetActorLocation(),
+			SurfaceUp,
+			VisualBounds))
+		{
+			GroundSupportHeight = VisualBounds.GetRootToLowestSupport()
+				+ JTSSurfacePlacementBounds::DefaultSurfaceClearance;
+			// A fully burrowed visual must move its actual SurfaceUp thickness below the mesh surface.
+			// This is intentionally independent of the actor root offset and any long tangent body axis.
+			BurrowDepth = FMath::Max(
+				4.0f,
+				VisualBounds.GetSurfaceThickness() + JTSSurfacePlacementBounds::DefaultSurfaceClearance);
+		}
 		return;
 	}
 
@@ -897,6 +923,7 @@ void AJTSMoonAntActor::PlaceOnGround(const FVector& NewGroundLocation)
 		{
 			SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 			SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
+			RecalculateGroundMetrics();
 			SetActorLocation(
 				SurfaceFrame.Location + SurfaceUp * GroundSupportHeight,
 				false,
@@ -965,10 +992,29 @@ void AJTSMoonAntActor::UpdateMoonAntHealthBarTransform()
 	}
 
 	ActiveVisual->UpdateBounds();
+	if (IsUsingRealPlanetSurface())
+	{
+		FJTSSurfaceVisualProjectionBounds VisualBounds;
+		if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+			ActiveVisual,
+			GetActorLocation(),
+			SurfaceUp,
+			VisualBounds))
+		{
+			FVector HealthBarLocation = VisualBounds.HighestPoint + SurfaceUp * 12.0f;
+			if (!bUsingSkeletalMoonAntMesh)
+			{
+				// Fallback mesh bend is material WPO, so its component bounds stay at the physical location.
+				HealthBarLocation += CurrentMoonBendWorldOffset;
+			}
+			MoonAntHealthBarComponent->SetWorldLocation(HealthBarLocation);
+			return;
+		}
+	}
+
 	const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
 	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
-	const float SurfaceExtent = IsUsingRealPlanetSurface() ? PhysicalExtent.Size() : PhysicalExtent.Z;
-	FVector HealthBarLocation = ActiveVisual->Bounds.Origin + SurfaceUp * (SurfaceExtent + 12.0f);
+	FVector HealthBarLocation = ActiveVisual->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 12.0f);
 	if (!bUsingSkeletalMoonAntMesh)
 	{
 		// Fallback mesh bend is material WPO, so its component bounds stay at the physical location.

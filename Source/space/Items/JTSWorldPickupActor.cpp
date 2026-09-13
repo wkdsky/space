@@ -22,6 +22,7 @@
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -589,10 +590,22 @@ FVector AJTSWorldPickupActor::GetInteractionAnchorWorldLocation() const
 {
 	if (IsValid(PickupMesh) && PickupMesh->IsRegistered())
 	{
+		if (bUsesRealPlanetSurface)
+		{
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				PickupMesh,
+				GetActorLocation(),
+				SurfaceUp,
+				VisualBounds))
+			{
+				return VisualBounds.HighestPoint + SurfaceUp * 22.0f;
+			}
+		}
+
 		const float BoundsScale = FMath::Max(FMath::Abs(PickupMesh->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = PickupMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		const float SurfaceExtent = bUsesRealPlanetSurface ? PhysicalExtent.Size() : PhysicalExtent.Z;
-		return PickupMesh->Bounds.Origin + SurfaceUp * (SurfaceExtent + 22.0f);
+		return PickupMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 22.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 70.0f;
@@ -678,9 +691,19 @@ void AJTSWorldPickupActor::PlaceOnPlanetSurface(
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
 	PickupMesh->UpdateBounds();
-	const float VisualSupportDistance = GetVisualSupportDistance(-SurfaceUp);
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	const float VisualSupportDistance = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+		PickupMesh,
+		GetActorLocation(),
+		SurfaceUp,
+		VisualBounds)
+		? VisualBounds.GetRootToLowestSupport()
+		: 0.0f;
 	SetActorLocation(
-		SurfaceFrame.Location + SurfaceUp * (VisualSupportDistance + FMath::Max(0.0f, SurfaceOffset)),
+		SurfaceFrame.Location + SurfaceUp * (
+			VisualSupportDistance
+			+ JTSSurfacePlacementBounds::DefaultSurfaceClearance
+			+ FMath::Max(0.0f, SurfaceOffset)),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);

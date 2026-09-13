@@ -72,6 +72,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool IsPawnInBoardingRange(const APawn* InteractingPawn) const;
 
+	/** Closest physical spacecraft-mesh bounds point used by camera-cone and LOS interaction targeting. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	FVector GetBoardingInteractionTargetWorldLocation(const FVector& ReferenceLocation) const;
+
 	USceneComponent* GetBoardingPoint() const;
 	USceneComponent* GetExitPoint() const;
 
@@ -258,6 +262,7 @@ public:
 	FOnShipBoostStateChanged OnBoostStateChanged;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -319,6 +324,8 @@ private:
 	/** Reconciles occupants once after all startup BeginPlay calls have completed. */
 	void ReconcileInitialBoardingOverlaps();
 	void SavePersistentStorage() const;
+	void UpdateBoardingTriggerFromSpacecraftMeshBounds();
+	bool GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBounds) const;
 
 	/** Collision root moved by the flight component with Sweep enabled. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
@@ -354,6 +361,18 @@ private:
 	/** Pawn-only overlap volume used for automatic deposits and boarding. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USphereComponent> BoardingTrigger;
+
+	/** Sizes the boarding/workshop trigger from the current physical spacecraft mesh instead of its legacy cube-era radius. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
+	bool bAutoSizeBoardingTriggerFromSpacecraftMesh = true;
+
+	/** Extra distance beyond the physical mesh bounds accepted for boarding and Moon workshop use. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float BoardingProximityMargin = 120.0f;
+
+	/** Retains the legacy minimum range for compact spacecraft while large meshes grow automatically. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float BoardingTriggerMinimumRadius = 360.0f;
 
 	/** Location where a boarded character is attached. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))

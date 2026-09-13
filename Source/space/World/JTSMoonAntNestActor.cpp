@@ -13,6 +13,7 @@
 #include "space/World/JTSMoonAntActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSMoonAntNestActor::AJTSMoonAntNestActor()
@@ -91,9 +92,16 @@ void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
 	NestMesh->UpdateBounds();
-	const float SurfaceSupport = GetVisualBoundsExtent().Size() + 2.0f;
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	const float SurfaceSupport = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+		NestMesh,
+		GetActorLocation(),
+		SurfaceUp,
+		VisualBounds)
+		? VisualBounds.GetRootToLowestSupport()
+		: 0.0f;
 	SetActorLocation(
-		SurfaceFrame.Location + SurfaceUp * SurfaceSupport,
+		SurfaceFrame.Location + SurfaceUp * (SurfaceSupport + JTSSurfacePlacementBounds::DefaultSurfaceClearance),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
@@ -164,10 +172,22 @@ FVector AJTSMoonAntNestActor::GetMeleeTargetAnchorWorldLocation_Implementation()
 {
 	if (IsValid(NestMesh) && NestMesh->IsRegistered())
 	{
+		if (IsUsingRealPlanetSurface())
+		{
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				NestMesh,
+				GetActorLocation(),
+				SurfaceUp,
+				VisualBounds))
+			{
+				return VisualBounds.HighestPoint + SurfaceUp * 24.0f;
+			}
+		}
+
 		const float BoundsScale = FMath::Max(FMath::Abs(NestMesh->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = NestMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		const float SurfaceExtent = IsUsingRealPlanetSurface() ? PhysicalExtent.Size() : PhysicalExtent.Z;
-		return NestMesh->Bounds.Origin + SurfaceUp * (SurfaceExtent + 24.0f);
+		return NestMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 24.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 55.0f;

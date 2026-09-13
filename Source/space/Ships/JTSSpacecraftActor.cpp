@@ -37,6 +37,7 @@
 #include "space/World/JTSPlanetLandingSite.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -173,6 +174,81 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
 }
 
+void AJTSSpacecraftActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	UpdateBoardingTriggerFromSpacecraftMeshBounds();
+}
+
+bool AJTSSpacecraftActor::GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBounds) const
+{
+	OutLocalBounds = FBox(ForceInit);
+	if (!IsValid(SpacecraftMesh))
+	{
+		return false;
+	}
+
+	// Keep WPO culling expansion out of both proximity and target calculations. The local bounds are
+	// transformed later, so the selected mesh's relative transform and scale remain authoritative.
+	const FBoxSphereBounds LocalBounds = SpacecraftMesh->CalcBounds(FTransform::Identity);
+	const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
+	const FVector PhysicalExtent = LocalBounds.BoxExtent.GetAbs() / BoundsScale;
+	if (PhysicalExtent.IsNearlyZero())
+	{
+		return false;
+	}
+
+	OutLocalBounds = FBox(LocalBounds.Origin - PhysicalExtent, LocalBounds.Origin + PhysicalExtent);
+	return OutLocalBounds.IsValid != 0;
+}
+
+void AJTSSpacecraftActor::UpdateBoardingTriggerFromSpacecraftMeshBounds()
+{
+	if (!bAutoSizeBoardingTriggerFromSpacecraftMesh || !IsValid(BoardingTrigger) || !IsValid(SceneRoot))
+	{
+		return;
+	}
+
+	FBox PhysicalLocalBounds(ForceInit);
+	if (!GetPhysicalSpacecraftMeshLocalBounds(PhysicalLocalBounds) || !IsValid(SpacecraftMesh))
+	{
+		return;
+	}
+
+	const FTransform RootTransform = SceneRoot->GetComponentTransform();
+	const FTransform MeshTransform = SpacecraftMesh->GetComponentTransform();
+	const FVector TriggerCenter = RootTransform.InverseTransformPosition(
+		MeshTransform.TransformPosition(PhysicalLocalBounds.GetCenter()));
+	float RequiredRadius = 0.0f;
+	for (int32 XSign = -1; XSign <= 1; XSign += 2)
+	{
+		for (int32 YSign = -1; YSign <= 1; YSign += 2)
+		{
+			for (int32 ZSign = -1; ZSign <= 1; ZSign += 2)
+			{
+				const FVector MeshLocalCorner(
+					XSign > 0 ? PhysicalLocalBounds.Max.X : PhysicalLocalBounds.Min.X,
+					YSign > 0 ? PhysicalLocalBounds.Max.Y : PhysicalLocalBounds.Min.Y,
+					ZSign > 0 ? PhysicalLocalBounds.Max.Z : PhysicalLocalBounds.Min.Z);
+				const FVector CornerInRoot = RootTransform.InverseTransformPosition(
+					MeshTransform.TransformPosition(MeshLocalCorner));
+				RequiredRadius = FMath::Max(RequiredRadius, FVector::Distance(CornerInRoot, TriggerCenter));
+			}
+		}
+	}
+
+	const FVector TriggerRelativeScale = BoardingTrigger->GetRelativeScale3D().GetAbs();
+	const float TriggerShapeScale = FMath::Max3(
+		TriggerRelativeScale.X,
+		TriggerRelativeScale.Y,
+		TriggerRelativeScale.Z);
+	const float DesiredScaledRadius = FMath::Max(
+		FMath::Max(1.0f, BoardingTriggerMinimumRadius),
+		RequiredRadius + FMath::Max(0.0f, BoardingProximityMargin));
+	BoardingTrigger->SetRelativeLocation(TriggerCenter, false, nullptr, ETeleportType::TeleportPhysics);
+	BoardingTrigger->SetSphereRadius(DesiredScaledRadius / FMath::Max(TriggerShapeScale, KINDA_SMALL_NUMBER), true);
+}
+
 void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -182,6 +258,8 @@ void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 void AJTSSpacecraftActor::BeginPlay()
 {
 	Super::BeginPlay();
+	// Blueprints select the visual mesh, so size this after their component defaults have been applied.
+	UpdateBoardingTriggerFromSpacecraftMeshBounds();
 	InitializeFlightCameraDistance();
 	if (FlightMovementComponent != nullptr
 		&& !FlightMovementComponent->OnBoostStateChanged.IsAlreadyBound(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged))
@@ -588,8 +666,10 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 {
 	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
 	const bool bEarthCollectionActive = IsEarthCollectionActive();
+	const bool bMoonExplorationActive = IsMoonExplorationActive();
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
-	if ((!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
+	if (bMoonExplorationActive
+		|| (!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
 		|| !IsValid(Character)
 		|| HasBoardedPlayer()
 		|| !IsPawnInBoardingRange(Character))
@@ -714,6 +794,23 @@ bool AJTSSpacecraftActor::IsPawnInBoardingRange(const APawn* InteractingPawn) co
 	return BoardingTrigger->IsOverlappingActor(InteractingPawn)
 		|| FVector::DistSquared(BoardingTrigger->GetComponentLocation(), InteractingPawn->GetActorLocation())
 			<= FMath::Square(BoardingTrigger->GetScaledSphereRadius());
+}
+
+FVector AJTSSpacecraftActor::GetBoardingInteractionTargetWorldLocation(const FVector& ReferenceLocation) const
+{
+	FBox PhysicalLocalBounds(ForceInit);
+	if (GetPhysicalSpacecraftMeshLocalBounds(PhysicalLocalBounds) && IsValid(SpacecraftMesh))
+	{
+		const FTransform MeshTransform = SpacecraftMesh->GetComponentTransform();
+		const FVector LocalReferenceLocation = MeshTransform.InverseTransformPosition(ReferenceLocation);
+		const FVector ClosestLocalPoint(
+			FMath::Clamp(LocalReferenceLocation.X, PhysicalLocalBounds.Min.X, PhysicalLocalBounds.Max.X),
+			FMath::Clamp(LocalReferenceLocation.Y, PhysicalLocalBounds.Min.Y, PhysicalLocalBounds.Max.Y),
+			FMath::Clamp(LocalReferenceLocation.Z, PhysicalLocalBounds.Min.Z, PhysicalLocalBounds.Max.Z));
+		return MeshTransform.TransformPosition(ClosestLocalPoint);
+	}
+
+	return IsValid(BoardingTrigger) ? BoardingTrigger->GetComponentLocation() : GetActorLocation();
 }
 
 USceneComponent* AJTSSpacecraftActor::GetBoardingPoint() const
@@ -1405,6 +1502,41 @@ FBox AJTSSpacecraftActor::GetResourceExclusionBounds() const
 
 FVector AJTSSpacecraftActor::GetNavigationMarkerWorldLocation() const
 {
+	if (const AJTSPlanetAnchor* const Planet = GetGroundedPlanet())
+	{
+		FVector NavigationUp = Planet->GetRadialUpVector(GetActorLocation()).GetSafeNormal();
+		if (NavigationUp.IsNearlyZero())
+		{
+			NavigationUp = FVector::UpVector;
+		}
+
+		if (IsValid(SpacecraftMesh) && SpacecraftMesh->IsRegistered())
+		{
+			FBox PhysicalLocalBounds(ForceInit);
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (GetPhysicalSpacecraftMeshLocalBounds(PhysicalLocalBounds)
+				&& JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+					SpacecraftMesh,
+					GetActorLocation(),
+					NavigationUp,
+					VisualBounds))
+			{
+				// HighestPoint is an extreme bounds corner. It is useful for collision clearance, but
+				// using it as a HUD anchor makes a long or tilted hull's prompt appear at one side of
+				// the ship. Keep the bounds center in the tangent plane and lift it to the same
+				// local-surface top projection instead.
+				const FVector VisualCenter = SpacecraftMesh->GetComponentTransform().TransformPosition(
+					PhysicalLocalBounds.GetCenter());
+				const float CenterProjection = FVector::DotProduct(VisualCenter - GetActorLocation(), NavigationUp);
+				const float CenterToTopOffset = VisualBounds.HighestProjectionFromRoot - CenterProjection;
+				return VisualCenter + NavigationUp * (CenterToTopOffset + NavigationMarkerHeightOffset);
+			}
+		}
+
+		return GetActorLocation() + NavigationUp * NavigationMarkerHeightOffset;
+	}
+
+	// Earth and Legacy Fake Moon retain their existing World-Z marker behavior.
 	if (IsValid(SpacecraftMesh) && SpacecraftMesh->IsRegistered())
 	{
 		const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
@@ -1437,14 +1569,17 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 		return FText::FromString(TEXT("[E] EXIT"));
 	}
 
-	if (IsSpaceWorldSurfaceActive() || IsEarthCollectionActive())
+	if (IsMoonExplorationActive())
+	{
+		return FText::FromString(TEXT("[E] WORKSHOP"));
+	}
+
+	if (IsEarthCollectionActive() || IsSpaceWorldSurfaceActive())
 	{
 		return FText::FromString(TEXT("HOLD [E] BOARD"));
 	}
 
-	return IsMoonExplorationActive()
-		? FText::FromString(TEXT("[E] WORKSHOP"))
-		: FText::GetEmpty();
+	return FText::GetEmpty();
 }
 
 void AJTSSpacecraftActor::Interact_Implementation(APawn* /*InteractingPawn*/)

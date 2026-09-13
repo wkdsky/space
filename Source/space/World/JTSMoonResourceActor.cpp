@@ -13,6 +13,7 @@
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -126,12 +127,22 @@ FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
 {
 	if (IsValid(ResourceMesh) && ResourceMesh->IsRegistered())
 	{
+		if (bUsesRealPlanetSurface)
+		{
+			FJTSSurfaceVisualProjectionBounds VisualBounds;
+			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				ResourceMesh,
+				GetActorLocation(),
+				SurfaceUp,
+				VisualBounds))
+			{
+				return VisualBounds.HighestPoint + SurfaceUp * 28.0f;
+			}
+		}
+
 		const float BoundsScale = FMath::Max(FMath::Abs(ResourceMesh->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = ResourceMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		const float SurfaceExtent = bUsesRealPlanetSurface
-			? PhysicalExtent.Size()
-			: PhysicalExtent.Z;
-		return ResourceMesh->Bounds.Origin + SurfaceUp * (SurfaceExtent + 28.0f);
+		return ResourceMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 28.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 120.0f;
@@ -248,9 +259,16 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
 	ResourceMesh->UpdateBounds();
 
-	const float SurfaceSupport = GetVisualBoundsExtent().Size();
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	const float SurfaceSupport = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+		ResourceMesh,
+		GetActorLocation(),
+		SurfaceUp,
+		VisualBounds)
+		? VisualBounds.GetRootToLowestSupport()
+		: 0.0f;
 	SetActorLocation(
-		SurfaceFrame.Location + SurfaceUp * SurfaceSupport,
+		SurfaceFrame.Location + SurfaceUp * (SurfaceSupport + JTSSurfacePlacementBounds::DefaultSurfaceClearance),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);

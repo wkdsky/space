@@ -956,6 +956,48 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceGameplayActive();
+	// MoonExploration has priority over SpaceWorld's generic surface-ready state. The latter is
+	// deliberately true for the real Moon, but Moon's spacecraft interaction is a one-press
+	// workshop rather than the hold-to-board surface-flight interaction.
+	if (bMoonExplorationActive)
+	{
+		bInteractKeyHeld = false;
+		AJTSSpacecraftActor* NearbyShip = NearbySpacecraft.Get();
+		if (InteractionComponent != nullptr)
+		{
+			InteractionComponent->RefreshInteractable();
+			if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
+			{
+				if (!InteractionTarget->IsA<AJTSSpacecraftActor>())
+				{
+					InteractionComponent->TryInteract();
+					return;
+				}
+
+				if (AJTSSpacecraftActor* const TargetSpacecraft = Cast<AJTSSpacecraftActor>(InteractionTarget))
+				{
+					NearbyShip = TargetSpacecraft;
+					// The interaction scan can discover a valid mesh-sized ship before an initial overlap
+					// notification reaches this pawn. Keep the existing workshop API's NearbySpacecraft
+					// contract true without introducing a second shop path.
+					if (NearbySpacecraft.Get() != TargetSpacecraft && TargetSpacecraft->IsPawnInBoardingRange(this))
+					{
+						NotifySpacecraftEntered(TargetSpacecraft);
+					}
+				}
+			}
+		}
+
+		if (IsValid(NearbyShip) && NearbyShip->IsPawnInBoardingRange(this))
+		{
+			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+			{
+				PlayerController->OpenMoonShop(this);
+			}
+		}
+		return;
+	}
+
 	if (bEarthCollectionActive || bSpaceWorldSurfaceActive)
 	{
 		if (BeginBoardingHold())
@@ -971,32 +1013,6 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 		}
 		return;
 	}
-	if (bMoonExplorationActive && !bSpaceWorldSurfaceActive)
-	{
-		bInteractKeyHeld = false;
-		AJTSSpacecraftActor* const NearbyShip = NearbySpacecraft.Get();
-		if (InteractionComponent != nullptr)
-		{
-			if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
-			{
-				if (!InteractionTarget->IsA<AJTSSpacecraftActor>())
-				{
-					InteractionComponent->TryInteract();
-					return;
-				}
-			}
-		}
-
-		if (IsValid(NearbyShip) && NearbyShip->IsPawnInBoardingRange(this))
-		{
-			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
-			{
-				PlayerController->OpenMoonShop(this);
-			}
-		}
-		return;
-	}
-
 	bInteractKeyHeld = false;
 	if (InteractionComponent != nullptr)
 	{
@@ -1012,8 +1028,10 @@ void AJTSCharacter::HandleInteractTriggered(const FInputActionValue& Value)
 		return;
 	}
 
-	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-		|| IsSpaceWorldSurfaceGameplayActive();
+	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	const bool bCanBeginBoarding = !bMoonExplorationActive
+		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+			|| IsSpaceWorldSurfaceGameplayActive());
 	if (!bCanBeginBoarding || bBoardingHoldActive)
 	{
 		return;
@@ -1462,8 +1480,10 @@ void AJTSCharacter::ApplyCameraView()
 
 bool AJTSCharacter::BeginBoardingHold()
 {
-	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-		|| IsSpaceWorldSurfaceGameplayActive();
+	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	const bool bCanBeginBoarding = !bMoonExplorationActive
+		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+			|| IsSpaceWorldSurfaceGameplayActive());
 	if (bBoardingHoldActive || IsBoarded() || !bCanBeginBoarding)
 	{
 		return false;
@@ -1509,8 +1529,10 @@ void AJTSCharacter::CompleteBoardingHold()
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = BoardingSpacecraft.Get();
-	const bool bCanCompleteBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-		|| IsSpaceWorldSurfaceGameplayActive();
+	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
+	const bool bCanCompleteBoarding = !bMoonExplorationActive
+		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+			|| IsSpaceWorldSurfaceGameplayActive());
 	if (!bCanCompleteBoarding
 		|| !IsValid(Spacecraft)
 		|| GetCurrentBoardingSpacecraft() != Spacecraft)

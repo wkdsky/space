@@ -7,6 +7,7 @@
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -181,9 +182,35 @@ bool AJTSMoonCorpseActor::SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* Sur
 	}
 
 	DisableLegacyMoonPresentation();
-	SetActorLocationAndRotation(
-		SurfaceTransform.GetLocation() + SurfaceUp * FMath::Max(0.0f, PlanetSurfaceClearance),
-		SurfaceTransform.GetRotation(),
+	SetActorRotation(SurfaceTransform.Rotator(), ETeleportType::TeleportPhysics);
+
+	// The landmark is composed from several meshes with intentionally positive local Z offsets.
+	// Accumulate all final visual components so the root is solved from the actual lowest point,
+	// rather than treating the root itself as the bottom of the lying figure.
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	for (UStaticMeshComponent* const VisualComponent : {
+		SkullMesh.Get(),
+		TorsoClothingMesh.Get(),
+		HipClothingMesh.Get(),
+		LeftArmBoneMesh.Get(),
+		RightArmBoneMesh.Get(),
+		LeftLegBoneMesh.Get(),
+		RightLegBoneMesh.Get()})
+	{
+		if (IsValid(VisualComponent))
+		{
+			VisualComponent->UpdateBounds();
+			JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+				VisualComponent,
+				GetActorLocation(),
+				SurfaceUp,
+				VisualBounds);
+		}
+	}
+
+	const float RootSupport = VisualBounds.bIsValid ? VisualBounds.GetRootToLowestSupport() : 0.0f;
+	SetActorLocation(
+		SurfaceTransform.GetLocation() + SurfaceUp * (RootSupport + FMath::Max(0.0f, PlanetSurfaceClearance)),
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
