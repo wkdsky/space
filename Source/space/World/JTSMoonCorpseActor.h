@@ -13,7 +13,7 @@ class AJTSPlanetSurfaceAnchor;
 
 /**
  * Runtime-only Moon event landmark: a visibly human, clothed skeleton assembled from prototype primitives.
- * It intentionally has no interaction behavior; it is the center of the nearby Ant Nest distribution.
+ * It intentionally has no interaction behavior; it is the center of the nearby MoonAnt Nest distribution.
  */
 UCLASS()
 class SPACE_API AJTSMoonCorpseActor : public AActor
@@ -40,28 +40,28 @@ private:
 	void UpdateMoonWrappedLogicalPosition();
 	void DisableLegacyMoonPresentation();
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<USceneComponent> SceneRoot;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> SkullMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> TorsoClothingMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> HipClothingMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> LeftArmBoneMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> RightArmBoneMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> LeftLegBoneMesh;
 
-	UPROPERTY(VisibleAnywhere, Category = "Moon|Ant Event")
+	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> RightLegBoneMesh;
 
 	/** Keeps the event landmark at the nearest periodic physical image in Moon Wrap worlds. */

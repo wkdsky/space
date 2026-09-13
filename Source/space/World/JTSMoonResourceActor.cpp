@@ -12,6 +12,7 @@
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
+#include "space/World/JTSPlanetAnchor.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -127,10 +128,13 @@ FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
 	{
 		const float BoundsScale = FMath::Max(FMath::Abs(ResourceMesh->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = ResourceMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		return ResourceMesh->Bounds.Origin + FVector(0.0f, 0.0f, PhysicalExtent.Z + 28.0f);
+		const float SurfaceExtent = bUsesRealPlanetSurface
+			? PhysicalExtent.Size()
+			: PhysicalExtent.Z;
+		return ResourceMesh->Bounds.Origin + SurfaceUp * (SurfaceExtent + 28.0f);
 	}
 
-	return GetActorLocation() + FVector(0.0f, 0.0f, 120.0f);
+	return GetActorLocation() + SurfaceUp * 120.0f;
 }
 
 FVector AJTSMoonResourceActor::GetVisualBoundsExtent() const
@@ -150,6 +154,8 @@ FVector AJTSMoonResourceActor::GetVisualBoundsExtent() const
 
 void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 {
+	bUsesRealPlanetSurface = false;
+	SurfaceUp = FVector::UpVector;
 	const FVector OriginalLocation = GetActorLocation();
 	const FVector FinalScale = GetActorScale3D();
 	if (!IsValid(ResourceMesh) || !ResourceMesh->IsRegistered())
@@ -217,6 +223,42 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 		FinalScale.X,
 		FinalScale.Y,
 		FinalScale.Z);
+}
+
+void AJTSMoonResourceActor::PlaceOnPlanetSurface(
+	AJTSPlanetAnchor* Planet,
+	const FVector& GroundLocation,
+	const FVector& PreferredForward)
+{
+	if (!IsValid(Planet) || !IsValid(ResourceMesh))
+	{
+		AdjustToGround(GroundLocation);
+		return;
+	}
+
+	FJTSPlanetSurfaceFrame SurfaceFrame;
+	if (!Planet->GetSurfaceFrameAt(GroundLocation, PreferredForward, SurfaceFrame))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("JTSMoonResourceActor %s could not resolve a real Moon surface frame."), *GetName());
+		return;
+	}
+
+	bUsesRealPlanetSurface = true;
+	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
+	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
+	ResourceMesh->UpdateBounds();
+
+	const float SurfaceSupport = GetVisualBoundsExtent().Size();
+	SetActorLocation(
+		SurfaceFrame.Location + SurfaceUp * SurfaceSupport,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	if (MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+	}
 }
 
 void AJTSMoonResourceActor::InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits)
@@ -331,6 +373,14 @@ void AJTSMoonResourceActor::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyResourceAppearance();
+	if (bUsesRealPlanetSurface)
+	{
+		if (MoonWrappedActorComponent != nullptr)
+		{
+			MoonWrappedActorComponent->Deactivate();
+		}
+		return;
+	}
 
 	if (MoonWrappedActorComponent != nullptr)
 	{

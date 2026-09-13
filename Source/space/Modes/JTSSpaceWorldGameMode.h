@@ -4,14 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "space/World/JTSPlanetSurfaceGameplay.h"
 
 #include "JTSSpaceWorldGameMode.generated.h"
 
 class AJTSCharacter;
 class AJTSPlanetLandingManager;
+class AJTSPlanetAnchor;
 class AJTSSpaceWorldManager;
 class AJTSSpacecraftActor;
 class APlayerController;
+class AActor;
 
 /**
  * Flow-layer entry point for persistent SpaceWorld gameplay.
@@ -40,6 +43,15 @@ private:
 	AJTSSpaceWorldManager* FindOrCreateSpaceWorldManager();
 	AJTSPlanetLandingManager* FindOrCreatePlanetLandingManager();
 	void StartInitialLandingSequence(APlayerController* PlayerController);
+	void HandleInitialLandingSequenceCompleted(
+		APlayerController* PlayerController,
+		AJTSPlanetAnchor* Planet,
+		AJTSCharacter* Character,
+		AJTSSpacecraftActor* Spacecraft);
+	const FJTSSurfaceGameplayControllerDefinition* FindSurfaceGameplayDefinition(const AJTSPlanetAnchor* Planet) const;
+	AActor* FindOrSpawnSurfaceGameplayController(
+		const FJTSSurfaceGameplayControllerDefinition& Definition,
+		AJTSPlanetAnchor* Planet);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpaceWorldManager> SpaceWorldManagerClass;
@@ -52,7 +64,12 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
+	/** Per-planet gameplay classes and Data Assets. Blueprint owns all project-specific selection. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface Gameplay", meta = (AllowPrivateAccess = "true"))
+	TArray<FJTSSurfaceGameplayControllerDefinition> SurfaceGameplayControllers;
+
 	TWeakObjectPtr<AJTSSpaceWorldManager> SpaceWorldManager;
 	TWeakObjectPtr<AJTSPlanetLandingManager> PlanetLandingManager;
 	TSet<TWeakObjectPtr<APlayerController>> StartedLandingSequences;
+	TMap<FName, TWeakObjectPtr<AActor>> ActiveSurfaceGameplayControllers;
 };

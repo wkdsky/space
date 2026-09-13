@@ -10,7 +10,7 @@ class UCanvasPanel;
 class UProgressBar;
 class SWidget;
 
-/** Small native-only world health bar used by Moon Ants without requiring a Widget Blueprint asset. */
+/** Small native-only world health bar used by MoonAnts without requiring a Widget Blueprint asset. */
 UCLASS()
 class SPACE_API UJTSHealthBarWidget : public UUserWidget
 {

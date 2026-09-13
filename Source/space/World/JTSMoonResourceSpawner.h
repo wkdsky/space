@@ -8,7 +8,9 @@
 
 class AJTSMoonResourceActor;
 class AJTSMoonCorpseActor;
-class AJTSRoachNestActor;
+class AJTSMoonSurfaceController;
+class AJTSPlanetAnchor;
+class AJTSMoonAntNestActor;
 class AJTSSpacecraftActor;
 class AJTSWorldPickupActor;
 
@@ -24,6 +26,10 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpawnRadius = 10000.0f;
 
+	/** Minimum centre-to-centre separation along the Moon surface. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float MinimumResourceSpacing = 200.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
 	int32 SmallRockWeight = 55;
 
@@ -36,13 +42,20 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
 
-	/** Extra XY clearance added around the spacecraft's physical mesh bounds. */
+	/** Extra surface-distance clearance added around the spacecraft's physical mesh bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionPadding = 500.0f;
 
-	/** Extra XY clearance added around fixed corpse and random Ant Nest landmark bounds. */
+	/** Extra surface-distance clearance added around fixed corpse and random MoonAnt Nest landmark bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float LandmarkExclusionPadding = 400.0f;
+
+	/** Real SpaceWorld Moon generation must be reproducible from its configured content data. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Random")
+	bool bUseDeterministicSeed = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Random", meta = (EditCondition = "bUseDeterministicSeed"))
+	int32 RandomSeed = 1337;
 };
 
 UCLASS()
@@ -64,7 +77,13 @@ public:
 	void SetLandmarkExclusions(
 		AJTSSpacecraftActor* InSpacecraft,
 		const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
-		const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InAntNestLandmarks);
+		const TArray<TWeakObjectPtr<AJTSMoonAntNestActor>>& InMoonAntNestLandmarks);
+
+	/** Enables real spherical surface sampling when this spawner belongs to a PlanetAnchor. */
+	void SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet);
+
+	/** Registers generated resources and pickups with the active real-surface controller. */
+	void SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController);
 
 protected:
 	virtual void BeginPlay() override;
@@ -78,8 +97,9 @@ private:
 		const FRotator& ResourceRotation,
 		const FVector& GroundLocation);
 	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation);
-	bool ResolveGroundLocation(const FVector& CandidateXY, FVector& OutGroundLocation) const;
-	bool IsCandidateExcludedByLandmarks(const FVector& CandidateXY) const;
+	bool ResolveGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
+	bool IsCandidateExcludedByLandmarks(const FVector& CandidateLocation) const;
+	bool IsUsingRealPlanetSurface() const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonResourceActor> ResourceActorClass;
@@ -89,6 +109,10 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float Radius = 10000.0f;
+
+	/** Runtime copy of the Moon surface settings' minimum surface spacing. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
+	float MinimumResourceSpacing = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 SmallRockWeight = 55;
@@ -130,6 +154,8 @@ private:
 
 	/** Initialization-time landmark cache supplied by AJTSMoonSurfaceController before GenerateResources. */
 	TWeakObjectPtr<AJTSSpacecraftActor> SpacecraftLandmark;
+	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
+	TWeakObjectPtr<AJTSMoonSurfaceController> SurfaceGameplayController;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
-	TArray<TWeakObjectPtr<AJTSRoachNestActor>> AntNestLandmarks;
+	TArray<TWeakObjectPtr<AJTSMoonAntNestActor>> MoonAntNestLandmarks;
 };

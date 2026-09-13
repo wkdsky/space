@@ -157,11 +157,11 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Aim Assist", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "45.0"))
 	float GenericPunchAimAssistAngle = 8.0f;
 
-	/** Small Moon Ants get a wider but still forward-facing punch aim cone. */
+	/** Small MoonAnts get a wider but still forward-facing punch aim cone. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Aim Assist", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "45.0"))
-	float AntPunchAimAssistAngle = 14.0f;
+	float MoonAntPunchAimAssistAngle = 14.0f;
 
-	/** A cached Ant may move a short distance during its punch montage, but never beyond this hard limit. */
+	/** A cached MoonAnt may move a short distance during its punch montage, but never beyond this hard limit. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Aim Assist", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", ClampMax = "205.0", UIMin = "1.0", UIMax = "205.0"))
 	float CachedTargetGraceRange = 205.0f;
 

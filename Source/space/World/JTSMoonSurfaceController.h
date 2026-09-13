@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "TimerManager.h"
+#include "space/World/JTSPlanetSurfaceGameplay.h"
 
 #include "JTSMoonSurfaceController.generated.h"
 
@@ -12,12 +13,15 @@ class AActor;
 class AJTSCharacter;
 class AJTSMoonCorpseActor;
 class AJTSMoonGameMode;
+class AJTSMoonResourceSpawner;
 class AJTSMoonWorldActor;
 class AJTSPlanetAnchor;
 class AJTSPlanetSurfaceAnchor;
-class AJTSRoachActor;
-class AJTSRoachNestActor;
+class AJTSMoonAntActor;
+class AJTSMoonAntNestActor;
 class AJTSSpacecraftActor;
+class IJTSMoonSurfaceGameplaySettings;
+class UJTSMoonSurfaceGameplayData;
 class ULevel;
 enum class EJTSEquipmentType : uint8;
 
@@ -27,14 +31,14 @@ enum class EJTSEquipmentType : uint8;
  * It is intentionally not a planet definition, gravity owner, camera owner, or streaming authority.
  */
 UCLASS(BlueprintType)
-class SPACE_API AJTSMoonSurfaceController : public AActor
+class SPACE_API AJTSMoonSurfaceController : public AActor, public IJTSPlanetSurfaceGameplay
 {
 	GENERATED_BODY()
 
 public:
 	AJTSMoonSurfaceController();
 
-	/** Resolves the Legacy Moon controller through AJTSMoonGameMode without scanning planet actors. */
+	/** Resolves either the legacy Moon controller or a controller active in the current SpaceWorld. */
 	static AJTSMoonSurfaceController* FindMoonSurfaceController(const UObject* WorldContextObject, FName RequestedPlanetId = NAME_None);
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Surface")
@@ -43,10 +47,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Moon|Surface")
 	bool IsSurfaceGameplayInitialized() const;
 
+	/** IJTSPlanetSurfaceGameplay implementation used by SpaceWorld GameMode after arrival completes. */
+	virtual bool SupportsPlanet(const AJTSPlanetAnchor* Planet) const override;
+	virtual bool InitializeSurfaceGameplay(const FJTSSurfaceGameplayContext& Context) override;
+	virtual void ShutdownSurfaceGameplay() override;
+	virtual bool IsSurfaceGameplayReady() const override;
+
 	/** Queues one initialization attempt after the surface has become visible and player/ship placement is complete. */
 	void RequestSurfaceGameplayInitialization();
 
-	/** Performs the one-shot runtime initialization when all Moon surface prerequisites are ready. */
+	/** Performs the Legacy one-shot initialization. SpaceWorld should call the Context overload. */
 	bool InitializeSurfaceGameplay();
 
 	/** Legacy L_MoonPrototype path: supplies the active GameMode as the settings source. */
@@ -55,19 +65,27 @@ public:
 	/** Legacy flat-streamed compatibility path only. Real gameplay planets no longer use this binding. */
 	void SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet);
 
-	/** Supplies the legacy Moon GameMode Blueprint CDO used as a transitional balance-data source. */
+	/** Supplies the legacy Moon GameMode Blueprint CDO used only by L_MoonPrototype. */
 	void SetMoonGameplaySettingsClass(TSubclassOf<AJTSMoonGameMode> InMoonGameplaySettingsClass);
 
-	/** Returns the transitional Moon balance source; later migration will replace the GameMode CDO with Moon settings data. */
-	const AJTSMoonGameMode* GetMoonSettings() const;
+	/** Returns real-SpaceWorld Data Asset settings, or legacy GameMode settings only on the Legacy map. */
+	const IJTSMoonSurfaceGameplaySettings* GetMoonSettings() const;
+	const UJTSMoonSurfaceGameplayData* GetMoonGameplayData() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Surface")
+	AJTSPlanetAnchor* GetOwningPlanet() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Surface")
+	bool IsUsingRealPlanetSurfaceGameplay() const;
 
 	/** The one Moon-surface ship found in this controller's streamed level, or explicitly supplied by SpaceWorldGameMode. */
 	AJTSSpacecraftActor* GetSpacecraft() const;
 	void SetSurfaceSpacecraft(AJTSSpacecraftActor* InSpacecraft);
 	/** Registers the persistent player/ship owned by SpaceWorldGameMode as part of this active surface. */
+	UFUNCTION(BlueprintCallable, Category = "Moon|Surface")
 	void RegisterSurfaceRuntimeActor(AActor* RuntimeActor);
 
-	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes ants or resources. */
+	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes MoonAnts or resources. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Real Surface")
 	AJTSMoonCorpseActor* SpawnCorpseAtPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* InCorpseSurfaceAnchor);
 
@@ -86,7 +104,7 @@ public:
 	FTransform GetSurfacePlayerSpawnTransform(const FTransform& FallbackTransform) const;
 	FTransform GetSurfaceSpacecraftSpawnTransform(const FTransform& FallbackTransform) const;
 
-	/** Legacy Fake Moon World-Z terrain trace used by Ants, nests, and Ant corpse placement. */
+	/** Resolves real PlanetAnchor collision on SpaceWorld Moon, otherwise retains the Legacy Fake Moon terrain trace. */
 	bool ResolveMoonGroundLocation(
 		const FVector& CandidateLocation,
 		FVector& OutGroundLocation,
@@ -106,20 +124,25 @@ private:
 	/** Timer-friendly wrapper for the bool-returning initialization operation. */
 	void AttemptSurfaceGameplayInitialization();
 	void ScheduleInitializationRetry();
+	void ApplySurfaceGameplayContext(const FJTSSurfaceGameplayContext& Context);
 	void InitializeMoonResources();
-	void InitializeMoonLandmarksAndAntNests();
+	void InitializeMoonLandmarksAndMoonAntNests();
 	AJTSMoonCorpseActor* FindLevelCorpseLandmark();
-	void ClearGeneratedAntNests();
-	bool IsAntNestCandidateFarFromShip(
+	void ClearGeneratedMoonAntNests();
+	bool IsMoonAntNestCandidateFarFromShip(
 		const FVector2D& CandidateLogicalPosition,
 		const FVector2D& ShipLogicalPosition) const;
 	void ConsumeExpeditionSupplies();
 	bool TryBuyWorkshopEquipment(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft, EJTSEquipmentType EquipmentType);
 	static int32 GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit);
 
-	/** Uses BP_MoonGameMode only as an optional balance-data template; it is never the owning World GameMode in SpaceWorld. */
+	/** Legacy map fallback only. Real SpaceWorld Moon config comes from MoonGameplayData or Context.GameplayData. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Surface|Settings", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonGameMode> MoonGameplaySettingsClass;
+
+	/** Project-configured Moon balance and asset selection for real SpaceWorld gameplay. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Surface|Settings", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSMoonSurfaceGameplayData> MoonGameplayData;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Surface", meta = (AllowPrivateAccess = "true"))
 	FName PlanetId = TEXT("Moon");
@@ -155,14 +178,21 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;
 
+	/** Explicit real-SpaceWorld generator binding. Legacy MoonPrototype retains its level scan fallback. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSMoonResourceSpawner> MoonResourceSpawner;
+
 	TWeakObjectPtr<AJTSMoonGameMode> LegacySettingsSource;
 	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
+	TWeakObjectPtr<AJTSCharacter> CachedPlayer;
+	UPROPERTY(Transient)
+	TObjectPtr<UJTSMoonSurfaceGameplayData> ActiveMoonGameplayData;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;
 	mutable TWeakObjectPtr<AJTSMoonWorldActor> CachedMoonWorld;
 	TWeakObjectPtr<AJTSMoonCorpseActor> LevelMoonCorpseLandmark;
 	TWeakObjectPtr<AJTSMoonCorpseActor> RealSurfaceMoonCorpse;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CachedLevelMoonCorpseLandmarks;
-	TArray<TWeakObjectPtr<AJTSRoachNestActor>> GeneratedAntNests;
+	TArray<TWeakObjectPtr<AJTSMoonAntNestActor>> GeneratedMoonAntNests;
 	TArray<TWeakObjectPtr<AActor>> RegisteredSurfaceRuntimeActors;
 
 	FTimerHandle ExpeditionConsumptionTimerHandle;
@@ -173,4 +203,5 @@ private:
 	bool bMissingSpacecraftLogged = false;
 	bool bSurfaceGameplayInitializationRequested = false;
 	bool bSurfaceGameplayInitialized = false;
+	bool bUsingRealPlanetSurfaceGameplay = false;
 };

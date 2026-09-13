@@ -1641,7 +1641,7 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 	TMap<EJTSResourceType, int32> ShipResourceAmounts;
 	for (const TPair<EJTSResourceType, int32>& Resource : ResourcesToDeposit)
 	{
-		if (Resource.Key == EJTSResourceType::AntCorpse)
+		if (Resource.Key == EJTSResourceType::MoonAntCorpse)
 		{
 			// Corpses deliberately remain ordinary carried items until they are submitted to the ship.
 			ShipResourceAmounts.FindOrAdd(EJTSResourceType::Organic) += Resource.Value;

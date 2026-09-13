@@ -6,21 +6,22 @@
 #include "GameFramework/GameModeBase.h"
 #include "TimerManager.h"
 #include "space/World/JTSMoonResourceSpawner.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
 
 #include "JTSMoonGameMode.generated.h"
 
 class AActor;
 class AJTSCharacter;
 class AJTSMoonCorpseActor;
-class AJTSRoachActor;
-class AJTSRoachNestActor;
+class AJTSMoonAntActor;
+class AJTSMoonAntNestActor;
 class AJTSMoonSurfaceController;
 class AJTSSpacecraftActor;
 enum class EJTSEquipmentType : uint8;
 
 /** Ruleset for the first playable Moon exploration level. */
 UCLASS()
-class SPACE_API AJTSMoonGameMode : public AGameModeBase
+class SPACE_API AJTSMoonGameMode : public AGameModeBase, public IJTSMoonSurfaceGameplaySettings
 {
 	GENERATED_BODY()
 
@@ -114,178 +115,178 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Moon|Combat")
 	float GetAttackCooldown() const;
 
-	/** Configured runtime Ant class. Nests use the native legacy class only when this is null. */
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant")
-	TSubclassOf<AJTSRoachActor> GetAntActorClass() const;
+	/** Configured runtime MoonAnt class. Nests use the native legacy class only when this is null. */
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt")
+	TSubclassOf<AJTSMoonAntActor> GetMoonAntActorClass() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	TSubclassOf<AJTSRoachNestActor> GetAntNestActorClass() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	TSubclassOf<AJTSMoonAntNestActor> GetMoonAntNestActorClass() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	int32 GetAntNestCount() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	int32 GetMoonAntNestCount() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestOuterRadiusAroundCorpse() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestOuterRadiusAroundCorpse() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestMinDistanceFromCorpse() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestMinDistanceFromCorpse() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestMinDistanceFromShip() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestMinDistanceFromShip() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestBaseMinSpacing() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestBaseMinSpacing() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestCandidateSpacingScaleMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestCandidateSpacingScaleMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestCandidateSpacingScaleMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestCandidateSpacingScaleMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestVisualScaleVariationMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestVisualScaleVariationMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestVisualScaleVariationMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestVisualScaleVariationMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestInnerWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestInnerWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestMidWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestMidWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Nests")
-	float GetAntNestOuterWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Nests")
+	float GetMoonAntNestOuterWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	int32 GetMaxActiveAntsPerNest() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	int32 GetMaxActiveMoonAntsPerNest() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnChance() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnChance() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnIntervalMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnIntervalMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnIntervalMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnIntervalMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnNearWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnNearWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnMidWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnMidWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnFarWeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnFarWeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnNearDistanceMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnNearDistanceMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnNearDistanceMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnNearDistanceMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnMidDistanceMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnMidDistanceMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnMidDistanceMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnMidDistanceMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnFarDistanceMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnFarDistanceMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Spawning")
-	float GetAntSpawnFarDistanceMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Spawning")
+	float GetMoonAntSpawnFarDistanceMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntRoamSpeed() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntRoamSpeed() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntRoamRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntRoamRadius() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntMaxHomeRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntMaxHomeRadius() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntRoamRetargetIntervalMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntRoamRetargetIntervalMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntRoamRetargetIntervalMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntRoamRetargetIntervalMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntSurfaceDurationMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntSurfaceDurationMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntSurfaceDurationMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntSurfaceDurationMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntEmergingDuration() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntEmergingDuration() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntHitReactionDuration() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntHitReactionDuration() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntBurrowDuration() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntBurrowDuration() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntFleeSpeed() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntFleeSpeed() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntFleeDurationMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntFleeDurationMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntFleeDurationMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntFleeDurationMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntMaxFleeDistance() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntMaxFleeDistance() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Behavior")
-	float GetAntTurnSpeed() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Behavior")
+	float GetMoonAntTurnSpeed() const;
 
-	/** Retained only for serialized Blueprint/API compatibility. Moon Ants never use chase behavior. */
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ants are neutral and do not chase players."))
-	float GetAntChaseSpeed() const;
+	/** Retained only for serialized Blueprint/API compatibility. MoonAnts never use chase behavior. */
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnts are neutral and do not chase players."))
+	float GetMoonAntChaseSpeed() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ants do not use a returning state."))
-	float GetAntReturnSpeed() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnts do not use a returning state."))
+	float GetMoonAntReturnSpeed() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ants do not aggro players."))
-	float GetAntAggroRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnts do not aggro players."))
+	float GetMoonAntAggroRadius() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ants do not aggro players."))
-	float GetAntLoseAggroRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnts do not aggro players."))
+	float GetMoonAntLoseAggroRadius() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ants do not react to player proximity."))
-	float GetAntStopDistanceFromPlayer() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnts do not react to player proximity."))
+	float GetMoonAntStopDistanceFromPlayer() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetAntRoamSpeed."))
-	float GetAntWanderSpeed() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetMoonAntRoamSpeed."))
+	float GetMoonAntWanderSpeed() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetAntRoamRadius."))
-	float GetAntWanderRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetMoonAntRoamRadius."))
+	float GetMoonAntWanderRadius() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetAntRoamRetargetIntervalMin."))
-	float GetAntWanderRetargetIntervalMin() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetMoonAntRoamRetargetIntervalMin."))
+	float GetMoonAntWanderRetargetIntervalMin() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetAntRoamRetargetIntervalMax."))
-	float GetAntWanderRetargetIntervalMax() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetMoonAntRoamRetargetIntervalMax."))
+	float GetMoonAntWanderRetargetIntervalMax() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetAntSurfaceDurationMax."))
-	float GetAntLifetime() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Use GetMoonAntSurfaceDurationMax."))
+	float GetMoonAntLifetime() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Ground")
-	float GetAntGroundTraceStartHeight() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Ground")
+	float GetMoonAntGroundTraceStartHeight() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Ground")
-	float GetAntGroundTraceDistance() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Ground")
+	float GetMoonAntGroundTraceDistance() const;
 
-	/** Serialized compatibility only. Runtime Ant death now uses UJTSHealthComponent. */
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "Moon Ant health is configured on AJTSRoachActor via AntMaxHealth."))
-	int32 GetAntPunchHitsToKill() const;
+	/** Serialized compatibility only. Runtime MoonAnt death now uses UJTSHealthComponent. */
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Legacy", meta = (DeprecatedFunction, DeprecationMessage = "MoonAnt health is configured on AJTSMoonAntActor via MoonAntMaxHealth."))
+	int32 GetMoonAntPunchHitsToKill() const;
 
-	UFUNCTION(BlueprintPure, Category = "Moon|Ant|Combat")
-	int32 GetAntNestPunchHitsToDestroy() const;
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|Combat")
+	int32 GetMoonAntNestPunchHitsToDestroy() const;
 
-	/** Shared Moon ground trace used by Ant Nests and moving Ants. */
+	/** Shared Moon ground trace used by MoonAnt Nests and moving MoonAnts. */
 	bool ResolveMoonGroundLocation(
 		const FVector& CandidateLocation,
 		FVector& OutGroundLocation,
@@ -392,179 +393,179 @@ private:
 	float AttackCooldown = 0.35f;
 
 	/** Assign BP_MoonAnt here in the active Moon GameMode Blueprint. Null intentionally uses the native fallback. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant", meta = (AllowPrivateAccess = "true"))
-	TSubclassOf<AJTSRoachActor> AntActorClass;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSMoonAntActor> MoonAntActorClass;
 
-	/** Runtime-only Ant Nest class; it defaults to the native legacy class. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true"))
-	TSubclassOf<AJTSRoachNestActor> AntNestActorClass;
+	/** Runtime-only MoonAnt Nest class; it defaults to the native legacy class. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSMoonAntNestActor> MoonAntNestActorClass;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 AntNestCount = 10;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 MoonAntNestCount = 10;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntNestOuterRadiusAroundCorpse = 1800.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntNestOuterRadiusAroundCorpse = 1800.0f;
 
 	/** Additional corpse clearance is combined with the corpse visual bounds before selecting a nest position. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntNestMinDistanceFromCorpse = 180.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntNestMinDistanceFromCorpse = 180.0f;
 
-	/** Keeps random Ant Nests out of the spacecraft landmark's immediate area. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntNestMinDistanceFromShip = 1200.0f;
+	/** Keeps random MoonAnt Nests out of the spacecraft landmark's immediate area. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntNestMinDistanceFromShip = 1200.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntNestBaseMinSpacing = 220.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntNestBaseMinSpacing = 220.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntNestCandidateSpacingScaleMin = 0.80f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntNestCandidateSpacingScaleMin = 0.80f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntNestCandidateSpacingScaleMax = 1.20f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntNestCandidateSpacingScaleMax = 1.20f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntNestVisualScaleVariationMin = 0.85f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntNestVisualScaleVariationMin = 0.85f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntNestVisualScaleVariationMax = 1.15f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntNestVisualScaleVariationMax = 1.15f;
 
 	/** Overlapping corpse-centered zones use these relative selection weights. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntNestInnerWeight = 0.60f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntNestInnerWeight = 0.60f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntNestMidWeight = 0.28f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntNestMidWeight = 0.28f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntNestOuterWeight = 0.12f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Nests", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntNestOuterWeight = 0.12f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 MaxActiveAntsPerNest = 4;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 MaxActiveMoonAntsPerNest = 4;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-	float AntSpawnChance = 0.75f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float MoonAntSpawnChance = 0.75f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntSpawnIntervalMin = 2.5f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntSpawnIntervalMin = 2.5f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntSpawnIntervalMax = 5.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntSpawnIntervalMax = 5.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnNearWeight = 0.62f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnNearWeight = 0.62f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnMidWeight = 0.27f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnMidWeight = 0.27f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnFarWeight = 0.11f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnFarWeight = 0.11f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnNearDistanceMin = 60.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnNearDistanceMin = 60.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnNearDistanceMax = 190.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnNearDistanceMax = 190.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnMidDistanceMin = 160.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnMidDistanceMin = 160.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnMidDistanceMax = 360.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnMidDistanceMax = 360.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnFarDistanceMin = 320.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnFarDistanceMin = 320.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntSpawnFarDistanceMax = 600.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Spawning", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntSpawnFarDistanceMax = 600.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntRoamSpeed = 85.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntRoamSpeed = 85.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntRoamRadius = 420.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntRoamRadius = 420.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntMaxHomeRadius = 650.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntMaxHomeRadius = 650.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntRoamRetargetIntervalMin = 1.2f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntRoamRetargetIntervalMin = 1.2f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntRoamRetargetIntervalMax = 3.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntRoamRetargetIntervalMax = 3.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntSurfaceDurationMin = 6.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntSurfaceDurationMin = 6.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntSurfaceDurationMax = 14.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntSurfaceDurationMax = 14.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntEmergingDuration = 0.35f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntEmergingDuration = 0.35f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntHitReactionDuration = 0.10f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntHitReactionDuration = 0.10f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntFleeSpeed = 260.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntFleeSpeed = 260.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntFleeDurationMin = 1.2f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntFleeDurationMin = 1.2f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float AntFleeDurationMax = 2.2f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float MoonAntFleeDurationMax = 2.2f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntMaxFleeDistance = 450.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntMaxFleeDistance = 450.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntBurrowDuration = 0.35f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntBurrowDuration = 0.35f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntTurnSpeed = 540.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Behavior", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntTurnSpeed = 540.0f;
 
-	/** Serialized compatibility only. None of these legacy settings participate in Moon Ant behavior. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntRoamSpeed."))
-	float AntWanderSpeed = 140.0f;
+	/** Serialized compatibility only. None of these legacy settings participate in MoonAnt behavior. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntRoamSpeed."))
+	float MoonAntWanderSpeed = 140.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Moon Ants never chase players."))
-	float AntChaseSpeed = 320.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "MoonAnts never chase players."))
+	float MoonAntChaseSpeed = 320.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Moon Ants do not use a returning state."))
-	float AntReturnSpeed = 220.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "MoonAnts do not use a returning state."))
+	float MoonAntReturnSpeed = 220.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Moon Ants never aggro players."))
-	float AntAggroRadius = 650.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "MoonAnts never aggro players."))
+	float MoonAntAggroRadius = 650.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Moon Ants never aggro players."))
-	float AntLoseAggroRadius = 900.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "MoonAnts never aggro players."))
+	float MoonAntLoseAggroRadius = 900.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Moon Ants do not react to player proximity."))
-	float AntStopDistanceFromPlayer = 90.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "MoonAnts do not react to player proximity."))
+	float MoonAntStopDistanceFromPlayer = 90.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntRoamRadius."))
-	float AntWanderRadius = 500.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntRoamRadius."))
+	float MoonAntWanderRadius = 500.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntRoamRetargetIntervalMin."))
-	float AntWanderRetargetIntervalMin = 1.5f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntRoamRetargetIntervalMin."))
+	float MoonAntWanderRetargetIntervalMin = 1.5f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntRoamRetargetIntervalMax."))
-	float AntWanderRetargetIntervalMax = 3.5f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntRoamRetargetIntervalMax."))
+	float MoonAntWanderRetargetIntervalMax = 3.5f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntSurfaceDurationMax."))
-	float AntLifetime = 40.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntSurfaceDurationMax."))
+	float MoonAntLifetime = 40.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AntGroundTraceStartHeight = 1000.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float MoonAntGroundTraceStartHeight = 1000.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float AntGroundTraceDistance = 3000.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float MoonAntGroundTraceDistance = 3000.0f;
 
-	/** Serialized compatibility only; no Ant runtime code reads this counter. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use AntMaxHealth on AJTSRoachActor."))
-	int32 AntPunchHitsToKill = 3;
+	/** Serialized compatibility only; no MoonAnt runtime code reads this counter. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Use MoonAntMaxHealth on AJTSMoonAntActor."))
+	int32 MoonAntPunchHitsToKill = 3;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Ant|Combat", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
-	int32 AntNestPunchHitsToDestroy = 3;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Combat", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
+	int32 MoonAntNestPunchHitsToDestroy = 3;
 
 	/** Optional class for the legacy runtime actor. It shares its implementation with streamed MoonSurface. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Runtime", meta = (AllowPrivateAccess = "true"))

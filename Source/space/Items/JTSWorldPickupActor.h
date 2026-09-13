@@ -14,6 +14,7 @@ class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
+class AJTSPlanetAnchor;
 struct FHitResult;
 
 /** One manually collected Moon world item. It can represent resources or a unique equipment item. */
@@ -61,6 +62,16 @@ public:
 	/** World-space visual extent used by ground-placement helpers. */
 	virtual FVector GetVisualBoundsExtent() const;
 	virtual void AdjustToGround(const FVector& GroundHitLocation);
+
+	/** Aligns a pickup with real PlanetAnchor collision and makes local Z follow the surface normal. */
+	void PlaceOnPlanetSurface(
+		AJTSPlanetAnchor* Planet,
+		const FVector& GroundLocation,
+		const FVector& PreferredForward,
+		float SurfaceOffset = 0.0f);
+
+	bool IsUsingRealPlanetSurface() const;
+	AJTSPlanetAnchor* GetSurfacePlanet() const;
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
@@ -136,9 +147,12 @@ private:
 	FVector DropGravityAcceleration = FVector::ZeroVector;
 	FVector PlannedGroundLocation = FVector::ZeroVector;
 	TArray<TWeakObjectPtr<AActor>> DropTraceIgnoredActors;
+	TWeakObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+	FVector SurfaceUp = FVector::UpVector;
 	float DropElapsedSeconds = 0.0f;
 	double FailureFeedbackEndTime = 0.0;
 	FString FailureFeedbackText;
 	bool bIsDropping = false;
 	bool bPickupConsumed = false;
+	bool bUsesRealPlanetSurface = false;
 };

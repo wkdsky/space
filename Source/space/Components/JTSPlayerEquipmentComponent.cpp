@@ -32,8 +32,8 @@ namespace
 			OutPickupItemType = EJTSWorldPickupItemType::Ore;
 			return true;
 
-		case EJTSResourceType::AntCorpse:
-			OutPickupItemType = EJTSWorldPickupItemType::AntCorpse;
+		case EJTSResourceType::MoonAntCorpse:
+			OutPickupItemType = EJTSWorldPickupItemType::MoonAntCorpse;
 			return true;
 
 		default:

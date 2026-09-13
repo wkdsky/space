@@ -32,7 +32,6 @@
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Modes/JTSEarthGameMode.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -40,6 +39,7 @@
 #include "space/UI/JTSCircularProgressWidget.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSSpaceWorldManager.h"
@@ -999,7 +999,7 @@ void UJTSPrototypeHUDWidget::BuildWorkshopPanel()
 		TEXT("WorkshopKnifeCard"),
 		TEXT("KNIFE"),
 		TEXT("WEAPON"),
-		TEXT("ONE-HIT ANTS AND NESTS"),
+		TEXT("ONE-HIT MOON ANTS AND NESTS"),
 		ShopKnifeCostText,
 		ShopKnifeBuyButton);
 	ShopKnifeCardSlot = ShopKnifeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopKnifeCard->Slot) : nullptr;
@@ -1013,7 +1013,7 @@ void UJTSPrototypeHUDWidget::BuildWorkshopPanel()
 		TEXT("WorkshopAxeCard"),
 		TEXT("AXE"),
 		TEXT("WEAPON"),
-		TEXT("ONE-HIT ANTS AND NESTS"),
+		TEXT("ONE-HIT MOON ANTS AND NESTS"),
 		ShopAxeCostText,
 		ShopAxeBuyButton);
 	ShopAxeCardSlot = ShopAxeCard != nullptr ? Cast<UCanvasPanelSlot>(ShopAxeCard->Slot) : nullptr;
@@ -1786,14 +1786,14 @@ void UJTSPrototypeHUDWidget::RefreshMoonShop()
 	}
 
 	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController)
 		? SurfaceController->GetMoonSettings()
 		: nullptr;
 	AJTSCharacter* const PlayerCharacter = ShopPlayer.Get();
 	AJTSSpacecraftActor* const Spacecraft = ShopSpacecraft.Get();
 	if (!IsValid(SurfaceController)
 		|| !SurfaceController->IsSurfaceGameplayInitialized()
-		|| !IsValid(MoonSettings)
+		|| MoonSettings == nullptr
 		|| !IsValid(PlayerCharacter)
 		|| !IsValid(Spacecraft))
 	{
@@ -1957,14 +1957,14 @@ void UJTSPrototypeHUDWidget::RefreshWorkshopLayout()
 void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Spacecraft)
 {
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController)
 		? SurfaceController->GetMoonSettings()
 		: nullptr;
 	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 	APlayerController* const PlayerController = GetOwningPlayer();
 	if (!IsValid(SurfaceController)
 		|| !SurfaceController->IsSurfaceGameplayInitialized()
-		|| !IsValid(MoonSettings)
+		|| MoonSettings == nullptr
 		|| !IsValid(Spacecraft)
 		|| !SurfaceController->OwnsSurfaceActor(Spacecraft)
 		|| !IsValid(PlayerCharacter)
@@ -2504,8 +2504,8 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 	case EJTSResourceType::Organic:
 		return TEXT("Organic");
 
-	case EJTSResourceType::AntCorpse:
-		return TEXT("Ant Corpse");
+	case EJTSResourceType::MoonAntCorpse:
+		return TEXT("MoonAnt Corpse");
 
 	default:
 		return TEXT("Unknown");

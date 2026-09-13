@@ -16,11 +16,12 @@
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Items/JTSResourceType.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
+#include "space/World/JTSPlanetAnchor.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -60,7 +61,7 @@ namespace
 		OutHorizontalSpeed = DefaultPickupDropHorizontalSpeed;
 		if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(World))
 		{
-			if (const AJTSMoonGameMode* const MoonSettings = SurfaceController->GetMoonSettings())
+			if (const IJTSMoonSurfaceGameplaySettings* const MoonSettings = SurfaceController->GetMoonSettings())
 			{
 				OutUpwardSpeed = MoonSettings->GetPickupDropUpwardSpeed();
 				OutHorizontalSpeed = MoonSettings->GetPickupDropHorizontalSpeed();
@@ -92,8 +93,8 @@ namespace
 			OutResourceType = EJTSResourceType::Ore;
 			return true;
 
-		case EJTSWorldPickupItemType::AntCorpse:
-			OutResourceType = EJTSResourceType::AntCorpse;
+		case EJTSWorldPickupItemType::MoonAntCorpse:
+			OutResourceType = EJTSResourceType::MoonAntCorpse;
 			return true;
 
 		default:
@@ -125,6 +126,41 @@ namespace
 			return false;
 		}
 	}
+
+	AJTSPlanetAnchor* FindRealSurfacePlanet(const UObject* WorldContextObject)
+	{
+		const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(WorldContextObject);
+		return IsValid(SurfaceController) && SurfaceController->IsUsingRealPlanetSurfaceGameplay()
+			? SurfaceController->GetOwningPlanet()
+			: nullptr;
+	}
+
+	FVector BuildTangentDirection(
+		const AJTSPlanetAnchor* Planet,
+		const FVector& Origin,
+		const FVector& PreferredDirection,
+		const float RandomAngleRadians)
+	{
+		if (!IsValid(Planet))
+		{
+			return FVector::ZeroVector;
+		}
+
+		FJTSPlanetSurfaceFrame SurfaceFrame;
+		if (!Planet->GetSurfaceFrameAt(Origin, PreferredDirection, SurfaceFrame))
+		{
+			return Planet->ProjectDirectionToSurfaceTangent(PreferredDirection, Origin);
+		}
+
+		const FVector BaseDirection = Planet->ProjectDirectionToSurfaceTangent(PreferredDirection, Origin);
+		if (!BaseDirection.IsNearlyZero())
+		{
+			return FQuat(SurfaceFrame.Up, RandomAngleRadians).RotateVector(BaseDirection).GetSafeNormal();
+		}
+
+		return (SurfaceFrame.Forward * FMath::Cos(RandomAngleRadians)
+			+ SurfaceFrame.Right * FMath::Sin(RandomAngleRadians)).GetSafeNormal();
+	}
 }
 
 AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
@@ -138,8 +174,21 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 		return nullptr;
 	}
 
+	AJTSPlanetAnchor* const Planet = FindRealSurfacePlanet(SourceActor);
+	FRotator SpawnRotation(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f);
+	if (IsValid(Planet))
+	{
+		FJTSPlanetSurfaceFrame SurfaceFrame;
+		if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
+		{
+			const FVector SurfaceForward = FQuat(
+				SurfaceFrame.Up,
+				FMath::DegreesToRadians(SpawnRotation.Yaw)).RotateVector(SurfaceFrame.Forward);
+			SpawnRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
+		}
+	}
 	const FTransform SpawnTransform(
-		FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f),
+		SpawnRotation,
 		GroundLocation);
 	AJTSWorldPickupActor* const Pickup = World->SpawnActorDeferred<AJTSWorldPickupActor>(
 		AJTSWorldPickupActor::StaticClass(),
@@ -154,7 +203,14 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 
 	Pickup->InitializeItem(NewItemType);
 	Pickup->FinishSpawning(SpawnTransform);
-	Pickup->AdjustToGround(GroundLocation);
+	if (IsValid(Planet))
+	{
+		Pickup->PlaceOnPlanetSurface(Planet, GroundLocation, SpawnRotation.Vector());
+	}
+	else
+	{
+		Pickup->AdjustToGround(GroundLocation);
+	}
 	return Pickup;
 }
 
@@ -171,32 +227,50 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		return nullptr;
 	}
 
-	const FVector GravityAcceleration = GetPickupGravityAcceleration(World, SafetyPawn);
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(
+		SourceActor != nullptr ? static_cast<const UObject*>(SourceActor) : static_cast<const UObject*>(SafetyPawn));
+	AJTSPlanetAnchor* const Planet = IsValid(SurfaceController) && SurfaceController->IsUsingRealPlanetSurfaceGameplay()
+		? SurfaceController->GetOwningPlanet()
+		: nullptr;
+	FVector GravityAcceleration = GetPickupGravityAcceleration(World, SafetyPawn);
+	if (IsValid(Planet))
+	{
+		GravityAcceleration = Planet->GetGravityDirection(Origin) * Planet->GetGravityStrength();
+	}
 	FVector DropUpDirection = -GravityAcceleration.GetSafeNormal();
 	if (DropUpDirection.IsNearlyZero())
 	{
-		DropUpDirection = FVector::UpVector;
+		DropUpDirection = IsValid(Planet) ? Planet->GetRadialUpVector(Origin) : FVector::UpVector;
 	}
 
 	float DropUpwardSpeed = DefaultPickupDropUpwardSpeed;
 	float DropHorizontalSpeed = DefaultPickupDropHorizontalSpeed;
 	GetPickupDropLaunchSpeeds(World, DropUpwardSpeed, DropHorizontalSpeed);
 
-	FVector SafePreferredDirection = PreferredDirection;
-	SafePreferredDirection.Z = 0.0f;
-	SafePreferredDirection = SafePreferredDirection.GetSafeNormal();
+	FVector SafePreferredDirection = IsValid(Planet)
+		? Planet->ProjectDirectionToSurfaceTangent(PreferredDirection, Origin)
+		: FVector(PreferredDirection.X, PreferredDirection.Y, 0.0f).GetSafeNormal();
 	TArray<AJTSWorldPickupActor*> ExistingPickups;
 	if (UJTSWorldPickupRegistrySubsystem* const Registry = World->GetSubsystem<UJTSWorldPickupRegistrySubsystem>())
 	{
 		Registry->GetRegisteredPickups(ExistingPickups);
 	}
-	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(
-		SourceActor != nullptr ? static_cast<const UObject*>(SourceActor) : static_cast<const UObject*>(SafetyPawn));
-
 	for (int32 AttemptIndex = 0; AttemptIndex < 12; ++AttemptIndex)
 	{
 		FVector HorizontalDirection;
-		if (!SafePreferredDirection.IsNearlyZero() && AttemptIndex < 4)
+		const bool bUsePreferredDirection = !SafePreferredDirection.IsNearlyZero() && AttemptIndex < 4;
+		if (IsValid(Planet))
+		{
+			const float DirectionAngle = bUsePreferredDirection
+				? FMath::DegreesToRadians(FMath::FRandRange(-36.0f, 36.0f))
+				: FMath::FRandRange(0.0f, UE_TWO_PI);
+			HorizontalDirection = BuildTangentDirection(
+				Planet,
+				Origin,
+				bUsePreferredDirection ? SafePreferredDirection : FVector::ZeroVector,
+				DirectionAngle);
+		}
+		else if (bUsePreferredDirection)
 		{
 			const float SideAngle = FMath::DegreesToRadians(FMath::FRandRange(-36.0f, 36.0f));
 			HorizontalDirection = SafePreferredDirection.RotateAngleAxis(SideAngle, FVector::UpVector);
@@ -207,24 +281,43 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 			HorizontalDirection = FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
 		}
 
-		const float Distance = !SafePreferredDirection.IsNearlyZero() && AttemptIndex < 4
+		const float Distance = bUsePreferredDirection
 			? FMath::FRandRange(140.0f, 230.0f)
 			: FMath::FRandRange(70.0f, 170.0f);
-		const FVector CandidateXY = Origin + HorizontalDirection * Distance;
+		if (HorizontalDirection.IsNearlyZero())
+		{
+			continue;
+		}
+
+		FVector CandidateLocation = Origin + HorizontalDirection * Distance;
+		FVector GroundLocation;
+		if (IsValid(Planet))
+		{
+			FJTSPlanetSurfaceHit SurfaceHit;
+			if (!Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
+			{
+				continue;
+			}
+			CandidateLocation = SurfaceHit.ImpactPoint;
+			GroundLocation = SurfaceHit.ImpactPoint;
+		}
 
 		if (IsValid(SafetyPawn))
 		{
 			const float PawnRadius = Cast<ACharacter>(SafetyPawn) != nullptr
 				? Cast<ACharacter>(SafetyPawn)->GetSimpleCollisionRadius()
 				: 45.0f;
-			if (FVector::DistSquared2D(CandidateXY, SafetyPawn->GetActorLocation()) < FMath::Square(PawnRadius + 85.0f))
+			const bool bTooCloseToPawn = IsValid(Planet)
+				? Planet->ApproximateSurfaceArcDistance(CandidateLocation, SafetyPawn->GetActorLocation()) < PawnRadius + 85.0f
+				: FVector::DistSquared2D(CandidateLocation, SafetyPawn->GetActorLocation()) < FMath::Square(PawnRadius + 85.0f);
+			if (bTooCloseToPawn)
 			{
 				continue;
 			}
 		}
 
 		bool bOverlapsShip = false;
-		auto DoesOverlapShip = [&CandidateXY, &bOverlapsShip](const AJTSSpacecraftActor* Spacecraft)
+		auto DoesOverlapShip = [Planet, &CandidateLocation, &bOverlapsShip](const AJTSSpacecraftActor* Spacecraft)
 		{
 			if (!IsValid(Spacecraft))
 			{
@@ -234,10 +327,19 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 			const FBox ShipBounds = Spacecraft->GetResourceExclusionBounds();
 			if (ShipBounds.IsValid)
 			{
+				if (IsValid(Planet))
+				{
+					const float SurfaceClearance = ShipBounds.GetExtent().Size() + 70.0f;
+					bOverlapsShip = Planet->ApproximateSurfaceArcDistance(
+						CandidateLocation,
+						Spacecraft->GetActorLocation()) <= SurfaceClearance;
+					return;
+				}
+
 				const FVector ShipCenter = ShipBounds.GetCenter();
 				const FVector ShipExtent = ShipBounds.GetExtent() + FVector(70.0f, 70.0f, 0.0f);
-				if (FMath::Abs(CandidateXY.X - ShipCenter.X) <= ShipExtent.X
-					&& FMath::Abs(CandidateXY.Y - ShipCenter.Y) <= ShipExtent.Y)
+				if (FMath::Abs(CandidateLocation.X - ShipCenter.X) <= ShipExtent.X
+					&& FMath::Abs(CandidateLocation.Y - ShipCenter.Y) <= ShipExtent.Y)
 				{
 					bOverlapsShip = true;
 					return;
@@ -269,7 +371,9 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		{
 			if (IsValid(ExistingPickup)
 				&& IsInCurrentMoonSurface(SurfaceController, ExistingPickup)
-				&& FVector::DistSquared2D(CandidateXY, ExistingPickup->GetActorLocation()) < FMath::Square(60.0f))
+				&& (IsValid(Planet)
+					? Planet->ApproximateSurfaceArcDistance(CandidateLocation, ExistingPickup->GetActorLocation()) < 60.0f
+					: FVector::DistSquared2D(CandidateLocation, ExistingPickup->GetActorLocation()) < FMath::Square(60.0f)))
 			{
 				bTooCloseToPickup = true;
 				break;
@@ -280,60 +384,77 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 			continue;
 		}
 
-		FCollisionQueryParams GroundTraceParams(SCENE_QUERY_STAT(JTSWorldPickupGroundTrace), false, SourceActor);
-		if (SourceActor != nullptr)
+		if (!IsValid(Planet))
 		{
-			GroundTraceParams.AddIgnoredActor(SourceActor);
-		}
-		if (SafetyPawn != nullptr)
-		{
-			GroundTraceParams.AddIgnoredActor(SafetyPawn);
-		}
-		if (IsValid(SurfaceController))
-		{
-			GroundTraceParams.AddIgnoredActor(SurfaceController->GetSpacecraft());
-			if (ULevel* const SurfaceLevel = SurfaceController->GetSurfaceLevel())
+			FCollisionQueryParams GroundTraceParams(SCENE_QUERY_STAT(JTSWorldPickupGroundTrace), false, SourceActor);
+			if (SourceActor != nullptr)
 			{
-				for (AActor* const Actor : SurfaceLevel->Actors)
+				GroundTraceParams.AddIgnoredActor(SourceActor);
+			}
+			if (SafetyPawn != nullptr)
+			{
+				GroundTraceParams.AddIgnoredActor(SafetyPawn);
+			}
+			if (IsValid(SurfaceController))
+			{
+				GroundTraceParams.AddIgnoredActor(SurfaceController->GetSpacecraft());
+				if (ULevel* const SurfaceLevel = SurfaceController->GetSurfaceLevel())
 				{
-					if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
+					for (AActor* const Actor : SurfaceLevel->Actors)
 					{
-						GroundTraceParams.AddIgnoredActor(Resource);
+						if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
+						{
+							GroundTraceParams.AddIgnoredActor(Resource);
+						}
 					}
 				}
 			}
-		}
-		else
-		{
-			for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+			else
 			{
-				GroundTraceParams.AddIgnoredActor(*ShipIt);
+				for (TActorIterator<AJTSSpacecraftActor> ShipIt(World); ShipIt; ++ShipIt)
+				{
+					GroundTraceParams.AddIgnoredActor(*ShipIt);
+				}
+				for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
+				{
+					GroundTraceParams.AddIgnoredActor(*ResourceIt);
+				}
 			}
-			for (TActorIterator<AJTSMoonResourceActor> ResourceIt(World); ResourceIt; ++ResourceIt)
+			for (AJTSWorldPickupActor* const ExistingPickup : ExistingPickups)
 			{
-				GroundTraceParams.AddIgnoredActor(*ResourceIt);
+				if (IsValid(ExistingPickup) && IsInCurrentMoonSurface(SurfaceController, ExistingPickup))
+				{
+					GroundTraceParams.AddIgnoredActor(ExistingPickup);
+				}
 			}
-		}
-		for (AJTSWorldPickupActor* const ExistingPickup : ExistingPickups)
-		{
-			if (IsValid(ExistingPickup) && IsInCurrentMoonSurface(SurfaceController, ExistingPickup))
+
+			FHitResult GroundHit;
+			const FVector TraceStart(CandidateLocation.X, CandidateLocation.Y, Origin.Z + 1200.0f);
+			const FVector TraceEnd(CandidateLocation.X, CandidateLocation.Y, Origin.Z - 2500.0f);
+			if (!World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, GroundTraceParams)
+				|| !GroundHit.bBlockingHit)
 			{
-				GroundTraceParams.AddIgnoredActor(ExistingPickup);
+				continue;
 			}
+
+			GroundLocation = GroundHit.ImpactPoint;
 		}
 
-		FHitResult GroundHit;
-		const FVector TraceStart(CandidateXY.X, CandidateXY.Y, Origin.Z + 1200.0f);
-		const FVector TraceEnd(CandidateXY.X, CandidateXY.Y, Origin.Z - 2500.0f);
-		if (!World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, GroundTraceParams)
-			|| !GroundHit.bBlockingHit)
+		FRotator SpawnRotation(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f);
+		if (IsValid(Planet))
 		{
-			continue;
+			FJTSPlanetSurfaceFrame SurfaceFrame;
+			if (Planet->GetSurfaceFrameAt(GroundLocation, HorizontalDirection, SurfaceFrame))
+			{
+				const FVector SurfaceForward = FQuat(
+					SurfaceFrame.Up,
+					FMath::DegreesToRadians(SpawnRotation.Yaw)).RotateVector(SurfaceFrame.Forward);
+				SpawnRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
+			}
 		}
-
 		const FTransform SpawnTransform(
-			FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f),
-			GroundHit.ImpactPoint + DropUpDirection * PickupDropSpawnHeight);
+			SpawnRotation,
+			GroundLocation + DropUpDirection * PickupDropSpawnHeight);
 		AJTSWorldPickupActor* const Pickup = World->SpawnActorDeferred<AJTSWorldPickupActor>(
 			AJTSWorldPickupActor::StaticClass(),
 			SpawnTransform,
@@ -352,15 +473,22 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 			SurfaceController->RegisterSurfaceRuntimeActor(Pickup);
 		}
 
-		const FVector GroundDirection = GravityAcceleration.IsNearlyZero()
-			? FVector::DownVector
-			: GravityAcceleration.GetSafeNormal();
-		const float VisualSupportDistance = Pickup->GetVisualSupportDistance(GroundDirection);
-		Pickup->SetActorLocation(
-			GroundHit.ImpactPoint + DropUpDirection * (VisualSupportDistance + PickupDropSpawnHeight),
-			false,
-			nullptr,
-			ETeleportType::TeleportPhysics);
+		if (IsValid(Planet))
+		{
+			Pickup->PlaceOnPlanetSurface(Planet, GroundLocation, SpawnRotation.Vector(), PickupDropSpawnHeight);
+		}
+		else
+		{
+			const FVector GroundDirection = GravityAcceleration.IsNearlyZero()
+				? FVector::DownVector
+				: GravityAcceleration.GetSafeNormal();
+			const float VisualSupportDistance = Pickup->GetVisualSupportDistance(GroundDirection);
+			Pickup->SetActorLocation(
+				GroundLocation + DropUpDirection * (VisualSupportDistance + PickupDropSpawnHeight),
+				false,
+				nullptr,
+				ETeleportType::TeleportPhysics);
+		}
 
 		FVector HorizontalLaunchDirection = GravityAcceleration.IsNearlyZero()
 			? HorizontalDirection
@@ -373,7 +501,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		Pickup->StartDropMotion(
 			DropUpDirection * DropUpwardSpeed + HorizontalLaunchDirection * HorizontalSpeed,
 			GravityAcceleration,
-			GroundHit.ImpactPoint,
+			GroundLocation,
 			SourceActor,
 			SafetyPawn);
 		return Pickup;
@@ -463,10 +591,11 @@ FVector AJTSWorldPickupActor::GetInteractionAnchorWorldLocation() const
 	{
 		const float BoundsScale = FMath::Max(FMath::Abs(PickupMesh->BoundsScale), KINDA_SMALL_NUMBER);
 		const FVector PhysicalExtent = PickupMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		return PickupMesh->Bounds.Origin + FVector(0.0f, 0.0f, PhysicalExtent.Z + 22.0f);
+		const float SurfaceExtent = bUsesRealPlanetSurface ? PhysicalExtent.Size() : PhysicalExtent.Z;
+		return PickupMesh->Bounds.Origin + SurfaceUp * (SurfaceExtent + 22.0f);
 	}
 
-	return GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
+	return GetActorLocation() + SurfaceUp * 70.0f;
 }
 
 void AJTSWorldPickupActor::InitializeItem(EJTSWorldPickupItemType NewItemType)
@@ -507,6 +636,9 @@ float AJTSWorldPickupActor::GetVisualSupportDistance(const FVector& GravityDirec
 
 void AJTSWorldPickupActor::AdjustToGround(const FVector& GroundHitLocation)
 {
+	bUsesRealPlanetSurface = false;
+	SurfacePlanet.Reset();
+	SurfaceUp = FVector::UpVector;
 	if (!IsValid(PickupMesh) || !PickupMesh->IsRegistered())
 	{
 		return;
@@ -520,6 +652,54 @@ void AJTSWorldPickupActor::AdjustToGround(const FVector& GroundHitLocation)
 		nullptr,
 		ETeleportType::TeleportPhysics);
 	UpdateMoonWrappedLogicalPosition();
+}
+
+void AJTSWorldPickupActor::PlaceOnPlanetSurface(
+	AJTSPlanetAnchor* Planet,
+	const FVector& GroundLocation,
+	const FVector& PreferredForward,
+	const float SurfaceOffset)
+{
+	if (!IsValid(Planet) || !IsValid(PickupMesh))
+	{
+		AdjustToGround(GroundLocation);
+		return;
+	}
+
+	FJTSPlanetSurfaceFrame SurfaceFrame;
+	if (!Planet->GetSurfaceFrameAt(GroundLocation, PreferredForward, SurfaceFrame))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("JTSWorldPickupActor %s could not resolve a real Moon surface frame."), *GetName());
+		return;
+	}
+
+	bUsesRealPlanetSurface = true;
+	SurfacePlanet = Planet;
+	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
+	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
+	PickupMesh->UpdateBounds();
+	const float VisualSupportDistance = GetVisualSupportDistance(-SurfaceUp);
+	SetActorLocation(
+		SurfaceFrame.Location + SurfaceUp * (VisualSupportDistance + FMath::Max(0.0f, SurfaceOffset)),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	if (MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+		MoonWrappedActorComponent->SetComponentTickEnabled(false);
+	}
+}
+
+bool AJTSWorldPickupActor::IsUsingRealPlanetSurface() const
+{
+	return bUsesRealPlanetSurface && SurfacePlanet.IsValid();
+}
+
+AJTSPlanetAnchor* AJTSWorldPickupActor::GetSurfacePlanet() const
+{
+	return SurfacePlanet.Get();
 }
 
 void AJTSWorldPickupActor::StartDropMotion(
@@ -538,7 +718,14 @@ void AJTSWorldPickupActor::StartDropMotion(
 
 	if (DropGravityAcceleration.IsNearlyZero())
 	{
-		AdjustToGround(PlannedGroundLocation);
+		if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
+		{
+			PlaceOnPlanetSurface(Planet, PlannedGroundLocation, GetActorForwardVector());
+		}
+		else
+		{
+			AdjustToGround(PlannedGroundLocation);
+		}
 		DropVelocity = FVector::ZeroVector;
 		bIsDropping = false;
 		SetActorTickEnabled(false);
@@ -608,6 +795,13 @@ void AJTSWorldPickupActor::BeginPlay()
 
 	if (MoonWrappedActorComponent != nullptr)
 	{
+		if (IsUsingRealPlanetSurface())
+		{
+			MoonWrappedActorComponent->Deactivate();
+			MoonWrappedActorComponent->SetComponentTickEnabled(false);
+			return;
+		}
+
 		UMaterialInterface* const BendMaterial = GetMoonBendMaterialForPickup();
 		if (BendMaterial != nullptr)
 		{
@@ -656,6 +850,12 @@ void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 		return;
 	}
 
+	const FVector CurrentLocation = GetActorLocation();
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
+	{
+		DropGravityAcceleration = Planet->GetGravityDirection(CurrentLocation) * Planet->GetGravityStrength();
+	}
+
 	const FVector GravityDirection = DropGravityAcceleration.GetSafeNormal();
 	if (GravityDirection.IsNearlyZero())
 	{
@@ -669,7 +869,6 @@ void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 	DropVelocity = HorizontalVelocity * FMath::Exp(-PickupDropHorizontalDamping * SafeDeltaSeconds)
 		+ GravityDirection * GravitySpeed;
 
-	const FVector CurrentLocation = GetActorLocation();
 	const FVector NextLocation = CurrentLocation + DropVelocity * SafeDeltaSeconds;
 	const float VisualSupportDistance = GetVisualSupportDistance(GravityDirection);
 	const FVector TraceStart = CurrentLocation + GravityDirection * FMath::Max(0.0f, VisualSupportDistance - 2.0f);
@@ -691,6 +890,24 @@ bool AJTSWorldPickupActor::TraceDropGround(
 	const FVector& TraceEnd,
 	FHitResult& OutGroundHit) const
 {
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
+	{
+		FJTSPlanetSurfaceHit SurfaceHit;
+		if (!Planet->ProbeSurfaceAlongGravity(
+			TraceStart,
+			FVector::Distance(TraceStart, TraceEnd),
+			SurfaceHit))
+		{
+			return false;
+		}
+
+		OutGroundHit = FHitResult();
+		OutGroundHit.bBlockingHit = true;
+		OutGroundHit.ImpactPoint = SurfaceHit.ImpactPoint;
+		OutGroundHit.ImpactNormal = SurfaceHit.ImpactNormal;
+		return true;
+	}
+
 	UWorld* const World = GetWorld();
 	if (World == nullptr)
 	{
@@ -765,6 +982,17 @@ void AJTSWorldPickupActor::BuildDropTraceIgnoredActors(AActor* SourceActor, APaw
 
 void AJTSWorldPickupActor::SettleDropOnGround(const FVector& GroundHitLocation)
 {
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
+	{
+		PlaceOnPlanetSurface(Planet, GroundHitLocation, GetActorForwardVector());
+		DropVelocity = FVector::ZeroVector;
+		bIsDropping = false;
+		SetActorTickEnabled(false);
+		DropTraceIgnoredActors.Reset();
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Pickup Landed: Item=%s"), *ItemTypeToString(ItemType));
+		return;
+	}
+
 	FVector GravityDirection = DropGravityAcceleration.GetSafeNormal();
 	if (GravityDirection.IsNearlyZero())
 	{
@@ -788,7 +1016,9 @@ void AJTSWorldPickupActor::SettleDropOnGround(const FVector& GroundHitLocation)
 
 void AJTSWorldPickupActor::UpdateMoonWrappedLogicalPosition()
 {
-	if (MoonWrappedActorComponent != nullptr && MoonWrappedActorComponent->IsMoonWrappingEnabled())
+	if (!IsUsingRealPlanetSurface()
+		&& MoonWrappedActorComponent != nullptr
+		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
 	{
 		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
 	}
@@ -1019,8 +1249,8 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 	case EJTSWorldPickupItemType::Ore:
 		return TEXT("ORE");
 
-	case EJTSWorldPickupItemType::AntCorpse:
-		return TEXT("ANT CORPSE");
+	case EJTSWorldPickupItemType::MoonAntCorpse:
+		return TEXT("MOON ANT CORPSE");
 
 	case EJTSWorldPickupItemType::Pickaxe:
 		return TEXT("PICKAXE");

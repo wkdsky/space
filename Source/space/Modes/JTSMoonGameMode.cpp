@@ -10,8 +10,8 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/World/JTSMoonSurfaceController.h"
-#include "space/World/JTSRoachActor.h"
-#include "space/World/JTSRoachNestActor.h"
+#include "space/World/JTSMoonAntActor.h"
+#include "space/World/JTSMoonAntNestActor.h"
 
 AJTSMoonGameMode::AJTSMoonGameMode()
 {
@@ -20,7 +20,7 @@ AJTSMoonGameMode::AJTSMoonGameMode()
 	PlayerControllerClass = AJTSPlayerController::StaticClass();
 	GameStateClass = AJTSGameState::StaticClass();
 	HUDClass = AJTSPrototypeHUD::StaticClass();
-	AntNestActorClass = AJTSRoachNestActor::StaticClass();
+	MoonAntNestActorClass = AJTSMoonAntNestActor::StaticClass();
 	MoonSurfaceControllerClass = AJTSMoonSurfaceController::StaticClass();
 }
 
@@ -186,289 +186,289 @@ float AJTSMoonGameMode::GetAttackCooldown() const
 	return FMath::Max(0.05f, AttackCooldown);
 }
 
-TSubclassOf<AJTSRoachActor> AJTSMoonGameMode::GetAntActorClass() const
+TSubclassOf<AJTSMoonAntActor> AJTSMoonGameMode::GetMoonAntActorClass() const
 {
-	return AntActorClass;
+	return MoonAntActorClass;
 }
 
-TSubclassOf<AJTSRoachNestActor> AJTSMoonGameMode::GetAntNestActorClass() const
+TSubclassOf<AJTSMoonAntNestActor> AJTSMoonGameMode::GetMoonAntNestActorClass() const
 {
-	TSubclassOf<AJTSRoachNestActor> ResolvedAntNestActorClass = AntNestActorClass;
-	if (ResolvedAntNestActorClass == nullptr)
+	TSubclassOf<AJTSMoonAntNestActor> ResolvedMoonAntNestActorClass = MoonAntNestActorClass;
+	if (ResolvedMoonAntNestActorClass == nullptr)
 	{
-		ResolvedAntNestActorClass = AJTSRoachNestActor::StaticClass();
+		ResolvedMoonAntNestActorClass = AJTSMoonAntNestActor::StaticClass();
 	}
-	return ResolvedAntNestActorClass;
+	return ResolvedMoonAntNestActorClass;
 }
 
-int32 AJTSMoonGameMode::GetAntNestCount() const
+int32 AJTSMoonGameMode::GetMoonAntNestCount() const
 {
-	return FMath::Max(0, AntNestCount);
+	return FMath::Max(0, MoonAntNestCount);
 }
 
-float AJTSMoonGameMode::GetAntNestOuterRadiusAroundCorpse() const
+float AJTSMoonGameMode::GetMoonAntNestOuterRadiusAroundCorpse() const
 {
-	return FMath::Max(1.0f, AntNestOuterRadiusAroundCorpse);
+	return FMath::Max(1.0f, MoonAntNestOuterRadiusAroundCorpse);
 }
 
-float AJTSMoonGameMode::GetAntNestMinDistanceFromCorpse() const
+float AJTSMoonGameMode::GetMoonAntNestMinDistanceFromCorpse() const
 {
-	return FMath::Clamp(AntNestMinDistanceFromCorpse, 0.0f, GetAntNestOuterRadiusAroundCorpse());
+	return FMath::Clamp(MoonAntNestMinDistanceFromCorpse, 0.0f, GetMoonAntNestOuterRadiusAroundCorpse());
 }
 
-float AJTSMoonGameMode::GetAntNestMinDistanceFromShip() const
+float AJTSMoonGameMode::GetMoonAntNestMinDistanceFromShip() const
 {
-	return FMath::Max(0.0f, AntNestMinDistanceFromShip);
+	return FMath::Max(0.0f, MoonAntNestMinDistanceFromShip);
 }
 
-float AJTSMoonGameMode::GetAntNestBaseMinSpacing() const
+float AJTSMoonGameMode::GetMoonAntNestBaseMinSpacing() const
 {
-	return FMath::Max(1.0f, AntNestBaseMinSpacing);
+	return FMath::Max(1.0f, MoonAntNestBaseMinSpacing);
 }
 
-float AJTSMoonGameMode::GetAntNestCandidateSpacingScaleMin() const
+float AJTSMoonGameMode::GetMoonAntNestCandidateSpacingScaleMin() const
 {
-	return FMath::Max(0.1f, AntNestCandidateSpacingScaleMin);
+	return FMath::Max(0.1f, MoonAntNestCandidateSpacingScaleMin);
 }
 
-float AJTSMoonGameMode::GetAntNestCandidateSpacingScaleMax() const
+float AJTSMoonGameMode::GetMoonAntNestCandidateSpacingScaleMax() const
 {
-	return FMath::Max(GetAntNestCandidateSpacingScaleMin(), AntNestCandidateSpacingScaleMax);
+	return FMath::Max(GetMoonAntNestCandidateSpacingScaleMin(), MoonAntNestCandidateSpacingScaleMax);
 }
 
-float AJTSMoonGameMode::GetAntNestVisualScaleVariationMin() const
+float AJTSMoonGameMode::GetMoonAntNestVisualScaleVariationMin() const
 {
-	return FMath::Max(0.1f, AntNestVisualScaleVariationMin);
+	return FMath::Max(0.1f, MoonAntNestVisualScaleVariationMin);
 }
 
-float AJTSMoonGameMode::GetAntNestVisualScaleVariationMax() const
+float AJTSMoonGameMode::GetMoonAntNestVisualScaleVariationMax() const
 {
-	return FMath::Max(GetAntNestVisualScaleVariationMin(), AntNestVisualScaleVariationMax);
+	return FMath::Max(GetMoonAntNestVisualScaleVariationMin(), MoonAntNestVisualScaleVariationMax);
 }
 
-float AJTSMoonGameMode::GetAntNestInnerWeight() const
+float AJTSMoonGameMode::GetMoonAntNestInnerWeight() const
 {
-	return FMath::Max(0.0f, AntNestInnerWeight);
+	return FMath::Max(0.0f, MoonAntNestInnerWeight);
 }
 
-float AJTSMoonGameMode::GetAntNestMidWeight() const
+float AJTSMoonGameMode::GetMoonAntNestMidWeight() const
 {
-	return FMath::Max(0.0f, AntNestMidWeight);
+	return FMath::Max(0.0f, MoonAntNestMidWeight);
 }
 
-float AJTSMoonGameMode::GetAntNestOuterWeight() const
+float AJTSMoonGameMode::GetMoonAntNestOuterWeight() const
 {
-	return FMath::Max(0.0f, AntNestOuterWeight);
+	return FMath::Max(0.0f, MoonAntNestOuterWeight);
 }
 
-int32 AJTSMoonGameMode::GetMaxActiveAntsPerNest() const
+int32 AJTSMoonGameMode::GetMaxActiveMoonAntsPerNest() const
 {
-	return FMath::Max(0, MaxActiveAntsPerNest);
+	return FMath::Max(0, MaxActiveMoonAntsPerNest);
 }
 
-float AJTSMoonGameMode::GetAntSpawnChance() const
+float AJTSMoonGameMode::GetMoonAntSpawnChance() const
 {
-	return FMath::Clamp(AntSpawnChance, 0.0f, 1.0f);
+	return FMath::Clamp(MoonAntSpawnChance, 0.0f, 1.0f);
 }
 
-float AJTSMoonGameMode::GetAntSpawnIntervalMin() const
+float AJTSMoonGameMode::GetMoonAntSpawnIntervalMin() const
 {
-	return FMath::Max(0.1f, AntSpawnIntervalMin);
+	return FMath::Max(0.1f, MoonAntSpawnIntervalMin);
 }
 
-float AJTSMoonGameMode::GetAntSpawnIntervalMax() const
+float AJTSMoonGameMode::GetMoonAntSpawnIntervalMax() const
 {
-	return FMath::Max(GetAntSpawnIntervalMin(), AntSpawnIntervalMax);
+	return FMath::Max(GetMoonAntSpawnIntervalMin(), MoonAntSpawnIntervalMax);
 }
 
-float AJTSMoonGameMode::GetAntSpawnNearWeight() const
+float AJTSMoonGameMode::GetMoonAntSpawnNearWeight() const
 {
-	return FMath::Max(0.0f, AntSpawnNearWeight);
+	return FMath::Max(0.0f, MoonAntSpawnNearWeight);
 }
 
-float AJTSMoonGameMode::GetAntSpawnMidWeight() const
+float AJTSMoonGameMode::GetMoonAntSpawnMidWeight() const
 {
-	return FMath::Max(0.0f, AntSpawnMidWeight);
+	return FMath::Max(0.0f, MoonAntSpawnMidWeight);
 }
 
-float AJTSMoonGameMode::GetAntSpawnFarWeight() const
+float AJTSMoonGameMode::GetMoonAntSpawnFarWeight() const
 {
-	return FMath::Max(0.0f, AntSpawnFarWeight);
+	return FMath::Max(0.0f, MoonAntSpawnFarWeight);
 }
 
-float AJTSMoonGameMode::GetAntSpawnNearDistanceMin() const
+float AJTSMoonGameMode::GetMoonAntSpawnNearDistanceMin() const
 {
-	return FMath::Max(0.0f, AntSpawnNearDistanceMin);
+	return FMath::Max(0.0f, MoonAntSpawnNearDistanceMin);
 }
 
-float AJTSMoonGameMode::GetAntSpawnNearDistanceMax() const
+float AJTSMoonGameMode::GetMoonAntSpawnNearDistanceMax() const
 {
-	return FMath::Max(GetAntSpawnNearDistanceMin(), AntSpawnNearDistanceMax);
+	return FMath::Max(GetMoonAntSpawnNearDistanceMin(), MoonAntSpawnNearDistanceMax);
 }
 
-float AJTSMoonGameMode::GetAntSpawnMidDistanceMin() const
+float AJTSMoonGameMode::GetMoonAntSpawnMidDistanceMin() const
 {
-	return FMath::Max(0.0f, AntSpawnMidDistanceMin);
+	return FMath::Max(0.0f, MoonAntSpawnMidDistanceMin);
 }
 
-float AJTSMoonGameMode::GetAntSpawnMidDistanceMax() const
+float AJTSMoonGameMode::GetMoonAntSpawnMidDistanceMax() const
 {
-	return FMath::Max(GetAntSpawnMidDistanceMin(), AntSpawnMidDistanceMax);
+	return FMath::Max(GetMoonAntSpawnMidDistanceMin(), MoonAntSpawnMidDistanceMax);
 }
 
-float AJTSMoonGameMode::GetAntSpawnFarDistanceMin() const
+float AJTSMoonGameMode::GetMoonAntSpawnFarDistanceMin() const
 {
-	return FMath::Max(0.0f, AntSpawnFarDistanceMin);
+	return FMath::Max(0.0f, MoonAntSpawnFarDistanceMin);
 }
 
-float AJTSMoonGameMode::GetAntSpawnFarDistanceMax() const
+float AJTSMoonGameMode::GetMoonAntSpawnFarDistanceMax() const
 {
-	return FMath::Max(GetAntSpawnFarDistanceMin(), AntSpawnFarDistanceMax);
+	return FMath::Max(GetMoonAntSpawnFarDistanceMin(), MoonAntSpawnFarDistanceMax);
 }
 
-float AJTSMoonGameMode::GetAntRoamSpeed() const
+float AJTSMoonGameMode::GetMoonAntRoamSpeed() const
 {
-	return FMath::Max(1.0f, AntRoamSpeed);
+	return FMath::Max(1.0f, MoonAntRoamSpeed);
 }
 
-float AJTSMoonGameMode::GetAntRoamRadius() const
+float AJTSMoonGameMode::GetMoonAntRoamRadius() const
 {
-	return FMath::Max(1.0f, AntRoamRadius);
+	return FMath::Max(1.0f, MoonAntRoamRadius);
 }
 
-float AJTSMoonGameMode::GetAntMaxHomeRadius() const
+float AJTSMoonGameMode::GetMoonAntMaxHomeRadius() const
 {
-	return FMath::Max(GetAntRoamRadius(), AntMaxHomeRadius);
+	return FMath::Max(GetMoonAntRoamRadius(), MoonAntMaxHomeRadius);
 }
 
-float AJTSMoonGameMode::GetAntRoamRetargetIntervalMin() const
+float AJTSMoonGameMode::GetMoonAntRoamRetargetIntervalMin() const
 {
-	return FMath::Max(0.1f, AntRoamRetargetIntervalMin);
+	return FMath::Max(0.1f, MoonAntRoamRetargetIntervalMin);
 }
 
-float AJTSMoonGameMode::GetAntRoamRetargetIntervalMax() const
+float AJTSMoonGameMode::GetMoonAntRoamRetargetIntervalMax() const
 {
-	return FMath::Max(GetAntRoamRetargetIntervalMin(), AntRoamRetargetIntervalMax);
+	return FMath::Max(GetMoonAntRoamRetargetIntervalMin(), MoonAntRoamRetargetIntervalMax);
 }
 
-float AJTSMoonGameMode::GetAntSurfaceDurationMin() const
+float AJTSMoonGameMode::GetMoonAntSurfaceDurationMin() const
 {
-	return FMath::Max(0.1f, AntSurfaceDurationMin);
+	return FMath::Max(0.1f, MoonAntSurfaceDurationMin);
 }
 
-float AJTSMoonGameMode::GetAntSurfaceDurationMax() const
+float AJTSMoonGameMode::GetMoonAntSurfaceDurationMax() const
 {
-	return FMath::Max(GetAntSurfaceDurationMin(), AntSurfaceDurationMax);
+	return FMath::Max(GetMoonAntSurfaceDurationMin(), MoonAntSurfaceDurationMax);
 }
 
-float AJTSMoonGameMode::GetAntEmergingDuration() const
+float AJTSMoonGameMode::GetMoonAntEmergingDuration() const
 {
-	return FMath::Max(0.0f, AntEmergingDuration);
+	return FMath::Max(0.0f, MoonAntEmergingDuration);
 }
 
-float AJTSMoonGameMode::GetAntHitReactionDuration() const
+float AJTSMoonGameMode::GetMoonAntHitReactionDuration() const
 {
-	return FMath::Max(0.0f, AntHitReactionDuration);
+	return FMath::Max(0.0f, MoonAntHitReactionDuration);
 }
 
-float AJTSMoonGameMode::GetAntBurrowDuration() const
+float AJTSMoonGameMode::GetMoonAntBurrowDuration() const
 {
-	return FMath::Max(0.0f, AntBurrowDuration);
+	return FMath::Max(0.0f, MoonAntBurrowDuration);
 }
 
-float AJTSMoonGameMode::GetAntFleeSpeed() const
+float AJTSMoonGameMode::GetMoonAntFleeSpeed() const
 {
-	return FMath::Max(1.0f, AntFleeSpeed);
+	return FMath::Max(1.0f, MoonAntFleeSpeed);
 }
 
-float AJTSMoonGameMode::GetAntFleeDurationMin() const
+float AJTSMoonGameMode::GetMoonAntFleeDurationMin() const
 {
-	return FMath::Max(0.1f, AntFleeDurationMin);
+	return FMath::Max(0.1f, MoonAntFleeDurationMin);
 }
 
-float AJTSMoonGameMode::GetAntFleeDurationMax() const
+float AJTSMoonGameMode::GetMoonAntFleeDurationMax() const
 {
-	return FMath::Max(GetAntFleeDurationMin(), AntFleeDurationMax);
+	return FMath::Max(GetMoonAntFleeDurationMin(), MoonAntFleeDurationMax);
 }
 
-float AJTSMoonGameMode::GetAntMaxFleeDistance() const
+float AJTSMoonGameMode::GetMoonAntMaxFleeDistance() const
 {
-	return FMath::Max(1.0f, AntMaxFleeDistance);
+	return FMath::Max(1.0f, MoonAntMaxFleeDistance);
 }
 
-float AJTSMoonGameMode::GetAntTurnSpeed() const
+float AJTSMoonGameMode::GetMoonAntTurnSpeed() const
 {
-	return FMath::Max(1.0f, AntTurnSpeed);
+	return FMath::Max(1.0f, MoonAntTurnSpeed);
 }
 
-float AJTSMoonGameMode::GetAntChaseSpeed() const
+float AJTSMoonGameMode::GetMoonAntChaseSpeed() const
 {
-	return FMath::Max(0.0f, AntChaseSpeed);
+	return FMath::Max(0.0f, MoonAntChaseSpeed);
 }
 
-float AJTSMoonGameMode::GetAntReturnSpeed() const
+float AJTSMoonGameMode::GetMoonAntReturnSpeed() const
 {
-	return FMath::Max(0.0f, AntReturnSpeed);
+	return FMath::Max(0.0f, MoonAntReturnSpeed);
 }
 
-float AJTSMoonGameMode::GetAntAggroRadius() const
+float AJTSMoonGameMode::GetMoonAntAggroRadius() const
 {
-	return FMath::Max(0.0f, AntAggroRadius);
+	return FMath::Max(0.0f, MoonAntAggroRadius);
 }
 
-float AJTSMoonGameMode::GetAntLoseAggroRadius() const
+float AJTSMoonGameMode::GetMoonAntLoseAggroRadius() const
 {
-	return FMath::Max(0.0f, AntLoseAggroRadius);
+	return FMath::Max(0.0f, MoonAntLoseAggroRadius);
 }
 
-float AJTSMoonGameMode::GetAntStopDistanceFromPlayer() const
+float AJTSMoonGameMode::GetMoonAntStopDistanceFromPlayer() const
 {
-	return FMath::Max(0.0f, AntStopDistanceFromPlayer);
+	return FMath::Max(0.0f, MoonAntStopDistanceFromPlayer);
 }
 
-float AJTSMoonGameMode::GetAntWanderSpeed() const
+float AJTSMoonGameMode::GetMoonAntWanderSpeed() const
 {
-	return FMath::Max(0.0f, AntWanderSpeed);
+	return FMath::Max(0.0f, MoonAntWanderSpeed);
 }
 
-float AJTSMoonGameMode::GetAntWanderRadius() const
+float AJTSMoonGameMode::GetMoonAntWanderRadius() const
 {
-	return FMath::Max(0.0f, AntWanderRadius);
+	return FMath::Max(0.0f, MoonAntWanderRadius);
 }
 
-float AJTSMoonGameMode::GetAntWanderRetargetIntervalMin() const
+float AJTSMoonGameMode::GetMoonAntWanderRetargetIntervalMin() const
 {
-	return FMath::Max(0.0f, AntWanderRetargetIntervalMin);
+	return FMath::Max(0.0f, MoonAntWanderRetargetIntervalMin);
 }
 
-float AJTSMoonGameMode::GetAntWanderRetargetIntervalMax() const
+float AJTSMoonGameMode::GetMoonAntWanderRetargetIntervalMax() const
 {
-	return FMath::Max(0.0f, AntWanderRetargetIntervalMax);
+	return FMath::Max(0.0f, MoonAntWanderRetargetIntervalMax);
 }
 
-float AJTSMoonGameMode::GetAntLifetime() const
+float AJTSMoonGameMode::GetMoonAntLifetime() const
 {
-	return FMath::Max(0.0f, AntLifetime);
+	return FMath::Max(0.0f, MoonAntLifetime);
 }
 
-float AJTSMoonGameMode::GetAntGroundTraceStartHeight() const
+float AJTSMoonGameMode::GetMoonAntGroundTraceStartHeight() const
 {
-	return FMath::Max(0.0f, AntGroundTraceStartHeight);
+	return FMath::Max(0.0f, MoonAntGroundTraceStartHeight);
 }
 
-float AJTSMoonGameMode::GetAntGroundTraceDistance() const
+float AJTSMoonGameMode::GetMoonAntGroundTraceDistance() const
 {
-	return FMath::Max(1.0f, AntGroundTraceDistance);
+	return FMath::Max(1.0f, MoonAntGroundTraceDistance);
 }
 
-int32 AJTSMoonGameMode::GetAntPunchHitsToKill() const
+int32 AJTSMoonGameMode::GetMoonAntPunchHitsToKill() const
 {
-	return FMath::Max(1, AntPunchHitsToKill);
+	return FMath::Max(1, MoonAntPunchHitsToKill);
 }
 
-int32 AJTSMoonGameMode::GetAntNestPunchHitsToDestroy() const
+int32 AJTSMoonGameMode::GetMoonAntNestPunchHitsToDestroy() const
 {
-	return FMath::Max(1, AntNestPunchHitsToDestroy);
+	return FMath::Max(1, MoonAntNestPunchHitsToDestroy);
 }
 
 bool AJTSMoonGameMode::TryCraftPickaxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
@@ -588,7 +588,7 @@ void AJTSMoonGameMode::BeginPlay()
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("JumpToSpace Moon Config: Crew=%d FoodRate=%.2f WaterRate=%.2f ResourceCount=%d SpawnRadius=%.1f PickaxeCost=%d BackpackRockCost=%d BackpackOreCost=%d KnifeCost=%d/%d AxeCost=%d/%d LargeYield=%d OreYield=%d PickupMaxDistance=%.0f PickupAcquireRadius=%.0f PickupRetainRadius=%.0f PickupAimRayRadius=%.0f ShipMarkerDistance=%.0f AttackRange=%.0f AntNests=%d"),
+		TEXT("JumpToSpace Moon Config: Crew=%d FoodRate=%.2f WaterRate=%.2f ResourceCount=%d SpawnRadius=%.1f PickaxeCost=%d BackpackRockCost=%d BackpackOreCost=%d KnifeCost=%d/%d AxeCost=%d/%d LargeYield=%d OreYield=%d PickupMaxDistance=%.0f PickupAcquireRadius=%.0f PickupRetainRadius=%.0f PickupAimRayRadius=%.0f ShipMarkerDistance=%.0f AttackRange=%.0f MoonAntNests=%d"),
 		GetCrewCount(),
 		GetFoodConsumptionPerPersonPerMinute(),
 		GetWaterConsumptionPerPersonPerMinute(),
@@ -609,7 +609,7 @@ void AJTSMoonGameMode::BeginPlay()
 		GetPickupAimRayRadius(),
 		GetSpacecraftMarkerShowDistance(),
 		GetAttackRange(),
-		GetAntNestCount());
+		GetMoonAntNestCount());
 
 	if (AJTSMoonSurfaceController* const Controller = EnsureMoonSurfaceController())
 	{

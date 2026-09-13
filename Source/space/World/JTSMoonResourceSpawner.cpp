@@ -13,9 +13,11 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonCorpseActor.h"
+#include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
-#include "space/World/JTSRoachNestActor.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
+#include "space/World/JTSMoonAntNestActor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
@@ -46,6 +48,13 @@ namespace
 		return FMath::Abs(RelativeCandidate.X) <= LandmarkExtent.X + SafePadding
 			&& FMath::Abs(RelativeCandidate.Y) <= LandmarkExtent.Y + SafePadding;
 	}
+
+	float GetSurfaceClearanceRadius(const FBox& Bounds, const float Padding)
+	{
+		return Bounds.IsValid
+			? Bounds.GetExtent().Size() + FMath::Max(0.0f, Padding)
+			: FMath::Max(0.0f, Padding);
+	}
 }
 
 AJTSMoonResourceSpawner::AJTSMoonResourceSpawner()
@@ -74,22 +83,35 @@ void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawn
 {
 	ResourceCount = FMath::Max(0, Settings.TotalResourceCount);
 	Radius = FMath::Max(0.0f, Settings.SpawnRadius);
+	MinimumResourceSpacing = FMath::Max(0.0f, Settings.MinimumResourceSpacing);
 	SmallRockWeight = FMath::Max(0, Settings.SmallRockWeight);
 	MediumRockWeight = FMath::Max(0, Settings.MediumRockWeight);
 	LargeRockWeight = FMath::Max(0, Settings.LargeRockWeight);
 	OreWeight = FMath::Max(0, Settings.OreWeight);
 	SpacecraftExclusionPadding = FMath::Max(0.0f, Settings.SpacecraftExclusionPadding);
 	LandmarkExclusionPadding = FMath::Max(0.0f, Settings.LandmarkExclusionPadding);
+	bUseRandomSeed = !Settings.bUseDeterministicSeed;
+	RandomSeed = Settings.RandomSeed;
 }
 
 void AJTSMoonResourceSpawner::SetLandmarkExclusions(
 	AJTSSpacecraftActor* InSpacecraft,
 	const TArray<TWeakObjectPtr<AJTSMoonCorpseActor>>& InCorpseLandmarks,
-	const TArray<TWeakObjectPtr<AJTSRoachNestActor>>& InAntNestLandmarks)
+	const TArray<TWeakObjectPtr<AJTSMoonAntNestActor>>& InMoonAntNestLandmarks)
 {
 	SpacecraftLandmark = InSpacecraft;
 	CorpseLandmarks = InCorpseLandmarks;
-	AntNestLandmarks = InAntNestLandmarks;
+	MoonAntNestLandmarks = InMoonAntNestLandmarks;
+}
+
+void AJTSMoonResourceSpawner::SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet)
+{
+	OwningPlanet = InOwningPlanet;
+}
+
+void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController)
+{
+	SurfaceGameplayController = InSurfaceGameplayController;
 }
 
 int32 AJTSMoonResourceSpawner::GenerateResources()
@@ -129,37 +151,106 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	FRandomStream RandomStream(Seed);
 
 	const float SafeRadius = FMath::Max(0.0f, Radius);
+	const float SafeMinimumSpacing = FMath::Max(0.0f, MinimumResourceSpacing);
 	const FVector Origin = GetActorLocation();
+	AJTSPlanetAnchor* const Planet = OwningPlanet.Get();
+	const bool bUseRealPlanetSurface = IsValid(Planet);
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+	const IJTSMoonSurfaceGameplaySettings* MoonSettings = IsValid(SurfaceController)
 		? SurfaceController->GetMoonSettings()
-		: World->GetAuthGameMode<AJTSMoonGameMode>();
-	const int32 LargeRockYieldUnits = IsValid(MoonSettings) ? MoonSettings->GetLargeRockTotalYieldUnits() : 6;
-	const int32 OreDepositYieldUnits = IsValid(MoonSettings) ? MoonSettings->GetOreDepositTotalYieldUnits() : 6;
+		: nullptr;
+	if (MoonSettings == nullptr)
+	{
+		if (const AJTSMoonGameMode* const LegacyGameMode = World->GetAuthGameMode<AJTSMoonGameMode>())
+		{
+			MoonSettings = static_cast<const IJTSMoonSurfaceGameplaySettings*>(LegacyGameMode);
+		}
+	}
+	const int32 LargeRockYieldUnits = MoonSettings != nullptr ? MoonSettings->GetLargeRockTotalYieldUnits() : 6;
+	const int32 OreDepositYieldUnits = MoonSettings != nullptr ? MoonSettings->GetOreDepositTotalYieldUnits() : 6;
 	int32 SpawnedCount = 0;
 	int32 RejectedLandmarkCount = 0;
+	int32 RejectedSpacingCount = 0;
 	int32 CandidateAttemptCount = 0;
 	const int32 MaxCandidateAttempts = FMath::Max(64, SafeResourceCount * 32);
+	TArray<FVector> AcceptedResourceLocations;
+
+	const auto FindRealSurfaceCandidate = [Planet, Origin, SafeRadius, &RandomStream](FVector& OutCandidateLocation)
+	{
+		if (!IsValid(Planet))
+		{
+			return false;
+		}
+
+		const FVector CapCenterDirection = Planet->GetRadialUpVector(Origin);
+		const float MaximumAngle = Planet->ArcDistanceToAngleRadians(SafeRadius);
+		const float CosineOfAngle = FMath::Lerp(1.0f, FMath::Cos(MaximumAngle), RandomStream.FRand());
+		const float SineOfAngle = FMath::Sqrt(FMath::Max(0.0f, 1.0f - FMath::Square(CosineOfAngle)));
+		const float Azimuth = RandomStream.FRandRange(0.0f, UE_TWO_PI);
+		FVector TangentX;
+		FVector TangentY;
+		CapCenterDirection.FindBestAxisVectors(TangentX, TangentY);
+		const FVector CandidateDirection = (
+			CapCenterDirection * CosineOfAngle
+			+ (TangentX * FMath::Cos(Azimuth) + TangentY * FMath::Sin(Azimuth)) * SineOfAngle).GetSafeNormal();
+
+		FJTSPlanetSurfaceHit SurfaceHit;
+		if (!Planet->ProjectPointToSurface(Planet->GetPlanetCenter() + CandidateDirection * Planet->GetApproximateRadius(), SurfaceHit))
+		{
+			return false;
+		}
+
+		OutCandidateLocation = SurfaceHit.ImpactPoint;
+		return true;
+	};
 
 	while (SpawnedCount < SafeResourceCount && CandidateAttemptCount < MaxCandidateAttempts)
 	{
 		++CandidateAttemptCount;
 		const float Angle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
 		const float Distance = SafeRadius * FMath::Sqrt(RandomStream.FRand());
-		const FVector CandidateXY = Origin + FVector(
-			FMath::Cos(Angle) * Distance,
-			FMath::Sin(Angle) * Distance,
-			0.0f);
-		if (IsCandidateExcludedByLandmarks(CandidateXY))
+		FVector CandidateLocation;
+		if (bUseRealPlanetSurface)
+		{
+			if (!FindRealSurfaceCandidate(CandidateLocation))
+			{
+				continue;
+			}
+		}
+		else
+		{
+			CandidateLocation = Origin + FVector(
+				FMath::Cos(Angle) * Distance,
+				FMath::Sin(Angle) * Distance,
+				0.0f);
+		}
+		if (IsCandidateExcludedByLandmarks(CandidateLocation))
 		{
 			++RejectedLandmarkCount;
 			continue;
 		}
 
 		FVector GroundLocation;
-		if (!ResolveGroundLocation(CandidateXY, GroundLocation))
+		if (!ResolveGroundLocation(CandidateLocation, GroundLocation))
 		{
 			continue;
+		}
+
+		if (SafeMinimumSpacing > 0.0f)
+		{
+			const bool bTooCloseToExistingResource = AcceptedResourceLocations.ContainsByPredicate(
+				[Planet, bUseRealPlanetSurface, &GroundLocation, SafeMinimumSpacing](const FVector& ExistingLocation)
+				{
+					const float Separation = bUseRealPlanetSurface && IsValid(Planet)
+						? Planet->ApproximateSurfaceArcDistance(ExistingLocation, GroundLocation)
+						: FVector::Dist2D(ExistingLocation, GroundLocation);
+					return Separation < SafeMinimumSpacing;
+				});
+			if (bTooCloseToExistingResource)
+			{
+				++RejectedSpacingCount;
+				continue;
+			}
 		}
 
 		const double ResourceRoll = static_cast<double>(RandomStream.FRand()) * static_cast<double>(TotalResourceWeight);
@@ -198,7 +289,18 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			BaseResourceScale.X * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier),
 			BaseResourceScale.Y * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier),
 			BaseResourceScale.Z * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier));
-		const FRotator ResourceRotation(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f);
+		FRotator ResourceRotation(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f);
+		if (bUseRealPlanetSurface)
+		{
+			FJTSPlanetSurfaceFrame SurfaceFrame;
+			if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
+			{
+				const float YawRadians = FMath::DegreesToRadians(ResourceRotation.Yaw);
+				const FVector SurfaceForward = FQuat(SurfaceFrame.Up, YawRadians).RotateVector(SurfaceFrame.Forward);
+				ResourceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
+			}
+		}
+		bool bSpawnedResourceAtCandidate = false;
 		if (bMiningNode)
 		{
 			if (AJTSMoonResourceActor* const Resource = SpawnMiningNode(
@@ -209,6 +311,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 				GroundLocation))
 			{
 				++SpawnedCount;
+				bSpawnedResourceAtCandidate = true;
 			}
 		}
 		else
@@ -221,12 +324,28 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 				{
 					const float PickupAngle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
 					const float PickupDistance = RandomStream.FRandRange(70.0f, 140.0f);
-					const FVector PickupCandidateXY = GroundLocation + FVector(
-						FMath::Cos(PickupAngle) * PickupDistance,
-						FMath::Sin(PickupAngle) * PickupDistance,
-						0.0f);
-					if (IsCandidateExcludedByLandmarks(PickupCandidateXY)
-						|| !ResolveGroundLocation(PickupCandidateXY, PickupGroundLocation))
+					FVector PickupCandidateLocation;
+					if (bUseRealPlanetSurface)
+					{
+						FJTSPlanetSurfaceFrame SurfaceFrame;
+						if (!Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
+						{
+							continue;
+						}
+						const FVector TangentDirection = (
+							SurfaceFrame.Forward * FMath::Cos(PickupAngle)
+							+ SurfaceFrame.Right * FMath::Sin(PickupAngle)).GetSafeNormal();
+						PickupCandidateLocation = GroundLocation + TangentDirection * PickupDistance;
+					}
+					else
+					{
+						PickupCandidateLocation = GroundLocation + FVector(
+							FMath::Cos(PickupAngle) * PickupDistance,
+							FMath::Sin(PickupAngle) * PickupDistance,
+							0.0f);
+					}
+					if (IsCandidateExcludedByLandmarks(PickupCandidateLocation)
+						|| !ResolveGroundLocation(PickupCandidateLocation, PickupGroundLocation))
 					{
 						continue;
 					}
@@ -240,16 +359,24 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			if (SpawnedPickupCount == InitialPickupCount)
 			{
 				++SpawnedCount;
+				bSpawnedResourceAtCandidate = true;
 			}
+		}
+
+		if (bSpawnedResourceAtCandidate)
+		{
+			AcceptedResourceLocations.Add(GroundLocation);
 		}
 	}
 
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("JumpToSpace Moon Spawn: Total=%d RejectedLandmarks=%d"),
+		TEXT("JumpToSpace Moon Spawn: Total=%d RejectedLandmarks=%d RejectedSpacing=%d Seed=%d"),
 		SpawnedCount,
-		RejectedLandmarkCount);
+		RejectedLandmarkCount,
+		RejectedSpacingCount,
+		Seed);
 
 	return SpawnedCount;
 }
@@ -312,7 +439,18 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 
 	Resource->InitializeMiningNode(ResourceType, TotalYieldUnits);
 	Resource->FinishSpawning(SpawnTransform);
-	Resource->AdjustToGround(GroundLocation);
+	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
+	{
+		Resource->PlaceOnPlanetSurface(Planet, GroundLocation, ResourceRotation.Vector());
+	}
+	else
+	{
+		Resource->AdjustToGround(GroundLocation);
+	}
+	if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
+	{
+		Controller->RegisterSurfaceRuntimeActor(Resource);
+	}
 	GeneratedResources.Add(Resource);
 	return Resource;
 }
@@ -326,13 +464,34 @@ AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector&
 		this);
 	if (IsValid(Pickup))
 	{
+		if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
+		{
+			Controller->RegisterSurfaceRuntimeActor(Pickup);
+		}
 		GeneratedPickups.Add(Pickup);
 	}
 	return Pickup;
 }
 
-bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, FVector& OutGroundLocation) const
+bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const
 {
+	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
+	{
+		const FVector RadialUp = Planet->GetRadialUpVector(CandidateLocation);
+		FJTSPlanetSurfaceHit SurfaceHit;
+		const float ProbeDistance = FMath::Max(0.0f, GroundTraceStartHeight) + FMath::Max(0.0f, GroundTraceDistance);
+		if (Planet->ProbeSurfaceAlongGravity(
+			CandidateLocation + RadialUp * FMath::Max(0.0f, GroundTraceStartHeight),
+			ProbeDistance,
+			SurfaceHit)
+			|| Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
+		{
+			OutGroundLocation = SurfaceHit.ImpactPoint;
+			return true;
+		}
+		return false;
+	}
+
 	UWorld* const World = GetWorld();
 	if (World == nullptr)
 	{
@@ -341,8 +500,8 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 
 	const float SafeTraceStartHeight = FMath::Max(0.0f, GroundTraceStartHeight);
 	const float SafeTraceDistance = FMath::Max(0.0f, GroundTraceDistance);
-	const FVector TraceStart(CandidateXY.X, CandidateXY.Y, GetActorLocation().Z + SafeTraceStartHeight);
-	const FVector TraceEnd(CandidateXY.X, CandidateXY.Y, GetActorLocation().Z + SafeTraceStartHeight - SafeTraceDistance);
+	const FVector TraceStart(CandidateLocation.X, CandidateLocation.Y, GetActorLocation().Z + SafeTraceStartHeight);
+	const FVector TraceEnd(CandidateLocation.X, CandidateLocation.Y, GetActorLocation().Z + SafeTraceStartHeight - SafeTraceDistance);
 	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSMoonResourceGroundTrace), false, this);
 	TraceParams.AddIgnoredActor(this);
 
@@ -362,7 +521,7 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 			TraceParams.AddIgnoredActor(Corpse.Get());
 		}
 	}
-	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : AntNestLandmarks)
+	for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : MoonAntNestLandmarks)
 	{
 		if (Nest.IsValid())
 		{
@@ -399,8 +558,42 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateXY, 
 	return false;
 }
 
-bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& CandidateXY) const
+bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& CandidateLocation) const
 {
+	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
+	{
+		auto IsWithinSurfaceClearance = [Planet, &CandidateLocation](const AActor* Landmark, const float Padding)
+		{
+			if (!IsValid(Landmark))
+			{
+				return false;
+			}
+
+			return Planet->ApproximateSurfaceArcDistance(CandidateLocation, Landmark->GetActorLocation())
+				<= GetSurfaceClearanceRadius(Landmark->GetComponentsBoundingBox(true), Padding);
+		};
+
+		if (IsWithinSurfaceClearance(SpacecraftLandmark.Get(), SpacecraftExclusionPadding))
+		{
+			return true;
+		}
+		for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CorpseLandmarks)
+		{
+			if (IsWithinSurfaceClearance(Corpse.Get(), LandmarkExclusionPadding))
+			{
+				return true;
+			}
+		}
+		for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : MoonAntNestLandmarks)
+		{
+			if (IsWithinSurfaceClearance(Nest.Get(), LandmarkExclusionPadding))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	const UWorld* const World = GetWorld();
 	if (World == nullptr)
 	{
@@ -408,7 +601,7 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 	}
 
 	const UJTSMoonWrapSubsystem* const WrapSubsystem = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-	const FVector2D CandidatePosition(CandidateXY.X, CandidateXY.Y);
+	const FVector2D CandidatePosition(CandidateLocation.X, CandidateLocation.Y);
 	if (SpacecraftLandmark.IsValid()
 		&& IsCandidateInsideWrappedBounds(
 			CandidatePosition,
@@ -432,7 +625,7 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 		}
 	}
 
-	for (const TWeakObjectPtr<AJTSRoachNestActor>& Nest : AntNestLandmarks)
+	for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : MoonAntNestLandmarks)
 	{
 		if (Nest.IsValid()
 			&& IsCandidateInsideWrappedBounds(
@@ -446,4 +639,9 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 	}
 
 	return false;
+}
+
+bool AJTSMoonResourceSpawner::IsUsingRealPlanetSurface() const
+{
+	return OwningPlanet.IsValid();
 }

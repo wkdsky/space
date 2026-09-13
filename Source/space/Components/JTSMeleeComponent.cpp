@@ -12,9 +12,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/World/JTSMoonSurfaceController.h"
-#include "space/World/JTSRoachActor.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
+#include "space/World/JTSMoonAntActor.h"
 #include "TimerManager.h"
 
 namespace
@@ -276,7 +276,7 @@ void UJTSMeleeComponent::PerformHitCheck()
 		if (IsValidDamageTarget(Candidate, AttackingPawn) && !HitActorsThisSwing.Contains(Candidate))
 		{
 			CandidateLocation = GetMeleeTargetAimPoint(Candidate);
-			const float AllowedRange = Candidate->IsA<AJTSRoachActor>()
+			const float AllowedRange = Candidate->IsA<AJTSMoonAntActor>()
 				? FMath::Min(205.0f, FMath::Max(PunchRange, CachedTargetGraceRange))
 				: PunchRange;
 			bUsingCachedTarget = IsWithinMeleeRange(AttackingPawn, Candidate->GetActorLocation(), AllowedRange)
@@ -391,8 +391,8 @@ bool UJTSMeleeComponent::TryAttack()
 	UWorld* const World = GetWorld();
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController) ? SurfaceController->GetMoonSettings() : nullptr;
-	if (!IsValid(AttackingPawn) || !IsValid(MoonSettings) || !IsMoonMeleeAvailable())
+	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController) ? SurfaceController->GetMoonSettings() : nullptr;
+	if (!IsValid(AttackingPawn) || MoonSettings == nullptr || !IsMoonMeleeAvailable())
 	{
 		return false;
 	}
@@ -658,10 +658,10 @@ bool UJTSMeleeComponent::FindBestPunchCandidate(
 			continue;
 		}
 
-		const bool bIsAnt = Candidate->IsA<AJTSRoachActor>();
+		const bool bIsMoonAnt = Candidate->IsA<AJTSMoonAntActor>();
 		const float AimAssistAngle = FMath::Max(
 			0.0f,
-			bIsAnt ? AntPunchAimAssistAngle : GenericPunchAimAssistAngle);
+			bIsMoonAnt ? MoonAntPunchAimAssistAngle : GenericPunchAimAssistAngle);
 		if (AimAssistAngle <= KINDA_SMALL_NUMBER)
 		{
 			continue;
@@ -680,10 +680,10 @@ bool UJTSMeleeComponent::FindBestPunchCandidate(
 		}
 
 		// Camera alignment is deliberately dominant: a closer side target must not replace the target under
-		// the crosshair. Ants receive only a small tie-breaking bias after both angle and distance are scored.
+		// the crosshair. MoonAnts receive only a small tie-breaking bias after both angle and distance are scored.
 		const float AngleScore = AimAngleDegrees / AimAssistAngle;
 		const float DistanceScore = PawnDistance / SearchRadius;
-		const float SmallTargetBias = bIsAnt ? 0.25f : 0.0f;
+		const float SmallTargetBias = bIsMoonAnt ? 0.25f : 0.0f;
 		const float Score = AngleScore * 100.0f + DistanceScore * 10.0f - SmallTargetBias;
 		if (Score < BestScore)
 		{

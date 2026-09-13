@@ -15,6 +15,14 @@ class AJTSSpacecraftActor;
 class APlayerController;
 class UObject;
 
+/** Fired only after one initial arrival has both a placed player and a landed/created spacecraft. */
+DECLARE_MULTICAST_DELEGATE_FourParams(
+	FOnJTSInitialLandingSequenceCompleted,
+	APlayerController* /* PlayerController */,
+	AJTSPlanetAnchor* /* Planet */,
+	AJTSCharacter* /* Character */,
+	AJTSSpacecraftActor* /* Spacecraft */);
+
 /**
  * Runtime coordinator for first arrival, legal landing-site queries, and landed-spacecraft respawn
  * resolution. It stores a dynamic site registry rather than putting level configuration on a planet.
@@ -60,6 +68,9 @@ public:
 	/** Starts a site-independent first arrival. Spawn transforms come from an ArrivalAnchor or safe generic fallback. */
 	UFUNCTION(BlueprintCallable, Category = "Planet|Arrival")
 	bool StartLandingSequence(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
+
+	/** Surface GameMode flow binds here instead of polling for player/ship creation. */
+	FOnJTSInitialLandingSequenceCompleted& OnInitialLandingSequenceCompleted();
 
 	/** Entry point used by AJTSSpacecraftActor::RequestLanding. */
 	bool RequestLanding(AJTSSpacecraftActor* Spacecraft, FJTSPlanetLandingValidationResult& OutResult);
@@ -157,4 +168,5 @@ private:
 	TSet<TWeakObjectPtr<AJTSPlanetLandingSite>> RegisteredLandingSites;
 	TMap<TWeakObjectPtr<AJTSPlanetAnchor>, TWeakObjectPtr<AJTSSpacecraftActor>> ArrivalSpacecraftByPlanet;
 	TMap<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<AJTSSpacecraftActor>> PlayerSpacecraft;
+	FOnJTSInitialLandingSequenceCompleted InitialLandingSequenceCompletedDelegate;
 };

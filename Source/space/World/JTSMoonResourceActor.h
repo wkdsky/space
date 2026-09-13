@@ -13,6 +13,7 @@ class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
+class AJTSPlanetAnchor;
 
 UCLASS()
 class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable
@@ -40,6 +41,12 @@ public:
 
 	FVector GetVisualBoundsExtent() const;
 	void AdjustToGround(const FVector& GroundHitLocation);
+
+	/** Places this node against real planet mesh collision and aligns local Z with its surface normal. */
+	void PlaceOnPlanetSurface(
+		AJTSPlanetAnchor* Planet,
+		const FVector& GroundLocation,
+		const FVector& PreferredForward);
 
 	/** Initializes a multi-use Large Rock or Ore Deposit mining node. */
 	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits);
@@ -88,6 +95,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
+
+	/** Cached normal used by interaction UI after a real-surface placement. */
+	FVector SurfaceUp = FVector::UpVector;
+	bool bUsesRealPlanetSurface = false;
 
 	bool bMiningInProgress = false;
 };

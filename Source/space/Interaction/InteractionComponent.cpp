@@ -10,9 +10,9 @@
 #include "GameFramework/Pawn.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSWorldPickupActor.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "TimerManager.h"
 
 UInteractionComponent::UInteractionComponent()
@@ -222,14 +222,14 @@ AActor* UInteractionComponent::FindBestWorldPickup(APawn* InteractingPawn)
 {
 	UWorld* const World = GetWorld();
 	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const AJTSMoonGameMode* const MoonSettings = IsValid(SurfaceController)
+	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController)
 		? SurfaceController->GetMoonSettings()
 		: nullptr;
 	if (!IsValid(InteractingPawn)
 		|| !IsValid(SurfaceController)
 		|| !SurfaceController->IsSurfaceGameplayInitialized()
 		|| !SurfaceController->OwnsSurfaceActor(InteractingPawn)
-		|| !IsValid(MoonSettings))
+		|| MoonSettings == nullptr)
 	{
 		return nullptr;
 	}

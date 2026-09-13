@@ -274,6 +274,7 @@ bool AJTSPlanetLandingManager::StartLandingSequence(APlayerController* PlayerCon
 	{
 		SpaceWorldManager->SetCurrentPlanet(Planet);
 		SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
+		SpaceWorldManager->SetSurfaceGameplayReady(false);
 		SpaceWorldManager->RequestPlanetContentLoad(Planet, true);
 	}
 
@@ -329,21 +330,21 @@ bool AJTSPlanetLandingManager::StartLandingSequence(APlayerController* PlayerCon
 		RegisterPlayerSpacecraft(PlayerController, Spacecraft);
 	}
 
-	if (bCharacterSpawned)
+	// The two spawns are intentionally independent, but the arrival sequence is complete only once
+	// both runtime actors exist. Surface gameplay must start from the completed event rather than
+	// player-only polling, so its controller receives one coherent context.
+	const bool bArrivalCompleted = bCharacterSpawned && bSpacecraftSpawned;
+	if (bArrivalCompleted)
 	{
-		if (AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
-		{
-			SpaceWorldManager->SetSurfaceGameplayReady(true);
-		}
-		if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
-		{
-			JTSPlayerController->ApplySpaceWorldInputMode();
-		}
+		InitialLandingSequenceCompletedDelegate.Broadcast(PlayerController, Planet, Character, Spacecraft);
 	}
 
-	// The two spawns are intentionally independent, but the arrival sequence is complete only once
-	// both runtime actors exist. A partial result remains observable in logs and can be retried.
-	return bCharacterSpawned && bSpacecraftSpawned;
+	return bArrivalCompleted;
+}
+
+FOnJTSInitialLandingSequenceCompleted& AJTSPlanetLandingManager::OnInitialLandingSequenceCompleted()
+{
+	return InitialLandingSequenceCompletedDelegate;
 }
 
 bool AJTSPlanetLandingManager::RequestLanding(
