@@ -9,9 +9,10 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
@@ -21,6 +22,22 @@
 
 namespace
 {
+	APawn* GetLocalPresentationPawn(UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
+			{
+				return Controller->GetPawn();
+			}
+		}
+		return nullptr;
+	}
+
 	FVector SanitizeVisualScale(const FVector& InScale)
 	{
 		const FVector AbsoluteScale(
@@ -100,6 +117,10 @@ void AJTSMoonAntCorpsePickupActor::InitializeFromMoonAnt(
 	const FRotator& SourceVisualRotation,
 	const FVector& InDeathGroundLocation)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	InitializeItem(EJTSWorldPickupItemType::MoonAntCorpse);
 	SourceSkeletalMeshAsset = SourceSkeletalMesh;
 	SourceFallbackMeshAsset = SourceFallbackMesh;
@@ -176,6 +197,14 @@ bool AJTSMoonAntCorpsePickupActor::CanInteract_Implementation(APawn* Interacting
 void AJTSMoonAntCorpsePickupActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!HasAuthority())
+	{
+		ConfigureCorpseVisual();
+		SetCorpseInteractionEnabled(bCorpseSettled);
+		SetActorTickEnabled(true);
+		return;
+	}
+
 	RealSurfacePlanet = GetRealSurfacePlanet();
 	bUsingRealPlanetSurfaceForPop = RealSurfacePlanet.IsValid();
 	if (bUsingRealPlanetSurfaceForPop)
@@ -210,6 +239,11 @@ void AJTSMoonAntCorpsePickupActor::Tick(float DeltaSeconds)
 	// AJTSWorldPickupActor only ticks its generic ballistic drops. Corpse pop and Fake Moon visual
 	// alignment are separate, visual-only work, so do not call the base implementation here.
 	AActor::Tick(DeltaSeconds);
+	if (!HasAuthority())
+	{
+		UpdateCorpseVisualTransform(bCorpseSettled ? 1.0f : 0.0f);
+		return;
+	}
 
 	if (!bCorpseSettled)
 	{
@@ -288,11 +322,39 @@ FVector AJTSMoonAntCorpsePickupActor::GetVisualBoundsExtent() const
 
 void AJTSMoonAntCorpsePickupActor::AdjustToGround(const FVector& GroundHitLocation)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	// This override is retained for shared pickup helpers. A corpse is always placed from its own
 	// unbent, side-flipped bounds so generic pickup support calculations cannot pollute its ground state.
 	SettledGroundLocation = GroundHitLocation;
 	PlaceAtSettledGroundLocation();
 	UpdateCorpseVisualTransform(bCorpseSettled ? 1.0f : 0.0f);
+}
+
+void AJTSMoonAntCorpsePickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, SourceSkeletalMeshAsset);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, SourceFallbackMeshAsset);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, SourceVisualScale);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, CorpseBaseRelativeRotation);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, DeathGroundLocation);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, bCorpseSettled);
+	DOREPLIFETIME(AJTSMoonAntCorpsePickupActor, bInitializedFromMoonAnt);
+}
+
+void AJTSMoonAntCorpsePickupActor::OnRep_CorpseVisualData()
+{
+	ConfigureCorpseVisual();
+	RecalculateGroundSupport();
+}
+
+void AJTSMoonAntCorpsePickupActor::OnRep_CorpseSettled()
+{
+	SetCorpseInteractionEnabled(bCorpseSettled);
 }
 
 UMaterialInterface* AJTSMoonAntCorpsePickupActor::GetMoonBendMaterialForPickup() const
@@ -618,7 +680,8 @@ void AJTSMoonAntCorpsePickupActor::UpdateCorpseVisualTransform(float PopAlpha)
 	FVector MoonBendWorldOffset = FVector::ZeroVector;
 
 	UWorld* const World = GetWorld();
-	const APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	// The nearest-image/pop bend is purely local mesh presentation; pickup authority remains server-side.
+	const APawn* const LocalPawn = GetLocalPresentationPawn(World);
 	if (World != nullptr)
 	{
 		const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();

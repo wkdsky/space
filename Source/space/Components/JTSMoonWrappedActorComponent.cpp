@@ -3,13 +3,33 @@
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonWorldActor.h"
 #include "space/World/JTSSpaceWorldManager.h"
+
+namespace
+{
+	APawn* GetLocalPresentationPawn(const UObject* Context)
+	{
+		UWorld* const World = Context != nullptr ? Context->GetWorld() : nullptr;
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
+			{
+				return Controller->GetPawn();
+			}
+		}
+		return nullptr;
+	}
+}
 
 UJTSMoonWrappedActorComponent::UJTSMoonWrappedActorComponent()
 {
@@ -138,20 +158,22 @@ bool UJTSMoonWrappedActorComponent::IsOwnerLocalControlled() const
 		return PawnOwner->IsLocallyControlled();
 	}
 
-	const APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	const APawn* const LocalPawn = GetLocalPresentationPawn(this);
 	return IsValid(LocalPawn) && LocalPawn == Owner;
 }
 
 void UJTSMoonWrappedActorComponent::RefreshPhysicalImage()
 {
-	if (!bMoonWrappingEnabled || IsOwnerLocalControlled())
+	AActor* const Owner = GetOwner();
+	// Never use a local view to move the canonical server actor. This routine is an explicitly
+	// client-side visual image adjustment and does not participate in gameplay or replication.
+	if (!bMoonWrappingEnabled || !IsValid(Owner) || Owner->HasAuthority() || IsOwnerLocalControlled())
 	{
 		return;
 	}
 
-	AActor* const Owner = GetOwner();
 	const UJTSMoonWrapSubsystem* const Subsystem = WrapSubsystem.Get();
-	const APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	const APawn* const LocalPawn = GetLocalPresentationPawn(this);
 	if (!IsValid(Owner) || !IsValid(Subsystem) || !IsValid(LocalPawn))
 	{
 		return;

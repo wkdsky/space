@@ -28,7 +28,7 @@ void UJTSSpacecraftFlightMovementComponent::BeginPlay()
 void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (ShouldSkipUpdate(DeltaTime) || !IsValid(UpdatedComponent))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || ShouldSkipUpdate(DeltaTime) || !IsValid(UpdatedComponent))
 	{
 		return;
 	}

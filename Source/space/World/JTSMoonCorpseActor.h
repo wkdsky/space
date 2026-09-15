@@ -34,8 +34,12 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UFUNCTION()
+	void OnRep_RealSurfacePlacement();
+
 	void ApplyPrototypeMaterials();
 	void UpdateMoonWrappedLogicalPosition();
 	void DisableLegacyMoonPresentation();
@@ -75,5 +79,6 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float PlanetSurfaceClearance = 2.0f;
 
+	UPROPERTY(ReplicatedUsing = OnRep_RealSurfacePlacement)
 	bool bUsesRealPlanetSurfacePlacement = false;
 };

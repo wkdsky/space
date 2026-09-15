@@ -54,8 +54,15 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual UMaterialInterface* GetMoonBendMaterialForPickup() const override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UFUNCTION()
+	void OnRep_CorpseVisualData();
+
+	UFUNCTION()
+	void OnRep_CorpseSettled();
+
 	UPrimitiveComponent* GetActiveCorpseVisual() const;
 	void ConfigureCorpseVisual();
 	void RecalculateGroundSupport();
@@ -99,10 +106,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt Corpse|Pop", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", UIMin = "0.05"))
 	float CorpsePopDurationMax = 0.45f;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_CorpseVisualData)
 	TObjectPtr<USkeletalMesh> SourceSkeletalMeshAsset;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_CorpseVisualData)
 	TObjectPtr<UStaticMesh> SourceFallbackMeshAsset;
 
 	UPROPERTY(Transient)
@@ -114,9 +121,15 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInterface>> SourceVisualMaterials;
 
+	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	FVector SourceVisualScale = FVector::OneVector;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	FRotator CorpseBaseRelativeRotation = FRotator::ZeroRotator;
+
 	FVector CorpseBaseRelativeLocation = FVector::ZeroVector;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	FVector DeathGroundLocation = FVector::ZeroVector;
 	FVector SettledGroundLocation = FVector::ZeroVector;
 	FVector2D DeathLogicalPosition = FVector2D::ZeroVector;
@@ -128,7 +141,10 @@ private:
 	bool bUseSkeletalCorpseVisual = false;
 	bool bUseDebugFallbackVisual = true;
 	bool bVisualUsesMaterialMoonBend = false;
+	UPROPERTY(ReplicatedUsing = OnRep_CorpseSettled)
 	bool bCorpseSettled = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	bool bInitializedFromMoonAnt = false;
 	bool bUsingMoonWrapForPop = false;
 	bool bUsingRealPlanetSurfaceForPop = false;

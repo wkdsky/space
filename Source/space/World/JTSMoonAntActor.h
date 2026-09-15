@@ -64,8 +64,12 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UFUNCTION()
+	void OnRep_MoonAntState();
+
 	const IJTSMoonSurfaceGameplaySettings* GetMoonGameMode() const;
 	void RefreshVisualMode();
 	void ConfigureMoonAntVisuals();
@@ -151,7 +155,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Health", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float MoonAntHealthBarVisibleDuration = 2.5f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|MoonAnt", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_MoonAntState, Category = "Moon|MoonAnt", meta = (AllowPrivateAccess = "true"))
 	EJTSMoonAntState MoonAntState = EJTSMoonAntState::Emerging;
 
 	UPROPERTY(Transient)
@@ -181,7 +185,10 @@ private:
 	float FleeDistanceTravelled = 0.0f;
 	float NextMoonAntVisualDebugLogTime = 0.0f;
 	FTimerHandle MoonAntHealthBarHideTimerHandle;
-	TWeakObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+	UPROPERTY(Replicated)
+	TObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+
+	UPROPERTY(Replicated)
 	FVector SurfaceUp = FVector::UpVector;
 	bool bInitialized = false;
 	bool bUsingSkeletalMoonAntMesh = false;
@@ -189,5 +196,6 @@ private:
 	bool bMoonAntVisualTransformReady = false;
 	bool bDeathSequenceStarted = false;
 	bool bHasDroppedCorpse = false;
+	UPROPERTY(Replicated)
 	bool bUsesRealPlanetSurface = false;
 };

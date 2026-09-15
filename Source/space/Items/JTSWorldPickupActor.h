@@ -82,6 +82,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Allows specialized pickups to preserve source visual materials instead of receiving the shared prop material. */
 	virtual UMaterialInterface* GetMoonBendMaterialForPickup() const;
@@ -91,6 +92,15 @@ protected:
 	void UpdateMoonWrappedLogicalPosition();
 
 private:
+	UFUNCTION()
+	void OnRep_ItemState();
+
+	UFUNCTION()
+	void OnRep_DropState();
+
+	UFUNCTION()
+	void OnRep_SurfacePresentation();
+
 	/** Starts the lightweight non-physics drop movement used only by SpawnGameplayDrop. */
 	void StartDropMotion(
 		const FVector& InitialVelocity,
@@ -133,7 +143,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> EquipmentMesh;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pickup", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_ItemState, Category = "Pickup", meta = (AllowPrivateAccess = "true"))
 	EJTSWorldPickupItemType ItemType = EJTSWorldPickupItemType::Rock;
 
 	UPROPERTY(Transient)
@@ -148,11 +158,17 @@ private:
 	FVector PlannedGroundLocation = FVector::ZeroVector;
 	TArray<TWeakObjectPtr<AActor>> DropTraceIgnoredActors;
 	TWeakObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
 	FVector SurfaceUp = FVector::UpVector;
 	float DropElapsedSeconds = 0.0f;
 	double FailureFeedbackEndTime = 0.0;
 	FString FailureFeedbackText;
+	UPROPERTY(ReplicatedUsing = OnRep_DropState)
 	bool bIsDropping = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_ItemState)
 	bool bPickupConsumed = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
 	bool bUsesRealPlanetSurface = false;
 };

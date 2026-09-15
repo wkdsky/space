@@ -8,7 +8,10 @@
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
+#include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
@@ -18,9 +21,6 @@
 AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	DefaultPawnClass = AJTSCharacter::StaticClass();
-	PlayerControllerClass = AJTSPlayerController::StaticClass();
-	GameStateClass = AJTSGameState::StaticClass();
 	HUDClass = AJTSPrototypeHUD::StaticClass();
 	bStartPlayersAsSpectators = true;
 	SpaceWorldManagerClass = AJTSSpaceWorldManager::StaticClass();
@@ -36,7 +36,12 @@ AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 void AJTSSpaceWorldGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client)
+	{
+		return;
+	}
 	StartedLandingSequences.Empty();
+	InitializedSurfacePlanets.Empty();
 
 	AJTSSpaceWorldManager* const WorldManager = FindOrCreateSpaceWorldManager();
 	if (!IsValid(WorldManager))
@@ -47,6 +52,17 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 
 	SpaceWorldManager = WorldManager;
 	WorldManager->InitializeCurrentPlanet();
+	if (UJTSExpeditionSubsystem* const Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
+	{
+		Expedition->SetCurrentMap(GetWorld()->GetPackage()->GetName());
+		if (!Expedition->GetSnapshot().CurrentPlanetId.IsEmpty())
+		{
+			if (AJTSPlanetAnchor* const SavedPlanet = WorldManager->FindPlanetById(FName(*Expedition->GetSnapshot().CurrentPlanetId)))
+			{
+				WorldManager->SetCurrentPlanet(SavedPlanet);
+			}
+		}
+	}
 	WorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
 
 	if (UWorld* const World = GetWorld())
@@ -54,7 +70,13 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 		if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
 		{
 			JTSGameState->SetFailureReason(EJTSFailureReason::None);
-			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::WaitingToStart);
+			// The session is already in progress during seamless arrival. Do not briefly reopen
+			// PreLogin admission while surface actors finish initializing.
+			JTSGameState->SetGameplayPhase(EJTSGameplayPhase::SpaceFlight);
+		}
+		if (UJTSOnlineSessionSubsystem* const Online = World->GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>())
+		{
+			Online->UpdateExpeditionPhase(EJTSGameplayPhase::SpaceFlight);
 		}
 	}
 
@@ -73,7 +95,10 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 
 	if (UWorld* const World = GetWorld())
 	{
-		StartInitialLandingSequence(World->GetFirstPlayerController());
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			StartInitialLandingSequence(It->Get());
+		}
 	}
 }
 
@@ -95,6 +120,7 @@ void AJTSSpaceWorldGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	ActiveSurfaceGameplayControllers.Empty();
+	InitializedSurfacePlanets.Empty();
 	StartedLandingSequences.Empty();
 	PlanetLandingManager.Reset();
 	SpaceWorldManager.Reset();
@@ -105,11 +131,18 @@ void AJTSSpaceWorldGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AJTSSpaceWorldGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
 {
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
-	StartInitialLandingSequence(NewPlayer);
+	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_Client)
+	{
+		StartInitialLandingSequence(NewPlayer);
+	}
 }
 
 void AJTSSpaceWorldGameMode::HandlePlayerCharacterDeath(AJTSCharacter* Character)
 {
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client)
+	{
+		return;
+	}
 	APlayerController* const PlayerController = IsValid(Character)
 		? Cast<APlayerController>(Character->GetController())
 		: nullptr;
@@ -236,6 +269,21 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	FJTSSurfaceGameplayContext Context;
 	Context.Planet = Planet;
 	Context.Player = Character;
+	for (AJTSPlayerState* const PlayerState : GetActivePlayerStates())
+	{
+		if (AJTSCharacter* const ActiveCharacter = PlayerState != nullptr ? Cast<AJTSCharacter>(PlayerState->GetPawn()) : nullptr)
+		{
+			Context.Players.Add(ActiveCharacter);
+		}
+	}
+	if (!Context.Players.Contains(Character))
+	{
+		Context.Players.Add(Character);
+	}
+	if (UJTSExpeditionSubsystem* const Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
+	{
+		Expedition->RestorePlayerState(Character->GetPlayerState<AJTSPlayerState>(), Character);
+	}
 	Context.Spacecraft = Spacecraft;
 	Context.GameplayData = Definition->GameplayData.IsNull() ? nullptr : Definition->GameplayData.LoadSynchronous();
 	if (!Definition->GameplayData.IsNull() && !IsValid(Context.GameplayData))
@@ -245,7 +293,9 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 		return;
 	}
 
-	if (!SurfaceGameplay->InitializeSurfaceGameplay(Context))
+	const FName PlanetId = Planet->GetPlanetId();
+	const bool bAlreadyInitialized = InitializedSurfacePlanets.Contains(PlanetId);
+	if (!bAlreadyInitialized && !SurfaceGameplay->InitializeSurfaceGameplay(Context))
 	{
 		UE_LOG(LogTemp, Error, TEXT("SpaceWorld surface gameplay initialization failed: PlanetId=%s Controller=%s."),
 			*Planet->GetPlanetId().ToString(), *GetNameSafe(ControllerActor));
@@ -253,18 +303,22 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 		return;
 	}
 
-	ActiveSurfaceGameplayControllers.Add(Planet->GetPlanetId(), ControllerActor);
+	if (!bAlreadyInitialized)
+	{
+		InitializedSurfacePlanets.Add(PlanetId);
+		ActiveSurfaceGameplayControllers.Add(PlanetId, ControllerActor);
+	}
+	SurfaceGameplay->RegisterSurfacePlayer(Character);
 	WorldManager->SetSurfaceGameplayReady(true);
 	if (AJTSGameState* const JTSGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
 	{
 		JTSGameState->SetFailureReason(EJTSFailureReason::None);
 		JTSGameState->SetGameplayPhase(EJTSGameplayPhase::MoonExploration);
 	}
-	if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+	if (UJTSOnlineSessionSubsystem* const Online = GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>())
 	{
-		JTSPlayerController->ApplySpaceWorldInputMode();
+		Online->UpdateExpeditionPhase(EJTSGameplayPhase::MoonExploration);
 	}
-
 	UE_LOG(LogTemp, Log, TEXT("SpaceWorld surface gameplay ready: PlanetId=%s Controller=%s."),
 		*Planet->GetPlanetId().ToString(), *GetNameSafe(ControllerActor));
 }
@@ -287,7 +341,7 @@ AActor* AJTSSpaceWorldGameMode::FindOrSpawnSurfaceGameplayController(
 	const FJTSSurfaceGameplayControllerDefinition& Definition,
 	AJTSPlanetAnchor* Planet)
 {
-	if (!IsValid(Planet) || Definition.ControllerClass == nullptr)
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client || !IsValid(Planet) || Definition.ControllerClass == nullptr)
 	{
 		return nullptr;
 	}

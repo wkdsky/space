@@ -31,6 +31,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	bool TryInteract();
 
+	/** Client intent only; the server independently validates range, line of sight, and target state. */
+	UFUNCTION(Server, Reliable)
+	void ServerTryInteract(AActor* Target);
+
 	/** Returns the target selected by the most recent detection pass. */
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	AActor* GetCurrentInteractable() const;
@@ -69,6 +73,7 @@ private:
 		float& OutViewAlignment,
 		float& OutPawnDistanceSquared) const;
 	bool HasInteractionLineOfSight(APawn* InteractingPawn, AActor* Candidate, const FVector& ViewLocation, const FVector& TargetLocation) const;
+	bool CanServerInteractWith(APawn* InteractingPawn, AActor* Candidate) const;
 	FVector GetInteractionTargetWorldLocation(const AActor* Candidate) const;
 	void SetCurrentInteractable(AActor* NewTarget);
 

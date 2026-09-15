@@ -9,6 +9,7 @@
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "UObject/ConstructorHelpers.h"
@@ -16,6 +17,8 @@
 AJTSResourcePickupActor::AJTSResourcePickupActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -142,6 +145,11 @@ FVector AJTSResourcePickupActor::GetInteractionAnchorWorldLocation() const
 
 void AJTSResourcePickupActor::InitializeResource(EJTSResourceType NewResourceType, int32 NewResourceAmount)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+
 	ResourceType = NewResourceType;
 	ResourceAmount = FMath::Max(1, NewResourceAmount);
 	ApplyResourceAppearance();
@@ -190,12 +198,15 @@ FText AJTSResourcePickupActor::GetInteractionPrompt_Implementation(APawn* Intera
 
 void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	TryPickup(InteractingPawn);
+	if (HasAuthority())
+	{
+		TryPickup(InteractingPawn);
+	}
 }
 
 bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 {
-	if (!CanInteract_Implementation(InteractingPawn))
+	if (!HasAuthority() || !CanInteract_Implementation(InteractingPawn))
 	{
 		return false;
 	}
@@ -216,6 +227,19 @@ bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 
 	Destroy();
 	return true;
+}
+
+void AJTSResourcePickupActor::OnRep_ResourceState()
+{
+	ApplyResourceAppearance();
+}
+
+void AJTSResourcePickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSResourcePickupActor, ResourceType);
+	DOREPLIFETIME(AJTSResourcePickupActor, ResourceAmount);
+	DOREPLIFETIME(AJTSResourcePickupActor, bPickupConsumed);
 }
 
 void AJTSResourcePickupActor::ApplyResourceAppearance()

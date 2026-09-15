@@ -53,6 +53,8 @@ namespace
 AJTSMoonSurfaceController::AJTSMoonSurfaceController()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	bAlwaysRelevant = true;
 	MoonGameplaySettingsClass = AJTSMoonGameMode::StaticClass();
 	MoonCorpseClass = AJTSMoonCorpseActor::StaticClass();
 }
@@ -109,7 +111,7 @@ bool AJTSMoonSurfaceController::SupportsPlanet(const AJTSPlanetAnchor* Planet) c
 
 bool AJTSMoonSurfaceController::InitializeSurfaceGameplay(const FJTSSurfaceGameplayContext& Context)
 {
-	if (!Context.HasRequiredRuntimeActors() || !SupportsPlanet(Context.Planet))
+	if (!HasAuthority() || !Context.HasRequiredRuntimeActors() || !SupportsPlanet(Context.Planet))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Moon surface controller %s rejected an invalid SpaceWorld context: Planet=%s Player=%s Spacecraft=%s."),
 			*GetName(),
@@ -120,7 +122,32 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay(const FJTSSurfaceGamep
 	}
 
 	ApplySurfaceGameplayContext(Context);
+	for (AJTSCharacter* const Player : Context.Players)
+	{
+		RegisterSurfacePlayer(Player);
+	}
 	return InitializeSurfaceGameplay();
+}
+
+void AJTSMoonSurfaceController::RegisterSurfacePlayer(AJTSCharacter* Player)
+{
+	if (!IsValid(Player))
+	{
+		return;
+	}
+	ActivePlayers.RemoveAll([](const TWeakObjectPtr<AJTSCharacter>& Candidate) { return !Candidate.IsValid(); });
+	ActivePlayers.AddUnique(Player);
+	RegisterSurfaceRuntimeActor(Player);
+}
+
+TArray<AJTSCharacter*> AJTSMoonSurfaceController::GetActivePlayers() const
+{
+	TArray<AJTSCharacter*> Result;
+	for (const TWeakObjectPtr<AJTSCharacter>& Player : ActivePlayers)
+	{
+		if (Player.IsValid()) Result.Add(Player.Get());
+	}
+	return Result;
 }
 
 void AJTSMoonSurfaceController::ShutdownSurfaceGameplay()
@@ -131,7 +158,10 @@ void AJTSMoonSurfaceController::ShutdownSurfaceGameplay()
 		World->GetTimerManager().ClearTimer(SurfaceInitializationTimerHandle);
 	}
 
-	ClearGeneratedMoonAntNests();
+	if (HasAuthority())
+	{
+		ClearGeneratedMoonAntNests();
+	}
 	bSurfaceGameplayInitializationRequested = false;
 	bSurfaceGameplayInitialized = false;
 	bMissingSpacecraftLogged = false;
@@ -275,13 +305,12 @@ void AJTSMoonSurfaceController::ApplySurfaceGameplayContext(const FJTSSurfaceGam
 {
 	OwningPlanet = Context.Planet;
 	PlanetId = Context.Planet->GetPlanetId();
-	CachedPlayer = Context.Player;
 	bUsingRealPlanetSurfaceGameplay = true;
 	LegacySettingsSource.Reset();
 	ActiveMoonGameplayData = Cast<UJTSMoonSurfaceGameplayData>(Context.GameplayData);
 
 	SetSurfaceSpacecraft(Context.Spacecraft);
-	RegisterSurfaceRuntimeActor(Context.Player);
+	RegisterSurfacePlayer(Context.Player);
 }
 
 void AJTSMoonSurfaceController::RegisterSurfaceRuntimeActor(AActor* RuntimeActor)
@@ -296,11 +325,20 @@ void AJTSMoonSurfaceController::RegisterSurfaceRuntimeActor(AActor* RuntimeActor
 		return !Candidate.IsValid();
 	});
 	RegisteredSurfaceRuntimeActors.AddUnique(RuntimeActor);
+	if (AJTSCharacter* const Character = Cast<AJTSCharacter>(RuntimeActor))
+	{
+		ActivePlayers.RemoveAll([](const TWeakObjectPtr<AJTSCharacter>& Candidate) { return !Candidate.IsValid(); });
+		ActivePlayers.AddUnique(Character);
+	}
 }
 
 AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnCorpseAtPlanetSurfaceAnchor(
 	AJTSPlanetSurfaceAnchor* InCorpseSurfaceAnchor)
 {
+	if (!HasAuthority())
+	{
+		return nullptr;
+	}
 	if (RealSurfaceMoonCorpse.IsValid())
 	{
 		return RealSurfaceMoonCorpse.Get();
@@ -465,7 +503,7 @@ void AJTSMoonSurfaceController::EndPlay(const EEndPlayReason::Type EndPlayReason
 {
 	ShutdownSurfaceGameplay();
 	CachedSpacecraft.Reset();
-	CachedPlayer.Reset();
+	ActivePlayers.Reset();
 	CachedMoonWorld.Reset();
 	LevelMoonCorpseLandmark.Reset();
 	RealSurfaceMoonCorpse.Reset();
@@ -499,6 +537,10 @@ void AJTSMoonSurfaceController::AttemptSurfaceGameplayInitialization()
 
 bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	bSurfaceGameplayInitializationRequested = false;
 	if (bSurfaceGameplayInitialized)
 	{
@@ -605,6 +647,10 @@ void AJTSMoonSurfaceController::ScheduleInitializationRetry()
 
 void AJTSMoonSurfaceController::InitializeMoonResources()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
 	if (MoonSettings == nullptr)
 	{
@@ -704,6 +750,10 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::FindLevelCorpseLandmark()
 
 void AJTSMoonSurfaceController::ClearGeneratedMoonAntNests()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	for (TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : GeneratedMoonAntNests)
 	{
 		if (Nest.IsValid())
@@ -774,7 +824,7 @@ bool AJTSMoonSurfaceController::ResolveMoonGroundLocation(
 			TraceParams.AddIgnoredActor(Nest.Get());
 		}
 	}
-	if (APawn* const PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	for (AJTSCharacter* const PlayerPawn : GetActivePlayers())
 	{
 		TraceParams.AddIgnoredActor(PlayerPawn);
 	}
@@ -824,6 +874,10 @@ bool AJTSMoonSurfaceController::IsMoonAntNestCandidateFarFromShip(
 
 void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	ClearGeneratedMoonAntNests();
 
 	UWorld* const World = GetWorld();
@@ -1073,6 +1127,10 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 
 void AJTSMoonSurfaceController::ConsumeExpeditionSupplies()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
 	AJTSSpacecraftActor* const Spacecraft = GetSpacecraft();
 	if (MoonSettings == nullptr || !IsValid(Spacecraft))
@@ -1095,7 +1153,7 @@ void AJTSMoonSurfaceController::ConsumeExpeditionSupplies()
 		return;
 	}
 
-	const double CrewCount = static_cast<double>(MoonSettings->GetCrewCount());
+	const double CrewCount = static_cast<double>(FMath::Max(1, GetActivePlayers().Num()));
 	FoodConsumptionAccumulator += static_cast<double>(MoonSettings->GetFoodConsumptionPerPersonPerMinute())
 		* CrewCount * ConsumptionTickSeconds / SecondsPerMinute;
 	WaterConsumptionAccumulator += static_cast<double>(MoonSettings->GetWaterConsumptionPerPersonPerMinute())
@@ -1143,6 +1201,10 @@ bool AJTSMoonSurfaceController::TryBuyWorkshopEquipment(
 	AJTSSpacecraftActor* Spacecraft,
 	EJTSEquipmentType EquipmentType)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
 	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
 	if (MoonSettings == nullptr || !IsValid(GameState) || !GameState->IsMoonExploration()

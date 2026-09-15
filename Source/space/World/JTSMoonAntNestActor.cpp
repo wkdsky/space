@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/Systems/JTSMoonWrapSubsystem.h"
@@ -19,6 +20,8 @@
 AJTSMoonAntNestActor::AJTSMoonAntNestActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -57,8 +60,12 @@ AJTSMoonAntNestActor::AJTSMoonAntNestActor()
 
 void AJTSMoonAntNestActor::AdjustToGround(const FVector& GroundLocation)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	bUsesRealPlanetSurface = false;
-	SurfacePlanet.Reset();
+	SurfacePlanet = nullptr;
 	SurfaceUp = FVector::UpVector;
 	const FVector Extent = GetVisualBoundsExtent();
 	SetActorLocation(
@@ -74,6 +81,10 @@ void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
 	const FVector& GroundLocation,
 	const FVector& PreferredForward)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (!IsValid(Planet) || !IsValid(NestMesh))
 	{
 		AdjustToGround(GroundLocation);
@@ -114,12 +125,13 @@ void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
 
 void AJTSMoonAntNestActor::SetMoonAntNestVisualScale(float InVisualScale)
 {
+	NestVisualScale = FMath::Max(0.1f, InVisualScale);
 	if (!IsValid(NestMesh))
 	{
 		return;
 	}
 
-	NestMesh->SetRelativeScale3D(BaseMoonAntNestMeshScale * FMath::Max(0.1f, InVisualScale));
+	NestMesh->SetRelativeScale3D(BaseMoonAntNestMeshScale * NestVisualScale);
 	if (NestMesh->IsRegistered())
 	{
 		NestMesh->UpdateBounds();
@@ -128,6 +140,10 @@ void AJTSMoonAntNestActor::SetMoonAntNestVisualScale(float InVisualScale)
 
 void AJTSMoonAntNestActor::SetMoonAntActorClass(TSubclassOf<AJTSMoonAntActor> InMoonAntActorClass)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	MoonAntActorClass = InMoonAntActorClass;
 }
 
@@ -138,7 +154,7 @@ bool AJTSMoonAntNestActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPaw
 
 void AJTSMoonAntNestActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType)
 {
-	if (!CanReceiveMeleeHit_Implementation(AttackingPawn))
+	if (!HasAuthority() || !CanReceiveMeleeHit_Implementation(AttackingPawn))
 	{
 		return;
 	}
@@ -200,11 +216,17 @@ void AJTSMoonAntNestActor::BeginPlay()
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	if (MoonGameMode == nullptr)
 	{
-		Destroy();
+		if (HasAuthority())
+		{
+			Destroy();
+		}
 		return;
 	}
 
-	PunchHitsRemaining = MoonGameMode->GetMoonAntNestPunchHitsToDestroy();
+	if (HasAuthority())
+	{
+		PunchHitsRemaining = MoonGameMode->GetMoonAntNestPunchHitsToDestroy();
+	}
 	if (IsUsingRealPlanetSurface() && MoonWrappedActorComponent != nullptr)
 	{
 		MoonWrappedActorComponent->Deactivate();
@@ -224,7 +246,10 @@ void AJTSMoonAntNestActor::BeginPlay()
 		TEXT("MoonAnt Nest created: Nest=%s MoonAntClass=%s"),
 		*GetNameSafe(this),
 		MoonAntActorClass != nullptr ? *GetNameSafe(MoonAntActorClass.Get()) : TEXT("None (native fallback)"));
-	ScheduleNextMoonAntSpawn();
+	if (HasAuthority())
+	{
+		ScheduleNextMoonAntSpawn();
+	}
 }
 
 void AJTSMoonAntNestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -250,7 +275,7 @@ const IJTSMoonSurfaceGameplaySettings* AJTSMoonAntNestActor::GetMoonGameMode() c
 
 AJTSPlanetAnchor* AJTSMoonAntNestActor::GetSurfacePlanet() const
 {
-	if (SurfacePlanet.IsValid())
+	if (IsValid(SurfacePlanet))
 	{
 		return SurfacePlanet.Get();
 	}
@@ -325,6 +350,10 @@ float AJTSMoonAntNestActor::ChooseMoonAntSpawnDistance(const IJTSMoonSurfaceGame
 
 void AJTSMoonAntNestActor::ScheduleNextMoonAntSpawn()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	UWorld* const World = GetWorld();
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	if (!IsValid(World) || MoonGameMode == nullptr || IsPendingKillPending())
@@ -342,6 +371,10 @@ void AJTSMoonAntNestActor::ScheduleNextMoonAntSpawn()
 
 void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	UWorld* const World = GetWorld();
 	if (!IsValid(World) || MoonGameMode == nullptr || IsPendingKillPending())
@@ -450,6 +483,30 @@ void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 	}
 
 	ScheduleNextMoonAntSpawn();
+}
+
+void AJTSMoonAntNestActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AJTSMoonAntNestActor, SurfacePlanet);
+	DOREPLIFETIME(AJTSMoonAntNestActor, SurfaceUp);
+	DOREPLIFETIME(AJTSMoonAntNestActor, NestVisualScale);
+	DOREPLIFETIME(AJTSMoonAntNestActor, PunchHitsRemaining);
+	DOREPLIFETIME(AJTSMoonAntNestActor, bUsesRealPlanetSurface);
+}
+
+void AJTSMoonAntNestActor::OnRep_NestPresentation()
+{
+	if (IsValid(NestMesh))
+	{
+		NestMesh->SetRelativeScale3D(BaseMoonAntNestMeshScale * FMath::Max(0.1f, NestVisualScale));
+	}
+	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+		MoonWrappedActorComponent->SetComponentTickEnabled(false);
+	}
 }
 
 void AJTSMoonAntNestActor::UpdateMoonWrappedLogicalPosition()

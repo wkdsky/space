@@ -270,12 +270,6 @@ E = Enum
 
 # Unreal Assets
 
-不要直接修改：
-
-- uasset
-- umap
-
-
 需要编辑器操作时：
 
 说明具体Editor步骤。
@@ -306,3 +300,13 @@ E = Enum
 2. 实现内容
 3. Editor需要操作的步骤
 4. 编译结果
+
+# Multiplayer Architecture
+
+- Gameplay is one shared 1–4 player Expedition. Listen Server and future Dedicated Server use the same server-authoritative rules; there is no separate single-player gameplay path.
+- `AJTSGameplayGameModeBase`/derived GameModes own rules and travel. `AJTSGameState` replicates global phase, deadline, active ship and planet state. `AJTSPlayerState` replicates ready, host, avatar color, boarding and player expedition status.
+- Cross-level expedition snapshots and host-only save data belong to `UJTSExpeditionSubsystem`, never to client-local `UJTSGameInstance` state. `UJTSOnlineSessionSubsystem` is the only UI-facing OnlineSubsystem wrapper.
+- Clients submit intent through owner RPCs. The server validates interaction, inventory/equipment mutations, damage, resource spawning, AI, spacecraft storage, boarding and flight input before changing replicated state.
+- Earth → SpaceWorld progression uses server seamless travel. A session closes normal joining after the expedition starts; host migration is intentionally unsupported.
+- The shared spacecraft supports up to four replicated occupants and one driver. Only the driver may send unreliable flight intent; server movement is replicated to everyone.
+- Voice remains provider-owned through `UJTSVoiceSubsystem`; do not add a custom audio transport, codec, raw-IP join UI, or hard-coded EOS credentials.

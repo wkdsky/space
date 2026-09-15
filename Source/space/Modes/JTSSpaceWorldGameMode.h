@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "space/Modes/JTSGameplayGameModeBase.h"
 #include "space/World/JTSPlanetSurfaceGameplay.h"
 
 #include "JTSSpaceWorldGameMode.generated.h"
@@ -24,7 +24,7 @@ class AActor;
  * live in AJTSPlanetLandingManager and AJTSPlanetLandingSite.
  */
 UCLASS()
-class SPACE_API AJTSSpaceWorldGameMode : public AGameModeBase
+class SPACE_API AJTSSpaceWorldGameMode : public AJTSGameplayGameModeBase
 {
 	GENERATED_BODY()
 
@@ -60,7 +60,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSPlanetLandingManager> PlanetLandingManagerClass;
 
-	/** Default vehicle only; a GameInstance persisted vehicle class still wins at runtime. */
+	/** Default vehicle only; the server-owned expedition snapshot can restore the chosen class at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
 
@@ -72,4 +72,5 @@ private:
 	TWeakObjectPtr<AJTSPlanetLandingManager> PlanetLandingManager;
 	TSet<TWeakObjectPtr<APlayerController>> StartedLandingSequences;
 	TMap<FName, TWeakObjectPtr<AActor>> ActiveSurfaceGameplayControllers;
+	TSet<FName> InitializedSurfacePlanets;
 };

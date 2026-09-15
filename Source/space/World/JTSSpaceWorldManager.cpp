@@ -3,10 +3,14 @@
 #include "space/World/JTSSpaceWorldManager.h"
 
 #include "Components/SceneComponent.h"
+#include "Engine/GameInstance.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreamingDynamic.h"
 #include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "space/Core/JTSGameState.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/World/JTSPlanetAnchor.h"
 
 namespace
@@ -18,6 +22,8 @@ namespace
 AJTSSpaceWorldManager::AJTSSpaceWorldManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	bAlwaysRelevant = true;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -64,7 +70,10 @@ void AJTSSpaceWorldManager::BeginPlay()
 
 	GSpaceWorldManagers.Add(GetWorld(), this);
 	RegisterPersistentPlanetAnchors();
-	InitializeCurrentPlanet();
+	if (HasAuthority())
+	{
+		InitializeCurrentPlanet();
+	}
 
 	if (bDebugSpaceTravel)
 	{
@@ -268,6 +277,10 @@ bool AJTSSpaceWorldManager::IsPlanetGameplayActive(const AJTSPlanetAnchor* Plane
 
 void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (CurrentPlanet.Get() == NewCurrentPlanet)
 	{
 		return;
@@ -290,6 +303,17 @@ void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 	{
 		ActivePlanet->SetActivePlanet(true);
 	}
+	if (AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	{
+		GameState->SetCurrentPlanetId(IsValid(CurrentPlanet) ? CurrentPlanet->GetPlanetId().ToString() : FString());
+	}
+	if (UGameInstance* const GameInstance = GetGameInstance())
+	{
+		if (UJTSExpeditionSubsystem* const Expedition = GameInstance->GetSubsystem<UJTSExpeditionSubsystem>())
+		{
+			Expedition->SetCurrentPlanetId(IsValid(CurrentPlanet) ? CurrentPlanet->GetPlanetId().ToString() : FString());
+		}
+	}
 
 	if (bDebugSpaceTravel)
 	{
@@ -300,6 +324,10 @@ void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 
 void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (CurrentTravelState == NewTravelState)
 	{
 		return;
@@ -318,6 +346,12 @@ void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
 	{
 		bSurfaceGameplayReady = false;
 	}
+	if (AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	{
+		GameState->SetGameplayPhase(CurrentTravelState == EJTSSpaceTravelState::Surface
+			? EJTSGameplayPhase::MoonExploration
+			: EJTSGameplayPhase::SpaceFlight);
+	}
 	if (bDebugSpaceTravel)
 	{
 		const UEnum* const TravelStateEnum = StaticEnum<EJTSSpaceTravelState>();
@@ -330,6 +364,10 @@ void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
 
 void AJTSSpaceWorldManager::SetSurfaceGameplayReady(bool bReady)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	bSurfaceGameplayReady = bReady && IsValid(CurrentPlanet) && IsSurfaceState();
 }
 
@@ -423,6 +461,10 @@ FOnJTSSpaceWorldLandingRequested& AJTSSpaceWorldManager::OnLandingRequested()
 
 void AJTSSpaceWorldManager::HandleFlightAltitude(float ApproximateAltitude)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	AJTSPlanetAnchor* const Planet = CurrentPlanet.Get();
 	if (!IsValid(Planet))
 	{
@@ -516,4 +558,20 @@ void AJTSSpaceWorldManager::LogDebugState() const
 		PlanetRadius,
 		bSurfaceGameplayReady ? TEXT("true") : TEXT("false"),
 		ContentState);
+}
+
+void AJTSSpaceWorldManager::OnRep_SpaceWorldState()
+{
+	if (IsValid(CurrentPlanet))
+	{
+		CurrentPlanet->SetActivePlanet(IsSurfaceState());
+	}
+}
+
+void AJTSSpaceWorldManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSSpaceWorldManager, CurrentPlanet);
+	DOREPLIFETIME(AJTSSpaceWorldManager, CurrentTravelState);
+	DOREPLIFETIME(AJTSSpaceWorldManager, bSurfaceGameplayReady);
 }

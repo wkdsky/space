@@ -10,6 +10,7 @@
 
 class AJTSSpacecraftActor;
 class AJTSPlanetAnchor;
+class AJTSPlayerState;
 class UCameraComponent;
 class UJTSCarryComponent;
 class UJTSHealthComponent;
@@ -63,6 +64,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
+
+	/** Reasserts the local Enhanced Input context after possession or seamless travel. */
+	void EnsureGameplayInputMapping();
 
 	/** Adjusts the third-person camera boom length. Positive wheel input zooms in. */
 	UFUNCTION(BlueprintCallable, Category = "Player|Camera")
@@ -140,7 +144,9 @@ protected:
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
 	virtual void OnRep_Controller() override;
+	virtual void OnRep_PlayerState() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 private:
@@ -149,6 +155,8 @@ private:
 	void UnregisterInputMappingContext();
 	void BindGameState();
 	void UnbindGameState();
+	void BindPlayerState();
+	void UnbindPlayerState();
 
 	void MoveForward(const FInputActionValue& Value);
 	void MoveRight(const FInputActionValue& Value);
@@ -198,6 +206,8 @@ private:
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
 	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
+	void ApplyBoardedPresentation();
+	void ApplyAvatarColor();
 	bool FindSafeCharacterSurfaceLocation(
 		AJTSPlanetAnchor* InPlanetAnchor,
 		const FVector& TraceReferenceLocation,
@@ -220,7 +230,13 @@ private:
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 	UFUNCTION()
+	void HandlePlayerStateNetworkChanged();
+
+	UFUNCTION()
 	void HandleHealthDeath(AController* InstigatorController, AActor* DamageCauser);
+
+	UFUNCTION()
+	void OnRep_BoardedSpacecraft();
 
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
@@ -403,8 +419,10 @@ private:
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundInputComponent;
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
+	TWeakObjectPtr<AJTSPlayerState> BoundPlayerState;
 	TWeakObjectPtr<AJTSSpacecraftActor> NearbySpacecraft;
-	TWeakObjectPtr<AJTSSpacecraftActor> BoardedSpacecraft;
+	UPROPERTY(ReplicatedUsing = OnRep_BoardedSpacecraft, Transient)
+	TObjectPtr<AJTSSpacecraftActor> BoardedSpacecraft;
 	TWeakObjectPtr<AJTSSpacecraftActor> BoardingSpacecraft;
 
 	FTimerHandle BoardingHoldTimerHandle;

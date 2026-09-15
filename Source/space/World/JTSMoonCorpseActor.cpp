@@ -5,6 +5,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
@@ -44,6 +45,8 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	SetActorEnableCollision(false);
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -147,6 +150,10 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 
 void AJTSMoonCorpseActor::AdjustToGround(const FVector& GroundLocation)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (bUsesRealPlanetSurfacePlacement)
 	{
 		return;
@@ -164,6 +171,10 @@ void AJTSMoonCorpseActor::AdjustToGround(const FVector& GroundLocation)
 
 bool AJTSMoonCorpseActor::SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	if (!IsValid(SurfaceAnchor))
 	{
 		return false;
@@ -227,6 +238,20 @@ void AJTSMoonCorpseActor::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyPrototypeMaterials();
+}
+
+void AJTSMoonCorpseActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSMoonCorpseActor, bUsesRealPlanetSurfacePlacement);
+}
+
+void AJTSMoonCorpseActor::OnRep_RealSurfacePlacement()
+{
+	if (bUsesRealPlanetSurfacePlacement)
+	{
+		DisableLegacyMoonPresentation();
+	}
 }
 
 void AJTSMoonCorpseActor::ApplyPrototypeMaterials()

@@ -6,6 +6,8 @@
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 
+#include "Net/UnrealNetwork.h"
+
 namespace
 {
 	bool TryGetPickupItemType(EJTSResourceType ResourceType, EJTSWorldPickupItemType& OutPickupItemType)
@@ -82,6 +84,7 @@ namespace
 UJTSPlayerEquipmentComponent::UJTSPlayerEquipmentComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
 	EquipmentSlots.Init(EJTSEquipmentType::None, EquipmentCapacity);
 }
 
@@ -92,7 +95,7 @@ bool UJTSPlayerEquipmentComponent::HasEquippedItem(EJTSEquipmentType EquipmentTy
 
 bool UJTSPlayerEquipmentComponent::TryEquipItem(EJTSEquipmentType EquipmentType)
 {
-	if (EquipmentType == EJTSEquipmentType::None || HasEquippedItem(EquipmentType))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || EquipmentType == EJTSEquipmentType::None || HasEquippedItem(EquipmentType))
 	{
 		return false;
 	}
@@ -132,6 +135,11 @@ bool UJTSPlayerEquipmentComponent::DropEquippedItem(EJTSEquipmentType EquipmentT
 
 bool UJTSPlayerEquipmentComponent::DropEquippedItemAtSlot(int32 SlotIndex)
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerDropEquipmentSlot(SlotIndex);
+		return true;
+	}
 	if (!EquipmentSlots.IsValidIndex(SlotIndex))
 	{
 		return false;
@@ -143,6 +151,10 @@ bool UJTSPlayerEquipmentComponent::DropEquippedItemAtSlot(int32 SlotIndex)
 
 void UJTSPlayerEquipmentComponent::UnequipAll()
 {
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
 	for (int32 SlotIndex = 0; SlotIndex < EquipmentSlots.Num(); ++SlotIndex)
 	{
 		const EJTSEquipmentType EquipmentType = EquipmentSlots[SlotIndex];
@@ -191,6 +203,11 @@ EJTSEquipmentType UJTSPlayerEquipmentComponent::GetEquipmentSlot(int32 SlotIndex
 
 bool UJTSPlayerEquipmentComponent::SelectEquipmentSlot(int32 SlotIndex)
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerSelectEquipmentSlot(SlotIndex);
+		return EquipmentSlots.IsValidIndex(SlotIndex);
+	}
 	if (!EquipmentSlots.IsValidIndex(SlotIndex))
 	{
 		return false;
@@ -199,6 +216,16 @@ bool UJTSPlayerEquipmentComponent::SelectEquipmentSlot(int32 SlotIndex)
 	SelectedEquipmentSlotIndex = SlotIndex;
 	NotifyEquipmentChanged();
 	return true;
+}
+
+void UJTSPlayerEquipmentComponent::ServerSelectEquipmentSlot_Implementation(int32 SlotIndex)
+{
+	SelectEquipmentSlot(SlotIndex);
+}
+
+void UJTSPlayerEquipmentComponent::ServerDropEquipmentSlot_Implementation(int32 SlotIndex)
+{
+	DropEquippedItemAtSlot(SlotIndex);
 }
 
 int32 UJTSPlayerEquipmentComponent::GetSelectedEquipmentSlotIndex() const
@@ -230,7 +257,7 @@ const TArray<EJTSEquipmentType>& UJTSPlayerEquipmentComponent::GetEquipmentSlots
 
 bool UJTSPlayerEquipmentComponent::TryUnequipItemInternal(EJTSEquipmentType EquipmentType, bool bDropEquipmentPickup)
 {
-	if (!CanUnequipItem(EquipmentType))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !CanUnequipItem(EquipmentType))
 	{
 		return false;
 	}
@@ -337,4 +364,16 @@ void UJTSPlayerEquipmentComponent::NotifyEquipmentChanged()
 	{
 		CarryComponent->NotifyCapacityChanged();
 	}
+}
+
+void UJTSPlayerEquipmentComponent::OnRep_EquipmentState()
+{
+	NotifyEquipmentChanged();
+}
+
+void UJTSPlayerEquipmentComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(UJTSPlayerEquipmentComponent, EquipmentSlots);
+	DOREPLIFETIME(UJTSPlayerEquipmentComponent, SelectedEquipmentSlotIndex);
 }

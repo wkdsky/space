@@ -12,9 +12,11 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/DamageType.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
@@ -31,6 +33,22 @@
 
 namespace
 {
+	APawn* GetLocalPresentationPawn(UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
+			{
+				return Controller->GetPawn();
+			}
+		}
+		return nullptr;
+	}
+
 	const TCHAR* GetMoonAntStateDebugName(EJTSMoonAntState State)
 	{
 		switch (State)
@@ -57,6 +75,8 @@ AJTSMoonAntActor::AJTSMoonAntActor()
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	SetActorEnableCollision(true);
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -128,13 +148,17 @@ AJTSMoonAntActor::AJTSMoonAntActor()
 
 void AJTSMoonAntActor::InitializeMoonAnt(AJTSMoonAntNestActor* InOriginNest, const FVector& InGroundLocation)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	OriginNest = InOriginNest;
 	GroundLocation = InGroundLocation;
 	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
 		IsValid(SurfaceController) && SurfaceController->IsUsingRealPlanetSurfaceGameplay())
 	{
 		SurfacePlanet = SurfaceController->GetOwningPlanet();
-		bUsesRealPlanetSurface = SurfacePlanet.IsValid();
+		bUsesRealPlanetSurface = IsValid(SurfacePlanet);
 		if (bUsesRealPlanetSurface)
 		{
 			SurfaceUp = SurfacePlanet->GetRadialUpVector(InGroundLocation);
@@ -164,7 +188,7 @@ bool AJTSMoonAntActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) c
 
 void AJTSMoonAntActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType)
 {
-	if (!CanReceiveMeleeHit_Implementation(AttackingPawn))
+	if (!HasAuthority() || !CanReceiveMeleeHit_Implementation(AttackingPawn))
 	{
 		return;
 	}
@@ -243,6 +267,20 @@ void AJTSMoonAntActor::BeginPlay()
 	// This repeats the construction-time decision so Blueprint component defaults are honored in every runtime spawn path.
 	RefreshVisualMode();
 
+	if (!HasAuthority())
+	{
+		ConfigureMoonAntVisuals();
+		ConfigureMoonAntHealthBar();
+		if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
+		{
+			MoonWrappedActorComponent->Deactivate();
+			MoonWrappedActorComponent->SetComponentTickEnabled(false);
+		}
+		UpdateMoonAntVisualTransform();
+		UpdateMoonAntHealthBarTransform();
+		return;
+	}
+
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	if (!bInitialized || !OriginNest.IsValid() || MoonGameMode == nullptr || !IsValid(HealthComponent))
 	{
@@ -305,6 +343,12 @@ void AJTSMoonAntActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AJTSMoonAntActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!HasAuthority())
+	{
+		UpdateMoonAntVisualTransform();
+		UpdateMoonAntHealthBarTransform();
+		return;
+	}
 
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	if (MoonGameMode == nullptr)
@@ -762,7 +806,7 @@ FVector AJTSMoonAntActor::GetShortestWrappedDeltaTo(const FVector2D& TargetLogic
 
 AJTSPlanetAnchor* AJTSMoonAntActor::GetSurfacePlanet() const
 {
-	if (SurfacePlanet.IsValid())
+	if (IsValid(SurfacePlanet))
 	{
 		return SurfacePlanet.Get();
 	}
@@ -1067,6 +1111,11 @@ void AJTSMoonAntActor::HandleHealthDamaged(float CurrentHealth, float MaxHealth,
 		HideMoonAntHealthBar();
 		return;
 	}
+	if (!HasAuthority())
+	{
+		ShowMoonAntHealthBar();
+		return;
+	}
 
 	FleeSourceLocation = IsValid(DamageCauser)
 		? DamageCauser->GetActorLocation()
@@ -1089,6 +1138,12 @@ void AJTSMoonAntActor::HandleHealthDeath(AController* InstigatorController, AAct
 	HideMoonAntHealthBar();
 	SetMeleeHitCollisionEnabled(false);
 	SetActorTickEnabled(false);
+	// Clients receive the replicated health/death state for presentation, but only the server may
+	// create the corpse or destroy this replicated gameplay actor.
+	if (!HasAuthority())
+	{
+		return;
+	}
 
 	UPrimitiveComponent* const ActiveVisual = GetActiveVisualComponent();
 	const USkeletalMesh* const SkeletalMesh = IsValid(MoonAntMesh) ? MoonAntMesh->GetSkeletalMeshAsset() : nullptr;
@@ -1111,10 +1166,7 @@ void AJTSMoonAntActor::HandleHealthDeath(AController* InstigatorController, AAct
 		VisualScale.Y,
 		VisualScale.Z);
 
-	if (HasAuthority())
-	{
-		SpawnMoonAntCorpse();
-	}
+	SpawnMoonAntCorpse();
 
 	// SpawnMoonAntCorpse finishes the deferred actor (including its visual initialization) synchronously.
 	// Only after that point is it safe to release this MoonAnt and its runtime mesh data.
@@ -1268,7 +1320,8 @@ void AJTSMoonAntActor::UpdateMoonAntVisualTransform()
 	FVector BendOriginLocation = FVector::ZeroVector;
 	float DistanceToBendOrigin = 0.0f;
 	UWorld* const World = GetWorld();
-	const APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	// Fake Moon bending is local presentation only; AI and damage selection never use this pawn.
+	const APawn* const LocalPawn = GetLocalPresentationPawn(World);
 	if (IsValid(LocalPawn))
 	{
 		// This is intentionally read on every visual update; only the pawn reference may be cached by
@@ -1464,6 +1517,25 @@ void AJTSMoonAntActor::SetMoonAntState(EJTSMoonAntState NewState)
 		break;
 	}
 
+	UpdateFallbackMaterial();
+}
+
+void AJTSMoonAntActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AJTSMoonAntActor, MoonAntState);
+	DOREPLIFETIME(AJTSMoonAntActor, SurfacePlanet);
+	DOREPLIFETIME(AJTSMoonAntActor, SurfaceUp);
+	DOREPLIFETIME(AJTSMoonAntActor, bUsesRealPlanetSurface);
+}
+
+void AJTSMoonAntActor::OnRep_MoonAntState()
+{
+	const bool bCanBeHit = MoonAntState != EJTSMoonAntState::Emerging
+		&& MoonAntState != EJTSMoonAntState::Burrowing
+		&& (!IsValid(HealthComponent) || !HealthComponent->IsDead());
+	SetMeleeHitCollisionEnabled(bCanBeHit);
 	UpdateFallbackMaterial();
 }
 

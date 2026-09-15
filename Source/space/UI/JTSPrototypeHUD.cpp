@@ -21,10 +21,6 @@ void AJTSPrototypeHUD::BeginPlay()
 	Super::BeginPlay();
 
 	APlayerController* PlayerController = GetOwningPlayerController();
-	if (PlayerController == nullptr && GetWorld() != nullptr)
-	{
-		PlayerController = GetWorld()->GetFirstPlayerController();
-	}
 	if (PlayerController == nullptr)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Jump to Space HUD could not create its native widget because the owning PlayerController is unavailable."));

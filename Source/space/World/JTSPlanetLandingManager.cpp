@@ -9,12 +9,14 @@
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "GameFramework/PlayerStart.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
-#include "space/Core/JTSGameInstance.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetArrivalAnchor.h"
@@ -78,6 +80,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogJTSPlanetLanding, Log, All);
 AJTSPlanetLandingManager::AJTSPlanetLandingManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	bAlwaysRelevant = true;
 	DefaultSpacecraftClass = AJTSSpacecraftActor::StaticClass();
 }
 
@@ -261,7 +265,7 @@ void AJTSPlanetLandingManager::DrawDebugLandingAreas(AJTSPlanetAnchor* Planet, f
 
 bool AJTSPlanetLandingManager::StartLandingSequence(APlayerController* PlayerController, AJTSPlanetAnchor* Planet)
 {
-	if (!IsValid(PlayerController) || !IsValid(Planet))
+	if (!HasAuthority() || !IsValid(PlayerController) || !IsValid(Planet))
 	{
 		UE_LOG(LogJTSPlanetLanding, Error, TEXT("Landing Start failed: PlayerController or Planet is invalid."));
 		return false;
@@ -351,6 +355,12 @@ bool AJTSPlanetLandingManager::RequestLanding(
 	AJTSSpacecraftActor* Spacecraft,
 	FJTSPlanetLandingValidationResult& OutResult)
 {
+	if (!HasAuthority())
+	{
+		OutResult = FJTSPlanetLandingValidationResult();
+		OutResult.Failure = EJTSLandingValidationFailure::InvalidFlightState;
+		return false;
+	}
 	OutResult = FJTSPlanetLandingValidationResult();
 	if (!IsValid(Spacecraft))
 	{
@@ -514,6 +524,10 @@ bool AJTSPlanetLandingManager::FindPlayerRespawnTransform(
 
 bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController* PlayerController)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	AJTSSpacecraftActor* const Spacecraft = GetPlayerSpacecraft(PlayerController);
 	if (!IsValid(PlayerController) || !IsValid(Spacecraft) || !Spacecraft->IsLanded())
 	{
@@ -554,6 +568,11 @@ bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController
 	Character->SetGameplayPlanet(Planet);
 	Character->InitializePlanetFrame();
 	Character->BeginPlanetFalling();
+	if (AJTSPlayerState* const PlayerState = PlayerController->GetPlayerState<AJTSPlayerState>())
+	{
+		PlayerState->SetBoarded(false);
+		PlayerState->SetExpeditionStatus(EJTSPlayerExpeditionStatus::Active);
+	}
 	RegisterPlayerSpacecraft(PlayerController, Spacecraft);
 	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Player Respawn Success: PlayerController=%s Spacecraft=%s Source=%d Location=%s"),
 		*GetNameSafe(PlayerController),
@@ -838,7 +857,7 @@ bool AJTSPlanetLandingManager::SpawnAndConfigureCharacter(
 	AJTSCharacter*& OutCharacter) const
 {
 	OutCharacter = nullptr;
-	if (!IsValid(PlayerController) || !IsValid(Planet))
+	if (!HasAuthority() || !IsValid(PlayerController) || !IsValid(Planet))
 	{
 		return false;
 	}
@@ -889,7 +908,7 @@ AJTSSpacecraftActor* AJTSPlanetLandingManager::FindOrSpawnArrivalSpacecraft(
 	const FTransform& SpawnTransform,
 	const FVector& PreferredSurfaceLocation)
 {
-	if (!IsValid(Planet))
+	if (!HasAuthority() || !IsValid(Planet))
 	{
 		return nullptr;
 	}
@@ -898,8 +917,8 @@ AJTSSpacecraftActor* AJTSPlanetLandingManager::FindOrSpawnArrivalSpacecraft(
 	{
 		if (AJTSSpacecraftActor* const Spacecraft = ExistingSpacecraft->Get(); IsValid(Spacecraft))
 		{
-			Spacecraft->InitializeForPlanetArrival(Planet);
-			ParkArrivalSpacecraftOnSurface(Spacecraft, Planet, PreferredSurfaceLocation);
+			// Every expedition shares this planet's one arrival craft. A later player must not
+			// reset its flight/storage state or teleport it to that player's arrival point.
 			return Spacecraft;
 		}
 	}
@@ -911,10 +930,9 @@ AJTSSpacecraftActor* AJTSPlanetLandingManager::FindOrSpawnArrivalSpacecraft(
 	}
 
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
-	if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
-		IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftClass())
+	if (UJTSExpeditionSubsystem* const Expedition = World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 	{
-		SpacecraftClass = GameInstance->GetPersistedSpacecraftClass();
+		SpacecraftClass = Expedition->GetSnapshot().SpacecraftClass.LoadSynchronous();
 	}
 	if (SpacecraftClass == nullptr)
 	{
@@ -1150,22 +1168,54 @@ bool AJTSPlanetLandingManager::ResolveArrivalTransforms(
 		OutSpacecraftTransform = BestArrivalAnchor->GetSpacecraftArrivalTransform();
 		UE_LOG(LogJTSPlanetLanding, Log, TEXT("Landing Anchor: %s Planet=%s"),
 			*GetNameSafe(BestArrivalAnchor), *Planet->GetPlanetId().ToString());
-		return true;
+	}
+	else
+	{
+		AGameModeBase* const GameMode = World != nullptr ? World->GetAuthGameMode<AGameModeBase>() : nullptr;
+		AActor* const PlayerStart = IsValid(GameMode) ? GameMode->FindPlayerStart(PlayerController) : nullptr;
+		OutPlayerTransform = IsValid(PlayerStart) ? PlayerStart->GetActorTransform() : Planet->GetApproachEntryTransform();
+		const FVector SurfaceUp = Planet->GetRadialUpVector(OutPlayerTransform.GetLocation());
+		const FVector SurfaceForward = Planet->ProjectDirectionToSurfaceTangent(
+			OutPlayerTransform.GetUnitAxis(EAxis::X),
+			OutPlayerTransform.GetLocation());
+		const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
+		OutSpacecraftTransform = FTransform(
+			SurfaceRotation,
+			OutPlayerTransform.GetLocation() + SurfaceRotation.RotateVector(GenericArrivalSpacecraftOffset));
+		UE_LOG(LogJTSPlanetLanding, Warning, TEXT("Landing Anchor: <none>; using PlayerStart-adjacent surface fallback for Planet=%s."),
+			*Planet->GetPlanetId().ToString());
 	}
 
-	AGameModeBase* const GameMode = World != nullptr ? World->GetAuthGameMode<AGameModeBase>() : nullptr;
-	AActor* const PlayerStart = IsValid(GameMode) ? GameMode->FindPlayerStart(PlayerController) : nullptr;
-	OutPlayerTransform = IsValid(PlayerStart) ? PlayerStart->GetActorTransform() : Planet->GetApproachEntryTransform();
-	const FVector SurfaceUp = Planet->GetRadialUpVector(OutPlayerTransform.GetLocation());
-	const FVector SurfaceForward = Planet->ProjectDirectionToSurfaceTangent(
-		OutPlayerTransform.GetUnitAxis(EAxis::X),
-		OutPlayerTransform.GetLocation());
-	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
-	OutSpacecraftTransform = FTransform(
-		SurfaceRotation,
-		OutPlayerTransform.GetLocation() + SurfaceRotation.RotateVector(GenericArrivalSpacecraftOffset));
-	UE_LOG(LogJTSPlanetLanding, Warning, TEXT("Landing Anchor: <none>; using PlayerStart-adjacent surface fallback for Planet=%s."),
-		*Planet->GetPlanetId().ToString());
+	// The vehicle transform belongs to the shared craft. Player transforms deliberately use a
+	// deterministic four-slot fan so seamless travel never stacks the expedition into one capsule.
+	TArray<APlayerController*> Controllers;
+	if (World != nullptr)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Candidate = It->Get(); IsValid(Candidate))
+			{
+				Controllers.Add(Candidate);
+			}
+		}
+	}
+	Controllers.Sort([](const APlayerController& Left, const APlayerController& Right)
+	{
+		const APlayerState* const LeftState = Left.GetPlayerState<APlayerState>();
+		const APlayerState* const RightState = Right.GetPlayerState<APlayerState>();
+		return (LeftState != nullptr ? LeftState->GetPlayerId() : INDEX_NONE)
+			< (RightState != nullptr ? RightState->GetPlayerId() : INDEX_NONE);
+	});
+	const int32 ArrivalIndex = FMath::Max(0, Controllers.IndexOfByKey(PlayerController)) % 4;
+	static const FVector2D ArrivalOffsets[4] = {
+		FVector2D(-220.0f, -220.0f), FVector2D(220.0f, -220.0f),
+		FVector2D(-220.0f, 220.0f), FVector2D(220.0f, 220.0f)
+	};
+	const FVector2D Offset = ArrivalOffsets[ArrivalIndex];
+	const FVector OffsetLocation = OutPlayerTransform.GetLocation()
+		+ OutPlayerTransform.GetUnitAxis(EAxis::X).GetSafeNormal() * Offset.X
+		+ OutPlayerTransform.GetUnitAxis(EAxis::Y).GetSafeNormal() * Offset.Y;
+	OutPlayerTransform.SetLocation(OffsetLocation);
 	return true;
 }
 

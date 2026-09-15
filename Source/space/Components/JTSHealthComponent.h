@@ -49,6 +49,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Health")
 	void SetMaxHealth(float NewMaxHealth, bool bFillHealth = true);
 
+	/** Server-only restore path for an expedition snapshot. Normal gameplay must still use damage/heal. */
+	void RestoreAuthoritativeHealth(float NewHealth);
+
 	UPROPERTY(BlueprintAssignable, Category = "Health")
 	FJTSOnHealthChanged OnHealthChanged;
 

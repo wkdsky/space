@@ -3,17 +3,26 @@
 #include "JTSPlayerController.h"
 
 #include "Engine/World.h"
-#include "GameMapsSettings.h"
+#include "Framework/Application/SlateApplication.h"
+#include "GameFramework/PlayerInput.h"
 #include "InputCoreTypes.h"
 #include "InputKeyEventArgs.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "space/Modes/JTSEarthGameMode.h"
+#include "space/Core/JTSGameState.h"
+#include "space/Modes/JTSGameplayGameModeBase.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Player/JTSPlayerState.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Systems/JTSOnlineSessionSubsystem.h"
+#include "space/Core/JTSMapPaths.h"
+#include "space/UI/JTSPreLaunchLobbyWidget.h"
+#include "space/World/JTSMoonSurfaceController.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "TimerManager.h"
 
 AJTSPlayerController::AJTSPlayerController()
 {
@@ -32,6 +41,7 @@ void AJTSPlayerController::BeginPlayingState()
 {
 	Super::BeginPlayingState();
 	BindGameState();
+	ScheduleGameStateBind();
 	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
 	{
@@ -48,6 +58,7 @@ void AJTSPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 	BindGameState();
+	ScheduleGameStateBind();
 	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
 	{
@@ -58,6 +69,11 @@ void AJTSPlayerController::BeginPlay()
 void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	CloseMoonShop();
+	HideLobby();
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(GameStateBindingRetryTimer);
+	}
 
 	if (AJTSGameState* const GameState = BoundGameState.Get())
 	{
@@ -68,6 +84,18 @@ void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void AJTSPlayerController::OnRep_Pawn()
+{
+	Super::OnRep_Pawn();
+	RefreshGameplayInputAfterPossess();
+}
+
+void AJTSPlayerController::ClientRestart_Implementation(APawn* NewPawn)
+{
+	Super::ClientRestart_Implementation(NewPawn);
+	RefreshGameplayInputAfterPossess();
+}
+
 void AJTSPlayerController::StartGame()
 {
 	if (!IsLocalController())
@@ -75,19 +103,141 @@ void AJTSPlayerController::StartGame()
 		return;
 	}
 
-	BindGameState();
+	ServerRequestStartExpedition();
+}
 
-	if (AJTSEarthGameMode* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSEarthGameMode>() : nullptr)
+void AJTSPlayerController::RequestSetReady()
+{
+	if (IsLocalController())
 	{
-		GameMode->StartEarthCollection();
+		if (const AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
+		{
+			ServerSetReady(!State->IsReady());
+		}
+	}
+}
+
+void AJTSPlayerController::RequestAvatarColor(EJTSAvatarColor NewColor)
+{
+	if (IsLocalController())
+	{
+		ServerSetAvatarColor(NewColor);
+	}
+}
+
+void AJTSPlayerController::RequestCloseJoining()
+{
+	if (IsLocalController())
+	{
+		ServerRequestCloseJoining();
+	}
+}
+
+void AJTSPlayerController::RequestKickPlayer(AJTSPlayerState* TargetPlayerState)
+{
+	if (IsLocalController() && TargetPlayerState != nullptr)
+	{
+		ServerRequestKickPlayer(TargetPlayerState);
+	}
+}
+
+void AJTSPlayerController::ServerSetReady_Implementation(bool bReady)
+{
+	if (AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
+	{
+		const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+		if (GameState != nullptr && GameState->IsWaitingToStart())
+		{
+			State->SetReady(bReady);
+		}
+	}
+}
+
+void AJTSPlayerController::ServerSetAvatarColor_Implementation(EJTSAvatarColor NewColor)
+{
+	const uint8 ColorIndex = static_cast<uint8>(NewColor);
+	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	if (ColorIndex <= static_cast<uint8>(EJTSAvatarColor::Purple)
+		&& GameState != nullptr
+		&& GameState->IsWaitingToStart())
+	{
+		if (AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
+		{
+			State->SetAvatarColor(NewColor);
+		}
+	}
+}
+
+void AJTSPlayerController::ServerRequestStartExpedition_Implementation()
+{
+	if (AJTSGameplayGameModeBase* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>() : nullptr)
+	{
+		GameMode->RequestStartExpedition(this);
+	}
+}
+
+void AJTSPlayerController::ServerRequestCloseJoining_Implementation()
+{
+	if (AJTSGameplayGameModeBase* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>() : nullptr)
+	{
+		GameMode->RequestCloseJoining(this);
+	}
+}
+
+void AJTSPlayerController::ServerRequestKickPlayer_Implementation(AJTSPlayerState* TargetPlayerState)
+{
+	if (AJTSGameplayGameModeBase* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>() : nullptr)
+	{
+		GameMode->RequestKickPlayer(this, TargetPlayerState);
+	}
+}
+
+void AJTSPlayerController::ClientHostLeftExpedition_Implementation()
+{
+	if (!IsLocalController())
+	{
+		return;
 	}
 
-	if (AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	CloseGameMenu();
+	if (UJTSOnlineSessionSubsystem* const Online = GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>())
 	{
-		if (GameState->IsEarthCollectionActive())
-		{
-			ApplyEarthCollectionInputMode();
-		}
+		Online->HandleHostLeftExpedition();
+	}
+}
+
+void AJTSPlayerController::ServerRequestBoardSpacecraft_Implementation(AJTSSpacecraftActor* Spacecraft)
+{
+	APawn* const ControlledPawn = GetPawn();
+	if (IsValid(Spacecraft) && IsValid(ControlledPawn) && Spacecraft->IsPawnInBoardingRange(ControlledPawn))
+	{
+		Spacecraft->TryBoardPlayer(ControlledPawn);
+	}
+}
+
+void AJTSPlayerController::ServerRequestDisembarkSpacecraft_Implementation(AJTSSpacecraftActor* Spacecraft)
+{
+	if (IsValid(Spacecraft))
+	{
+		Spacecraft->TryDisembarkPlayer(GetPawn());
+	}
+}
+
+void AJTSPlayerController::ServerRequestCraft_Implementation(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft)
+{
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
+	if (!IsValid(ControlledCharacter) || !IsValid(Spacecraft) || !IsValid(SurfaceController))
+	{
+		return;
+	}
+	switch (EquipmentType)
+	{
+	case EJTSEquipmentType::Pickaxe: SurfaceController->TryCraftPickaxe(ControlledCharacter, Spacecraft); break;
+	case EJTSEquipmentType::Backpack: SurfaceController->TryCraftBackpack(ControlledCharacter, Spacecraft); break;
+	case EJTSEquipmentType::Knife: SurfaceController->TryCraftKnife(ControlledCharacter, Spacecraft); break;
+	case EJTSEquipmentType::Axe: SurfaceController->TryCraftAxe(ControlledCharacter, Spacecraft); break;
+	default: break;
 	}
 }
 
@@ -98,15 +248,8 @@ void AJTSPlayerController::RestartCurrentLevel()
 		return;
 	}
 
-	const FString CurrentLevelName = UGameplayStatics::GetCurrentLevelName(this, true);
-	if (CurrentLevelName.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Jump to Space could not restart because the current level name is empty."));
-		return;
-	}
-
-	SetPause(false);
-	UGameplayStatics::OpenLevel(this, FName(*CurrentLevelName));
+	// A connected expedition must never use OpenLevel on one peer. Leaving is the explicit restart path.
+	ReturnToMainMenu();
 }
 
 void AJTSPlayerController::QuitGame()
@@ -114,6 +257,15 @@ void AJTSPlayerController::QuitGame()
 	if (!IsLocalController())
 	{
 		return;
+	}
+
+	if (UGameInstance* const GameInstance = GetGameInstance())
+	{
+		if (UJTSOnlineSessionSubsystem* const Online = GameInstance->GetSubsystem<UJTSOnlineSessionSubsystem>())
+		{
+			Online->RequestApplicationQuit();
+			return;
+		}
 	}
 
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
@@ -126,16 +278,11 @@ void AJTSPlayerController::ReturnToMainMenu()
 		return;
 	}
 
-	const FString DefaultMap = UGameMapsSettings::GetGameDefaultMap();
-	if (DefaultMap.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Jump to Space cannot return to the main menu because GameDefaultMap is empty."));
-		return;
-	}
-
 	CloseGameMenu();
-	SetPause(false);
-	UGameplayStatics::OpenLevel(this, FName(*DefaultMap));
+	if (UJTSOnlineSessionSubsystem* const Online = GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>())
+	{
+		Online->LeaveExpedition();
+	}
 }
 
 void AJTSPlayerController::ApplyEarthCollectionInputMode()
@@ -145,20 +292,67 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 		return;
 	}
 
-	SetPause(false);
+	// The lobby uses UI-only focus and pushes both Ignore flags. Merely collapsing its widget leaves
+	// Slate focus and input-stack state alive across seamless travel, which is why attack could still
+	// fire while movement/look were ignored. Tear the widget down and restore every input owner here.
+	HideLobby();
 	FInputModeGameOnly InputMode;
 	InputMode.SetConsumeCaptureMouseDown(true);
 	SetInputMode(InputMode);
 	bShowMouseCursor = false;
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
-	SetIgnoreMoveInput(false);
-	SetIgnoreLookInput(false);
+	ResetIgnoreInputFlags();
+	if (PlayerInput != nullptr)
+	{
+		PlayerInput->FlushPressedKeys();
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::SetDirectly);
+		FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
+	}
+	if (AJTSCharacter* const CharacterPawn = Cast<AJTSCharacter>(GetPawn()))
+	{
+		CharacterPawn->EnsureGameplayInputMapping();
+	}
 }
 
 void AJTSPlayerController::ApplySpaceWorldInputMode()
 {
 	ApplyEarthCollectionInputMode();
+}
+
+void AJTSPlayerController::ApplyPreLaunchLobbyInputMode()
+{
+	if (!IsLocalController() || LobbyWidget == nullptr)
+	{
+		return;
+	}
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	InputMode.SetWidgetToFocus(LobbyWidget->TakeWidget());
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+	SetIgnoreMoveInput(true);
+	SetIgnoreLookInput(true);
+}
+
+bool AJTSPlayerController::IsPreLaunchLobbyWorld() const
+{
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	const FString PackageName = World->GetPackage() != nullptr ? World->GetPackage()->GetName() : FString();
+	return PackageName == JTSMapPaths::PreLaunchLobby
+		|| PackageName.EndsWith(TEXT("L_PreLaunchLobby"))
+		|| World->GetMapName().Contains(TEXT("L_PreLaunchLobby"));
 }
 
 void AJTSPlayerController::SetSpacecraftCameraViewTarget(AJTSSpacecraftActor* Spacecraft)
@@ -212,7 +406,6 @@ void AJTSPlayerController::OpenMoonShop(AJTSCharacter* InPlayer)
 		return;
 	}
 
-	SetPause(false);
 	FInputModeGameAndUI InputMode;
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	InputMode.SetHideCursorDuringCapture(false);
@@ -277,7 +470,6 @@ void AJTSPlayerController::OpenGameMenu()
 	}
 
 	PrototypeWidget->OpenGameMenu();
-	SetPause(true);
 	FInputModeUIOnly InputMode;
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
@@ -304,7 +496,6 @@ void AJTSPlayerController::CloseGameMenu()
 		return;
 	}
 
-	SetPause(false);
 	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
 	{
@@ -401,6 +592,62 @@ void AJTSPlayerController::BindGameState()
 	}
 }
 
+void AJTSPlayerController::ScheduleGameStateBind()
+{
+	if (!IsLocalController() || GetWorld() == nullptr)
+	{
+		return;
+	}
+	GameStateBindingRetryCount = 0;
+	GetWorld()->GetTimerManager().SetTimer(
+		GameStateBindingRetryTimer,
+		this,
+		&AJTSPlayerController::RetryBindGameState,
+		0.05f,
+		false);
+}
+
+void AJTSPlayerController::RetryBindGameState()
+{
+	if (!IsLocalController() || GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	BindGameState();
+	++GameStateBindingRetryCount;
+	const AJTSGameState* const CurrentState = GetWorld()->GetGameState<AJTSGameState>();
+	if ((CurrentState == nullptr || BoundGameState.Get() != CurrentState || GameStateBindingRetryCount < 8)
+		&& GameStateBindingRetryCount < 40)
+	{
+		GetWorld()->GetTimerManager().SetTimer(
+			GameStateBindingRetryTimer,
+			this,
+			&AJTSPlayerController::RetryBindGameState,
+			0.10f,
+			false);
+	}
+}
+
+void AJTSPlayerController::RefreshGameplayInputAfterPossess()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (AJTSCharacter* const CharacterPawn = Cast<AJTSCharacter>(GetPawn()))
+	{
+		CharacterPawn->EnsureGameplayInputMapping();
+	}
+	BindGameState();
+	ScheduleGameStateBind();
+	if (const AJTSGameState* const State = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	{
+		ApplyInputModeForPhase(State->GetGameplayPhase());
+	}
+}
+
 void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhase)
 {
 	if (!IsLocalController())
@@ -416,23 +663,31 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 	switch (GameplayPhase)
 	{
 	case EJTSGameplayPhase::WaitingToStart:
-	case EJTSGameplayPhase::EarthCaptureFailure:
 	{
-		SetPause(true);
-		FInputModeUIOnly InputMode;
-		SetInputMode(InputMode);
-		bShowMouseCursor = true;
-		bEnableClickEvents = true;
-		bEnableMouseOverEvents = true;
-		SetIgnoreMoveInput(true);
-		SetIgnoreLookInput(true);
+		if (IsPreLaunchLobbyWorld())
+		{
+			ShowLobby();
+			ApplyPreLaunchLobbyInputMode();
+		}
+		else
+		{
+			// Earth may briefly expose its default replicated phase while the GameState arrives.
+			// It is not a lobby; preserve game ownership of the viewport until its real phase lands.
+			HideLobby();
+			ApplyEarthCollectionInputMode();
+		}
 		break;
 	}
+
+	case EJTSGameplayPhase::EarthCaptureFailure:
+		HideLobby();
+		ApplyEarthCollectionInputMode();
+		break;
 
 	case EJTSGameplayPhase::MoonArrivalSuccess:
 	{
 		// Keep the world running so the Earth GameMode transition timer can travel to the Moon.
-		SetPause(false);
+		HideLobby();
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(true);
 		SetInputMode(InputMode);
@@ -446,7 +701,7 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 
 	case EJTSGameplayPhase::Launching:
 	{
-		SetPause(false);
+		HideLobby();
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(true);
 		SetInputMode(InputMode);
@@ -459,20 +714,23 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 	}
 
 	case EJTSGameplayPhase::EarthCollection:
+		HideLobby();
 		ApplyEarthCollectionInputMode();
 		break;
 
 	case EJTSGameplayPhase::MoonExploration:
+		HideLobby();
 		ApplyEarthCollectionInputMode();
 		break;
 
 	case EJTSGameplayPhase::SpaceFlight:
+		HideLobby();
 		ApplySpaceWorldInputMode();
 		break;
 
 	case EJTSGameplayPhase::EarthCollectionFinished:
 	{
-		SetPause(false);
+		HideLobby();
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(true);
 		SetInputMode(InputMode);
@@ -507,4 +765,31 @@ void AJTSPlayerController::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGamep
 	}
 
 	ApplyInputModeForPhase(NewGameplayPhase);
+}
+
+void AJTSPlayerController::ShowLobby()
+{
+	if (!IsLocalController() || !IsPreLaunchLobbyWorld()) return;
+	if (LobbyWidget == nullptr)
+	{
+		const TSubclassOf<UJTSPreLaunchLobbyWidget> WidgetClass = PreLaunchLobbyWidgetClass.IsNull()
+			? UJTSPreLaunchLobbyWidget::StaticClass()
+			: PreLaunchLobbyWidgetClass.LoadSynchronous();
+		LobbyWidget = CreateWidget<UJTSPreLaunchLobbyWidget>(this, WidgetClass != nullptr ? WidgetClass : TSubclassOf<UJTSPreLaunchLobbyWidget>(UJTSPreLaunchLobbyWidget::StaticClass()));
+		if (LobbyWidget != nullptr)
+		{
+			LobbyWidget->AddToViewport(90);
+			UE_LOG(LogTemp, Log, TEXT("Jump to Space pre-launch lobby widget %s is visible for local controller %s."), *GetNameSafe(LobbyWidget->GetClass()), *GetName());
+		}
+	}
+	if (LobbyWidget != nullptr) LobbyWidget->SetVisibility(ESlateVisibility::Visible);
+}
+
+void AJTSPlayerController::HideLobby()
+{
+	if (LobbyWidget != nullptr)
+	{
+		LobbyWidget->RemoveFromParent();
+		LobbyWidget = nullptr;
+	}
 }

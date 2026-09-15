@@ -88,6 +88,8 @@ public:
 	/** Set by the landing flow once initial gameplay actors exist; this gates startup/input readiness, never gravity. */
 	void SetSurfaceGameplayReady(bool bReady);
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	bool IsSurfaceGameplayReady() const;
 
@@ -122,6 +124,9 @@ private:
 	ULevelStreamingDynamic* FindPlanetContentStreamingLevel(const AJTSPlanetAnchor* Planet) const;
 	void LogDebugState() const;
 
+	UFUNCTION()
+	void OnRep_SpaceWorldState();
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
 
@@ -135,10 +140,10 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
 	EJTSSpaceTravelState InitialTravelState = EJTSSpaceTravelState::Surface;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> CurrentPlanet;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Space World|State", meta = (AllowPrivateAccess = "true"))
 	EJTSSpaceTravelState CurrentTravelState = EJTSSpaceTravelState::Surface;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Content", meta = (AllowPrivateAccess = "true"))
@@ -157,6 +162,7 @@ private:
 	FTimerHandle DebugTimerHandle;
 	FOnJTSSpaceWorldLandingRequested LandingRequestedDelegate;
 	bool bPlanetRegistryInitialized = false;
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState)
 	bool bSurfaceGameplayReady = false;
 	bool bLandingEligibilityAnnounced = false;
 };

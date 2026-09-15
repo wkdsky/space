@@ -115,6 +115,9 @@ private:
 	void HandleGreenAvatarClicked();
 
 	UFUNCTION()
+	void HandlePurpleAvatarClicked();
+
+	UFUNCTION()
 	void HandleRestartClicked();
 
 	UFUNCTION()
@@ -143,6 +146,12 @@ private:
 
 	UFUNCTION()
 	void HandleResumeGameClicked();
+
+	UFUNCTION()
+	void HandleGameMenuSessionDetailsClicked();
+
+	UFUNCTION()
+	void HandleGameMenuSettingsClicked();
 
 	UFUNCTION()
 	void HandleReturnToMainMenuClicked();
@@ -407,6 +416,9 @@ private:
 	TObjectPtr<UButton> GreenAvatarButton;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UButton> PurpleAvatarButton;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UBorder> SettingsPreviewBlock;
 
 	UPROPERTY(Transient)
@@ -426,6 +438,15 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ResumeGameButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> GameMenuSessionDetailsButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> GameMenuSettingsButton;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> GameMenuInfoText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> ReturnToMainMenuButton;

@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
@@ -51,6 +52,8 @@ namespace
 AJTSMoonResourceActor::AJTSMoonResourceActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -281,6 +284,10 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 
 void AJTSMoonResourceActor::InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	ResourceType = NewResourceType;
 	TotalYieldUnits = FMath::Max(1, NewTotalYieldUnits);
 	RemainingYieldUnits = TotalYieldUnits;
@@ -308,7 +315,7 @@ FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* Interact
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	if (!CanInteract_Implementation(InteractingPawn))
+	if (!HasAuthority() || !CanInteract_Implementation(InteractingPawn))
 	{
 		return;
 	}
@@ -418,6 +425,31 @@ void AJTSMoonResourceActor::OnConstruction(const FTransform& Transform)
 	TotalYieldUnits = FMath::Max(1, TotalYieldUnits);
 	RemainingYieldUnits = FMath::Clamp(RemainingYieldUnits, 0, TotalYieldUnits);
 	ApplyResourceAppearance();
+}
+
+void AJTSMoonResourceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AJTSMoonResourceActor, ResourceType);
+	DOREPLIFETIME(AJTSMoonResourceActor, TotalYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, RemainingYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, SurfaceUp);
+	DOREPLIFETIME(AJTSMoonResourceActor, bUsesRealPlanetSurface);
+}
+
+void AJTSMoonResourceActor::OnRep_ResourceData()
+{
+	ApplyResourceAppearance();
+}
+
+void AJTSMoonResourceActor::OnRep_SurfacePresentation()
+{
+	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+		MoonWrappedActorComponent->SetComponentTickEnabled(false);
+	}
 }
 
 FText AJTSMoonResourceActor::GetMiningPrompt(APawn* InteractingPawn) const

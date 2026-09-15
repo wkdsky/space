@@ -64,6 +64,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void PerformHitCheck();
 
+	/** Input intent RPCs; hit targets are always acquired again on the authority. */
+	UFUNCTION(Server, Reliable)
+	void ServerStartAttack();
+
+	UFUNCTION(Server, Reliable)
+	void ServerPerformHitCheck();
+
+	UFUNCTION(Server, Reliable)
+	void ServerTryAttack();
+
+	UFUNCTION(Server, Reliable)
+	void ServerReleaseAttack();
+
 	/** Bind a montage, weapon animation, or attack effects here without coupling this component to an Anim Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category = "Melee|Attack")
 	FOnAttackStarted OnAttackStarted;

@@ -24,6 +24,27 @@ namespace
 	constexpr float GroundSurfaceZ = 0.0f;
 	constexpr float TileTransformTolerance = 0.1f;
 	const FIntPoint InvalidTileCoordinate(MAX_int32, MAX_int32);
+
+	APawn* GetLocalPresentationPawn(UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
+			{
+				return Controller->GetPawn();
+			}
+		}
+		return nullptr;
+	}
+
+	bool UsesLocalPresentationRing(const UWorld* World)
+	{
+		return World != nullptr && (World->GetNetMode() == NM_Client || World->GetNetMode() == NM_Standalone);
+	}
 }
 
 AJTSMoonLoopGroundActor::AJTSMoonLoopGroundActor()
@@ -130,15 +151,25 @@ void AJTSMoonLoopGroundActor::Tick(float DeltaSeconds)
 		InvalidateTileAssignments();
 	}
 
-	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
-	APawn* const LocalPawn = PlayerController != nullptr ? PlayerController->GetPawn() : nullptr;
-	if (LocalPawn != nullptr)
+	if (!bVisualMeshesBuilt)
 	{
-		if (!bVisualMeshesBuilt)
+		BuildVisualMeshes();
+	}
+
+	if (UsesLocalPresentationRing(World))
+	{
+		if (APawn* const LocalPawn = GetLocalPresentationPawn(World))
 		{
-			BuildVisualMeshes();
+			// This client-local ring only affects presentation/prediction. Server gameplay never
+			// chooses an active player through this path.
+			UpdateTileRing(LocalPawn->GetActorLocation(), GetMovementBaseForPawn(LocalPawn));
 		}
-		UpdateTileRing(LocalPawn->GetActorLocation(), GetMovementBaseForPawn(LocalPawn));
+	}
+	else if (!bHasCurrentTile)
+	{
+		// Dedicated/listen authority keeps one canonical map-centered collision layout so no
+		// Player 0 can decide what other connected players can stand on.
+		UpdateTileRing(GetActorLocation(), nullptr);
 	}
 }
 
@@ -158,8 +189,7 @@ void AJTSMoonLoopGroundActor::RebuildTiles()
 	BuildVisualMeshes();
 	InvalidateTileAssignments();
 
-	APlayerController* const PlayerController = World != nullptr ? World->GetFirstPlayerController() : nullptr;
-	APawn* const LocalPawn = PlayerController != nullptr ? PlayerController->GetPawn() : nullptr;
+	APawn* const LocalPawn = UsesLocalPresentationRing(World) ? GetLocalPresentationPawn(World) : nullptr;
 	UpdateTileRing(
 		LocalPawn != nullptr ? LocalPawn->GetActorLocation() : GetActorLocation(),
 		GetMovementBaseForPawn(LocalPawn));

@@ -58,8 +58,15 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UFUNCTION()
+	void OnRep_ResourceData();
+
+	UFUNCTION()
+	void OnRep_SurfacePresentation();
+
 	FText GetMiningPrompt(APawn* InteractingPawn) const;
 	void ConfigureResourceMesh();
 	void ApplyResourceAppearance();
@@ -84,20 +91,23 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> OreMesh;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSResourceType ResourceType = EJTSResourceType::Rock;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
 	int32 TotalYieldUnits = 6;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 RemainingYieldUnits = 6;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
 
 	/** Cached normal used by interaction UI after a real-surface placement. */
+	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
 	FVector SurfaceUp = FVector::UpVector;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
 	bool bUsesRealPlanetSurface = false;
 
 	bool bMiningInProgress = false;

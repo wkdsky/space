@@ -84,9 +84,12 @@ void AJTSResourceSpawnArea::ApplyEarthSpawnSettings(const FJTSEarthResourceSpawn
 int32 AJTSResourceSpawnArea::GenerateResources()
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || SpawnBox == nullptr)
+	if (!HasAuthority() || World == nullptr || SpawnBox == nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("JTSResourceSpawnArea '%s' could not generate resources because its World or Box is unavailable."), *GetName());
+		if (World == nullptr || SpawnBox == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("JTSResourceSpawnArea '%s' could not generate resources because its World or Box is unavailable."), *GetName());
+		}
 		return 0;
 	}
 
@@ -349,6 +352,11 @@ int32 AJTSResourceSpawnArea::GenerateResources()
 
 void AJTSResourceSpawnArea::ClearGeneratedPickups()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+
 	for (TObjectPtr<AJTSResourcePickupActor>& Pickup : GeneratedPickups)
 	{
 		if (IsValid(Pickup))

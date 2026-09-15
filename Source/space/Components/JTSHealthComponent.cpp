@@ -112,6 +112,19 @@ void UJTSHealthComponent::SetMaxHealth(float NewMaxHealth, bool bFillHealth)
 	}
 }
 
+void UJTSHealthComponent::RestoreAuthoritativeHealth(float NewHealth)
+{
+	if (!CanModifyHealth() || !FMath::IsFinite(NewHealth))
+	{
+		return;
+	}
+
+	CurrentHealth = FMath::Clamp(NewHealth, 0.0f, MaxHealth);
+	bIsDead = CurrentHealth <= 0.0f;
+	bDeathBroadcasted = bIsDead;
+	BroadcastHealthChanged();
+}
+
 void UJTSHealthComponent::BeginPlay()
 {
 	Super::BeginPlay();

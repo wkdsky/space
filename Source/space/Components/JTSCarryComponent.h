@@ -20,6 +20,7 @@ class SPACE_API UJTSCarryComponent : public UActorComponent
 
 public:
 	UJTSCarryComponent();
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Returns whether one additional resource can fit in the carry inventory. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
@@ -75,6 +76,8 @@ public:
 
 	/** Broadcasts the current count and effective capacity after an equipment capacity change. */
 	void NotifyCapacityChanged();
+	/** Server-only snapshot restore hook used by expedition loading. */
+	void RestoreCarriedItems(const TArray<EJTSResourceType>& NewItems);
 
 	/** Broadcast after a resource is successfully added. */
 	UPROPERTY(BlueprintAssignable, Category = "Carry")
@@ -88,8 +91,11 @@ private:
 	int32 GetEquipmentCapacityBonus() const;
 	void RebuildCarriedResourceAmounts();
 
+	UFUNCTION()
+	void OnRep_CarriedItems();
+
 	/** Actual ordered inventory slots. Resources never stack into a single slot. */
-	UPROPERTY(VisibleAnywhere, Category = "Carry")
+	UPROPERTY(ReplicatedUsing = OnRep_CarriedItems, VisibleAnywhere, Category = "Carry")
 	TArray<EJTSResourceType> CarriedItems;
 
 	/** Aggregated resource view retained for deposits and native presentation. */

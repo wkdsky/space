@@ -25,6 +25,10 @@ struct SPACE_API FJTSSurfaceGameplayContext
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Planet|Surface Gameplay")
 	TObjectPtr<AJTSCharacter> Player = nullptr;
 
+	/** All players active on this shared planet. Player remains as a legacy first-entry convenience only. */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Planet|Surface Gameplay")
+	TArray<TObjectPtr<AJTSCharacter>> Players;
+
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Planet|Surface Gameplay")
 	TObjectPtr<AJTSSpacecraftActor> Spacecraft = nullptr;
 
@@ -34,7 +38,7 @@ struct SPACE_API FJTSSurfaceGameplayContext
 
 	bool HasRequiredRuntimeActors() const
 	{
-		return Planet.Get() != nullptr && Player.Get() != nullptr && Spacecraft.Get() != nullptr;
+		return Planet.Get() != nullptr && Spacecraft.Get() != nullptr;
 	}
 };
 
@@ -74,6 +78,8 @@ class SPACE_API IJTSPlanetSurfaceGameplay
 public:
 	virtual bool SupportsPlanet(const AJTSPlanetAnchor* Planet) const = 0;
 	virtual bool InitializeSurfaceGameplay(const FJTSSurfaceGameplayContext& Context) = 0;
+	/** Called for later arrivals after one shared controller has initialized planet-wide runtime state. */
+	virtual void RegisterSurfacePlayer(AJTSCharacter* Player) {}
 	virtual void ShutdownSurfaceGameplay() = 0;
 	virtual bool IsSurfaceGameplayReady() const = 0;
 };

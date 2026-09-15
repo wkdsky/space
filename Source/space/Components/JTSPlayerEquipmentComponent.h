@@ -26,6 +26,7 @@ class SPACE_API UJTSPlayerEquipmentComponent : public UActorComponent
 
 public:
 	UJTSPlayerEquipmentComponent();
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	bool HasEquippedItem(EJTSEquipmentType EquipmentType) const;
@@ -74,6 +75,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Equipment")
 	bool SelectEquipmentSlot(int32 SlotIndex);
 
+	UFUNCTION(Server, Reliable)
+	void ServerSelectEquipmentSlot(int32 SlotIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDropEquipmentSlot(int32 SlotIndex);
+
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	int32 GetSelectedEquipmentSlotIndex() const;
 
@@ -102,10 +109,13 @@ private:
 	bool TryUnequipItemInternal(EJTSEquipmentType EquipmentType, bool bDropEquipmentPickup);
 	void NotifyEquipmentChanged();
 
-	UPROPERTY(VisibleAnywhere, Category = "Equipment")
+	UFUNCTION()
+	void OnRep_EquipmentState();
+
+	UPROPERTY(ReplicatedUsing = OnRep_EquipmentState, VisibleAnywhere, Category = "Equipment")
 	TArray<EJTSEquipmentType> EquipmentSlots;
 
 	/** The selected slot controls the active tool but never disables passive equipment. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_EquipmentState, VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	int32 SelectedEquipmentSlotIndex = 0;
 };

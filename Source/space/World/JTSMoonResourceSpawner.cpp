@@ -4,8 +4,8 @@
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
-#include "Kismet/GameplayStatics.h"
 #include "Math/RandomStream.h"
 #include "space/Items/JTSResourceType.h"
 #include "space/Modes/JTSMoonGameMode.h"
@@ -73,7 +73,7 @@ void AJTSMoonResourceSpawner::BeginPlay()
 	const bool bMoonRuntimeWillInitialize = World != nullptr
 		&& (World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
 			|| AJTSSpaceWorldManager::FindSpaceWorldManager(this) != nullptr);
-	if (!bMoonRuntimeWillInitialize)
+	if (HasAuthority() && !bMoonRuntimeWillInitialize)
 	{
 		GenerateResources();
 	}
@@ -117,7 +117,7 @@ void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AJTSMoonSurfaceContro
 int32 AJTSMoonResourceSpawner::GenerateResources()
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr)
+	if (!HasAuthority() || World == nullptr)
 	{
 		return 0;
 	}
@@ -506,9 +506,22 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateLoca
 	TraceParams.AddIgnoredActor(this);
 
 	// Ground placement must only see Moon terrain, never gameplay actors or a prior resource node.
-	if (APawn* const LocalPlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	if (const AJTSMoonSurfaceController* const SurfaceController = SurfaceGameplayController.Get())
 	{
-		TraceParams.AddIgnoredActor(LocalPlayerPawn);
+		for (AJTSCharacter* const SurfacePlayer : SurfaceController->GetActivePlayers())
+		{
+			TraceParams.AddIgnoredActor(SurfacePlayer);
+		}
+	}
+	else
+	{
+		for (FConstPlayerControllerIterator ControllerIt = World->GetPlayerControllerIterator(); ControllerIt; ++ControllerIt)
+		{
+			if (APawn* const PlayerPawn = ControllerIt->Get() != nullptr ? ControllerIt->Get()->GetPawn() : nullptr)
+			{
+				TraceParams.AddIgnoredActor(PlayerPawn);
+			}
+		}
 	}
 	if (SpacecraftLandmark.IsValid())
 	{

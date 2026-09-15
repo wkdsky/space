@@ -3,12 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "space/Modes/JTSGameplayGameModeBase.h"
 #include "TimerManager.h"
 
 #include "JTSEarthGameMode.generated.h"
 
 class AJTSGameState;
+class AJTSPlayerController;
 class UWorld;
 
 /** Earth resource placement values owned by the Earth chapter ruleset. */
@@ -51,7 +52,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJTSEarthCollectionFinished);
  * Ruleset for the Earth launch prototype.
  */
 UCLASS()
-class SPACE_API AJTSEarthGameMode : public AGameModeBase
+class SPACE_API AJTSEarthGameMode : public AJTSGameplayGameModeBase
 {
 	GENERATED_BODY()
 
@@ -65,6 +66,8 @@ public:
 	/** Starts the one-time Earth resource collection phase for this level. */
 	UFUNCTION(BlueprintCallable, Category = "Earth|Collection")
 	void StartEarthCollection();
+
+	virtual bool RequestStartExpedition(AJTSPlayerController* RequestingController) override;
 
 	/** Returns whether the Earth resource collection phase is active. */
 	UFUNCTION(BlueprintPure, Category = "Earth|Collection")
@@ -116,7 +119,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Transition", meta = (AllowPrivateAccess = "true"))
 	TSoftObjectPtr<UWorld> PostEarthSpaceWorldLevel;
 
-	/** Legacy fallback retained for old Earth Blueprint configuration. New projects must configure PostEarthSpaceWorldLevel. */
+	/** Retained only so existing Blueprint assets deserialize. It is no longer used for travel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Transition", meta = (AllowPrivateAccess = "true"))
 	TSoftObjectPtr<UWorld> MoonLevel;
 
@@ -127,6 +130,10 @@ private:
 	/** Settings applied to the Earth level's JTSResourceSpawnArea before it generates pickups. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Resources", meta = (AllowPrivateAccess = "true", ShowOnlyInnerProperties))
 	FJTSEarthResourceSpawnSettings ResourceSpawnSettings;
+
+	/** Default co-op policy: every connected expedition member must board before launch. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Earth|Multiplayer", meta = (AllowPrivateAccess = "true"))
+	bool bRequireAllPlayersBoarded = true;
 
 	FTimerHandle EarthCollectionTimerHandle;
 	FTimerHandle LaunchSequenceTimerHandle;

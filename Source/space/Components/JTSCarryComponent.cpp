@@ -4,9 +4,12 @@
 
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 
+#include "Net/UnrealNetwork.h"
+
 UJTSCarryComponent::UJTSCarryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
 }
 
 bool UJTSCarryComponent::CanCarryResource(EJTSResourceType ResourceType) const
@@ -27,7 +30,7 @@ bool UJTSCarryComponent::TryAddResource(EJTSResourceType ResourceType)
 
 bool UJTSCarryComponent::TryAddResources(EJTSResourceType ResourceType, int32 ResourceAmount)
 {
-	if (!CanCarryResources(ResourceAmount))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !CanCarryResources(ResourceAmount))
 	{
 		return false;
 	}
@@ -46,7 +49,7 @@ bool UJTSCarryComponent::TryTakeAllResources(TMap<EJTSResourceType, int32>& OutR
 {
 	OutResources.Reset();
 
-	if (CarriedItems.IsEmpty())
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || CarriedItems.IsEmpty())
 	{
 		return false;
 	}
@@ -113,6 +116,10 @@ bool UJTSCarryComponent::CommitOverflowRemovalForCapacity(
 	int32 NewCapacity,
 	const TArray<EJTSResourceType>& ExpectedOverflowItems)
 {
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
 	TArray<EJTSResourceType> CurrentOverflowItems;
 	if (!GetOverflowItemsForCapacity(NewCapacity, CurrentOverflowItems)
 		|| CurrentOverflowItems != ExpectedOverflowItems)
@@ -134,6 +141,30 @@ bool UJTSCarryComponent::CommitOverflowRemovalForCapacity(
 void UJTSCarryComponent::NotifyCapacityChanged()
 {
 	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+}
+
+void UJTSCarryComponent::RestoreCarriedItems(const TArray<EJTSResourceType>& NewItems)
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+	CarriedItems = NewItems;
+	CarriedItems.SetNum(FMath::Min(CarriedItems.Num(), GetCarryCapacity()), EAllowShrinking::No);
+	RebuildCarriedResourceAmounts();
+	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+}
+
+void UJTSCarryComponent::OnRep_CarriedItems()
+{
+	RebuildCarriedResourceAmounts();
+	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+}
+
+void UJTSCarryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(UJTSCarryComponent, CarriedItems);
 }
 
 int32 UJTSCarryComponent::GetEquipmentCapacityBonus() const

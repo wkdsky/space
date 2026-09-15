@@ -43,8 +43,12 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UFUNCTION()
+	void OnRep_NestPresentation();
+
 	const IJTSMoonSurfaceGameplaySettings* GetMoonGameMode() const;
 	FVector GetVisualBoundsExtent() const;
 	bool ResolveMoonAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
@@ -73,9 +77,20 @@ private:
 
 	FTimerHandle MoonAntSpawnTimerHandle;
 	TArray<TWeakObjectPtr<AJTSMoonAntActor>> ActiveMoonAnts;
-	TWeakObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+	UPROPERTY(Replicated)
+	TObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
+
+	UPROPERTY(ReplicatedUsing = OnRep_NestPresentation)
 	FVector SurfaceUp = FVector::UpVector;
+
 	FVector BaseMoonAntNestMeshScale = FVector(0.68f, 0.68f, 0.20f);
+
+	UPROPERTY(ReplicatedUsing = OnRep_NestPresentation)
+	float NestVisualScale = 1.0f;
+
+	UPROPERTY(Replicated)
 	int32 PunchHitsRemaining = 3;
+
+	UPROPERTY(ReplicatedUsing = OnRep_NestPresentation)
 	bool bUsesRealPlanetSurface = false;
 };

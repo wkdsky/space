@@ -67,6 +67,10 @@ protected:
 private:
 	bool TryPickup(APawn* InteractingPawn);
 	void ApplyResourceAppearance();
+
+	UFUNCTION()
+	void OnRep_ResourceState();
+
 	void ShowFailureFeedback(const FString& FailureReason);
 	FText GetFailureFeedback() const;
 	static FString ResourceTypeToPromptName(EJTSResourceType InResourceType);
@@ -84,11 +88,11 @@ private:
 	TObjectPtr<USphereComponent> PickupTrigger;
 
 	/** Resource added to the interacting pawn when this pickup succeeds. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_ResourceState, EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSResourceType ResourceType = EJTSResourceType::Fuel;
 
 	/** Number of resource units awarded by this pickup. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
+	UPROPERTY(ReplicatedUsing = OnRep_ResourceState, EditAnywhere, BlueprintReadOnly, Category = "Resource", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
 	int32 ResourceAmount = 1;
 
 	UPROPERTY(Transient)
@@ -100,5 +104,8 @@ private:
 
 	double FailureFeedbackEndTime = 0.0;
 	FString FailureFeedbackText;
+	UPROPERTY(ReplicatedUsing = OnRep_ResourceState)
 	bool bPickupConsumed = false;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };

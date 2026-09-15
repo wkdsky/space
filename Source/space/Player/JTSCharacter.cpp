@@ -26,6 +26,7 @@
 #include "InputModifiers.h"
 #include "Math/BoxSphereBounds.h"
 #include "Math/RotationMatrix.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
@@ -34,6 +35,7 @@
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Modes/JTSSpaceWorldGameMode.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
@@ -92,7 +94,7 @@ AJTSCharacter::AJTSCharacter()
 	DebugVisual->SetGenerateOverlapEvents(false);
 	DebugVisual->SetCanEverAffectNavigation(false);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshAsset(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (DebugMeshAsset.Succeeded())
 	{
 		DebugVisual->SetStaticMesh(DebugMeshAsset.Object);
@@ -371,7 +373,7 @@ float AJTSCharacter::GetBoardingHoldRemainingTime() const
 
 bool AJTSCharacter::IsBoarded() const
 {
-	return BoardedSpacecraft.IsValid();
+	return IsValid(BoardedSpacecraft.Get());
 }
 
 AJTSSpacecraftActor* AJTSCharacter::GetNearbySpacecraft() const
@@ -426,7 +428,7 @@ void AJTSCharacter::NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft)
 
 bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 {
-	if (!IsValid(Spacecraft) || IsBoarded() || !IsValid(GetCapsuleComponent()))
+	if (!HasAuthority() || !IsValid(Spacecraft) || IsBoarded() || !IsValid(GetCapsuleComponent()))
 	{
 		return false;
 	}
@@ -442,26 +444,7 @@ bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 	bInteractKeyHeld = false;
 	NearbySpacecraft = Spacecraft;
 	BoardedSpacecraft = Spacecraft;
-
-	PreviousCapsuleCollisionEnabled = GetCapsuleComponent()->GetCollisionEnabled();
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	if (GetMesh() != nullptr)
-	{
-		bPreviousMeshVisible = GetMesh()->IsVisible();
-		GetMesh()->SetVisibility(false, true);
-	}
-	if (DebugVisual != nullptr)
-	{
-		bPreviousDebugVisualVisible = DebugVisual->IsVisible();
-		DebugVisual->SetVisibility(false, true);
-	}
-
-	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
-	{
-		MovementComponent->StopMovementImmediately();
-		MovementComponent->DisableMovement();
-	}
+	ApplyBoardedPresentation();
 
 	if (!AttachToComponent(BoardingPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale))
 	{
@@ -475,7 +458,7 @@ bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 
 void AJTSCharacter::ExitBoardedState(AJTSSpacecraftActor* Spacecraft)
 {
-	if (BoardedSpacecraft.Get() != Spacecraft)
+	if (!HasAuthority() || BoardedSpacecraft.Get() != Spacecraft)
 	{
 		return;
 	}
@@ -485,7 +468,7 @@ void AJTSCharacter::ExitBoardedState(AJTSSpacecraftActor* Spacecraft)
 
 void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
 {
-	if (BoardedSpacecraft.Get() == Spacecraft)
+	if (HasAuthority() && BoardedSpacecraft.Get() == Spacecraft)
 	{
 		RestoreAfterBoarding(Spacecraft, false);
 	}
@@ -516,6 +499,7 @@ void AJTSCharacter::BeginPlay()
 
 	InitializeThirdPersonCameraDistance();
 	ApplyCameraView();
+	BindPlayerState();
 	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
 
@@ -578,6 +562,7 @@ void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	CancelBoardingHold();
 	CancelEquipmentSlotHold();
 	UnbindGameState();
+	UnbindPlayerState();
 	UnregisterInputMappingContext();
 	if (IsValid(HealthComponent))
 	{
@@ -711,6 +696,12 @@ void AJTSCharacter::InitializeInput()
 	AddNegatedMapping(MoveRightAction, EKeys::A);
 }
 
+void AJTSCharacter::EnsureGameplayInputMapping()
+{
+	InitializeInput();
+	RegisterInputMappingContext();
+}
+
 void AJTSCharacter::RegisterInputMappingContext()
 {
 	if (InputMappingContext == nullptr)
@@ -783,6 +774,37 @@ void AJTSCharacter::UnbindGameState()
 		GameState->OnGameplayPhaseChanged.RemoveDynamic(this, &AJTSCharacter::HandleGameplayPhaseChanged);
 	}
 	BoundGameState.Reset();
+}
+
+void AJTSCharacter::BindPlayerState()
+{
+	AJTSPlayerState* const NewPlayerState = GetPlayerState<AJTSPlayerState>();
+	if (BoundPlayerState.Get() == NewPlayerState)
+	{
+		ApplyAvatarColor();
+		return;
+	}
+
+	if (AJTSPlayerState* const PreviousPlayerState = BoundPlayerState.Get())
+	{
+		PreviousPlayerState->OnNetworkStateChanged.RemoveDynamic(this, &AJTSCharacter::HandlePlayerStateNetworkChanged);
+	}
+
+	BoundPlayerState = NewPlayerState;
+	if (NewPlayerState != nullptr)
+	{
+		NewPlayerState->OnNetworkStateChanged.AddDynamic(this, &AJTSCharacter::HandlePlayerStateNetworkChanged);
+	}
+	ApplyAvatarColor();
+}
+
+void AJTSCharacter::UnbindPlayerState()
+{
+	if (AJTSPlayerState* const BoundState = BoundPlayerState.Get())
+	{
+		BoundState->OnNetworkStateChanged.RemoveDynamic(this, &AJTSCharacter::HandlePlayerStateNetworkChanged);
+	}
+	BoundPlayerState.Reset();
 }
 
 void AJTSCharacter::MoveForward(const FInputActionValue& Value)
@@ -948,7 +970,10 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 		bInteractKeyHeld = false;
 		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
 		{
-			Spacecraft->TryDisembarkPlayer(this);
+			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+			{
+				PlayerController->ServerRequestDisembarkSpacecraft(Spacecraft);
+			}
 		}
 		return;
 	}
@@ -1541,12 +1566,12 @@ void AJTSCharacter::CompleteBoardingHold()
 		return;
 	}
 
-	const bool bBoarded = Spacecraft->TryBoardPlayer(this);
-	CancelBoardingHold();
-	if (!bBoarded)
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 	{
-		bInteractKeyHeld = false;
+		PlayerController->ServerRequestBoardSpacecraft(Spacecraft);
 	}
+	CancelBoardingHold();
+	bInteractKeyHeld = false;
 }
 
 AJTSSpacecraftActor* AJTSCharacter::GetCurrentBoardingSpacecraft()
@@ -1622,21 +1647,8 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 		}
 	}
 
-	if (GetMesh() != nullptr)
-	{
-		GetMesh()->SetVisibility(bPreviousMeshVisible, true);
-	}
-	if (DebugVisual != nullptr)
-	{
-		DebugVisual->SetVisibility(bPreviousDebugVisualVisible, true);
-	}
-	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
-	{
-		MovementComponent->SetMovementMode(MOVE_Walking);
-		MovementComponent->MaxWalkSpeed = WalkingSpeed;
-	}
-
 	BoardedSpacecraft = nullptr;
+	ApplyBoardedPresentation();
 	if (NearbySpacecraft.Get() == Spacecraft)
 	{
 		NearbySpacecraft = nullptr;
@@ -1665,6 +1677,70 @@ bool AJTSCharacter::FindSafeDisembarkLocation(
 	}
 
 	return FindLegacySafeDisembarkLocation(Spacecraft, OutLocation);
+}
+
+void AJTSCharacter::OnRep_BoardedSpacecraft()
+{
+	ApplyBoardedPresentation();
+}
+
+void AJTSCharacter::ApplyBoardedPresentation()
+{
+	const bool bNowBoarded = BoardedSpacecraft != nullptr;
+	if (UCapsuleComponent* const Capsule = GetCapsuleComponent())
+	{
+		if (bNowBoarded)
+		{
+			PreviousCapsuleCollisionEnabled = Capsule->GetCollisionEnabled();
+			Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+		else
+		{
+			Capsule->SetCollisionEnabled(PreviousCapsuleCollisionEnabled);
+		}
+	}
+	if (GetMesh() != nullptr)
+	{
+		if (bNowBoarded) { bPreviousMeshVisible = GetMesh()->IsVisible(); GetMesh()->SetVisibility(false, true); }
+		else { GetMesh()->SetVisibility(bPreviousMeshVisible, true); }
+	}
+	if (DebugVisual != nullptr)
+	{
+		if (bNowBoarded) { bPreviousDebugVisualVisible = DebugVisual->IsVisible(); DebugVisual->SetVisibility(false, true); }
+		else { DebugVisual->SetVisibility(bPreviousDebugVisualVisible, true); }
+	}
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		if (bNowBoarded) { MovementComponent->StopMovementImmediately(); MovementComponent->DisableMovement(); }
+		else { MovementComponent->SetMovementMode(MOVE_Walking); MovementComponent->MaxWalkSpeed = WalkingSpeed; }
+	}
+}
+
+void AJTSCharacter::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	BindPlayerState();
+}
+
+void AJTSCharacter::HandlePlayerStateNetworkChanged()
+{
+	ApplyAvatarColor();
+}
+
+void AJTSCharacter::ApplyAvatarColor()
+{
+	const AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	if (State != nullptr && DebugVisual != nullptr)
+	{
+		const FLinearColor AvatarColor = State->GetAvatarLinearColor();
+		DebugVisual->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(AvatarColor.R, AvatarColor.G, AvatarColor.B));
+	}
+}
+
+void AJTSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSCharacter, BoardedSpacecraft);
 }
 
 bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
@@ -1937,6 +2013,14 @@ void AJTSCharacter::HandleHealthDeath(AController* InstigatorController, AActor*
 {
 	static_cast<void>(InstigatorController);
 	static_cast<void>(DamageCauser);
+
+	if (HasAuthority())
+	{
+		if (AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
+		{
+			State->SetExpeditionStatus(EJTSPlayerExpeditionStatus::Dead);
+		}
+	}
 
 	if (UWorld* const World = GetWorld())
 	{

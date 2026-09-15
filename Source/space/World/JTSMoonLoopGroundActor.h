@@ -13,7 +13,10 @@ class UProceduralMeshComponent;
 class USceneComponent;
 struct FPropertyChangedEvent;
 
-/** Reusable 3x3 ring of flat gameplay tiles around the continuously moving local player. */
+/**
+ * Fake Moon tile ring. The authoritative server keeps a canonical map-centered collision ring;
+ * client instances may recycle presentation/collision proxies around their own local viewpoint.
+ */
 UCLASS()
 class SPACE_API AJTSMoonLoopGroundActor : public AActor
 {

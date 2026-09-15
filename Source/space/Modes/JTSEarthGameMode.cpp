@@ -4,23 +4,24 @@
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/SoftObjectPath.h"
-#include "space/Core/JTSGameInstance.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/World/JTSResourceSpawnArea.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
+#include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/UI/JTSPrototypeHUD.h"
 
 AJTSEarthGameMode::AJTSEarthGameMode()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	DefaultPawnClass = AJTSCharacter::StaticClass();
-	PlayerControllerClass = AJTSPlayerController::StaticClass();
-	GameStateClass = AJTSGameState::StaticClass();
 	HUDClass = AJTSPrototypeHUD::StaticClass();
+	PostEarthSpaceWorldLevel = TSoftObjectPtr<UWorld>(FSoftObjectPath(JTSMapPaths::SpaceWorldAsset));
 }
 
 float AJTSEarthGameMode::GetEarthCollectionDuration() const
@@ -31,6 +32,10 @@ float AJTSEarthGameMode::GetEarthCollectionDuration() const
 void AJTSEarthGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client)
+	{
+		return;
+	}
 
 	bEarthCollectionStarted = false;
 	bEarthCollectionFinished = false;
@@ -48,13 +53,25 @@ void AJTSEarthGameMode::BeginPlay()
 	if (AJTSGameState* const JTSGameState = GetJTSGameState())
 	{
 		JTSGameState->SetFailureReason(EJTSFailureReason::None);
+		JTSGameState->SetEarthLaunchFuelRequirement(GetMinimumFuelRequired());
 		JTSGameState->SetEarthCollectionEndTime(0.0);
-		JTSGameState->SetGameplayPhase(EJTSGameplayPhase::WaitingToStart);
+		// L_EarthLaunchPrototype is never a ready room. Arrival from L_PreLaunchLobby begins
+		// the server-authoritative collection chapter immediately, so no lobby widget/HUD state
+		// can leak across this boundary.
+		StartEarthCollection();
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("Jump to Space could not enter Waiting To Start because its GameState is unavailable."));
 	}
+}
+
+bool AJTSEarthGameMode::RequestStartExpedition(AJTSPlayerController* RequestingController)
+{
+	// Launch is intentionally owned by AJTSPreLaunchLobbyGameMode. Earth has no secondary
+	// WaitingToStart state that a client could use to re-open a lobby or restart a chapter.
+	(void)RequestingController;
+	return false;
 }
 
 void AJTSEarthGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -71,7 +88,7 @@ void AJTSEarthGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AJTSEarthGameMode::StartEarthCollection()
 {
-	if (bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client || bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
 		return;
 	}
@@ -89,18 +106,42 @@ void AJTSEarthGameMode::StartEarthCollection()
 		return;
 	}
 
-	if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>())
+	if (UJTSExpeditionSubsystem* const Expedition = World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 	{
-		GameInstance->ClearPersistedSpacecraftStorage();
+		if (!Expedition->HasActiveExpedition())
+		{
+			Expedition->StartNewExpedition(FGuid::NewGuid().ToString(EGuidFormats::Digits));
+		}
+		Expedition->SetCurrentMap(World->GetPackage()->GetName());
+		Expedition->SetCurrentCheckpoint(TEXT("Earth Collection"));
+		JTSGameState->SetExpeditionId(Expedition->GetSnapshot().ExpeditionId);
 	}
 
 	bEarthCollectionStarted = true;
 	JTSGameState->SetFailureReason(EJTSFailureReason::None);
+	JTSGameState->SetEarthLaunchFuelRequirement(GetMinimumFuelRequired());
 
 	const float CollectionDuration = GetEarthCollectionDuration();
 	JTSGameState->SetEarthCollectionEndTime(
-		static_cast<double>(World->GetTimeSeconds()) + static_cast<double>(CollectionDuration));
+		JTSGameState->GetSynchronizedServerTimeSeconds() + static_cast<double>(CollectionDuration));
 	JTSGameState->SetGameplayPhase(EJTSGameplayPhase::EarthCollection);
+	if (UJTSOnlineSessionSubsystem* const Online = World->GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>())
+	{
+		Online->UpdateExpeditionPhase(EJTSGameplayPhase::EarthCollection);
+	}
+	MarkAllPlayersActive();
+	// Lobby movement is blocked through its local UI input mode, never by keeping the pawn disabled.
+	// Restore a valid server movement mode here as a defensive boundary for old seamless-travel pawns.
+	for (AJTSPlayerState* const PlayerState : GetActivePlayerStates())
+	{
+		if (AJTSCharacter* const PlayerCharacter = PlayerState != nullptr ? Cast<AJTSCharacter>(PlayerState->GetPawn()) : nullptr)
+		{
+			if (UCharacterMovementComponent* const Movement = PlayerCharacter->GetCharacterMovement(); Movement != nullptr && Movement->MovementMode == MOVE_None)
+			{
+				Movement->SetMovementMode(MOVE_Walking);
+			}
+		}
+	}
 
 	AJTSResourceSpawnArea* ResourceSpawnArea = nullptr;
 	int32 ResourceSpawnAreaCount = 0;
@@ -145,11 +186,6 @@ void AJTSEarthGameMode::StartEarthCollection()
 			false);
 	}
 
-	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(World->GetFirstPlayerController()))
-	{
-		PlayerController->ApplyEarthCollectionInputMode();
-	}
-
 	if (RemainingDuration <= 0.0f)
 	{
 		FinishEarthCollection();
@@ -180,7 +216,7 @@ float AJTSEarthGameMode::GetMoonTransitionDelay() const
 
 void AJTSEarthGameMode::FinishEarthCollection()
 {
-	if (!bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
+	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client || !bEarthCollectionStarted || bEarthCollectionFinished || bLaunchSequenceStarted || bLaunchOutcomeResolved)
 	{
 		return;
 	}
@@ -194,10 +230,8 @@ void AJTSEarthGameMode::FinishEarthCollection()
 
 	AJTSSpacecraftActor* Spacecraft = nullptr;
 	int32 SpacecraftCount = 0;
-	APawn* PlayerPawn = nullptr;
 	if (UWorld* const World = GetWorld())
 	{
-		PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
 		for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It)
 		{
 			if (!IsValid(*It))
@@ -217,9 +251,22 @@ void AJTSEarthGameMode::FinishEarthCollection()
 		UE_LOG(LogTemp, Warning, TEXT("Jump to Space found %d spacecraft actors at the Earth collection deadline; using the first valid spacecraft only."), SpacecraftCount);
 	}
 
-	const bool bPlayerBoardedAtDeadline = IsValid(Spacecraft)
-		&& IsValid(PlayerPawn)
-		&& Spacecraft->IsPlayerBoarded(PlayerPawn);
+	bool bPlayerBoardedAtDeadline = bRequireAllPlayersBoarded ? IsValid(Spacecraft) : false;
+	int32 BoardedPlayerCount = 0;
+	for (AJTSPlayerState* const PlayerState : GetActivePlayerStates())
+	{
+		APawn* const PlayerPawn = PlayerState != nullptr ? PlayerState->GetPawn() : nullptr;
+		const bool bThisPlayerBoarded = IsValid(Spacecraft) && IsValid(PlayerPawn) && Spacecraft->IsPlayerBoarded(PlayerPawn);
+		BoardedPlayerCount += bThisPlayerBoarded ? 1 : 0;
+		if (bRequireAllPlayersBoarded)
+		{
+			bPlayerBoardedAtDeadline &= bThisPlayerBoarded;
+		}
+		else
+		{
+			bPlayerBoardedAtDeadline |= bThisPlayerBoarded;
+		}
+	}
 
 	if (AJTSGameState* const JTSGameState = GetJTSGameState())
 	{
@@ -332,12 +379,12 @@ void AJTSEarthGameMode::ResolveLaunchOutcome()
 	{
 		if (bHasEnoughFuel)
 		{
-			UJTSGameInstance* const GameInstance = World != nullptr
-				? World->GetGameInstance<UJTSGameInstance>()
+			UJTSExpeditionSubsystem* const Expedition = World != nullptr
+				? World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>()
 				: nullptr;
-			if (!IsValid(GameInstance))
+			if (!IsValid(Expedition))
 			{
-				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not preserve spacecraft Storage because the configured GameInstance is not UJTSGameInstance."));
+				UE_LOG(LogTemp, Error, TEXT("Jump to Space could not preserve spacecraft storage because the Expedition subsystem is unavailable."));
 				JTSGameState->SetFailureReason(EJTSFailureReason::InvalidGameInstance);
 				JTSGameState->SetGameplayPhase(EJTSGameplayPhase::EarthCaptureFailure);
 				return;
@@ -360,8 +407,9 @@ void AJTSEarthGameMode::ResolveLaunchOutcome()
 				LaunchFuelCost,
 				Spacecraft->GetFuelCount());
 
-			GameInstance->SetPersistedSpacecraftStorage(Spacecraft->GetStorage());
-			GameInstance->SetPersistedSpacecraftClass(Spacecraft->GetClass());
+			Expedition->SetSpacecraftSnapshot(Spacecraft->GetClass(), Spacecraft->GetStorage());
+			Expedition->CaptureWorldState(JTSGameState, Spacecraft);
+			Expedition->RequestSave();
 			UE_LOG(
 				LogTemp,
 				Log,
@@ -443,7 +491,10 @@ void AJTSEarthGameMode::TravelToMoon()
 		return;
 	}
 
-	UGameplayStatics::OpenLevel(this, FName(*SpaceWorldLevelPackageName));
+	if (UWorld* const World = GetWorld())
+	{
+		World->ServerTravel(SpaceWorldLevelPackageName, true);
+	}
 }
 
 bool AJTSEarthGameMode::ResolvePostEarthSpaceWorldLevelPackageName(FString& OutPackageName) const
@@ -454,18 +505,18 @@ bool AJTSEarthGameMode::ResolvePostEarthSpaceWorldLevelPackageName(FString& OutP
 	if (SpaceWorldLevelPath.IsValid())
 	{
 		OutPackageName = SpaceWorldLevelPath.GetLongPackageName();
+		if (OutPackageName == JTSMapPaths::LegacyMoonPrototype)
+		{
+			UE_LOG(LogTemp, Error, TEXT("JumpToSpace Earth launch rejected L_MoonPrototype_Tmp. Configure PostEarthSpaceWorldLevel with L_SpaceWorld."));
+			OutPackageName.Reset();
+			return false;
+		}
 		return !OutPackageName.IsEmpty();
 	}
 
-	const FSoftObjectPath LegacyMoonLevelPath = MoonLevel.ToSoftObjectPath();
-	if (!LegacyMoonLevelPath.IsValid())
-	{
-		return false;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Earth launch is using legacy MoonLevel. Configure PostEarthSpaceWorldLevel with L_SpaceWorld."));
-	OutPackageName = LegacyMoonLevelPath.GetLongPackageName();
-	return !OutPackageName.IsEmpty();
+	UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Earth launch has no PostEarthSpaceWorldLevel override; using the canonical L_SpaceWorld map."));
+	OutPackageName = JTSMapPaths::SpaceWorld;
+	return true;
 }
 
 AJTSGameState* AJTSEarthGameMode::GetJTSGameState() const

@@ -50,6 +50,7 @@ public:
 	/** IJTSPlanetSurfaceGameplay implementation used by SpaceWorld GameMode after arrival completes. */
 	virtual bool SupportsPlanet(const AJTSPlanetAnchor* Planet) const override;
 	virtual bool InitializeSurfaceGameplay(const FJTSSurfaceGameplayContext& Context) override;
+	virtual void RegisterSurfacePlayer(AJTSCharacter* Player) override;
 	virtual void ShutdownSurfaceGameplay() override;
 	virtual bool IsSurfaceGameplayReady() const override;
 
@@ -84,6 +85,7 @@ public:
 	/** Registers the persistent player/ship owned by SpaceWorldGameMode as part of this active surface. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Surface")
 	void RegisterSurfaceRuntimeActor(AActor* RuntimeActor);
+	TArray<AJTSCharacter*> GetActivePlayers() const;
 
 	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes MoonAnts or resources. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Real Surface")
@@ -184,7 +186,7 @@ private:
 
 	TWeakObjectPtr<AJTSMoonGameMode> LegacySettingsSource;
 	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
-	TWeakObjectPtr<AJTSCharacter> CachedPlayer;
+	TArray<TWeakObjectPtr<AJTSCharacter>> ActivePlayers;
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSMoonSurfaceGameplayData> ActiveMoonGameplayData;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;

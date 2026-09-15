@@ -1,10 +1,10 @@
 #include "JTSMoonWorldActor.h"
 
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "space/World/JTSMoonSurfaceController.h"
 
 namespace
@@ -16,6 +16,22 @@ namespace
 	const FName TransitionWidthName(TEXT("TransitionWidth"));
 	const FName CurveRadiusName(TEXT("CurveRadius"));
 	const FName BendMaxDistanceName(TEXT("BendMaxDistance"));
+
+	APawn* GetLocalPresentationPawn(UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
+			{
+				return Controller->GetPawn();
+			}
+		}
+		return nullptr;
+	}
 }
 
 AJTSMoonWorldActor::AJTSMoonWorldActor()
@@ -207,7 +223,7 @@ void AJTSMoonWorldActor::UpdateBendMaterialParameters()
 	}
 
 	UWorld* const World = GetWorld();
-	if (World == nullptr || BendParameterCollection == nullptr)
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer || BendParameterCollection == nullptr)
 	{
 		if (!bMissingCollectionLogged && BendParameterCollection == nullptr)
 		{
@@ -223,7 +239,9 @@ void AJTSMoonWorldActor::UpdateBendMaterialParameters()
 		return;
 	}
 
-	const APawn* const LocalPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	// Material parameter collections are local presentation state; they must not influence
+	// server gameplay and are anchored only to this machine's local player.
+	const APawn* const LocalPawn = GetLocalPresentationPawn(World);
 	const FVector PlayerLocation = IsValid(LocalPawn) ? LocalPawn->GetActorLocation() : FVector::ZeroVector;
 	PublishScalar(Instance, BendOriginXName, PlayerLocation.X, CachedBendOriginX, bHasCachedBendOriginX);
 	PublishScalar(Instance, BendOriginYName, PlayerLocation.Y, CachedBendOriginY, bHasCachedBendOriginY);

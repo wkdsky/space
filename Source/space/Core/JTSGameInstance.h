@@ -4,25 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-#include "space/Items/JTSResourceTypes.h"
+#include "space/Core/JTSExpeditionTypes.h"
 
 #include "JTSGameInstance.generated.h"
 
-class AJTSSpacecraftActor;
-
-UENUM(BlueprintType)
-enum class EJTSAvatarColor : uint8
-{
-	Blue UMETA(DisplayName = "Blue"),
-	Orange UMETA(DisplayName = "Orange"),
-	Green UMETA(DisplayName = "Green")
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnJTSExpeditionSuppliesChanged, float, Food, float, Water);
-
-/**
- * Native cross-level root for Jump to Space runtime state.
- */
+/** Local-only preferences. Shared expedition state lives in UJTSExpeditionSubsystem instead. */
 UCLASS()
 class SPACE_API UJTSGameInstance : public UGameInstance
 {
@@ -30,6 +16,7 @@ class SPACE_API UJTSGameInstance : public UGameInstance
 
 public:
 	virtual void Init() override;
+	virtual void Shutdown() override;
 
 	UFUNCTION(BlueprintPure, Category = "Settings")
 	EJTSAvatarColor GetSelectedAvatarColor() const;
@@ -40,67 +27,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Settings")
 	FLinearColor GetSelectedAvatarLinearColor() const;
 
-	/** Returns the resource amount stored in the cross-level spacecraft snapshot. */
-	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
-	int32 GetPersistedSpacecraftResourceAmount(EJTSResourceType ResourceType) const;
-
-	/** Returns whether a spacecraft storage snapshot is available for the next persistent space-world travel. */
-	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
-	bool HasPersistedSpacecraftStorage() const;
-
-	/** Replaces the cross-level spacecraft storage snapshot after a successful launch or active-space update. */
-	void SetPersistedSpacecraftStorage(const TMap<EJTSResourceType, int32>& NewStorage);
-
-	/** Returns the cross-level spacecraft storage snapshot. */
-	const TMap<EJTSResourceType, int32>& GetPersistedSpacecraftStorage() const;
-
-	/** Clears the completed or failed mission's travel spacecraft snapshot, including storage and class, before a new Earth run. */
-	void ClearPersistedSpacecraftStorage();
-
-	/** Stores the runtime spacecraft class used for the current Earth-to-SpaceWorld travel. */
-	void SetPersistedSpacecraftClass(TSubclassOf<AJTSSpacecraftActor> NewSpacecraftClass);
-
-	/** Returns the runtime spacecraft class snapshot for the current travel, when one exists. */
-	TSubclassOf<AJTSSpacecraftActor> GetPersistedSpacecraftClass() const;
-
-	/** Returns whether the current travel has an actual Earth spacecraft class snapshot. */
-	bool HasPersistedSpacecraftClass() const;
-
-	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
-	float GetExpeditionFood() const;
-
-	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
-	float GetExpeditionWater() const;
-
-	UFUNCTION(BlueprintCallable, Category = "Expedition|Supplies")
-	void SetExpeditionSupplies(float NewFood, float NewWater);
-
-	UFUNCTION(BlueprintCallable, Category = "Expedition|Supplies")
-	void ConsumeExpeditionSupplies(float FoodAmount, float WaterAmount);
-
-	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
-	bool IsFoodDepleted() const;
-
-	UFUNCTION(BlueprintPure, Category = "Expedition|Supplies")
-	bool IsWaterDepleted() const;
-
-	UPROPERTY(BlueprintAssignable, Category = "Expedition|Supplies")
-	FOnJTSExpeditionSuppliesChanged OnExpeditionSuppliesChanged;
-
 private:
-	static float NormalizeExpeditionResource(float Value);
-	static bool IsSupportedResourceType(EJTSResourceType ResourceType);
-
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Settings", meta = (AllowPrivateAccess = "true"))
 	EJTSAvatarColor SelectedAvatarColor = EJTSAvatarColor::Blue;
-
-	/** Travel-only snapshot. The active spacecraft owns the live Storage in each level. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
-	TMap<EJTSResourceType, int32> PersistedSpacecraftStorage;
-
-	/** Travel-only class snapshot. This preserves the actual Earth spacecraft Blueprint across OpenLevel. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Ship|Travel", meta = (AllowPrivateAccess = "true"))
-	TSubclassOf<AJTSSpacecraftActor> PersistedSpacecraftClass;
-
-	bool bHasPersistedSpacecraftStorage = false;
 };

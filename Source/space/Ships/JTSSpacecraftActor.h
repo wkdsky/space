@@ -6,6 +6,7 @@
 #include "GameFramework/Pawn.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Core/JTSExpeditionTypes.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSResourceTypes.h"
 #include "space/World/JTSPlanetLandingTypes.h"
@@ -13,10 +14,12 @@
 #include "JTSSpacecraftActor.generated.h"
 
 class AJTSCharacter;
+class AJTSPlayerState;
 class AJTSPlanetAnchor;
 class AJTSPlanetLandingSite;
 class AJTSPlanetSurfaceAnchor;
 class AController;
+class APlayerController;
 class UBoxComponent;
 class UCameraComponent;
 class UEnhancedInputLocalPlayerSubsystem;
@@ -59,6 +62,7 @@ public:
 	/** Immediately disembarks the currently boarded character during active exploration. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryDisembarkPlayer(APawn* InteractingPawn);
+	bool TryDisembarkPlayerForController(APlayerController* PlayerController);
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool IsPlayerBoarded(const APawn* InteractingPawn) const;
@@ -68,6 +72,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	AJTSCharacter* GetBoardedPlayer() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	const TArray<FJTSSpacecraftOccupantState>& GetOccupants() const { return Occupants; }
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	AJTSPlayerState* GetDriverPlayerState() const { return DriverPlayerState; }
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool IsPawnInBoardingRange(const APawn* InteractingPawn) const;
@@ -247,11 +257,26 @@ public:
 	/** Returns the active spacecraft storage, keyed by resource type. */
 	const TMap<EJTSResourceType, int32>& GetStorage() const;
 
-	/** Restores the GameInstance snapshot once this ship becomes the active persistent runtime spacecraft. */
+	/** Server-only restore path used by UJTSExpeditionSubsystem after seamless travel. */
+	void RestoreStorageFromExpedition(const TMap<EJTSResourceType, int32>& NewStorage);
+
+	/** Restores the server-owned expedition snapshot once this ship becomes the active persistent runtime spacecraft. */
 	void RestorePersistentStorage();
 
 	/** Compatibility entry point for existing Moon surface code. */
 	void RestoreStorageForMoonTravel();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Driver intent only. Server clamps and applies input to the authoritative movement component. */
+	UFUNCTION(Server, Unreliable)
+	void ServerSetFlightInput(const FJTSSpacecraftInputState& InputState);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestLanding();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestSurfaceTakeoff();
 
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
@@ -311,6 +336,22 @@ private:
 	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
 	void HandleAssistedLandingCompleted();
 	void HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure);
+	void SubmitFlightInput();
+	void ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState);
+	void SyncReplicatedStorage();
+	void RebuildStorageFromReplicatedArray();
+	AJTSCharacter* FindBoardedCharacterForPlayerState(const AJTSPlayerState* InPlayerState) const;
+	bool IsPlayerStateOccupying(const AJTSPlayerState* InPlayerState) const;
+	void RemoveOccupant(const AJTSPlayerState* InPlayerState);
+
+	UFUNCTION()
+	void OnRep_Storage();
+
+	UFUNCTION()
+	void OnRep_Occupants();
+
+	UFUNCTION()
+	void OnRep_FlightState();
 
 	UFUNCTION()
 	void HandleFlightBoostStateChanged(bool bIsBoosting);
@@ -436,6 +477,15 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TMap<EJTSResourceType, int32> Storage;
 
+	UPROPERTY(ReplicatedUsing = OnRep_Storage, VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
+	TArray<FJTSResourceAmount> ReplicatedStorage;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Occupants, VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
+	TArray<FJTSSpacecraftOccupantState> Occupants;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Occupants, VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlayerState> DriverPlayerState;
+
 	/** Character currently attached to this spacecraft, if any. */
 	UPROPERTY(Transient)
 	TObjectPtr<AJTSCharacter> BoardedPlayer;
@@ -486,24 +536,24 @@ private:
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;
 
 	/** Transient real-planet parking state. Earth and Legacy Fake Moon spacecraft leave this unset. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> GroundedPlanet;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	bool bIsGroundedOnPlanet = false;
 
 	/** Planet that supplies free-flight gravity. It stays valid while the craft is Flying. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> FlightPlanet;
 
 	/** Site whose accepted rule set produced the current landed state. Null for legacy surface snaps. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetLandingSite> ActiveLandingSite;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	EJTSSpacecraftFlightState FlightState = EJTSSpacecraftFlightState::Flying;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	EJTSLandingValidationFailure LastLandingFailure = EJTSLandingValidationFailure::None;
 
 	TWeakObjectPtr<AJTSPlanetLandingSite> PendingLandingSite;
@@ -513,4 +563,8 @@ private:
 
 	bool bPersistedStorageRestoreAttempted = false;
 	bool bFlightCameraDistanceInitialized = false;
+	FJTSSpacecraftInputState LocalFlightInput;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "1", ClampMax = "4"))
+	int32 MaximumOccupants = 4;
 };

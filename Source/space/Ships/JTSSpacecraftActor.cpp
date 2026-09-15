@@ -14,6 +14,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputAction.h"
@@ -25,12 +26,13 @@
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
-#include "space/Core/JTSGameInstance.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
+#include "space/Player/JTSPlayerState.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
@@ -39,6 +41,7 @@
 #include "space/World/JTSSpaceWorldManager.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
 #include "TimerManager.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -91,6 +94,11 @@ namespace
 AJTSSpacecraftActor::AJTSSpacecraftActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	bReplicates = true;
+	SetReplicateMovement(true);
+	bAlwaysRelevant = true;
+	SetNetUpdateFrequency(30.0f);
+	SetMinNetUpdateFrequency(10.0f);
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -294,9 +302,17 @@ void AJTSSpacecraftActor::BeginPlay()
 	}
 
 	RestorePersistentStorage();
+	if (HasAuthority())
+	{
+		SyncReplicatedStorage();
+	}
 
 	if (AJTSGameState* const JTSGameState = World->GetGameState<AJTSGameState>())
 	{
+		if (HasAuthority() && JTSGameState->GetActiveSpacecraft() == nullptr)
+		{
+			JTSGameState->SetActiveSpacecraft(this);
+		}
 		JTSGameState->OnGameplayPhaseChanged.AddDynamic(this, &AJTSSpacecraftActor::HandleGameplayPhaseChanged);
 	}
 
@@ -352,18 +368,26 @@ void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 
-	AJTSCharacter* const BoardedCharacter = BoardedPlayer.Get();
 	AJTSCharacter* const NearbyCharacter = NearbyPlayer.Get();
-	if (BoardedCharacter != nullptr)
+	for (const FJTSSpacecraftOccupantState& Occupant : Occupants)
 	{
-		BoardedCharacter->HandleSpacecraftInvalidated(this);
+		if (HasAuthority() && Occupant.PlayerState != nullptr)
+		{
+			Occupant.PlayerState->SetBoarded(false);
+		}
+		if (AJTSCharacter* const BoardedCharacter = FindBoardedCharacterForPlayerState(Occupant.PlayerState))
+		{
+			BoardedCharacter->HandleSpacecraftInvalidated(this);
+		}
 	}
-	if (NearbyCharacter != nullptr && NearbyCharacter != BoardedCharacter)
+	if (NearbyCharacter != nullptr && !NearbyCharacter->IsBoarded())
 	{
 		NearbyCharacter->HandleSpacecraftInvalidated(this);
 	}
 
 	BoardedPlayer = nullptr;
+	Occupants.Reset();
+	DriverPlayerState = nullptr;
 	NearbyPlayer = nullptr;
 
 	Super::EndPlay(EndPlayReason);
@@ -511,57 +535,44 @@ void AJTSSpacecraftActor::UnregisterFlightInputMappingContext()
 
 void AJTSSpacecraftActor::FlightMoveForward(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetForwardInput(Value.Get<float>());
-	}
+	LocalFlightInput.Throttle = Value.Get<float>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetStrafeInput(Value.Get<float>());
-	}
+	LocalFlightInput.Strafe = Value.Get<float>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightMoveVertical(const FInputActionValue& Value)
 {
 	if (Value.Get<float>() > KINDA_SMALL_NUMBER && IsSpaceWorldSurfaceActive())
 	{
-		BeginSurfaceTakeoff();
+		if (HasAuthority()) ServerRequestSurfaceTakeoff_Implementation(); else ServerRequestSurfaceTakeoff();
 	}
-
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetVerticalInput(Value.Get<float>());
-	}
+	LocalFlightInput.Vertical = Value.Get<float>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightRoll(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetRollInput(Value.Get<float>());
-	}
+	LocalFlightInput.Roll = Value.Get<float>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightLookYaw(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->AddYawInput(Value.Get<float>());
-	}
+	LocalFlightInput.Yaw = Value.Get<float>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightLookPitch(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
-		const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
-		FlightMovementComponent->AddPitchInput(Value.Get<float>() * PitchDirection);
-	}
+	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
+	const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
+	LocalFlightInput.Pitch = Value.Get<float>() * PitchDirection;
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightCameraZoom(const FInputActionValue& Value)
@@ -571,41 +582,33 @@ void AJTSSpacecraftActor::FlightCameraZoom(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightBoostStarted(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetBoosting(Value.Get<bool>());
-	}
+	LocalFlightInput.bBoosting = Value.Get<bool>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightBoostStopped(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetBoosting(false);
-	}
+	LocalFlightInput.bBoosting = false;
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightBrakeStarted(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetBraking(Value.Get<bool>());
-	}
+	LocalFlightInput.bBraking = Value.Get<bool>();
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightBrakeStopped(const FInputActionValue& Value)
 {
-	if (FlightMovementComponent != nullptr)
-	{
-		FlightMovementComponent->SetBraking(false);
-	}
+	LocalFlightInput.bBraking = false;
+	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightLandingStarted(const FInputActionValue& Value)
 {
 	if (Value.Get<bool>())
 	{
-		RequestLanding();
+		if (HasAuthority()) ServerRequestLanding_Implementation(); else ServerRequestLanding();
 	}
 }
 
@@ -616,9 +619,9 @@ void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
 		return;
 	}
 
-	if (AJTSCharacter* const Character = BoardedPlayer.Get())
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 	{
-		TryDisembarkPlayer(Character);
+		PlayerController->ServerRequestDisembarkSpacecraft(this);
 	}
 }
 
@@ -659,85 +662,110 @@ void AJTSSpacecraftActor::HandleFlightBoostStateChanged(bool bIsBoosting)
 
 bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	return DepositPlayerResources(Cast<AJTSCharacter>(InteractingPawn));
 }
 
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 {
-	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
+	if (!HasAuthority())
+	{
+		return false;
+	}
+	AJTSCharacter* const InteractingCharacter = Cast<AJTSCharacter>(InteractingPawn);
+	AJTSPlayerState* const OccupantPlayerState = IsValid(InteractingCharacter) ? InteractingCharacter->GetPlayerState<AJTSPlayerState>() : nullptr;
 	const bool bEarthCollectionActive = IsEarthCollectionActive();
 	const bool bMoonExplorationActive = IsMoonExplorationActive();
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
 	if (bMoonExplorationActive
 		|| (!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
-		|| !IsValid(Character)
-		|| HasBoardedPlayer()
-		|| !IsPawnInBoardingRange(Character))
+		|| !IsValid(InteractingCharacter)
+		|| !IsValid(OccupantPlayerState)
+		|| IsPlayerStateOccupying(OccupantPlayerState)
+		|| Occupants.Num() >= FMath::Clamp(MaximumOccupants, 1, 4)
+		|| !IsPawnInBoardingRange(InteractingCharacter))
 	{
 		return false;
 	}
 
 	APlayerController* const PlayerController = bSpaceWorldSurfaceActive
-		? Cast<APlayerController>(Character->GetController())
+		? Cast<APlayerController>(InteractingCharacter->GetController())
 		: nullptr;
 	if (bSpaceWorldSurfaceActive && !IsValid(PlayerController))
 	{
 		return false;
 	}
 
-	if (!Character->EnterBoardedState(this))
+	if (!InteractingCharacter->EnterBoardedState(this))
 	{
 		return false;
 	}
+	OccupantPlayerState->SetBoarded(true);
 
-	BoardedPlayer = Character;
-	NearbyPlayer = Character;
+	NearbyPlayer = InteractingCharacter;
+	FJTSSpacecraftOccupantState& Occupant = Occupants.AddDefaulted_GetRef();
+	Occupant.PlayerState = OccupantPlayerState;
+	Occupant.SeatRole = EJTSSpacecraftSeatRole::Passenger;
 	if (!bSpaceWorldSurfaceActive)
 	{
-		// Preserve Earth collection's existing hold-to-board state. Earth launch flow owns its
-		// transition and intentionally does not hand direct spacecraft control to the player.
+		OnRep_Occupants();
 		return true;
 	}
 
-	PlayerController->Possess(this);
-	if (GetController() != PlayerController)
+	if (DriverPlayerState == nullptr)
 	{
-		BoardedPlayer = nullptr;
-		NearbyPlayer = nullptr;
-		Character->ExitBoardedState(this);
-		if (PlayerController->GetPawn() != Character)
+		DriverPlayerState = OccupantPlayerState;
+		Occupant.SeatRole = EJTSSpacecraftSeatRole::Driver;
+		BoardedPlayer = InteractingCharacter;
+		PlayerController->Possess(this);
+		if (GetController() != PlayerController)
 		{
-			PlayerController->Possess(Character);
+			RemoveOccupant(OccupantPlayerState);
+			OccupantPlayerState->SetBoarded(false);
+			DriverPlayerState = nullptr;
+			BoardedPlayer = nullptr;
+			InteractingCharacter->ExitBoardedState(this);
+			if (PlayerController->GetPawn() != InteractingCharacter)
+			{
+				PlayerController->Possess(InteractingCharacter);
+			}
+			return false;
 		}
-		return false;
+		if (PlayerController->IsLocalController())
+		{
+			PlayerController->FlushPressedKeys();
+		}
+		if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
+		{
+			JTSPlayerController->SetSpacecraftCameraViewTarget(this);
+		}
 	}
-	if (PlayerController->IsLocalController())
-	{
-		// Do not carry the E hold that completed boarding into the newly active flight input context.
-		// The player must release it, then explicitly press a flight control such as Space to take off.
-		PlayerController->FlushPressedKeys();
-	}
-	if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
-	{
-		JTSPlayerController->SetSpacecraftCameraViewTarget(this);
-	}
-	else
-	{
-		PlayerController->SetViewTargetWithBlend(this, 0.35f);
-	}
-
+	OnRep_Occupants();
 	return true;
 }
 
 bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 {
-	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
+	if (!HasAuthority())
+	{
+		return false;
+	}
+	AJTSCharacter* BoardedCharacter = Cast<AJTSCharacter>(InteractingPawn);
 	APlayerController* const PlayerController = Cast<APlayerController>(GetController());
-	const bool bPlayerIsDriving = IsValid(PlayerController) && PlayerController->GetPawn() == this;
+	if (BoardedCharacter == nullptr && InteractingPawn == this && PlayerController != nullptr)
+	{
+		BoardedCharacter = FindBoardedCharacterForPlayerState(PlayerController->GetPlayerState<AJTSPlayerState>());
+	}
+	AJTSPlayerState* const OccupantPlayerState = BoardedCharacter != nullptr ? BoardedCharacter->GetPlayerState<AJTSPlayerState>() : nullptr;
+	const bool bPlayerIsDriving = IsValid(PlayerController) && OccupantPlayerState != nullptr && DriverPlayerState == OccupantPlayerState;
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
 	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive() && !bSpaceWorldSurfaceActive)
-		|| !IsValid(Character)
-		|| BoardedPlayer.Get() != Character)
+		|| !IsValid(BoardedCharacter)
+		|| !IsValid(OccupantPlayerState)
+		|| !IsPlayerStateOccupying(OccupantPlayerState))
 	{
 		return false;
 	}
@@ -747,41 +775,58 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 		return false;
 	}
 
-	BoardedPlayer = nullptr;
-	NearbyPlayer = nullptr;
+	RemoveOccupant(OccupantPlayerState);
+	OccupantPlayerState->SetBoarded(false);
+	if (bPlayerIsDriving)
+	{
+		DriverPlayerState = nullptr;
+		BoardedPlayer = nullptr;
+	}
 	if (bPlayerIsDriving)
 	{
 		PlayerController->UnPossess();
 	}
-	Character->ExitBoardedState(this);
+	BoardedCharacter->ExitBoardedState(this);
 	if (bPlayerIsDriving && IsValid(PlayerController))
 	{
-		PlayerController->Possess(Character);
+		PlayerController->Possess(BoardedCharacter);
 		if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
 		{
-			JTSPlayerController->RestoreCharacterCameraViewTarget(Character);
+			JTSPlayerController->RestoreCharacterCameraViewTarget(BoardedCharacter);
 		}
 		else
 		{
-			PlayerController->SetViewTargetWithBlend(Character, 0.35f);
+			PlayerController->SetViewTargetWithBlend(BoardedCharacter, 0.35f);
 		}
 	}
+	OnRep_Occupants();
 	return true;
+}
+
+bool AJTSSpacecraftActor::TryDisembarkPlayerForController(APlayerController* PlayerController)
+{
+	if (!HasAuthority() || PlayerController == nullptr)
+	{
+		return false;
+	}
+	AJTSPlayerState* const ControllerPlayerState = PlayerController->GetPlayerState<AJTSPlayerState>();
+	return TryDisembarkPlayer(FindBoardedCharacterForPlayerState(ControllerPlayerState));
 }
 
 bool AJTSSpacecraftActor::IsPlayerBoarded(const APawn* InteractingPawn) const
 {
-	return IsValid(InteractingPawn) && BoardedPlayer.Get() == InteractingPawn;
+	const AJTSCharacter* const InteractingCharacter = Cast<AJTSCharacter>(InteractingPawn);
+	return IsValid(InteractingCharacter) && IsPlayerStateOccupying(InteractingCharacter->GetPlayerState<AJTSPlayerState>());
 }
 
 bool AJTSSpacecraftActor::HasBoardedPlayer() const
 {
-	return IsValid(BoardedPlayer);
+	return !Occupants.IsEmpty();
 }
 
 AJTSCharacter* AJTSSpacecraftActor::GetBoardedPlayer() const
 {
-	return BoardedPlayer.Get();
+	return IsValid(BoardedPlayer) ? BoardedPlayer.Get() : FindBoardedCharacterForPlayerState(DriverPlayerState);
 }
 
 bool AJTSSpacecraftActor::IsPawnInBoardingRange(const APawn* InteractingPawn) const
@@ -927,6 +972,10 @@ float AJTSSpacecraftActor::GetThrottleNormalized() const
 
 void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	FlightPlanet = Planet;
 	if (FlightMovementComponent != nullptr)
 	{
@@ -936,7 +985,7 @@ void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
 
 void AJTSSpacecraftActor::InitializeForPlanetArrival(AJTSPlanetAnchor* Planet)
 {
-	if (!IsValid(Planet))
+	if (!HasAuthority() || !IsValid(Planet))
 	{
 		return;
 	}
@@ -962,6 +1011,10 @@ void AJTSSpacecraftActor::InitializeForPlanetArrival(AJTSPlanetAnchor* Planet)
 
 bool AJTSSpacecraftActor::RequestLanding()
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	if (FlightState != EJTSSpacecraftFlightState::Flying)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Landing Request ignored: Spacecraft=%s State=%d"),
@@ -986,6 +1039,10 @@ bool AJTSSpacecraftActor::BeginLandingAssist(
 	const FJTSPlanetLandingValidationResult& ValidationResult,
 	float DurationSeconds)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	if (FlightState != EJTSSpacecraftFlightState::LandingRequest
 		|| !ValidationResult.bIsValid
 		|| !IsValid(ValidationResult.LandingSite)
@@ -1023,6 +1080,10 @@ bool AJTSSpacecraftActor::BeginLandingAssist(
 
 void AJTSSpacecraftActor::CancelLandingRequest(EJTSLandingValidationFailure Failure)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	if (FlightState == EJTSSpacecraftFlightState::LandingAssist && FlightMovementComponent != nullptr)
 	{
 		FlightMovementComponent->CancelAssistedLanding();
@@ -1068,6 +1129,10 @@ AJTSPlanetAnchor* AJTSSpacecraftActor::GetFlightPlanet() const
 
 bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	ClearGroundedPlanet();
 	AJTSPlanetAnchor* const Planet = FlightPlanet.Get();
 	if (FlightMovementComponent != nullptr && IsValid(Planet))
@@ -1092,6 +1157,10 @@ bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransfor
 
 void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	SetFlightTargetPlanet(InPlanetAnchor);
 	GroundedPlanet = InPlanetAnchor;
 	bIsGroundedOnPlanet = IsValid(InPlanetAnchor);
@@ -1113,6 +1182,10 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 
 bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	if (!IsSpaceWorldSurfaceActive() || !IsGroundedOnPlanet())
 	{
 		return false;
@@ -1137,6 +1210,10 @@ bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 
 void AJTSSpacecraftActor::ClearGroundedPlanet()
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	GroundedPlanet = nullptr;
 	bIsGroundedOnPlanet = false;
 	ActiveLandingSite = nullptr;
@@ -1167,6 +1244,10 @@ bool AJTSSpacecraftActor::SnapSpacecraftToSurfaceTransform(
 	AJTSPlanetAnchor* InPlanetAnchor,
 	const FTransform& SurfaceTransform)
 {
+	if (!HasAuthority())
+	{
+		return false;
+	}
 	if (!IsValid(InPlanetAnchor) || !InPlanetAnchor->HasGameplaySurface())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s has no valid real gameplay planet."), *GetName());
@@ -1608,7 +1689,7 @@ bool AJTSSpacecraftActor::TryConsumeResource(EJTSResourceType ResourceType, int3
 
 bool AJTSSpacecraftActor::TryConsumeResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts)
 {
-	if (ResourceAmounts.IsEmpty())
+	if (!HasAuthority() || ResourceAmounts.IsEmpty())
 	{
 		return false;
 	}
@@ -1636,6 +1717,7 @@ bool AJTSSpacecraftActor::TryConsumeResourceAmounts(const TMap<EJTSResourceType,
 		}
 	}
 
+	SyncReplicatedStorage();
 	SavePersistentStorage();
 	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 	return true;
@@ -1684,7 +1766,7 @@ bool AJTSSpacecraftActor::DepositResources(const TArray<EJTSResourceType>& Resou
 }
 bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, int32>& ResourceAmounts)
 {
-	if (ResourceAmounts.IsEmpty())
+	if (!HasAuthority() || ResourceAmounts.IsEmpty())
 	{
 		return false;
 	}
@@ -1703,6 +1785,7 @@ bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, in
 		UE_LOG(LogTemp, Log, TEXT("Spacecraft Deposit: Type=%s Amount=%d"), GetResourceTypeName(Resource.Key), Resource.Value);
 	}
 
+	SyncReplicatedStorage();
 	SavePersistentStorage();
 	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 	return true;
@@ -1711,6 +1794,171 @@ bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, in
 const TMap<EJTSResourceType, int32>& AJTSSpacecraftActor::GetStorage() const
 {
 	return Storage;
+}
+
+void AJTSSpacecraftActor::SyncReplicatedStorage()
+{
+	if (!HasAuthority()) return;
+	ReplicatedStorage.Reset();
+	for (const TPair<EJTSResourceType, int32>& Entry : Storage)
+	{
+		if (Entry.Value > 0)
+		{
+			FJTSResourceAmount& ReplicatedEntry = ReplicatedStorage.AddDefaulted_GetRef();
+			ReplicatedEntry.ResourceType = Entry.Key;
+			ReplicatedEntry.Amount = Entry.Value;
+		}
+	}
+	OnRep_Storage();
+}
+
+void AJTSSpacecraftActor::RebuildStorageFromReplicatedArray()
+{
+	Storage.Reset();
+	for (const FJTSResourceAmount& Entry : ReplicatedStorage)
+	{
+		if (IsSupportedResourceType(Entry.ResourceType) && Entry.Amount > 0)
+		{
+			Storage.FindOrAdd(Entry.ResourceType) += Entry.Amount;
+		}
+	}
+}
+
+void AJTSSpacecraftActor::OnRep_Storage()
+{
+	RebuildStorageFromReplicatedArray();
+	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
+}
+
+void AJTSSpacecraftActor::OnRep_Occupants()
+{
+	// Character attachment and its replicated BoardedSpacecraft property drive visual presentation.
+	// This callback exists for UI/Blueprint observers of seat changes.
+}
+
+void AJTSSpacecraftActor::OnRep_FlightState()
+{
+	if (FlightMovementComponent == nullptr)
+	{
+		return;
+	}
+
+	FlightMovementComponent->SetTargetPlanet(FlightPlanet);
+	if (FlightState == EJTSSpacecraftFlightState::Landed || bIsGroundedOnPlanet)
+	{
+		FlightMovementComponent->ClearInput();
+		FlightMovementComponent->Deactivate();
+	}
+	else if (!FlightMovementComponent->IsActive())
+	{
+		FlightMovementComponent->Activate(true);
+	}
+}
+
+bool AJTSSpacecraftActor::IsPlayerStateOccupying(const AJTSPlayerState* InPlayerState) const
+{
+	return InPlayerState != nullptr && Occupants.ContainsByPredicate([InPlayerState](const FJTSSpacecraftOccupantState& Occupant)
+	{
+		return Occupant.PlayerState == InPlayerState;
+	});
+}
+
+AJTSCharacter* AJTSSpacecraftActor::FindBoardedCharacterForPlayerState(const AJTSPlayerState* InPlayerState) const
+{
+	if (InPlayerState == nullptr || GetWorld() == nullptr) return nullptr;
+	for (TActorIterator<AJTSCharacter> It(GetWorld()); It; ++It)
+	{
+		if (IsValid(*It) && It->GetPlayerState<AJTSPlayerState>() == InPlayerState && It->GetBoardedSpacecraft() == this)
+		{
+			return *It;
+		}
+	}
+	return nullptr;
+}
+
+void AJTSSpacecraftActor::RemoveOccupant(const AJTSPlayerState* InPlayerState)
+{
+	if (!HasAuthority() || InPlayerState == nullptr) return;
+	Occupants.RemoveAll([InPlayerState](const FJTSSpacecraftOccupantState& Occupant)
+	{
+		return Occupant.PlayerState == InPlayerState;
+	});
+}
+
+void AJTSSpacecraftActor::SubmitFlightInput()
+{
+	if (HasAuthority())
+	{
+		ApplyFlightInputOnServer(LocalFlightInput);
+	}
+	else
+	{
+		ServerSetFlightInput(LocalFlightInput);
+	}
+}
+
+void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState)
+{
+	if (!HasAuthority() || FlightMovementComponent == nullptr) return;
+	FlightMovementComponent->SetForwardInput(FMath::Clamp(InputState.Throttle, -1.0f, 1.0f));
+	FlightMovementComponent->SetStrafeInput(FMath::Clamp(InputState.Strafe, -1.0f, 1.0f));
+	FlightMovementComponent->SetVerticalInput(FMath::Clamp(InputState.Vertical, -1.0f, 1.0f));
+	FlightMovementComponent->SetRollInput(FMath::Clamp(InputState.Roll, -1.0f, 1.0f));
+	FlightMovementComponent->AddYawInput(FMath::Clamp(InputState.Yaw, -1.0f, 1.0f));
+	FlightMovementComponent->AddPitchInput(FMath::Clamp(InputState.Pitch, -1.0f, 1.0f));
+	FlightMovementComponent->SetBoosting(InputState.bBoosting);
+	FlightMovementComponent->SetBraking(InputState.bBraking);
+}
+
+void AJTSSpacecraftActor::ServerSetFlightInput_Implementation(const FJTSSpacecraftInputState& InputState)
+{
+	const APlayerController* const DriverController = Cast<APlayerController>(GetController());
+	if (DriverController != nullptr && DriverController->GetPlayerState<AJTSPlayerState>() == DriverPlayerState)
+	{
+		ApplyFlightInputOnServer(InputState);
+	}
+}
+
+void AJTSSpacecraftActor::ServerRequestLanding_Implementation()
+{
+	if (DriverPlayerState != nullptr) RequestLanding();
+}
+
+void AJTSSpacecraftActor::ServerRequestSurfaceTakeoff_Implementation()
+{
+	if (DriverPlayerState != nullptr) BeginSurfaceTakeoff();
+}
+
+void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedStorage);
+	DOREPLIFETIME(AJTSSpacecraftActor, Occupants);
+	DOREPLIFETIME(AJTSSpacecraftActor, DriverPlayerState);
+	DOREPLIFETIME(AJTSSpacecraftActor, GroundedPlanet);
+	DOREPLIFETIME(AJTSSpacecraftActor, bIsGroundedOnPlanet);
+	DOREPLIFETIME(AJTSSpacecraftActor, FlightPlanet);
+	DOREPLIFETIME(AJTSSpacecraftActor, ActiveLandingSite);
+	DOREPLIFETIME(AJTSSpacecraftActor, FlightState);
+	DOREPLIFETIME(AJTSSpacecraftActor, LastLandingFailure);
+}
+
+void AJTSSpacecraftActor::RestoreStorageFromExpedition(const TMap<EJTSResourceType, int32>& NewStorage)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Storage.Reset();
+	for (const TPair<EJTSResourceType, int32>& Entry : NewStorage)
+	{
+		if (IsSupportedResourceType(Entry.Key) && Entry.Value > 0)
+		{
+			Storage.Add(Entry.Key, Entry.Value);
+		}
+	}
+	SyncReplicatedStorage();
+	OnShipResourcesChanged.Broadcast(GetFuelCount(), GetWaterCount(), GetFoodCount());
 }
 
 bool AJTSSpacecraftActor::IsEarthCollectionActive() const
@@ -1801,7 +2049,7 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 
 void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
 {
-	if (!IsValid(BoardingTrigger))
+	if (!HasAuthority() || !IsValid(BoardingTrigger))
 	{
 		return;
 	}
@@ -1810,15 +2058,15 @@ void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
 	BoardingTrigger->GetOverlappingActors(OverlappingActors, AJTSCharacter::StaticClass());
 	for (AActor* const OverlappingActor : OverlappingActors)
 	{
-		AJTSCharacter* const Character = Cast<AJTSCharacter>(OverlappingActor);
-		if (!IsValid(Character))
+		AJTSCharacter* const OverlappingCharacter = Cast<AJTSCharacter>(OverlappingActor);
+		if (!IsValid(OverlappingCharacter))
 		{
 			continue;
 		}
 
-		NearbyPlayer = Character;
-		DepositPlayerResources(Character);
-		Character->NotifySpacecraftEntered(this);
+		NearbyPlayer = OverlappingCharacter;
+		DepositPlayerResources(OverlappingCharacter);
+		OverlappingCharacter->NotifySpacecraftEntered(this);
 	}
 }
 
@@ -1830,7 +2078,7 @@ void AJTSSpacecraftActor::ReconcileInitialBoardingOverlaps()
 void AJTSSpacecraftActor::RestorePersistentStorage()
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
+	if (!HasAuthority() || World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}
@@ -1838,10 +2086,9 @@ void AJTSSpacecraftActor::RestorePersistentStorage()
 	if (!bPersistedStorageRestoreAttempted)
 	{
 		bPersistedStorageRestoreAttempted = true;
-		UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>();
-		if (IsValid(GameInstance) && GameInstance->HasPersistedSpacecraftStorage())
+		if (UJTSExpeditionSubsystem* const Expedition = World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 		{
-			Storage = GameInstance->GetPersistedSpacecraftStorage();
+			Expedition->RestoreSpacecraft(this);
 			UE_LOG(
 				LogTemp,
 				Log,
@@ -1869,14 +2116,15 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 void AJTSSpacecraftActor::SavePersistentStorage() const
 {
 	UWorld* const World = GetWorld();
-	if (World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
+	if (!HasAuthority() || World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}
 
-	if (UJTSGameInstance* const GameInstance = World->GetGameInstance<UJTSGameInstance>())
+	if (UJTSExpeditionSubsystem* const Expedition = World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 	{
-		GameInstance->SetPersistedSpacecraftStorage(Storage);
+		Expedition->SetSpacecraftSnapshot(GetClass(), Storage);
+		Expedition->RequestSave();
 	}
 }
 
@@ -1897,17 +2145,21 @@ void AJTSSpacecraftActor::HandleBoardingTriggerBeginOverlap(
 	bool bFromSweep,
 	const FHitResult& SweepResult)
 {
-	AJTSCharacter* const Character = Cast<AJTSCharacter>(OtherActor);
-	if (!IsValid(Character))
+	if (!HasAuthority())
+	{
+		return;
+	}
+	AJTSCharacter* const OverlappingCharacter = Cast<AJTSCharacter>(OtherActor);
+	if (!IsValid(OverlappingCharacter))
 	{
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("Spacecraft BoardingTrigger Enter Player=%s"), *Character->GetName());
+	UE_LOG(LogTemp, Log, TEXT("Spacecraft BoardingTrigger Enter Player=%s"), *OverlappingCharacter->GetName());
 
-	NearbyPlayer = Character;
-	DepositPlayerResources(Character);
-	Character->NotifySpacecraftEntered(this);
+	NearbyPlayer = OverlappingCharacter;
+	DepositPlayerResources(OverlappingCharacter);
+	OverlappingCharacter->NotifySpacecraftEntered(this);
 }
 
 void AJTSSpacecraftActor::HandleBoardingTriggerEndOverlap(
@@ -1916,12 +2168,16 @@ void AJTSSpacecraftActor::HandleBoardingTriggerEndOverlap(
 	UPrimitiveComponent* OtherComp,
 	int32 OtherBodyIndex)
 {
-	AJTSCharacter* const Character = Cast<AJTSCharacter>(OtherActor);
-	if (!IsValid(Character) || NearbyPlayer.Get() != Character)
+	if (!HasAuthority())
+	{
+		return;
+	}
+	AJTSCharacter* const OverlappingCharacter = Cast<AJTSCharacter>(OtherActor);
+	if (!IsValid(OverlappingCharacter) || NearbyPlayer.Get() != OverlappingCharacter)
 	{
 		return;
 	}
 
 	NearbyPlayer = nullptr;
-	Character->NotifySpacecraftExited(this);
+	OverlappingCharacter->NotifySpacecraftExited(this);
 }

@@ -40,6 +40,7 @@ namespace
 UJTSMeleeComponent::UJTSMeleeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
 }
 
 void UJTSMeleeComponent::BeginPlay()
@@ -90,6 +91,13 @@ void UJTSMeleeComponent::RefreshMeleeTarget()
 
 void UJTSMeleeComponent::AttackPressed()
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		bAttackHeld = true;
+		if (!bIsAttacking) StartAttack();
+		ServerStartAttack();
+		return;
+	}
 	bAttackHeld = true;
 	if (bIsAttacking)
 	{
@@ -103,6 +111,10 @@ void UJTSMeleeComponent::AttackPressed()
 void UJTSMeleeComponent::AttackReleased()
 {
 	bAttackHeld = false;
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerReleaseAttack();
+	}
 }
 
 void UJTSMeleeComponent::StartAttack()
@@ -257,6 +269,11 @@ void UJTSMeleeComponent::EndAttackState()
 
 void UJTSMeleeComponent::PerformHitCheck()
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerPerformHitCheck();
+		return;
+	}
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 	UWorld* const World = GetWorld();
 	if (!bIsAttacking || !IsValid(AttackingPawn) || !IsValid(World) || PunchMaxTargets < 1)
@@ -388,6 +405,11 @@ void UJTSMeleeComponent::PerformHitCheck()
 
 bool UJTSMeleeComponent::TryAttack()
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerTryAttack();
+		return true;
+	}
 	UWorld* const World = GetWorld();
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
@@ -821,7 +843,7 @@ bool UJTSMeleeComponent::HasMeleeLineOfSight(APawn* AttackingPawn, AActor* Candi
 
 bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPawn, EJTSMeleeAttackType AttackType)
 {
-	if (!IsValidDamageTarget(Target, AttackingPawn))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !IsValidDamageTarget(Target, AttackingPawn))
 	{
 		return false;
 	}
@@ -841,6 +863,30 @@ bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPaw
 	}
 
 	return false;
+}
+
+void UJTSMeleeComponent::ServerStartAttack_Implementation()
+{
+	bAttackHeld = true;
+	if (!bIsAttacking)
+	{
+		StartAttack();
+	}
+}
+
+void UJTSMeleeComponent::ServerPerformHitCheck_Implementation()
+{
+	PerformHitCheck();
+}
+
+void UJTSMeleeComponent::ServerTryAttack_Implementation()
+{
+	TryAttack();
+}
+
+void UJTSMeleeComponent::ServerReleaseAttack_Implementation()
+{
+	bAttackHeld = false;
 }
 
 float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType) const

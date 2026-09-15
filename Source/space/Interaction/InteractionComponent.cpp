@@ -19,6 +19,7 @@
 UInteractionComponent::UInteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
 }
 
 void UInteractionComponent::BeginPlay()
@@ -73,8 +74,28 @@ bool UInteractionComponent::TryInteract()
 		return false;
 	}
 
-	IInteractable::Execute_Interact(Target, InteractingPawn);
+	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
+	{
+		if (!CanServerInteractWith(InteractingPawn, Target))
+		{
+			return false;
+		}
+		IInteractable::Execute_Interact(Target, InteractingPawn);
+	}
+	else
+	{
+		ServerTryInteract(Target);
+	}
 	return true;
+}
+
+void UInteractionComponent::ServerTryInteract_Implementation(AActor* Target)
+{
+	APawn* const InteractingPawn = Cast<APawn>(GetOwner());
+	if (CanServerInteractWith(InteractingPawn, Target))
+	{
+		IInteractable::Execute_Interact(Target, InteractingPawn);
+	}
 }
 
 AActor* UInteractionComponent::GetCurrentInteractable() const
@@ -487,6 +508,35 @@ bool UInteractionComponent::HasInteractionLineOfSight(
 	// requested target point as visible, while still rejecting geometry that blocks the ray earlier.
 	constexpr float TargetPointTolerance = 18.0f;
 	return FVector::DistSquared(VisibilityHit.ImpactPoint, TargetLocation) <= FMath::Square(TargetPointTolerance);
+}
+
+bool UInteractionComponent::CanServerInteractWith(APawn* InteractingPawn, AActor* Candidate) const
+{
+	if (!IsValid(InteractingPawn)
+		|| !IsValid(Candidate)
+		|| !Candidate->GetClass()->ImplementsInterface(UInteractable::StaticClass())
+		|| !IInteractable::Execute_CanInteract(Candidate, InteractingPawn))
+	{
+		return false;
+	}
+	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate);
+	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate);
+	if (Spacecraft != nullptr)
+	{
+		return Spacecraft->IsPawnInBoardingRange(InteractingPawn);
+	}
+	const float ServerRadius = FMath::Max(0.0f, InteractionRadius) + 50.0f;
+	if (FVector::DistSquared(InteractingPawn->GetActorLocation(), TargetLocation) > FMath::Square(ServerRadius))
+	{
+		return false;
+	}
+	if (!bRequireInteractionLineOfSight)
+	{
+		return true;
+	}
+	// Never accept a client camera transform as validation data. The pawn's own server transform is used.
+	const FVector Start = InteractingPawn->GetActorLocation() + FVector(0.0f, 0.0f, InteractingPawn->BaseEyeHeight);
+	return HasInteractionLineOfSight(InteractingPawn, Candidate, Start, TargetLocation);
 }
 
 FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* Candidate) const

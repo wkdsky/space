@@ -9,7 +9,10 @@ class AJTSMoonWorldActor;
 class UJTSMoonWrapSubsystem;
 class UMaterialInterface;
 
-/** Places one authoritative actor at the local player's nearest periodic physical image in Fake Moon worlds. */
+/**
+ * Client-side Fake Moon presentation helper. The server retains the canonical replicated transform;
+ * each non-authority client may select a nearest periodic image for visual continuity only.
+ */
 UCLASS(ClassGroup = (Moon), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSMoonWrappedActorComponent : public UActorComponent
 {

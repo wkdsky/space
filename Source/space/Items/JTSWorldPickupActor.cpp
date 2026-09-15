@@ -12,6 +12,7 @@
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
@@ -170,7 +171,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 	const FVector& GroundLocation,
 	AActor* SourceActor)
 {
-	if (World == nullptr)
+	if (World == nullptr || World->GetNetMode() == NM_Client)
 	{
 		return nullptr;
 	}
@@ -223,7 +224,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 	AActor* SourceActor,
 	const FVector& PreferredDirection)
 {
-	if (World == nullptr)
+	if (World == nullptr || World->GetNetMode() == NM_Client)
 	{
 		return nullptr;
 	}
@@ -516,6 +517,8 @@ AJTSWorldPickupActor::AJTSWorldPickupActor()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 	SetActorTickEnabled(false);
+	bReplicates = true;
+	SetReplicateMovement(true);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -613,6 +616,10 @@ FVector AJTSWorldPickupActor::GetInteractionAnchorWorldLocation() const
 
 void AJTSWorldPickupActor::InitializeItem(EJTSWorldPickupItemType NewItemType)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	ItemType = NewItemType;
 	bPickupConsumed = false;
 	ApplyItemAppearance();
@@ -732,6 +739,10 @@ void AJTSWorldPickupActor::StartDropMotion(
 	AActor* SourceActor,
 	APawn* SafetyPawn)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
 	DropVelocity = InitialVelocity;
 	DropGravityAcceleration = GravityAcceleration;
 	PlannedGroundLocation = SafeGroundLocation;
@@ -785,7 +796,7 @@ FText AJTSWorldPickupActor::GetInteractionPrompt_Implementation(APawn* Interacti
 
 void AJTSWorldPickupActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	if (!CanInteract_Implementation(InteractingPawn))
+	if (!HasAuthority() || !CanInteract_Implementation(InteractingPawn))
 	{
 		return;
 	}
@@ -858,6 +869,11 @@ void AJTSWorldPickupActor::OnConstruction(const FTransform& Transform)
 void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!HasAuthority())
+	{
+		SetActorTickEnabled(false);
+		return;
+	}
 
 	if (!bIsDropping)
 	{
@@ -906,6 +922,37 @@ void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 
 	SetActorLocation(NextLocation, false, nullptr, ETeleportType::TeleportPhysics);
 	UpdateMoonWrappedLogicalPosition();
+}
+
+void AJTSWorldPickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AJTSWorldPickupActor, ItemType);
+	DOREPLIFETIME(AJTSWorldPickupActor, SurfaceUp);
+	DOREPLIFETIME(AJTSWorldPickupActor, bIsDropping);
+	DOREPLIFETIME(AJTSWorldPickupActor, bPickupConsumed);
+	DOREPLIFETIME(AJTSWorldPickupActor, bUsesRealPlanetSurface);
+}
+
+void AJTSWorldPickupActor::OnRep_ItemState()
+{
+	ApplyItemAppearance();
+}
+
+void AJTSWorldPickupActor::OnRep_DropState()
+{
+	// Movement is replicated by the server; clients never simulate a second drop trajectory.
+	SetActorTickEnabled(false);
+}
+
+void AJTSWorldPickupActor::OnRep_SurfacePresentation()
+{
+	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
+	{
+		MoonWrappedActorComponent->Deactivate();
+		MoonWrappedActorComponent->SetComponentTickEnabled(false);
+	}
 }
 
 bool AJTSWorldPickupActor::TraceDropGround(
