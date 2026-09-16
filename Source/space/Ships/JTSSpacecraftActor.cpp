@@ -161,7 +161,7 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 
 	BoardingTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("BoardingTrigger"));
 	BoardingTrigger->SetupAttachment(SceneRoot);
-	BoardingTrigger->SetSphereRadius(360.0f);
+	BoardingTrigger->SetSphereRadius(300.0f);
 	BoardingTrigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	BoardingTrigger->SetCollisionObjectType(ECC_WorldDynamic);
 	BoardingTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -837,8 +837,18 @@ bool AJTSSpacecraftActor::IsPawnInBoardingRange(const APawn* InteractingPawn) co
 	}
 
 	return BoardingTrigger->IsOverlappingActor(InteractingPawn)
-		|| FVector::DistSquared(BoardingTrigger->GetComponentLocation(), InteractingPawn->GetActorLocation())
-			<= FMath::Square(BoardingTrigger->GetScaledSphereRadius());
+		|| FVector::DistSquared(GetBoardingInteractionCenter(), InteractingPawn->GetActorLocation())
+			<= FMath::Square(GetBoardingInteractionRadius());
+}
+
+FVector AJTSSpacecraftActor::GetBoardingInteractionCenter() const
+{
+	return IsValid(BoardingTrigger) ? BoardingTrigger->GetComponentLocation() : GetActorLocation();
+}
+
+float AJTSSpacecraftActor::GetBoardingInteractionRadius() const
+{
+	return IsValid(BoardingTrigger) ? FMath::Max(0.0f, BoardingTrigger->GetScaledSphereRadius()) : 0.0f;
 }
 
 FVector AJTSSpacecraftActor::GetBoardingInteractionTargetWorldLocation(const FVector& ReferenceLocation) const
@@ -2005,6 +2015,13 @@ bool AJTSSpacecraftActor::IsMoonSurfaceRuntimeActive() const
 bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 {
 	if (!IsValid(Player))
+	{
+		return false;
+	}
+	// SpaceWorld resources remain in the player's replicated Item Inventory until the player uses
+	// the supply terminal's explicit deposit action. Earth keeps its original automatic collection
+	// transfer, while SpaceWorld gains a visible shared-wallet handoff for the shop economy.
+	if (IsSpaceWorldRuntimeActive())
 	{
 		return false;
 	}

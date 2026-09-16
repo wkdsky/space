@@ -29,9 +29,11 @@
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
+#include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Modes/JTSSpaceWorldGameMode.h"
 #include "space/Player/JTSPlayerController.h"
@@ -62,10 +64,12 @@ AJTSCharacter::AJTSCharacter()
 	MovementComponent->GravityScale = 1.0f;
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
+	InventoryComponent = CreateDefaultSubobject<UJTSInventoryComponent>(TEXT("InventoryComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
 	EquipmentComponent = CreateDefaultSubobject<UJTSPlayerEquipmentComponent>(TEXT("EquipmentComponent"));
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
+	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
@@ -104,6 +108,11 @@ AJTSCharacter::AJTSCharacter()
 UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
 {
 	return CarryComponent.Get();
+}
+
+UJTSInventoryComponent* AJTSCharacter::GetInventoryComponent() const
+{
+	return InventoryComponent.Get();
 }
 
 UJTSPlayerEquipmentComponent* AJTSCharacter::GetEquipmentComponent() const
@@ -306,9 +315,9 @@ float AJTSCharacter::GetAimPitch() const
 
 int32 AJTSCharacter::GetEquipmentHoldSlotIndex() const
 {
-	if (bEquipmentHoldCompleted || !IsValid(EquipmentComponent)
-		|| !EquipmentComponent->GetEquipmentSlots().IsValidIndex(HeldEquipmentSlotIndex)
-		|| EquipmentComponent->GetEquipmentSlot(HeldEquipmentSlotIndex) == EJTSEquipmentType::None)
+	if (bEquipmentHoldCompleted || !IsValid(InventoryComponent)
+		|| HeldEquipmentSlotIndex < 0 || HeldEquipmentSlotIndex >= 4
+		|| InventoryComponent->GetItemAtSlot(HeldEquipmentSlotIndex).IsEmpty())
 	{
 		return INDEX_NONE;
 	}
@@ -384,6 +393,19 @@ AJTSSpacecraftActor* AJTSCharacter::GetNearbySpacecraft() const
 AJTSSpacecraftActor* AJTSCharacter::GetBoardedSpacecraft() const
 {
 	return BoardedSpacecraft.Get();
+}
+
+bool AJTSCharacter::TryDepositCarriedResourcesToNearbySpacecraft()
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	AJTSSpacecraftActor* const Spacecraft = NearbySpacecraft.Get();
+	return IsValid(Spacecraft)
+		&& Spacecraft->IsPawnInBoardingRange(this)
+		&& Spacecraft->TryDepositResourcesFromPawn(this);
 }
 
 void AJTSCharacter::NotifySpacecraftEntered(AJTSSpacecraftActor* Spacecraft)
@@ -951,6 +973,25 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 {
+	// E is both the world-interaction key and the lightweight close shortcut for
+	// the terminal.  Check modal shop state before the general gameplay-input
+	// guard so a visible shop can never trap the player in UI input mode.
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+	{
+		if (PlayerController->IsSpaceShopOpen())
+		{
+			bInteractKeyHeld = false;
+			PlayerController->CloseSpaceShop();
+			return;
+		}
+		if (PlayerController->IsMoonShopOpen())
+		{
+			bInteractKeyHeld = false;
+			PlayerController->CloseMoonShop();
+			return;
+		}
+	}
+
 	if (IsGameplayInputBlocked())
 	{
 		return;
@@ -958,13 +999,6 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 
 	// TODO(FakeMoon): Re-evaluate camera-ray versus flat-world trajectory for future long-range hitscan/projectiles.
 	bInteractKeyHeld = true;
-	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()); PlayerController != nullptr && PlayerController->IsMoonShopOpen())
-	{
-		bInteractKeyHeld = false;
-		PlayerController->CloseMoonShop();
-		return;
-	}
-
 	if (IsBoarded())
 	{
 		bInteractKeyHeld = false;
@@ -987,7 +1021,6 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	if (bMoonExplorationActive)
 	{
 		bInteractKeyHeld = false;
-		AJTSSpacecraftActor* NearbyShip = NearbySpacecraft.Get();
 		if (InteractionComponent != nullptr)
 		{
 			InteractionComponent->RefreshInteractable();
@@ -1001,7 +1034,6 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 
 				if (AJTSSpacecraftActor* const TargetSpacecraft = Cast<AJTSSpacecraftActor>(InteractionTarget))
 				{
-					NearbyShip = TargetSpacecraft;
 					// The interaction scan can discover a valid mesh-sized ship before an initial overlap
 					// notification reaches this pawn. Keep the existing workshop API's NearbySpacecraft
 					// contract true without introducing a second shop path.
@@ -1013,13 +1045,9 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 			}
 		}
 
-		if (IsValid(NearbyShip) && NearbyShip->IsPawnInBoardingRange(this))
-		{
-			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
-			{
-				PlayerController->OpenMoonShop(this);
-			}
-		}
+		// The former ship-click workshop is retired.  Supplies now use the replicated physical
+		// terminal in SpaceWorld, so aiming at the terminal (rather than the ship mesh) opens the
+		// shared-wallet shop through IInteractable.
 		return;
 	}
 
@@ -1087,17 +1115,28 @@ void AJTSCharacter::HandleInteractCanceled(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 {
-	if (!CanUseNormalGameplayInput() || !IsValid(MeleeComponent))
+	if (!CanUseNormalGameplayInput())
 	{
 		return;
 	}
-	
-	MeleeComponent->AttackPressed();
+	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
+	{
+		RangedWeaponComponent->StartFire();
+		return;
+	}
+	if (IsValid(MeleeComponent))
+	{
+		MeleeComponent->AttackPressed();
+	}
 }
 
 void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
 {
 	// Release must always be forwarded so a blocked UI or phase transition cannot leave the hold state stuck.
+	if (IsValid(RangedWeaponComponent))
+	{
+		RangedWeaponComponent->StopFire();
+	}
 	if (IsValid(MeleeComponent))
 	{
 		MeleeComponent->AttackReleased();
@@ -1167,8 +1206,8 @@ void AJTSCharacter::HandleEquipmentSlotFourReleased(const FInputActionValue& Val
 
 void AJTSCharacter::BeginEquipmentSlotHold(int32 SlotIndex)
 {
-	if (!CanUseNormalGameplayInput() || !IsValid(EquipmentComponent)
-		|| SlotIndex < 0 || SlotIndex >= EquipmentComponent->GetEquipmentCapacity())
+	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent)
+		|| SlotIndex < 0 || SlotIndex >= 4)
 	{
 		return;
 	}
@@ -1183,7 +1222,7 @@ void AJTSCharacter::BeginEquipmentSlotHold(int32 SlotIndex)
 	HeldEquipmentSlotIndex = SlotIndex;
 	bEquipmentHoldCompleted = false;
 	EquipmentHoldStartTime = static_cast<double>(World->GetTimeSeconds());
-	if (EquipmentComponent->GetEquipmentSlot(SlotIndex) == EJTSEquipmentType::None)
+	if (InventoryComponent->GetItemAtSlot(SlotIndex).IsEmpty())
 	{
 		return;
 	}
@@ -1204,9 +1243,9 @@ void AJTSCharacter::EndEquipmentSlotHold(int32 SlotIndex)
 
 	const bool bShouldSelectSlot = !bEquipmentHoldCompleted;
 	CancelEquipmentSlotHold();
-	if (bShouldSelectSlot && CanUseNormalGameplayInput() && IsValid(EquipmentComponent))
+	if (bShouldSelectSlot && CanUseNormalGameplayInput() && IsValid(InventoryComponent))
 	{
-		EquipmentComponent->SelectEquipmentSlot(SlotIndex);
+		InventoryComponent->SelectQuickbarSlot(SlotIndex);
 	}
 }
 
@@ -1224,14 +1263,14 @@ void AJTSCharacter::CancelEquipmentSlotHold()
 
 void AJTSCharacter::CompleteEquipmentSlotHold()
 {
-	if (!CanUseNormalGameplayInput() || !IsValid(EquipmentComponent) || HeldEquipmentSlotIndex == INDEX_NONE)
+	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent) || HeldEquipmentSlotIndex == INDEX_NONE)
 	{
 		CancelEquipmentSlotHold();
 		return;
 	}
 
 	const int32 SlotIndex = HeldEquipmentSlotIndex;
-	bEquipmentHoldCompleted = EquipmentComponent->DropEquippedItemAtSlot(SlotIndex);
+	bEquipmentHoldCompleted = InventoryComponent->DropItemAtSlot(SlotIndex);
 	HeldEquipmentSlotIndex = INDEX_NONE;
 	EquipmentHoldStartTime = 0.0;
 	if (UWorld* const World = GetWorld())
@@ -1433,7 +1472,7 @@ FVector AJTSCharacter::GetPlanetCameraForward(const FVector& CurrentUp) const
 bool AJTSCharacter::IsGameplayInputBlocked() const
 {
 	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
-	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsGameMenuOpen();
+	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsSpaceShopOpen() || PlayerController->IsGameMenuOpen();
 }
 
 void AJTSCharacter::ApplyCameraPitchLimits()

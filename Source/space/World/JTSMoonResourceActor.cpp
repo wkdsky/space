@@ -8,11 +8,11 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWorldPickupActor.h"
-#include "space/Items/JTSWorldPickupItemType.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
@@ -64,6 +64,7 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 	ResourceMesh->SetCollisionObjectType(ECC_WorldDynamic);
 	ResourceMesh->SetCollisionResponseToAllChannels(ECR_Overlap);
 	ResourceMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	ResourceMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	ResourceMesh->SetGenerateOverlapEvents(true);
 	ResourceMesh->SetCanEverAffectNavigation(false);
 
@@ -121,9 +122,25 @@ int32 AJTSMoonResourceActor::GetRemainingYieldUnits() const
 	return FMath::Clamp(RemainingYieldUnits, 0, GetTotalYieldUnits());
 }
 
+EJTSMoonResourceNodeSize AJTSMoonResourceActor::GetNodeSize() const
+{
+	return NodeSize;
+}
+
+float AJTSMoonResourceActor::GetRemainingMiningWork() const
+{
+	return FMath::Clamp(RemainingMiningWork, 0.0f, FMath::Max(0.1f, TotalMiningWork));
+}
+
 FText AJTSMoonResourceActor::GetInteractionDisplayName() const
 {
-	return FText::FromString(ResourceType == EJTSResourceType::Ore ? TEXT("ORE DEPOSIT") : TEXT("LARGE ROCK"));
+	switch (NodeSize)
+	{
+	case EJTSMoonResourceNodeSize::MediumRock: return FText::FromString(TEXT("MEDIUM ROCK"));
+	case EJTSMoonResourceNodeSize::OreVein: return FText::FromString(TEXT("ORE VEIN"));
+	case EJTSMoonResourceNodeSize::LargeRock:
+	default: return FText::FromString(TEXT("LARGE ROCK"));
+	}
 }
 
 FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
@@ -282,15 +299,23 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 	}
 }
 
-void AJTSMoonResourceActor::InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits)
+void AJTSMoonResourceActor::InitializeMiningNode(
+	EJTSResourceType NewResourceType,
+	int32 NewTotalYieldUnits,
+	EJTSMoonResourceNodeSize NewNodeSize)
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 	ResourceType = NewResourceType;
+	NodeSize = NewResourceType == EJTSResourceType::Ore ? EJTSMoonResourceNodeSize::OreVein : NewNodeSize;
 	TotalYieldUnits = FMath::Max(1, NewTotalYieldUnits);
 	RemainingYieldUnits = TotalYieldUnits;
+	const float WorkPerDrop = NodeSize == EJTSMoonResourceNodeSize::MediumRock ? 2.5f
+		: NodeSize == EJTSMoonResourceNodeSize::LargeRock ? 4.0f : 5.0f;
+	TotalMiningWork = FMath::Max(1.0f, static_cast<float>(TotalYieldUnits) * WorkPerDrop);
+	RemainingMiningWork = TotalMiningWork;
 	bMiningInProgress = false;
 	ApplyResourceAppearance();
 }
@@ -298,19 +323,13 @@ void AJTSMoonResourceActor::InitializeMiningNode(EJTSResourceType NewResourceTyp
 bool AJTSMoonResourceActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
 	return IsValid(InteractingPawn)
-		&& !bMiningInProgress
 		&& !IsPendingKillPending()
-		&& GetRemainingYieldUnits() > 0;
+		&& GetRemainingMiningWork() > KINDA_SMALL_NUMBER;
 }
 
 FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
-	if (!CanInteract_Implementation(InteractingPawn))
-	{
-		return FText::GetEmpty();
-	}
-
-	return GetMiningPrompt(InteractingPawn);
+	return CanInteract_Implementation(InteractingPawn) ? GetMiningPrompt(InteractingPawn) : FText::GetEmpty();
 }
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
@@ -320,78 +339,138 @@ void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 		return;
 	}
 
-	const UJTSPlayerEquipmentComponent* const EquipmentComponent = InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>();
-	if (!IsValid(EquipmentComponent) || !EquipmentComponent->HasActiveTool(EJTSEquipmentType::Pickaxe))
+	EJTSItemId ItemId = EJTSItemId::None;
+	float Work = 0.0f;
+	if (!ResolveHeldMiningWork(InteractingPawn, ItemId, Work))
 	{
-		const TCHAR* const FailureReason = IsValid(EquipmentComponent)
-			&& EquipmentComponent->HasEquippedItem(EJTSEquipmentType::Pickaxe)
-			? TEXT("PickaxeNotSelected")
-			: TEXT("NeedPickaxe");
-		UE_LOG(
-			LogTemp,
-			Log,
-			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=%s"),
-			GetMiningNodeName(ResourceType),
-			GetRemainingYieldUnits(),
-			GetMoonResourceTypeName(ResourceType),
-			FailureReason);
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Mining: Node=%s Success=false Reason=NeedHeldMiningItem"), *GetName());
 		return;
 	}
+	ApplyMiningWork(InteractingPawn, ItemId, Work);
+}
 
-	const EJTSWorldPickupItemType PickupItemType = ResourceType == EJTSResourceType::Ore
-		? EJTSWorldPickupItemType::Ore
-		: EJTSWorldPickupItemType::Rock;
-	UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-	const bool bAddToInventory = IsValid(CarryComponent) && CarryComponent->CanCarryResource(ResourceType);
-	bMiningInProgress = true;
-	bool bDelivered = false;
-	FString Destination;
-	if (bAddToInventory)
+bool AJTSMoonResourceActor::ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutItemId, float& OutWork) const
+{
+	OutItemId = EJTSItemId::None;
+	OutWork = 0.0f;
+	const UJTSInventoryComponent* const Inventory = IsValid(Miner)
+		? Miner->FindComponentByClass<UJTSInventoryComponent>()
+		: nullptr;
+	if (!IsValid(Inventory))
 	{
-		bDelivered = CarryComponent->TryAddResource(ResourceType);
-		Destination = TEXT("Inventory");
+		return false;
 	}
-	else
+	const FJTSItemInstance ActiveItem = Inventory->GetActiveItem();
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveItem.ItemId);
+	if (ActiveItem.IsEmpty() || !IsValid(Definition) || Definition->MiningWork <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	OutItemId = ActiveItem.ItemId;
+	OutWork = Definition->MiningWork;
+	return true;
+}
+
+bool AJTSMoonResourceActor::SpawnAllResourceDrops(APawn* Miner)
+{
+	if (!HasAuthority() || GetWorld() == nullptr)
+	{
+		return false;
+	}
+	const EJTSItemId DropItemId = UJTSItemDefinitionLibrary::GetItemIdForResource(ResourceType);
+	if (DropItemId == EJTSItemId::None)
+	{
+		return false;
+	}
+
+	TArray<AJTSWorldPickupActor*> SpawnedPickups;
+	for (int32 DropIndex = 0; DropIndex < GetTotalYieldUnits(); ++DropIndex)
 	{
 		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
 			GetWorld(),
-			PickupItemType,
+			UJTSItemDefinitionLibrary::MakeInstance(DropItemId),
 			GetActorLocation(),
-			InteractingPawn,
-			this);
-		bDelivered = IsValid(Pickup);
-		Destination = TEXT("WorldDrop");
+			Miner,
+			this,
+			Miner != nullptr ? Miner->GetActorForwardVector() : FVector::ForwardVector);
+		if (!IsValid(Pickup))
+		{
+			for (AJTSWorldPickupActor* const SpawnedPickup : SpawnedPickups)
+			{
+				if (IsValid(SpawnedPickup))
+				{
+					SpawnedPickup->Destroy();
+				}
+			}
+			return false;
+		}
+		SpawnedPickups.Add(Pickup);
+	}
+	return true;
+}
+
+bool AJTSMoonResourceActor::ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemId, float WorkAmount)
+{
+	if (!HasAuthority() || !CanInteract_Implementation(Miner) || WorkAmount <= KINDA_SMALL_NUMBER)
+	{
+		return false;
 	}
 
-	if (!bDelivered)
+	EJTSItemId VerifiedItemId = EJTSItemId::None;
+	float VerifiedWork = 0.0f;
+	if (!ResolveHeldMiningWork(Miner, VerifiedItemId, VerifiedWork) || VerifiedItemId != SourceItemId)
 	{
-		bMiningInProgress = false;
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=false Reason=DeliveryFailed"),
-			GetMiningNodeName(ResourceType),
-			GetRemainingYieldUnits(),
-			GetMoonResourceTypeName(ResourceType));
-		return;
+		return false;
+	}
+	const float AppliedWork = FMath::Clamp(WorkAmount, 0.0f, VerifiedWork);
+	const float NewRemainingWork = FMath::Max(0.0f, RemainingMiningWork - AppliedWork);
+	if (NewRemainingWork <= KINDA_SMALL_NUMBER && !SpawnAllResourceDrops(Miner))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Mining: Node=%s Success=false Reason=DropSpawnFailed"), *GetName());
+		return false;
 	}
 
-	RemainingYieldUnits = FMath::Max(0, RemainingYieldUnits - 1);
-	UE_LOG(
-		LogTemp,
-		Log,
-		TEXT("JumpToSpace Mining: Node=%s Remaining=%d Item=%s Success=true Destination=%s"),
-		GetMiningNodeName(ResourceType),
-		GetRemainingYieldUnits(),
-		GetMoonResourceTypeName(ResourceType),
-		*Destination);
-	if (RemainingYieldUnits == 0)
+	RemainingMiningWork = NewRemainingWork;
+	if (RemainingMiningWork <= KINDA_SMALL_NUMBER)
 	{
+		RemainingYieldUnits = 0;
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Mining: Node=%s Item=%d Work=%.2f Destroyed=true Drops=%d"), *GetName(), static_cast<int32>(SourceItemId), AppliedWork, TotalYieldUnits);
 		Destroy();
-		return;
+		return true;
 	}
 
-	bMiningInProgress = false;
+	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace Mining: Node=%s Item=%d Work=%.2f Remaining=%.2f"), *GetName(), static_cast<int32>(SourceItemId), AppliedWork, RemainingMiningWork);
+	return true;
+}
+
+bool AJTSMoonResourceActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const
+{
+	return CanInteract_Implementation(AttackingPawn);
+}
+
+void AJTSMoonResourceActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType)
+{
+	EJTSItemId ItemId = EJTSItemId::None;
+	float Work = 0.0f;
+	if (ResolveHeldMiningWork(AttackingPawn, ItemId, Work))
+	{
+		ApplyMiningWork(AttackingPawn, ItemId, Work);
+	}
+}
+
+FText AJTSMoonResourceActor::GetMeleeTargetDisplayName_Implementation() const
+{
+	return GetInteractionDisplayName();
+}
+
+FText AJTSMoonResourceActor::GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const
+{
+	return GetMiningPrompt(AttackingPawn);
+}
+
+FVector AJTSMoonResourceActor::GetMeleeTargetAnchorWorldLocation_Implementation() const
+{
+	return GetInteractionAnchorWorldLocation();
 }
 
 void AJTSMoonResourceActor::BeginPlay()
@@ -424,6 +503,8 @@ void AJTSMoonResourceActor::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 	TotalYieldUnits = FMath::Max(1, TotalYieldUnits);
 	RemainingYieldUnits = FMath::Clamp(RemainingYieldUnits, 0, TotalYieldUnits);
+	TotalMiningWork = FMath::Max(0.1f, TotalMiningWork);
+	RemainingMiningWork = FMath::Clamp(RemainingMiningWork, 0.0f, TotalMiningWork);
 	ApplyResourceAppearance();
 }
 
@@ -434,6 +515,9 @@ void AJTSMoonResourceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AJTSMoonResourceActor, ResourceType);
 	DOREPLIFETIME(AJTSMoonResourceActor, TotalYieldUnits);
 	DOREPLIFETIME(AJTSMoonResourceActor, RemainingYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, NodeSize);
+	DOREPLIFETIME(AJTSMoonResourceActor, TotalMiningWork);
+	DOREPLIFETIME(AJTSMoonResourceActor, RemainingMiningWork);
 	DOREPLIFETIME(AJTSMoonResourceActor, SurfaceUp);
 	DOREPLIFETIME(AJTSMoonResourceActor, bUsesRealPlanetSurface);
 }
@@ -454,20 +538,19 @@ void AJTSMoonResourceActor::OnRep_SurfacePresentation()
 
 FText AJTSMoonResourceActor::GetMiningPrompt(APawn* InteractingPawn) const
 {
-	const UJTSPlayerEquipmentComponent* const EquipmentComponent = IsValid(InteractingPawn)
-		? InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>()
-		: nullptr;
-	if (!IsValid(EquipmentComponent) || !EquipmentComponent->HasEquippedItem(EJTSEquipmentType::Pickaxe))
+	EJTSItemId ItemId = EJTSItemId::None;
+	float Work = 0.0f;
+	if (!ResolveHeldMiningWork(InteractingPawn, ItemId, Work))
 	{
-		return FText::FromString(TEXT("NEED PICKAXE"));
-	}
-	if (!EquipmentComponent->HasActiveTool(EJTSEquipmentType::Pickaxe))
-	{
-		const int32 PickaxeSlotIndex = EquipmentComponent->GetEquipmentSlotIndex(EJTSEquipmentType::Pickaxe);
-		return FText::FromString(FString::Printf(TEXT("SELECT PICKAXE [%d]"), PickaxeSlotIndex + 1));
+		const UJTSInventoryComponent* const Inventory = IsValid(InteractingPawn)
+			? InteractingPawn->FindComponentByClass<UJTSInventoryComponent>()
+			: nullptr;
+		return IsValid(Inventory) && !Inventory->GetActiveItem().IsEmpty()
+			? FText::FromString(TEXT("ACTIVE ITEM CANNOT MINE"))
+			: FText::FromString(TEXT("HOLD AN ITEM TO MINE"));
 	}
 
-	return FText::FromString(TEXT("[E] MINE"));
+	return FText::FromString(FString::Printf(TEXT("[E] MINE  %.1f WORK"), Work));
 }
 
 void AJTSMoonResourceActor::ConfigureResourceMesh()

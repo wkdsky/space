@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSResourceTypes.h"
 
 #include "JTSExpeditionTypes.generated.h"
@@ -148,6 +149,16 @@ struct SPACE_API FJTSPlayerSnapshot
 
 	UPROPERTY()
 	TArray<FJTSResourceAmount> Inventory;
+
+	/** v3 item-system snapshot. Inventory stays separate from body-worn equipment. */
+	UPROPERTY()
+	TArray<FJTSItemInstance> ItemInventory;
+
+	UPROPERTY()
+	TArray<FJTSItemInstance> Wearables;
+
+	UPROPERTY()
+	int32 SelectedQuickbarSlot = 0;
 };
 
 /** Cross-level snapshot owned by the authoritative expedition subsystem, never by a client GameInstance. */
@@ -202,7 +213,7 @@ struct SPACE_API FJTSExpeditionSnapshot
 	double PlaytimeSeconds = 0.0;
 
 	UPROPERTY()
-	int32 SaveVersion = 1;
+	int32 SaveVersion = 3;
 };
 
 /** Read-only front-end projection of a host-owned expedition save. */
@@ -239,5 +250,5 @@ struct SPACE_API FJTSExpeditionSaveSummary
 	double PlaytimeSeconds = 0.0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Expedition Save")
-	int32 SaveVersion = 1;
+	int32 SaveVersion = 3;
 };

@@ -67,6 +67,7 @@ void AJTSResourceSpawnArea::ApplyEarthSpawnSettings(const FJTSEarthResourceSpawn
 	MinimumPickupSpacing = FMath::Max(0.0f, Settings.MinimumPickupSpacing);
 	PlayerExclusionRadius = FMath::Max(0.0f, Settings.PlayerExclusionRadius);
 	SpacecraftExclusionRadius = FMath::Max(0.0f, Settings.SpacecraftExclusionRadius);
+	SpacecraftInteractionClearance = FMath::Max(0.0f, Settings.SpacecraftInteractionClearance);
 	EdgePadding = FMath::Max(0.0f, Settings.EdgePadding);
 
 	if (SpawnBox != nullptr)
@@ -214,6 +215,15 @@ int32 AJTSResourceSpawnArea::GenerateResources()
 	const float SafeMinimumSpacing = FMath::Max(0.0f, MinimumPickupSpacing);
 	const float SafePlayerExclusion = FMath::Max(0.0f, PlayerExclusionRadius);
 	const float SafeSpacecraftExclusion = FMath::Max(0.0f, SpacecraftExclusionRadius);
+	const float SafeSpacecraftInteractionClearance = FMath::Max(0.0f, SpacecraftInteractionClearance);
+	const FVector SpacecraftExclusionCenter = IsValid(Spacecraft)
+		? Spacecraft->GetBoardingInteractionCenter()
+		: FVector::ZeroVector;
+	const float EffectiveSpacecraftExclusion = IsValid(Spacecraft)
+		? FMath::Max(
+			SafeSpacecraftExclusion,
+			Spacecraft->GetBoardingInteractionRadius() + SafeSpacecraftInteractionClearance)
+		: SafeSpacecraftExclusion;
 	const float SafeTraceStart = FMath::Max(0.0f, GroundTraceStartHeight);
 	const float SafeTraceDistance = FMath::Max(0.0f, GroundTraceDistance);
 	const float MinimumLocalX = -BoxExtent.X + SafeEdgePadding;
@@ -270,8 +280,8 @@ int32 AJTSResourceSpawnArea::GenerateResources()
 			}
 
 			if (IsValid(Spacecraft)
-				&& SafeSpacecraftExclusion > 0.0f
-				&& FVector::DistSquared2D(CandidateWorldXY, Spacecraft->GetActorLocation()) < FMath::Square(SafeSpacecraftExclusion))
+				&& EffectiveSpacecraftExclusion > 0.0f
+				&& FVector::DistSquared2D(CandidateWorldXY, SpacecraftExclusionCenter) < FMath::Square(EffectiveSpacecraftExclusion))
 			{
 				continue;
 			}

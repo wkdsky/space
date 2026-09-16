@@ -1,136 +1,113 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "space/Components/JTSCarryComponent.h"
-#include "space/Items/JTSWorldPickupActor.h"
-#include "space/Items/JTSWorldPickupItemType.h"
-
-#include "Net/UnrealNetwork.h"
-
-namespace
-{
-	bool TryGetPickupItemType(EJTSResourceType ResourceType, EJTSWorldPickupItemType& OutPickupItemType)
-	{
-		switch (ResourceType)
-		{
-		case EJTSResourceType::Fuel:
-			OutPickupItemType = EJTSWorldPickupItemType::Fuel;
-			return true;
-
-		case EJTSResourceType::Water:
-			OutPickupItemType = EJTSWorldPickupItemType::Water;
-			return true;
-
-		case EJTSResourceType::Food:
-			OutPickupItemType = EJTSWorldPickupItemType::Food;
-			return true;
-
-		case EJTSResourceType::Rock:
-			OutPickupItemType = EJTSWorldPickupItemType::Rock;
-			return true;
-
-		case EJTSResourceType::Ore:
-			OutPickupItemType = EJTSWorldPickupItemType::Ore;
-			return true;
-
-		case EJTSResourceType::MoonAntCorpse:
-			OutPickupItemType = EJTSWorldPickupItemType::MoonAntCorpse;
-			return true;
-
-		default:
-			return false;
-		}
-	}
-
-	bool TryGetPickupItemType(EJTSEquipmentType EquipmentType, EJTSWorldPickupItemType& OutPickupItemType)
-	{
-		switch (EquipmentType)
-		{
-		case EJTSEquipmentType::Pickaxe:
-			OutPickupItemType = EJTSWorldPickupItemType::Pickaxe;
-			return true;
-
-		case EJTSEquipmentType::Backpack:
-			OutPickupItemType = EJTSWorldPickupItemType::Backpack;
-			return true;
-
-		case EJTSEquipmentType::Knife:
-			OutPickupItemType = EJTSWorldPickupItemType::Knife;
-			return true;
-
-		case EJTSEquipmentType::Axe:
-			OutPickupItemType = EJTSWorldPickupItemType::Axe;
-			return true;
-
-		default:
-			return false;
-		}
-	}
-
-	void DestroySpawnedPickups(TArray<AJTSWorldPickupActor*>& SpawnedPickups)
-	{
-		for (AJTSWorldPickupActor* const Pickup : SpawnedPickups)
-		{
-			if (IsValid(Pickup))
-			{
-				Pickup->Destroy();
-			}
-		}
-		SpawnedPickups.Reset();
-	}
-}
+#include "space/Components/JTSInventoryComponent.h"
 
 UJTSPlayerEquipmentComponent::UJTSPlayerEquipmentComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
-	SetIsReplicatedByDefault(true);
-	EquipmentSlots.Init(EJTSEquipmentType::None, EquipmentCapacity);
+	LegacyQuickbarSlots.Init(EJTSEquipmentType::None, 4);
+}
+
+void UJTSPlayerEquipmentComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	OnWearablesChanged.AddDynamic(this, &UJTSPlayerEquipmentComponent::HandleWearablesChanged);
+	if (UJTSInventoryComponent* const Inventory = GetInventory())
+	{
+		Inventory->OnInventoryChanged.AddDynamic(this, &UJTSPlayerEquipmentComponent::HandleInventoryChanged);
+	}
+	NotifyEquipmentChanged();
+}
+
+EJTSItemId UJTSPlayerEquipmentComponent::ToItemId(EJTSEquipmentType EquipmentType)
+{
+	switch (EquipmentType)
+	{
+	case EJTSEquipmentType::Pickaxe: return EJTSItemId::Pickaxe;
+	case EJTSEquipmentType::Backpack: return EJTSItemId::Backpack;
+	case EJTSEquipmentType::Knife: return EJTSItemId::Knife;
+	case EJTSEquipmentType::Axe: return EJTSItemId::Axe;
+	default: return EJTSItemId::None;
+	}
+}
+
+EJTSEquipmentType UJTSPlayerEquipmentComponent::ToEquipmentType(EJTSItemId ItemId)
+{
+	switch (ItemId)
+	{
+	case EJTSItemId::Pickaxe: return EJTSEquipmentType::Pickaxe;
+	case EJTSItemId::Backpack: return EJTSEquipmentType::Backpack;
+	case EJTSItemId::Knife: return EJTSEquipmentType::Knife;
+	case EJTSItemId::Axe: return EJTSEquipmentType::Axe;
+	default: return EJTSEquipmentType::None;
+	}
+}
+
+UJTSInventoryComponent* UJTSPlayerEquipmentComponent::GetInventory() const
+{
+	return GetOwner() != nullptr ? GetOwner()->FindComponentByClass<UJTSInventoryComponent>() : nullptr;
 }
 
 bool UJTSPlayerEquipmentComponent::HasEquippedItem(EJTSEquipmentType EquipmentType) const
 {
-	return EquipmentType != EJTSEquipmentType::None && EquipmentSlots.Contains(EquipmentType);
+	if (EquipmentType == EJTSEquipmentType::Backpack)
+	{
+		return HasWearable(EJTSWearableSlot::Backpack);
+	}
+	if (const UJTSInventoryComponent* const Inventory = GetInventory())
+	{
+		return Inventory->GetItemCount(ToItemId(EquipmentType)) > 0;
+	}
+	return false;
 }
 
 bool UJTSPlayerEquipmentComponent::TryEquipItem(EJTSEquipmentType EquipmentType)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || EquipmentType == EJTSEquipmentType::None || HasEquippedItem(EquipmentType))
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
 	{
 		return false;
 	}
-
-	const int32 EmptySlotIndex = EquipmentSlots.IndexOfByKey(EJTSEquipmentType::None);
-	if (EmptySlotIndex == INDEX_NONE)
+	const EJTSItemId ItemId = ToItemId(EquipmentType);
+	if (ItemId == EJTSItemId::None)
 	{
 		return false;
 	}
-
-	EquipmentSlots[EmptySlotIndex] = EquipmentType;
-	const bool bIsSelectableTool = EquipmentType == EJTSEquipmentType::Pickaxe
-		|| EquipmentType == EJTSEquipmentType::Knife
-		|| EquipmentType == EJTSEquipmentType::Axe;
-	if (bIsSelectableTool && !HasActiveTool(EquipmentType))
+	if (EquipmentType == EJTSEquipmentType::Backpack)
 	{
-		SelectedEquipmentSlotIndex = EmptySlotIndex;
+		FJTSItemInstance Backpack;
+		Backpack.ItemId = EJTSItemId::Backpack;
+		Backpack.StackCount = 1;
+		return UJTSWearableEquipmentComponent::TryEquipItem(Backpack);
 	}
-	NotifyEquipmentChanged();
-	return true;
+	return GetInventory() != nullptr && GetInventory()->TryAddItemById(ItemId);
 }
 
 bool UJTSPlayerEquipmentComponent::CanUnequipItem(EJTSEquipmentType EquipmentType) const
 {
-	return EquipmentType != EJTSEquipmentType::None && HasEquippedItem(EquipmentType);
+	return HasEquippedItem(EquipmentType);
 }
 
 bool UJTSPlayerEquipmentComponent::UnequipItem(EJTSEquipmentType EquipmentType)
 {
-	return TryUnequipItemInternal(EquipmentType, false);
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+	if (EquipmentType == EJTSEquipmentType::Backpack)
+	{
+		return UJTSWearableEquipmentComponent::TryUnequipItem(EJTSWearableSlot::Backpack);
+	}
+	return GetInventory() != nullptr && GetInventory()->TryRemoveItem(ToItemId(EquipmentType), 1);
 }
 
 bool UJTSPlayerEquipmentComponent::DropEquippedItem(EJTSEquipmentType EquipmentType)
 {
-	return TryUnequipItemInternal(EquipmentType, true);
+	if (EquipmentType == EJTSEquipmentType::Backpack)
+	{
+		return DropWearableItem(EJTSWearableSlot::Backpack);
+	}
+	return DropEquippedItemAtSlot(GetEquipmentSlotIndex(EquipmentType));
 }
 
 bool UJTSPlayerEquipmentComponent::DropEquippedItemAtSlot(int32 SlotIndex)
@@ -138,84 +115,47 @@ bool UJTSPlayerEquipmentComponent::DropEquippedItemAtSlot(int32 SlotIndex)
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		ServerDropEquipmentSlot(SlotIndex);
-		return true;
+		return SlotIndex >= 0 && SlotIndex < 4;
 	}
-	if (!EquipmentSlots.IsValidIndex(SlotIndex))
-	{
-		return false;
-	}
-
-	const EJTSEquipmentType EquipmentType = EquipmentSlots[SlotIndex];
-	return EquipmentType != EJTSEquipmentType::None && TryUnequipItemInternal(EquipmentType, true);
+	return GetInventory() != nullptr && GetInventory()->DropItemAtSlot(SlotIndex);
 }
 
 void UJTSPlayerEquipmentComponent::UnequipAll()
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	if (GetOwner() != nullptr && GetOwner()->HasAuthority() && HasWearable(EJTSWearableSlot::Backpack))
 	{
-		return;
-	}
-	for (int32 SlotIndex = 0; SlotIndex < EquipmentSlots.Num(); ++SlotIndex)
-	{
-		const EJTSEquipmentType EquipmentType = EquipmentSlots[SlotIndex];
-		if (EquipmentType != EJTSEquipmentType::None)
-		{
-			UnequipItem(EquipmentType);
-		}
+		DropWearableItem(EJTSWearableSlot::Backpack);
 	}
 }
 
 int32 UJTSPlayerEquipmentComponent::GetEquippedItemCount() const
 {
-	int32 EquippedItemCount = 0;
-	for (const EJTSEquipmentType EquipmentType : EquipmentSlots)
-	{
-		if (EquipmentType != EJTSEquipmentType::None)
-		{
-			++EquippedItemCount;
-		}
-	}
-
-	return EquippedItemCount;
+	return GetEquippedWearableCount();
 }
 
 int32 UJTSPlayerEquipmentComponent::GetEquipmentCapacity() const
 {
-	return EquipmentCapacity;
+	return 4;
 }
 
 bool UJTSPlayerEquipmentComponent::HasAvailableSlot() const
 {
-	return EquipmentSlots.Contains(EJTSEquipmentType::None);
-}
-
-int32 UJTSPlayerEquipmentComponent::GetInventoryCapacityBonus() const
-{
-	return HasEquippedItem(EJTSEquipmentType::Backpack) ? BackpackInventoryCapacityBonus : 0;
+	const UJTSInventoryComponent* const Inventory = GetInventory();
+	return (Inventory != nullptr && Inventory->HasAvailableSlot()) || !HasWearable(EJTSWearableSlot::Backpack);
 }
 
 EJTSEquipmentType UJTSPlayerEquipmentComponent::GetEquipmentSlot(int32 SlotIndex) const
 {
-	return EquipmentSlots.IsValidIndex(SlotIndex)
-		? EquipmentSlots[SlotIndex]
-		: EJTSEquipmentType::None;
+	if (const UJTSInventoryComponent* const Inventory = GetInventory())
+	{
+		return ToEquipmentType(Inventory->GetItemAtSlot(SlotIndex).ItemId);
+	}
+	return EJTSEquipmentType::None;
 }
 
 bool UJTSPlayerEquipmentComponent::SelectEquipmentSlot(int32 SlotIndex)
 {
-	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
-	{
-		ServerSelectEquipmentSlot(SlotIndex);
-		return EquipmentSlots.IsValidIndex(SlotIndex);
-	}
-	if (!EquipmentSlots.IsValidIndex(SlotIndex))
-	{
-		return false;
-	}
-
-	SelectedEquipmentSlotIndex = SlotIndex;
-	NotifyEquipmentChanged();
-	return true;
+	return GetInventory() != nullptr && GetInventory()->SelectQuickbarSlot(SlotIndex);
 }
 
 void UJTSPlayerEquipmentComponent::ServerSelectEquipmentSlot_Implementation(int32 SlotIndex)
@@ -230,150 +170,60 @@ void UJTSPlayerEquipmentComponent::ServerDropEquipmentSlot_Implementation(int32 
 
 int32 UJTSPlayerEquipmentComponent::GetSelectedEquipmentSlotIndex() const
 {
-	return EquipmentSlots.IsValidIndex(SelectedEquipmentSlotIndex) ? SelectedEquipmentSlotIndex : 0;
+	return GetInventory() != nullptr ? GetInventory()->GetSelectedQuickbarSlot() : 0;
 }
 
 int32 UJTSPlayerEquipmentComponent::GetEquipmentSlotIndex(EJTSEquipmentType EquipmentType) const
 {
-	return EquipmentType == EJTSEquipmentType::None ? INDEX_NONE : EquipmentSlots.IndexOfByKey(EquipmentType);
+	if (const UJTSInventoryComponent* const Inventory = GetInventory())
+	{
+		const TArray<FJTSItemInstance>& Slots = Inventory->GetItemSlots();
+		for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+		{
+			if (Slots[SlotIndex].ItemId == ToItemId(EquipmentType))
+			{
+				return SlotIndex;
+			}
+		}
+	}
+	return INDEX_NONE;
 }
 
 bool UJTSPlayerEquipmentComponent::HasActiveTool(EJTSEquipmentType EquipmentType) const
 {
-	return EquipmentType != EJTSEquipmentType::None
-		&& GetEquipmentSlot(GetSelectedEquipmentSlotIndex()) == EquipmentType;
+	return GetInventory() != nullptr && GetInventory()->GetActiveItemId() == ToItemId(EquipmentType);
 }
 
 bool UJTSPlayerEquipmentComponent::HasActiveWeapon() const
 {
-	const EJTSEquipmentType ActiveEquipment = GetEquipmentSlot(GetSelectedEquipmentSlotIndex());
-	return ActiveEquipment == EJTSEquipmentType::Knife || ActiveEquipment == EJTSEquipmentType::Axe;
+	const EJTSItemId ActiveItemId = GetInventory() != nullptr ? GetInventory()->GetActiveItemId() : EJTSItemId::None;
+	return ActiveItemId == EJTSItemId::Knife || ActiveItemId == EJTSItemId::Axe;
 }
 
 const TArray<EJTSEquipmentType>& UJTSPlayerEquipmentComponent::GetEquipmentSlots() const
 {
-	return EquipmentSlots;
+	LegacyQuickbarSlots.Init(EJTSEquipmentType::None, 4);
+	if (const UJTSInventoryComponent* const Inventory = GetInventory())
+	{
+		for (int32 SlotIndex = 0; SlotIndex < LegacyQuickbarSlots.Num(); ++SlotIndex)
+		{
+			LegacyQuickbarSlots[SlotIndex] = ToEquipmentType(Inventory->GetItemAtSlot(SlotIndex).ItemId);
+		}
+	}
+	return LegacyQuickbarSlots;
 }
 
-bool UJTSPlayerEquipmentComponent::TryUnequipItemInternal(EJTSEquipmentType EquipmentType, bool bDropEquipmentPickup)
+void UJTSPlayerEquipmentComponent::HandleWearablesChanged(int32 EquippedWearableCount)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !CanUnequipItem(EquipmentType))
-	{
-		return false;
-	}
-
-	const int32 EquippedSlotIndex = EquipmentSlots.IndexOfByKey(EquipmentType);
-	if (EquippedSlotIndex == INDEX_NONE)
-	{
-		return false;
-	}
-
-	UJTSCarryComponent* const CarryComponent = GetOwner() != nullptr
-		? GetOwner()->FindComponentByClass<UJTSCarryComponent>()
-		: nullptr;
-	TArray<EJTSResourceType> OverflowItems;
-	if (EquipmentType == EJTSEquipmentType::Backpack && IsValid(CarryComponent)
-		&& !CarryComponent->GetOverflowItemsForCapacity(CarryComponent->GetBaseCapacity(), OverflowItems))
-	{
-		return false;
-	}
-
-	const bool bNeedsWorldPickup = bDropEquipmentPickup || !OverflowItems.IsEmpty();
-	APawn* const OwnerPawn = Cast<APawn>(GetOwner());
-	UWorld* const World = GetWorld();
-	if (bNeedsWorldPickup && (!IsValid(OwnerPawn) || World == nullptr))
-	{
-		return false;
-	}
-
-	TArray<AJTSWorldPickupActor*> SpawnedPickups;
-	auto SpawnPickup = [World, OwnerPawn, &SpawnedPickups](EJTSWorldPickupItemType PickupItemType)
-	{
-		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
-			World,
-			PickupItemType,
-			OwnerPawn->GetActorLocation(),
-			OwnerPawn,
-			OwnerPawn,
-			OwnerPawn->GetActorForwardVector());
-		if (!IsValid(Pickup))
-		{
-			return false;
-		}
-
-		SpawnedPickups.Add(Pickup);
-		return true;
-	};
-
-	// Backpack overflow remains in the existing Carry slots until all resource drops and the backpack drop exist.
-	for (const EJTSResourceType OverflowItem : OverflowItems)
-	{
-		EJTSWorldPickupItemType ResourcePickupItemType = EJTSWorldPickupItemType::Rock;
-		if (!TryGetPickupItemType(OverflowItem, ResourcePickupItemType) || !SpawnPickup(ResourcePickupItemType))
-		{
-			DestroySpawnedPickups(SpawnedPickups);
-			return false;
-		}
-	}
-
-	if (bDropEquipmentPickup)
-	{
-		EJTSWorldPickupItemType EquipmentPickupItemType = EJTSWorldPickupItemType::Pickaxe;
-		if (!TryGetPickupItemType(EquipmentType, EquipmentPickupItemType) || !SpawnPickup(EquipmentPickupItemType))
-		{
-			DestroySpawnedPickups(SpawnedPickups);
-			return false;
-		}
-	}
-
-	if (!OverflowItems.IsEmpty()
-		&& (!IsValid(CarryComponent)
-			|| !CarryComponent->CommitOverflowRemovalForCapacity(CarryComponent->GetBaseCapacity(), OverflowItems)))
-	{
-		DestroySpawnedPickups(SpawnedPickups);
-		return false;
-	}
-
-	EquipmentSlots[EquippedSlotIndex] = EJTSEquipmentType::None;
 	NotifyEquipmentChanged();
+}
 
-	if (EquipmentType == EJTSEquipmentType::Backpack)
-	{
-		UE_LOG(
-			LogTemp,
-			Log,
-			TEXT("JumpToSpace Backpack Unequip: OverflowDropped=%d BackpackDropped=%s"),
-			OverflowItems.Num(),
-			bDropEquipmentPickup ? TEXT("true") : TEXT("false"));
-	}
-	else if (bDropEquipmentPickup)
-	{
-		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Equipment Drop: Item=%d"), static_cast<int32>(EquipmentType));
-	}
-
-	return true;
+void UJTSPlayerEquipmentComponent::HandleInventoryChanged(int32 UsedSlots, int32 Capacity)
+{
+	NotifyEquipmentChanged();
 }
 
 void UJTSPlayerEquipmentComponent::NotifyEquipmentChanged()
 {
 	OnEquipmentChanged.Broadcast(GetEquippedItemCount());
-
-	if (UJTSCarryComponent* const CarryComponent = GetOwner() != nullptr
-		? GetOwner()->FindComponentByClass<UJTSCarryComponent>()
-		: nullptr)
-	{
-		CarryComponent->NotifyCapacityChanged();
-	}
-}
-
-void UJTSPlayerEquipmentComponent::OnRep_EquipmentState()
-{
-	NotifyEquipmentChanged();
-}
-
-void UJTSPlayerEquipmentComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(UJTSPlayerEquipmentComponent, EquipmentSlots);
-	DOREPLIFETIME(UJTSPlayerEquipmentComponent, SelectedEquipmentSlotIndex);
 }

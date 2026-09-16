@@ -80,6 +80,16 @@ void UJTSFrontEndRootWidget::NativeDestruct()
 
 FReply UJTSFrontEndRootWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (InKeyEvent.GetKey() == EKeys::Escape
+		&& PageSwitcher != nullptr
+		&& PageSwitcher->GetActiveWidget() == ExpeditionSelectPage
+		&& ExpeditionSelectPage != nullptr
+		&& ExpeditionSelectPage->IsDeleteConfirmationOpen())
+	{
+		ExpeditionSelectPage->CancelPendingDeleteConfirmation();
+		return FReply::Handled();
+	}
+
 	if (InKeyEvent.GetKey() == EKeys::Escape && PageSwitcher != nullptr && PageSwitcher->GetActiveWidget() != MainMenu)
 	{
 		ShowMainMenu();

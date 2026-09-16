@@ -52,6 +52,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resources|Spawning", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionRadius = 400.0f;
 
+	/** Minimum clear ground outside the current spacecraft interaction volume. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resources|Spawning", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float SpacecraftInteractionClearance = 250.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resources|Spawning", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float EdgePadding = 100.0f;
 

@@ -11,7 +11,8 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCarriedResourcesChanged, int32, CarriedItemCount, int32, CarryCapacity);
 
 /**
- * Stores the small, fixed-capacity set of resources carried by one actor.
+ * Compatibility projection for pre-v1 callers. Resources now live in UJTSInventoryComponent as
+ * item instances; this component intentionally exposes the former resource-only API.
  */
 UCLASS(ClassGroup = (Items), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSCarryComponent : public UActorComponent
@@ -20,6 +21,7 @@ class SPACE_API UJTSCarryComponent : public UActorComponent
 
 public:
 	UJTSCarryComponent();
+	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Returns whether one additional resource can fit in the carry inventory. */
@@ -84,21 +86,15 @@ public:
 	FOnCarriedResourcesChanged OnCarriedResourcesChanged;
 
 private:
-	/** The Moon prototype starts with two slots; Backpack adds capacity through the equipment component. */
-	UPROPERTY(EditDefaultsOnly, Category = "Carry", meta = (ClampMin = "1", UIMin = "1"))
-	int32 BaseCapacity = 2;
-
-	int32 GetEquipmentCapacityBonus() const;
-	void RebuildCarriedResourceAmounts();
+	class UJTSInventoryComponent* GetInventoryComponent() const;
+	void RebuildCarriedResourceAmounts() const;
 
 	UFUNCTION()
-	void OnRep_CarriedItems();
+	void HandleInventoryChanged(int32 UsedSlots, int32 Capacity);
 
-	/** Actual ordered inventory slots. Resources never stack into a single slot. */
-	UPROPERTY(ReplicatedUsing = OnRep_CarriedItems, VisibleAnywhere, Category = "Carry")
-	TArray<EJTSResourceType> CarriedItems;
+	/** Lazily rebuilt flattened legacy view. New gameplay code should use UJTSInventoryComponent. */
+	mutable TArray<EJTSResourceType> CarriedItems;
 
 	/** Aggregated resource view retained for deposits and native presentation. */
-	UPROPERTY(VisibleAnywhere, Category = "Carry")
-	TMap<EJTSResourceType, int32> CarriedResources;
+	mutable TMap<EJTSResourceType, int32> CarriedResources;
 };

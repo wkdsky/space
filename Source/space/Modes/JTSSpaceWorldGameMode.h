@@ -13,6 +13,7 @@ class AJTSPlanetLandingManager;
 class AJTSPlanetAnchor;
 class AJTSSpaceWorldManager;
 class AJTSSpacecraftActor;
+class AJTSShopTerminalActor;
 class APlayerController;
 class AActor;
 
@@ -52,6 +53,7 @@ private:
 	AActor* FindOrSpawnSurfaceGameplayController(
 		const FJTSSurfaceGameplayControllerDefinition& Definition,
 		AJTSPlanetAnchor* Planet);
+	AJTSShopTerminalActor* FindOrSpawnShopTerminal(AJTSSpacecraftActor* Spacecraft, AJTSPlanetAnchor* Planet);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpaceWorldManager> SpaceWorldManagerClass;
@@ -68,9 +70,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface Gameplay", meta = (AllowPrivateAccess = "true"))
 	TArray<FJTSSurfaceGameplayControllerDefinition> SurfaceGameplayControllers;
 
+	/** Blueprint can replace the terminal presentation while C++ owns shared-wallet rules. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Shop", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<AJTSShopTerminalActor> ShopTerminalClass;
+
 	TWeakObjectPtr<AJTSSpaceWorldManager> SpaceWorldManager;
 	TWeakObjectPtr<AJTSPlanetLandingManager> PlanetLandingManager;
 	TSet<TWeakObjectPtr<APlayerController>> StartedLandingSequences;
 	TMap<FName, TWeakObjectPtr<AActor>> ActiveSurfaceGameplayControllers;
 	TSet<FName> InitializedSurfacePlanets;
+	TWeakObjectPtr<AJTSShopTerminalActor> ShopTerminal;
 };

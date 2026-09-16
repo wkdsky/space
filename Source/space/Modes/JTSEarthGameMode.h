@@ -42,6 +42,10 @@ struct SPACE_API FJTSEarthResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Earth|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionRadius = 400.0f;
 
+	/** Extra clear ground outside the dynamically sized spacecraft interaction volume. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Earth|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float SpacecraftInteractionClearance = 250.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Earth|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float EdgePadding = 100.0f;
 };

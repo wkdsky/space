@@ -19,11 +19,13 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 #include "Math/RotationMatrix.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/IInteractable.h"
@@ -31,6 +33,7 @@
 #include "space/Interaction/JTSMeleeTarget.h"
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -44,6 +47,7 @@
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
+#include "space/World/JTSShopTerminalActor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
 namespace
@@ -176,32 +180,11 @@ namespace
 
 bool UJTSPrototypeHUDWidget::OpenMoonShop(AJTSCharacter* Player)
 {
-	if (!IsValid(Player) || !BoundGameState.IsValid() || !BoundGameState->IsMoonExploration() || MoonShopPanel == nullptr)
-	{
-		return false;
-	}
-
-	AJTSSpacecraftActor* const Spacecraft = Player->GetNearbySpacecraft();
-	if (!IsValid(Spacecraft) || !Spacecraft->IsPawnInBoardingRange(Player))
-	{
-		return false;
-	}
-
-	ShopPlayer = Player;
-	ShopSpacecraft = Spacecraft;
-	bMoonShopOpen = true;
-	bWorkshopEquipmentTab = false;
-	ApplyLayerVisibility(MoonShopPanel, true);
-	RefreshWorkshopTabs();
-	RefreshMoonShop();
-	RefreshGameplayHud();
-	UE_LOG(
-		LogTemp,
-		Log,
-		TEXT("JumpToSpace Shop Open: Player=%s ShipRock=%d"),
-		*Player->GetName(),
-		Spacecraft->GetResourceAmount(EJTSResourceType::Rock));
-	return true;
+	// This native HUD keeps the old panel code only so prior widget assets do
+	// not lose bindings.  The transaction path is deliberately retired: the
+	// physical SpaceWorld terminal owns the formal market.
+	static_cast<void>(Player);
+	return false;
 }
 
 void UJTSPrototypeHUDWidget::CloseMoonShop()
@@ -249,6 +232,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	SetIsFocusable(true);
 	BuildWidgetTree();
 	BindGameState();
 	BindPlayerHealth();
@@ -264,6 +248,20 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 	{
 		RefreshPhaseView(EJTSGameplayPhase::WaitingToStart);
 	}
+}
+
+FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (bGameMenuOpen && InKeyEvent.GetKey() == EKeys::Escape)
+	{
+		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+		{
+			Controller->CloseGameMenu();
+			return FReply::Handled();
+		}
+	}
+
+	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
 
 void UJTSPrototypeHUDWidget::NativeDestruct()
@@ -578,8 +576,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		if (InventoryPanel != nullptr && InventoryCanvas != nullptr)
 		{
 			InventoryPanel->SetContent(InventoryCanvas);
-			AddCanvasChild(InventoryCanvas, MakeTextBlock(WidgetTree, TEXT("InventoryTitle"), TEXT("INVENTORY"), 17.0f, FLinearColor(0.78f, 0.92f, 1.0f, 1.0f), ETextJustify::Center), FAnchors(0.5f, 0.0f), FVector2D(0.0f, 2.0f), FVector2D(200.0f, 24.0f), FVector2D(0.5f, 0.0f));
-		for (int32 SlotIndex = 0; SlotIndex < 7; ++SlotIndex)
+		AddCanvasChild(InventoryCanvas, MakeTextBlock(WidgetTree, TEXT("InventoryTitle"), TEXT("QUICKBAR / INVENTORY"), 17.0f, FLinearColor(0.78f, 0.92f, 1.0f, 1.0f), ETextJustify::Center), FAnchors(0.5f, 0.0f), FVector2D(0.0f, 2.0f), FVector2D(340.0f, 24.0f), FVector2D(0.5f, 0.0f));
+		for (int32 SlotIndex = 0; SlotIndex < 16; ++SlotIndex)
 		{
 			UBorder* const SlotBorder = MakeBorder(
 				WidgetTree,
@@ -666,7 +664,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		if (EquipmentPanel != nullptr && EquipmentCanvas != nullptr)
 		{
 			EquipmentPanel->SetContent(EquipmentCanvas);
-			AddCanvasChild(EquipmentCanvas, MakeTextBlock(WidgetTree, TEXT("EquipmentTitle"), TEXT("EQUIPMENT"), 16.0f, FLinearColor(0.94f, 0.85f, 0.55f, 1.0f), ETextJustify::Center), FAnchors(0.5f, 0.0f), FVector2D(0.0f, 2.0f), FVector2D(190.0f, 23.0f), FVector2D(0.5f, 0.0f));
+			AddCanvasChild(EquipmentCanvas, MakeTextBlock(WidgetTree, TEXT("EquipmentTitle"), TEXT("WEARABLES"), 16.0f, FLinearColor(0.94f, 0.85f, 0.55f, 1.0f), ETextJustify::Center), FAnchors(0.5f, 0.0f), FVector2D(0.0f, 2.0f), FVector2D(190.0f, 23.0f), FVector2D(0.5f, 0.0f));
 			for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
 			{
 				const int32 Column = SlotIndex % 2;
@@ -1275,7 +1273,10 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	const bool bEarthCollection = NewGameplayPhase == EJTSGameplayPhase::EarthCollection;
 	const bool bMoonExploration = NewGameplayPhase == EJTSGameplayPhase::MoonExploration;
 	const bool bSpaceFlight = NewGameplayPhase == EJTSGameplayPhase::SpaceFlight;
-	if (bEarthCollection || bMoonExploration)
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bSpaceWorldSurface = IsValid(SpaceWorldManager) && SpaceWorldManager->IsSurfaceGameplayReady();
+	const bool bGameplaySurface = bEarthCollection || bMoonExploration || bSpaceWorldSurface;
+	if (bGameplaySurface)
 	{
 		BindPlayerHealth();
 	}
@@ -1292,21 +1293,21 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	// layers stay disabled so they cannot compete with replicated lobby state.
 	ApplyLayerVisibility(StartMenuLayer, false);
 	ApplyLayerVisibility(SettingsLayer, false);
-	ApplyLayerVisibility(GameplayLayer, bEarthCollection || bMoonExploration || bSpaceFlight);
+	ApplyLayerVisibility(GameplayLayer, bGameplaySurface || bSpaceFlight);
 	ApplyLayerVisibility(LaunchingLayer, NewGameplayPhase == EJTSGameplayPhase::Launching);
 	ApplyLayerVisibility(ResultLayer, NewGameplayPhase == EJTSGameplayPhase::EarthCaptureFailure || NewGameplayPhase == EJTSGameplayPhase::MoonArrivalSuccess);
 	ApplyLayerVisibility(FuelToMoonPanel, bEarthCollection);
 	ApplyLayerVisibility(TimeText, bEarthCollection);
 	ApplyLayerVisibility(FlightTelemetryText, bSpaceFlight);
-	ApplyLayerVisibility(PlayerCardPanel, bEarthCollection || bMoonExploration);
-	ApplyLayerVisibility(InventoryPanel, bEarthCollection || bMoonExploration);
+	ApplyLayerVisibility(PlayerCardPanel, bGameplaySurface);
+	ApplyLayerVisibility(InventoryPanel, bGameplaySurface);
 	ApplyLayerVisibility(EquipmentPanel, false);
-	ApplyLayerVisibility(RightSidebarPanel, bEarthCollection || bMoonExploration);
-	ApplyLayerVisibility(ShipResourcesPanel, bEarthCollection || bMoonExploration);
-	ApplyLayerVisibility(InteractionPromptText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
-	ApplyLayerVisibility(CrosshairText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
-	ApplyLayerVisibility(GameplayHelpText, (bEarthCollection || bMoonExploration) && !bMoonShopOpen && !bGameMenuOpen);
-	if (!bEarthCollection && !bMoonExploration)
+	ApplyLayerVisibility(RightSidebarPanel, bGameplaySurface);
+	ApplyLayerVisibility(ShipResourcesPanel, bGameplaySurface);
+	ApplyLayerVisibility(InteractionPromptText, bGameplaySurface && !bMoonShopOpen && !bGameMenuOpen);
+	ApplyLayerVisibility(CrosshairText, bGameplaySurface && !bMoonShopOpen && !bGameMenuOpen);
+	ApplyLayerVisibility(GameplayHelpText, bGameplaySurface && !bMoonShopOpen && !bGameMenuOpen);
+	if (!bGameplaySurface)
 	{
 		SetBoardingProgressVisible(false);
 	}
@@ -1323,7 +1324,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	{
 		RefreshResultView(NewGameplayPhase);
 	}
-	else if (bEarthCollection || bMoonExploration)
+	else if (bGameplaySurface)
 	{
 		RefreshGameplayHud();
 	}
@@ -1555,20 +1556,14 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 		return;
 	}
 
-	const UJTSCarryComponent* CarryComponent = nullptr;
-	int32 EffectiveCapacity = 2;
-	int32 BaseCapacity = EffectiveCapacity;
-	if (const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
-	{
-		CarryComponent = PlayerCharacter->GetCarryComponent();
-		if (IsValid(CarryComponent))
-		{
-			EffectiveCapacity = CarryComponent->GetCarryCapacity();
-			BaseCapacity = CarryComponent->GetBaseCapacity();
-		}
-	}
+	const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
+	const UJTSInventoryComponent* const Inventory = PlayerCharacter != nullptr
+		? PlayerCharacter->GetInventoryComponent()
+		: nullptr;
+	int32 EffectiveCapacity = IsValid(Inventory) ? Inventory->GetInventoryCapacity() : 2;
+	const int32 BaseCapacity = IsValid(Inventory) ? Inventory->GetBaseInventoryCapacity() : 2;
 	EffectiveCapacity = FMath::Clamp(EffectiveCapacity, 1, InventorySlotTexts.Num());
-	BaseCapacity = FMath::Clamp(BaseCapacity, 0, EffectiveCapacity);
+	const int32 ClampedBaseCapacity = FMath::Clamp(BaseCapacity, 0, EffectiveCapacity);
 
 	int32 ViewportWidth = 1280;
 	int32 ViewportHeight = 720;
@@ -1583,7 +1578,11 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 		static_cast<float>(SlotsPerRow) * 104.0f + 16.0f);
 	const float PanelHeight = 30.0f + static_cast<float>(RowCount) * 70.0f + 8.0f;
 	const float SlotWidth = (PanelWidth - 16.0f - static_cast<float>(SlotsPerRow - 1) * 4.0f) / static_cast<float>(SlotsPerRow);
-	const TArray<EJTSResourceType>* const CarriedItems = IsValid(CarryComponent) ? &CarryComponent->GetCarriedItems() : nullptr;
+	const TArray<FJTSItemInstance>* const Items = IsValid(Inventory) ? &Inventory->GetItemSlots() : nullptr;
+	const int32 QuickbarSlotCount = IsValid(Inventory)
+		? Inventory->GetQuickbarSlotCount()
+		: FMath::Min(4, EffectiveCapacity);
+	const int32 SelectedQuickbarSlot = IsValid(Inventory) ? Inventory->GetSelectedQuickbarSlot() : INDEX_NONE;
 	if (InventoryPanelSlot != nullptr)
 	{
 		InventoryPanelSlot->SetSize(FVector2D(PanelWidth, PanelHeight));
@@ -1597,14 +1596,18 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 	for (int32 SlotIndex = 0; SlotIndex < InventorySlotTexts.Num(); ++SlotIndex)
 	{
 		const bool bSlotVisible = SlotIndex < EffectiveCapacity;
-		const bool bBackpackBonusSlot = SlotIndex >= BaseCapacity;
+		const bool bBackpackBonusSlot = SlotIndex >= ClampedBaseCapacity;
+		const bool bQuickbarSlot = SlotIndex < QuickbarSlotCount;
+		const bool bSelected = bQuickbarSlot && SlotIndex == SelectedQuickbarSlot;
 		if (InventorySlotBorders.IsValidIndex(SlotIndex) && InventorySlotBorders[SlotIndex] != nullptr)
 		{
 			InventorySlotBorders[SlotIndex]->SetVisibility(bSlotVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-			InventorySlotBorders[SlotIndex]->SetBrushColor(bBackpackBonusSlot
+			InventorySlotBorders[SlotIndex]->SetBrushColor(bSelected
+				? FLinearColor(0.12f, 0.56f, 0.67f, 0.99f)
+				: bBackpackBonusSlot
 				? FLinearColor(0.045f, 0.095f, 0.135f, 0.96f)
 				: FLinearColor(0.08f, 0.15f, 0.22f, 0.96f));
-			InventorySlotBorders[SlotIndex]->SetPadding(bBackpackBonusSlot ? 2.0f : 3.0f);
+			InventorySlotBorders[SlotIndex]->SetPadding(bSelected ? 1.5f : bBackpackBonusSlot ? 2.0f : 3.0f);
 			if (UCanvasPanelSlot* const LayoutSlot = Cast<UCanvasPanelSlot>(InventorySlotBorders[SlotIndex]->Slot))
 			{
 				const int32 RowIndex = SlotIndex / SlotsPerRow;
@@ -1616,12 +1619,25 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 
 		if (UTextBlock* const SlotText = InventorySlotTexts[SlotIndex])
 		{
-			const FString SlotLabel = CarriedItems != nullptr && CarriedItems->IsValidIndex(SlotIndex)
-				? ResourceTypeToString((*CarriedItems)[SlotIndex]).ToUpper()
-				: TEXT("EMPTY");
+			const FJTSItemInstance Item = Items != nullptr && Items->IsValidIndex(SlotIndex)
+				? (*Items)[SlotIndex]
+				: FJTSItemInstance();
+			FString SlotLabel = Item.IsEmpty()
+				? TEXT("EMPTY")
+				: UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString().ToUpper();
+			if (!Item.IsEmpty() && Item.StackCount > 1)
+			{
+				SlotLabel += FString::Printf(TEXT(" x%d"), Item.StackCount);
+			}
+			if (bQuickbarSlot)
+			{
+				SlotLabel = FString::Printf(TEXT("[%d] %s"), SlotIndex + 1, *SlotLabel);
+			}
 			SlotText->SetText(FText::FromString(SlotLabel));
-			SlotText->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), SlotWidth < 76.0f ? 11.0f : 14.0f));
-			SlotText->SetColorAndOpacity(FSlateColor(bBackpackBonusSlot
+			SlotText->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), SlotWidth < 76.0f ? 10.0f : 13.0f));
+			SlotText->SetColorAndOpacity(FSlateColor(bSelected
+				? FLinearColor(0.88f, 1.0f, 1.0f, 1.0f)
+				: bBackpackBonusSlot
 				? FLinearColor(0.66f, 0.80f, 0.87f, 1.0f)
 				: FLinearColor(0.78f, 0.84f, 0.90f, 1.0f)));
 		}
@@ -1630,50 +1646,49 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 
 void UJTSPrototypeHUDWidget::RefreshEquipmentSlots()
 {
-	const bool bMoonExploration = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
 	const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 	const UJTSPlayerEquipmentComponent* const EquipmentComponent = PlayerCharacter != nullptr
 		? PlayerCharacter->GetEquipmentComponent()
 		: nullptr;
-	const bool bShowEquipment = bMoonExploration
-		&& IsValid(EquipmentComponent)
-		&& EquipmentComponent->GetEquippedItemCount() > 0;
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bShowEquipment = IsValid(EquipmentComponent)
+		&& ((BoundGameState.IsValid() && (BoundGameState->IsEarthCollectionActive() || BoundGameState->IsMoonExploration()))
+			|| (IsValid(SpaceWorldManager) && SpaceWorldManager->IsSurfaceGameplayReady()));
 	ApplyLayerVisibility(EquipmentPanel, bShowEquipment);
-	const int32 SelectedSlotIndex = bShowEquipment ? EquipmentComponent->GetSelectedEquipmentSlotIndex() : INDEX_NONE;
-	const int32 HeldSlotIndex = PlayerCharacter != nullptr ? PlayerCharacter->GetEquipmentHoldSlotIndex() : INDEX_NONE;
-	const float HoldProgress = PlayerCharacter != nullptr ? PlayerCharacter->GetEquipmentHoldProgress() : 0.0f;
+	const TArray<FString> SlotNames = { TEXT("BACKPACK"), TEXT("SUIT"), TEXT("HELMET"), TEXT("ACCESSORY") };
+	const TArray<EJTSWearableSlot> SlotTypes = { EJTSWearableSlot::Backpack, EJTSWearableSlot::Body, EJTSWearableSlot::Head, EJTSWearableSlot::Accessory };
 
 	for (int32 SlotIndex = 0; SlotIndex < EquipmentSlotTexts.Num(); ++SlotIndex)
 	{
-		const bool bSelected = bShowEquipment && SlotIndex == SelectedSlotIndex;
+		const FJTSItemInstance Wearable = bShowEquipment && SlotTypes.IsValidIndex(SlotIndex)
+			? EquipmentComponent->GetWearable(SlotTypes[SlotIndex])
+			: FJTSItemInstance();
+		const bool bOccupied = !Wearable.IsEmpty();
 		if (EquipmentSlotBorders.IsValidIndex(SlotIndex) && EquipmentSlotBorders[SlotIndex] != nullptr)
 		{
-			EquipmentSlotBorders[SlotIndex]->SetBrushColor(bSelected
-				? FLinearColor(0.12f, 0.42f, 0.43f, 0.98f)
+			EquipmentSlotBorders[SlotIndex]->SetBrushColor(bOccupied
+				? FLinearColor(0.13f, 0.34f, 0.25f, 0.98f)
 				: FLinearColor(0.12f, 0.105f, 0.06f, 0.96f));
-			EquipmentSlotBorders[SlotIndex]->SetPadding(bSelected ? 2.0f : 3.0f);
+			EquipmentSlotBorders[SlotIndex]->SetPadding(bOccupied ? 2.0f : 3.0f);
 		}
 		if (UTextBlock* const SlotText = EquipmentSlotTexts[SlotIndex])
 		{
-			const EJTSEquipmentType EquipmentType = bShowEquipment
-				? EquipmentComponent->GetEquipmentSlot(SlotIndex)
-				: EJTSEquipmentType::None;
-			SlotText->SetText(FText::FromString(EquipmentTypeToString(EquipmentType)));
-			SlotText->SetColorAndOpacity(FSlateColor(bSelected
-				? FLinearColor(0.77f, 1.0f, 0.97f, 1.0f)
+			const FString ItemName = bOccupied
+				? UJTSItemDefinitionLibrary::GetItemDisplayName(Wearable.ItemId).ToString().ToUpper()
+				: TEXT("EMPTY");
+			const FString SlotName = SlotNames.IsValidIndex(SlotIndex) ? SlotNames[SlotIndex] : TEXT("WEARABLE");
+			SlotText->SetText(FText::FromString(FString::Printf(TEXT("%s\n%s"), *SlotName, *ItemName)));
+			SlotText->SetColorAndOpacity(FSlateColor(bOccupied
+				? FLinearColor(0.72f, 1.0f, 0.82f, 1.0f)
 				: FLinearColor(0.84f, 0.80f, 0.68f, 1.0f)));
 		}
 		if (EquipmentSlotKeyTexts.IsValidIndex(SlotIndex) && EquipmentSlotKeyTexts[SlotIndex] != nullptr)
 		{
-			EquipmentSlotKeyTexts[SlotIndex]->SetText(FText::AsNumber(SlotIndex + 1));
+			EquipmentSlotKeyTexts[SlotIndex]->SetText(FText::GetEmpty());
 		}
 		if (EquipmentHoldProgressWidgets.IsValidIndex(SlotIndex) && EquipmentHoldProgressWidgets[SlotIndex] != nullptr)
 		{
-			const bool bShowHoldProgress = bShowEquipment && SlotIndex == HeldSlotIndex && HoldProgress > 0.0f;
-			EquipmentHoldProgressWidgets[SlotIndex]->SetProgress(HoldProgress);
-			EquipmentHoldProgressWidgets[SlotIndex]->SetVisibility(bShowHoldProgress
-				? ESlateVisibility::SelfHitTestInvisible
-				: ESlateVisibility::Collapsed);
+			EquipmentHoldProgressWidgets[SlotIndex]->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 }
@@ -1718,7 +1733,8 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	FText TargetName;
 	FVector PromptAnchor = FVector::ZeroVector;
 	bool bHasPromptAnchor = false;
-	if (!bMoonShopOpen && !bGameMenuOpen)
+	const AJTSPlayerController* const OwningController = Cast<AJTSPlayerController>(GetOwningPlayer());
+	if (!bMoonShopOpen && !bGameMenuOpen && (!IsValid(OwningController) || !OwningController->IsSpaceShopOpen()))
 	{
 		if (AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
 		{
@@ -1761,12 +1777,18 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 							PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
 							bHasPromptAnchor = true;
 						}
-						else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
-						{
-							TargetName = FText::FromString(TEXT("SPACECRAFT"));
-							PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
-							bHasPromptAnchor = true;
-						}
+					else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
+					{
+						TargetName = FText::FromString(TEXT("SPACECRAFT"));
+						PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+						bHasPromptAnchor = true;
+					}
+					else if (const AJTSShopTerminalActor* const Terminal = Cast<AJTSShopTerminalActor>(Target))
+					{
+						TargetName = FText::FromString(TEXT("EXPEDITION SUPPLY"));
+						PromptAnchor = Terminal->GetActorLocation() + FVector(0.0f, 0.0f, 130.0f);
+						bHasPromptAnchor = true;
+					}
 					}
 				}
 

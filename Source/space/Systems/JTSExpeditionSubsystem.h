@@ -49,6 +49,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Expedition|Save")
 	bool HasSaveInSlot(int32 InSaveSlot) const;
 
+	/**
+	 * Permanently removes one local host save slot. This is intentionally unavailable to
+	 * connected clients and also clears the in-memory snapshot when it is the active slot.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Expedition|Save")
+	bool DeleteExpeditionSlot(int32 InSaveSlot);
+
 	UFUNCTION(BlueprintPure, Category = "Expedition|Save")
 	int32 GetActiveSaveSlot() const { return ActiveSaveSlot; }
 

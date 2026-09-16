@@ -12,6 +12,7 @@
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Player/JTSCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSResourcePickupActor::AJTSResourcePickupActor()
@@ -211,6 +212,15 @@ bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 		return false;
 	}
 
+	AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn);
+	// A full inventory should not prevent a player who is already at the ship from submitting the
+	// resources they carry. Submit before the capacity check, then again after the newly collected
+	// resource is added below.
+	if (IsValid(Character))
+	{
+		Character->TryDepositCarriedResourcesToNearbySpacecraft();
+	}
+
 	if (!CanCollectResource(InteractingPawn, GetResourceAmount(), true))
 	{
 		ShowFailureFeedback(TEXT("InventoryFull"));
@@ -223,6 +233,13 @@ bool AJTSResourcePickupActor::TryPickup(APawn* InteractingPawn)
 		bPickupConsumed = false;
 		ShowFailureFeedback(TEXT("InventoryFull"));
 		return false;
+	}
+
+	// A player can collect a resource after the ship's overlap Begin event has already fired. In
+	// that case submit it immediately instead of requiring an artificial leave-and-re-enter loop.
+	if (IsValid(Character))
+	{
+		Character->TryDepositCarriedResourcesToNearbySpacecraft();
 	}
 
 	Destroy();

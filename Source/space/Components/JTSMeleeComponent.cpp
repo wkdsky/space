@@ -11,7 +11,9 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "space/Components/JTSHealthComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSMoonAntActor.h"
@@ -443,7 +445,18 @@ bool UJTSMeleeComponent::TryAttack()
 		HitActorsThisSwing.Add(Target);
 	}
 
-	NextAttackTime = CurrentTime + static_cast<double>(MoonSettings->GetAttackCooldown());
+	float AttackInterval = MoonSettings->GetAttackCooldown();
+	if (const UJTSInventoryComponent* const Inventory = AttackingPawn->FindComponentByClass<UJTSInventoryComponent>())
+	{
+		if (const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Inventory->GetActiveItemId()))
+		{
+			if (Definition->IsHoldable())
+			{
+				AttackInterval = Definition->MeleeAttackInterval;
+			}
+		}
+	}
+	NextAttackTime = CurrentTime + static_cast<double>(FMath::Max(0.08f, AttackInterval));
 	RefreshMeleeTarget();
 	return true;
 }
@@ -456,50 +469,59 @@ AActor* UJTSMeleeComponent::GetCurrentMeleeTarget() const
 EJTSMeleeAttackType UJTSMeleeComponent::GetCurrentAttackType() const
 {
 	const APawn* const AttackingPawn = Cast<APawn>(GetOwner());
-	const UJTSPlayerEquipmentComponent* const EquipmentComponent = IsValid(AttackingPawn)
-		? AttackingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>()
+	const UJTSInventoryComponent* const Inventory = IsValid(AttackingPawn)
+		? AttackingPawn->FindComponentByClass<UJTSInventoryComponent>()
 		: nullptr;
-	if (!IsValid(EquipmentComponent))
+	if (!IsValid(Inventory))
 	{
 		return EJTSMeleeAttackType::Punch;
 	}
 
-	switch (EquipmentComponent->GetEquipmentSlot(EquipmentComponent->GetSelectedEquipmentSlotIndex()))
+	const FJTSItemInstance ActiveItem = Inventory->GetActiveItem();
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveItem.ItemId);
+	if (!IsValid(Definition) || !Definition->IsHoldable())
 	{
-	case EJTSEquipmentType::Knife:
+		return EJTSMeleeAttackType::Punch;
+	}
+
+	switch (ActiveItem.ItemId)
+	{
+	case EJTSItemId::Knife:
 		return EJTSMeleeAttackType::Knife;
 
-	case EJTSEquipmentType::Axe:
+	case EJTSItemId::Axe:
 		return EJTSMeleeAttackType::Axe;
 
+	case EJTSItemId::Pickaxe:
+		return EJTSMeleeAttackType::Tool;
+
 	default:
-		return EJTSMeleeAttackType::Punch;
+		return EJTSMeleeAttackType::Improvised;
 	}
 }
 
 EJTSAttackType UJTSMeleeComponent::ResolveAttackType() const
 {
 	const APawn* const AttackingPawn = Cast<APawn>(GetOwner());
-	const UJTSPlayerEquipmentComponent* const EquipmentComponent = IsValid(AttackingPawn)
-		? AttackingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>()
+	const UJTSInventoryComponent* const Inventory = IsValid(AttackingPawn)
+		? AttackingPawn->FindComponentByClass<UJTSInventoryComponent>()
 		: nullptr;
-	if (!IsValid(EquipmentComponent))
+	if (!IsValid(Inventory))
 	{
 		return EJTSAttackType::Punch;
 	}
 
-	switch (EquipmentComponent->GetEquipmentSlot(EquipmentComponent->GetSelectedEquipmentSlotIndex()))
+	const FJTSItemInstance ActiveItem = Inventory->GetActiveItem();
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveItem.ItemId);
+	if (!IsValid(Definition) || !Definition->IsHoldable())
 	{
-	case EJTSEquipmentType::Knife:
-	case EJTSEquipmentType::Axe:
-		return EJTSAttackType::MeleeWeapon;
-
-	case EJTSEquipmentType::Pickaxe:
+		return EJTSAttackType::Punch;
+	}
+	if (Definition->MiningWork > KINDA_SMALL_NUMBER)
+	{
 		return EJTSAttackType::Tool;
-
-	default:
-		return EJTSAttackType::Punch;
 	}
+	return EJTSAttackType::MeleeWeapon;
 }
 
 AActor* UJTSMeleeComponent::FindBestMeleeTarget(APawn* AttackingPawn) const
@@ -891,6 +913,21 @@ void UJTSMeleeComponent::ServerReleaseAttack_Implementation()
 
 float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType) const
 {
+	if (AttackType != EJTSMeleeAttackType::Punch)
+	{
+		const APawn* const AttackingPawn = Cast<APawn>(GetOwner());
+		const UJTSInventoryComponent* const Inventory = IsValid(AttackingPawn)
+			? AttackingPawn->FindComponentByClass<UJTSInventoryComponent>()
+			: nullptr;
+		if (IsValid(Inventory))
+		{
+			if (const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Inventory->GetActiveItemId()))
+			{
+				return FMath::Max(0.0f, Definition->CombatDamage);
+			}
+		}
+	}
+
 	switch (AttackType)
 	{
 	case EJTSMeleeAttackType::Knife:
@@ -898,6 +935,10 @@ float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType)
 
 	case EJTSMeleeAttackType::Axe:
 		return FMath::Max(0.0f, AxeDamage);
+
+	case EJTSMeleeAttackType::Tool:
+	case EJTSMeleeAttackType::Improvised:
+		return FMath::Max(0.0f, PunchDamage);
 
 	case EJTSMeleeAttackType::Punch:
 	default:

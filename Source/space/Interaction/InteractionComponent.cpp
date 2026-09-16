@@ -9,11 +9,10 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "space/Interaction/IInteractable.h"
+#include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
-#include "space/World/JTSMoonSurfaceController.h"
-#include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "TimerManager.h"
 
 UInteractionComponent::UInteractionComponent()
@@ -150,11 +149,6 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 		return nullptr;
 	}
 
-	if (AActor* const PickupTarget = FindBestWorldPickup(InteractingPawn))
-	{
-		return PickupTarget;
-	}
-
 	FVector ViewLocation;
 	FVector ViewForward;
 	if (!TryGetInteractionView(InteractingPawn, ViewLocation, ViewForward))
@@ -165,7 +159,7 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 	TArray<FOverlapResult> OverlapResults;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractionDetection), false, InteractingPawn);
 	const FCollisionShape DetectionShape = FCollisionShape::MakeSphere(InteractionRadius);
-	const bool bFoundOverlap = World->OverlapMultiByObjectType(
+	World->OverlapMultiByObjectType(
 		OverlapResults,
 		InteractingPawn->GetActorLocation(),
 		FQuat::Identity,
@@ -173,44 +167,54 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 		DetectionShape,
 		QueryParams);
 
-	if (!bFoundOverlap)
+	// One candidate set is important: no interactable type is allowed to win just
+	// because it was discovered by a more specialized detector.
+	TSet<AActor*> CandidateActors;
+	for (const FOverlapResult& OverlapResult : OverlapResults)
 	{
-		return nullptr;
+		if (AActor* const Candidate = OverlapResult.GetActor())
+		{
+			CandidateActors.Add(Candidate);
+		}
+	}
+	if (AActor* const PreviousTarget = CurrentInteractable.Get())
+	{
+		CandidateActors.Add(PreviousTarget);
+	}
+	if (UJTSWorldPickupRegistrySubsystem* const PickupRegistry = World->GetSubsystem<UJTSWorldPickupRegistrySubsystem>())
+	{
+		TArray<AJTSWorldPickupActor*> RegisteredPickups;
+		PickupRegistry->GetRegisteredPickups(RegisteredPickups);
+		for (AJTSWorldPickupActor* const Pickup : RegisteredPickups)
+		{
+			CandidateActors.Add(Pickup);
+		}
 	}
 
-	const float RetainHalfAngle = FMath::Max(
-		InteractionViewHalfAngleDegrees,
-		InteractionRetainViewHalfAngleDegrees);
-	if (AActor* const StickyTarget = CurrentInteractable.Get();
-		IsValidInteractable(StickyTarget, InteractingPawn))
+	FCollisionQueryParams AimQueryParams(SCENE_QUERY_STAT(InteractionAim), false, InteractingPawn);
+	AimQueryParams.AddIgnoredActor(InteractingPawn);
+	FHitResult AimHit;
+	const bool bHasAimHit = World->LineTraceSingleByChannel(
+		AimHit,
+		ViewLocation,
+		ViewLocation + ViewForward * FMath::Max(InteractionRadius, InteractionAimTraceDistance),
+		ECC_Visibility,
+		AimQueryParams);
+	if (bHasAimHit && IsValid(AimHit.GetActor()))
 	{
-		float StickyAlignment = 0.0f;
-		float StickyDistanceSquared = 0.0f;
-		if (IsInteractionTargetVisible(
-			InteractingPawn,
-			StickyTarget,
-			ViewLocation,
-			ViewForward,
-			RetainHalfAngle,
-			StickyAlignment,
-			StickyDistanceSquared))
-		{
-			return StickyTarget;
-		}
+		CandidateActors.Add(AimHit.GetActor());
 	}
 
 	AActor* BestTarget = nullptr;
+	bool bBestTargetIsAimHit = false;
 	float BestViewAlignment = -1.0f;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
-	TSet<AActor*> EvaluatedCandidates;
-	for (const FOverlapResult& OverlapResult : OverlapResults)
+	for (AActor* const Candidate : CandidateActors)
 	{
-		AActor* const Candidate = OverlapResult.GetActor();
-		if (EvaluatedCandidates.Contains(Candidate) || !IsValidInteractable(Candidate, InteractingPawn))
+		if (!IsValidInteractable(Candidate, InteractingPawn))
 		{
 			continue;
 		}
-		EvaluatedCandidates.Add(Candidate);
 
 		float ViewAlignment = 0.0f;
 		float DistanceSquared = 0.0f;
@@ -226,11 +230,18 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 			continue;
 		}
 
-		// Screen/aim alignment determines intent; distance only breaks near-identical angles.
-		const bool bBetterAlignment = ViewAlignment > BestViewAlignment + KINDA_SMALL_NUMBER;
-		const bool bEquivalentAlignment = FMath::IsNearlyEqual(ViewAlignment, BestViewAlignment, KINDA_SMALL_NUMBER);
-		if (bBetterAlignment || (bEquivalentAlignment && DistanceSquared < BestDistanceSquared))
+		const bool bCandidateIsAimHit = bHasAimHit && AimHit.GetActor() == Candidate;
+		// Priority is explicit and shared by every interaction: an actual camera ray hit,
+		// then camera alignment, then physical proximity for near-equal view directions.
+		const bool bBetterAimHit = bCandidateIsAimHit && !bBestTargetIsAimHit;
+		const bool bSameAimHitClass = bCandidateIsAimHit == bBestTargetIsAimHit;
+		const float AlignmentTolerance = FMath::Max(0.0f, InteractionAlignmentTieTolerance);
+		const bool bBetterAlignment = bSameAimHitClass && ViewAlignment > BestViewAlignment + AlignmentTolerance;
+		const bool bEquivalentAlignment = bSameAimHitClass
+			&& FMath::Abs(ViewAlignment - BestViewAlignment) <= AlignmentTolerance;
+		if (bBetterAimHit || bBetterAlignment || (bEquivalentAlignment && DistanceSquared < BestDistanceSquared))
 		{
+			bBestTargetIsAimHit = bCandidateIsAimHit;
 			BestViewAlignment = ViewAlignment;
 			BestDistanceSquared = DistanceSquared;
 			BestTarget = Candidate;
@@ -238,153 +249,6 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 	}
 
 	return BestTarget;
-}
-
-AActor* UInteractionComponent::FindBestWorldPickup(APawn* InteractingPawn)
-{
-	UWorld* const World = GetWorld();
-	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController)
-		? SurfaceController->GetMoonSettings()
-		: nullptr;
-	if (!IsValid(InteractingPawn)
-		|| !IsValid(SurfaceController)
-		|| !SurfaceController->IsSurfaceGameplayInitialized()
-		|| !SurfaceController->OwnsSurfaceActor(InteractingPawn)
-		|| MoonSettings == nullptr)
-	{
-		return nullptr;
-	}
-
-	APlayerController* const PlayerController = Cast<APlayerController>(InteractingPawn->GetController());
-	APlayerCameraManager* const CameraManager = PlayerController != nullptr ? PlayerController->PlayerCameraManager : nullptr;
-	UJTSWorldPickupRegistrySubsystem* const PickupRegistry = World->GetSubsystem<UJTSWorldPickupRegistrySubsystem>();
-	if (!IsValid(PlayerController) || !IsValid(CameraManager) || !IsValid(PickupRegistry))
-	{
-		return nullptr;
-	}
-
-	int32 ViewportWidth = 0;
-	int32 ViewportHeight = 0;
-	PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
-	if (ViewportWidth <= 0 || ViewportHeight <= 0)
-	{
-		return nullptr;
-	}
-
-	const FVector CameraLocation = CameraManager->GetCameraLocation();
-	const FVector CameraForward = CameraManager->GetCameraRotation().Vector().GetSafeNormal();
-	if (CameraForward.IsNearlyZero())
-	{
-		return nullptr;
-	}
-	const FVector2D ViewportCenter(static_cast<float>(ViewportWidth) * 0.5f, static_cast<float>(ViewportHeight) * 0.5f);
-	const float MaxDistance = MoonSettings->GetPickupMaxDistance();
-	const float MaxDistanceSquared = FMath::Square(MaxDistance);
-	const float ViewportScale = FMath::Max(0.1f, static_cast<float>(ViewportHeight) / 1080.0f);
-	const float AcquireRadiusSquared = FMath::Square(MoonSettings->GetPickupAcquireRadius() * ViewportScale);
-	const float RetainRadiusSquared = FMath::Square(MoonSettings->GetPickupRetainRadius() * ViewportScale);
-	const float AimRayRadiusSquared = FMath::Square(MoonSettings->GetPickupAimRayRadius());
-
-	auto IsPickupCandidate = [
-		this,
-		World,
-		SurfaceController,
-		InteractingPawn,
-		PlayerController,
-		CameraLocation,
-		CameraForward,
-		ViewportCenter,
-		MaxDistanceSquared,
-		AimRayRadiusSquared](
-		AJTSWorldPickupActor* Pickup,
-		float ScreenRadiusSquared,
-		float& OutScreenDistanceSquared,
-		float& OutWorldDistanceSquared)
-	{
-		OutScreenDistanceSquared = TNumericLimits<float>::Max();
-		OutWorldDistanceSquared = TNumericLimits<float>::Max();
-		if (!IsValid(SurfaceController)
-			|| !SurfaceController->OwnsSurfaceActor(Pickup)
-			|| !IsValidInteractable(Pickup, InteractingPawn))
-		{
-			return false;
-		}
-
-		const FVector PickupTargetLocation = Pickup->GetInteractionTargetWorldLocation();
-		const FVector ToPickup = PickupTargetLocation - CameraLocation;
-		const float ForwardDistance = FVector::DotProduct(ToPickup, CameraForward);
-		OutWorldDistanceSquared = FVector::DistSquared(InteractingPawn->GetActorLocation(), PickupTargetLocation);
-		if (OutWorldDistanceSquared > MaxDistanceSquared || ForwardDistance <= KINDA_SMALL_NUMBER)
-		{
-			return false;
-		}
-
-		FVector2D PickupScreenLocation;
-		if (!PlayerController->ProjectWorldLocationToScreen(PickupTargetLocation, PickupScreenLocation, true))
-		{
-			return false;
-		}
-
-		OutScreenDistanceSquared = FVector2D::DistSquared(PickupScreenLocation, ViewportCenter);
-		if (OutScreenDistanceSquared > ScreenRadiusSquared)
-		{
-			return false;
-		}
-
-		const FVector ClosestAimPoint = CameraLocation + CameraForward * ForwardDistance;
-		if (FVector::DistSquared(PickupTargetLocation, ClosestAimPoint) > AimRayRadiusSquared)
-		{
-			return false;
-		}
-
-		FCollisionQueryParams VisibilityParams(SCENE_QUERY_STAT(JTSPickupLineOfSight), false, InteractingPawn);
-		VisibilityParams.AddIgnoredActor(InteractingPawn);
-		FHitResult VisibilityHit;
-		if (World->LineTraceSingleByChannel(VisibilityHit, CameraLocation, PickupTargetLocation, ECC_Visibility, VisibilityParams)
-			&& VisibilityHit.bBlockingHit && VisibilityHit.GetActor() != Pickup)
-		{
-			return false;
-		}
-
-		return true;
-	};
-
-	if (AJTSWorldPickupActor* const StickyPickup = Cast<AJTSWorldPickupActor>(CurrentInteractable.Get()))
-	{
-		float StickyScreenDistanceSquared = 0.0f;
-		float StickyWorldDistanceSquared = 0.0f;
-		if (IsPickupCandidate(StickyPickup, RetainRadiusSquared, StickyScreenDistanceSquared, StickyWorldDistanceSquared))
-		{
-			return StickyPickup;
-		}
-	}
-
-	TArray<AJTSWorldPickupActor*> RegisteredPickups;
-	PickupRegistry->GetRegisteredPickups(RegisteredPickups);
-	AJTSWorldPickupActor* BestPickup = nullptr;
-	float BestScreenDistanceSquared = TNumericLimits<float>::Max();
-	float BestWorldDistanceSquared = TNumericLimits<float>::Max();
-	for (AJTSWorldPickupActor* const Pickup : RegisteredPickups)
-	{
-		float ScreenDistanceSquared = 0.0f;
-		float WorldDistanceSquared = 0.0f;
-		if (!IsPickupCandidate(Pickup, AcquireRadiusSquared, ScreenDistanceSquared, WorldDistanceSquared))
-		{
-			continue;
-		}
-
-		const bool bCloserToCrosshair = ScreenDistanceSquared + 4.0f < BestScreenDistanceSquared;
-		const bool bEqualCrosshairDistance = FMath::Abs(ScreenDistanceSquared - BestScreenDistanceSquared) <= 4.0f;
-		if (bCloserToCrosshair || (bEqualCrosshairDistance && WorldDistanceSquared < BestWorldDistanceSquared))
-		{
-			BestPickup = Pickup;
-			BestScreenDistanceSquared = ScreenDistanceSquared;
-			BestWorldDistanceSquared = WorldDistanceSquared;
-		}
-	}
-
-	return BestPickup;
 }
 
 bool UInteractionComponent::IsValidInteractable(AActor* Candidate, APawn* InteractingPawn) const
@@ -436,7 +300,7 @@ bool UInteractionComponent::IsInteractionTargetVisible(
 		return false;
 	}
 
-	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate);
+	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate, ViewLocation);
 	OutPawnDistanceSquared = FVector::DistSquared(InteractingPawn->GetActorLocation(), TargetLocation);
 	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate);
 	const bool bUsesBoardingProximity = IsValid(Spacecraft)
@@ -519,7 +383,10 @@ bool UInteractionComponent::CanServerInteractWith(APawn* InteractingPawn, AActor
 	{
 		return false;
 	}
-	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate);
+	// The server deliberately validates against its own authoritative pawn eye
+	// position, never a client-provided camera transform.
+	const FVector Start = InteractingPawn->GetActorLocation() + FVector(0.0f, 0.0f, InteractingPawn->BaseEyeHeight);
+	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate, Start);
 	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate);
 	if (Spacecraft != nullptr)
 	{
@@ -534,12 +401,10 @@ bool UInteractionComponent::CanServerInteractWith(APawn* InteractingPawn, AActor
 	{
 		return true;
 	}
-	// Never accept a client camera transform as validation data. The pawn's own server transform is used.
-	const FVector Start = InteractingPawn->GetActorLocation() + FVector(0.0f, 0.0f, InteractingPawn->BaseEyeHeight);
 	return HasInteractionLineOfSight(InteractingPawn, Candidate, Start, TargetLocation);
 }
 
-FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* Candidate) const
+FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* Candidate, const FVector& ReferenceLocation) const
 {
 	if (!IsValid(Candidate))
 	{
@@ -550,7 +415,19 @@ FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* C
 	{
 		const APawn* const InteractingPawn = Cast<APawn>(GetOwner());
 		return Spacecraft->GetBoardingInteractionTargetWorldLocation(
-			IsValid(InteractingPawn) ? InteractingPawn->GetActorLocation() : Candidate->GetActorLocation());
+			!ReferenceLocation.IsNearlyZero()
+				? ReferenceLocation
+				: IsValid(InteractingPawn) ? InteractingPawn->GetActorLocation() : Candidate->GetActorLocation());
+	}
+
+	if (const AJTSWorldPickupActor* const WorldPickup = Cast<AJTSWorldPickupActor>(Candidate))
+	{
+		return WorldPickup->GetInteractionTargetWorldLocation();
+	}
+
+	if (const AJTSResourcePickupActor* const ResourcePickup = Cast<AJTSResourcePickupActor>(Candidate))
+	{
+		return ResourcePickup->GetInteractionAnchorWorldLocation();
 	}
 
 	const FBox CandidateBounds = Candidate->GetComponentsBoundingBox(true);

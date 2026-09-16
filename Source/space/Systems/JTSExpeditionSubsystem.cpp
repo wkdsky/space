@@ -8,6 +8,8 @@
 #include "Misc/SecureHash.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
@@ -42,6 +44,55 @@ bool UJTSExpeditionSubsystem::HasSaveInSlot(int32 InSaveSlot) const
 
 	return UGameplayStatics::DoesSaveGameExist(GetSaveGameSlotName(InSaveSlot), 0)
 		|| (InSaveSlot == 1 && UGameplayStatics::DoesSaveGameExist(SaveSlotName, 0));
+}
+
+bool UJTSExpeditionSubsystem::DeleteExpeditionSlot(int32 InSaveSlot)
+{
+	if (InSaveSlot < 1 || InSaveSlot > MaximumSaveSlots)
+	{
+		return false;
+	}
+
+	// SaveGame files are a host-local authority concern. A connected client must never
+	// mutate its local cache as though it were the shared expedition save.
+	if (const UWorld* const World = GetWorld(); World != nullptr && World->GetNetMode() == NM_Client)
+	{
+		return false;
+	}
+
+	bool bDeletedAnySave = false;
+	const FString PhysicalSlotName = GetSaveGameSlotName(InSaveSlot);
+	if (UGameplayStatics::DoesSaveGameExist(PhysicalSlotName, 0))
+	{
+		bDeletedAnySave |= UGameplayStatics::DeleteGameInSlot(PhysicalSlotName, 0);
+	}
+
+	// Slot one also owns the compatibility projection for pre-four-slot saves.
+	if (InSaveSlot == 1 && UGameplayStatics::DoesSaveGameExist(SaveSlotName, 0))
+	{
+		bDeletedAnySave |= UGameplayStatics::DeleteGameInSlot(SaveSlotName, 0);
+	}
+
+	if (!bDeletedAnySave)
+	{
+		return false;
+	}
+
+	if (ActiveSaveSlot == InSaveSlot)
+	{
+		if (UWorld* const World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(DeferredSaveTimer);
+		}
+		Snapshot = FJTSExpeditionSnapshot();
+		JoinCode.Reset();
+		JoinPasswordHash.Reset();
+		ActiveSaveSlot = INDEX_NONE;
+		ActivePlaySegmentStartedUtc = FDateTime();
+		bResumeRequested = false;
+	}
+
+	return true;
 }
 
 bool UJTSExpeditionSubsystem::HasSavedSnapshot() const
@@ -96,7 +147,7 @@ void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 		Snapshot.LastPlayedUtcTicks = Snapshot.SavedUtcTicks;
 	}
 	Snapshot.PlaytimeSeconds = FMath::Max(0.0, Snapshot.PlaytimeSeconds);
-	Snapshot.SaveVersion = FMath::Max(2, Snapshot.SaveVersion);
+	Snapshot.SaveVersion = FMath::Max(3, Snapshot.SaveVersion);
 }
 
 void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
@@ -109,7 +160,7 @@ void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
 	Snapshot.SaveSlot = SelectedSlot;
 	Snapshot.DisplayName = FString::Printf(TEXT("Expedition %02d"), SelectedSlot);
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 2;
+	Snapshot.SaveVersion = 3;
 	ActiveSaveSlot = SelectedSlot;
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -130,7 +181,7 @@ bool UJTSExpeditionSubsystem::BeginNewExpeditionInSlot(int32 InSaveSlot, const F
 	Snapshot.SaveSlot = InSaveSlot;
 	Snapshot.DisplayName = InDisplayName.TrimStartAndEnd();
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 2;
+	Snapshot.SaveVersion = 3;
 	NormalizeSnapshotMetadata(InSaveSlot);
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -265,9 +316,16 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			{
 				PlayerSnapshot.Health = Health->GetHealth();
 			}
-			if (const UJTSCarryComponent* const Carry = Character != nullptr ? Character->FindComponentByClass<UJTSCarryComponent>() : nullptr)
+			if (const UJTSInventoryComponent* const Inventory = Character != nullptr ? Character->GetInventoryComponent() : nullptr)
 			{
-				PlayerSnapshot.Inventory = ToResourceArray(Carry->GetCarriedResources());
+				PlayerSnapshot.ItemInventory = Inventory->GetItemSlots();
+				PlayerSnapshot.SelectedQuickbarSlot = Inventory->GetSelectedQuickbarSlot();
+				// Keep the old projection populated so v1/v2 saves and readers remain compatible.
+				PlayerSnapshot.Inventory = ToResourceArray(Inventory->GetResourceAmounts());
+			}
+			if (const UJTSPlayerEquipmentComponent* const Wearables = Character != nullptr ? Character->GetEquipmentComponent() : nullptr)
+			{
+				PlayerSnapshot.Wearables = Wearables->GetWearableSlots();
 			}
 		}
 	}
@@ -302,17 +360,29 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 	{
 		Health->RestoreAuthoritativeHealth(SavedPlayer->Health);
 	}
-	if (UJTSCarryComponent* const Carry = Character->FindComponentByClass<UJTSCarryComponent>())
+	if (UJTSPlayerEquipmentComponent* const Wearables = Character->GetEquipmentComponent(); IsValid(Wearables) && !SavedPlayer->Wearables.IsEmpty())
 	{
-		TArray<EJTSResourceType> RestoredItems;
-		for (const FJTSResourceAmount& Resource : SavedPlayer->Inventory)
+		Wearables->RestoreWearables(SavedPlayer->Wearables);
+	}
+	if (UJTSInventoryComponent* const Inventory = Character->GetInventoryComponent(); IsValid(Inventory))
+	{
+		if (!SavedPlayer->ItemInventory.IsEmpty())
 		{
-			for (int32 Index = 0; Index < FMath::Max(0, Resource.Amount); ++Index)
-			{
-				RestoredItems.Add(Resource.ResourceType);
-			}
+			Inventory->RestoreItems(SavedPlayer->ItemInventory, SavedPlayer->SelectedQuickbarSlot);
 		}
-		Carry->RestoreCarriedItems(RestoredItems);
+		else
+		{
+			// v1/v2 migration: legacy resource snapshots become current one-unit item instances.
+			TArray<EJTSResourceType> RestoredItems;
+			for (const FJTSResourceAmount& Resource : SavedPlayer->Inventory)
+			{
+				for (int32 Index = 0; Index < FMath::Max(0, Resource.Amount); ++Index)
+				{
+					RestoredItems.Add(Resource.ResourceType);
+				}
+			}
+			Inventory->RestoreLegacyResources(RestoredItems);
+		}
 	}
 }
 

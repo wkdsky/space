@@ -259,9 +259,9 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		const double LargeRockThreshold = MediumRockThreshold + static_cast<double>(SafeLargeRockWeight);
 		EJTSResourceType ResourceType = EJTSResourceType::Rock;
 		FVector BaseResourceScale(0.5f);
-		int32 InitialPickupCount = 1;
 		bool bMiningNode = false;
 		int32 TotalYieldUnits = 0;
+		EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::MediumRock;
 		if (ResourceRoll < static_cast<double>(SafeSmallRockWeight))
 		{
 			BaseResourceScale = FVector(0.5f);
@@ -269,13 +269,16 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		else if (ResourceRoll < MediumRockThreshold)
 		{
 			BaseResourceScale = FVector(1.0f);
-			InitialPickupCount = 2;
+			bMiningNode = true;
+			TotalYieldUnits = 2;
+			NodeSize = EJTSMoonResourceNodeSize::MediumRock;
 		}
 		else if (ResourceRoll < LargeRockThreshold)
 		{
 			BaseResourceScale = FVector(2.0f);
 			bMiningNode = true;
 			TotalYieldUnits = LargeRockYieldUnits;
+			NodeSize = EJTSMoonResourceNodeSize::LargeRock;
 		}
 		else
 		{
@@ -283,6 +286,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			BaseResourceScale = FVector(1.2f, 1.2f, 1.8f);
 			bMiningNode = true;
 			TotalYieldUnits = OreDepositYieldUnits;
+			NodeSize = EJTSMoonResourceNodeSize::OreVein;
 		}
 
 		const FVector ResourceScale(
@@ -306,6 +310,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			if (AJTSMoonResourceActor* const Resource = SpawnMiningNode(
 				ResourceType,
 				TotalYieldUnits,
+				NodeSize,
 				ResourceScale,
 				ResourceRotation,
 				GroundLocation))
@@ -316,47 +321,8 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		}
 		else
 		{
-			int32 SpawnedPickupCount = 0;
-			for (int32 PickupIndex = 0; PickupIndex < InitialPickupCount; ++PickupIndex)
-			{
-				FVector PickupGroundLocation = GroundLocation;
-				if (PickupIndex > 0)
-				{
-					const float PickupAngle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
-					const float PickupDistance = RandomStream.FRandRange(70.0f, 140.0f);
-					FVector PickupCandidateLocation;
-					if (bUseRealPlanetSurface)
-					{
-						FJTSPlanetSurfaceFrame SurfaceFrame;
-						if (!Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
-						{
-							continue;
-						}
-						const FVector TangentDirection = (
-							SurfaceFrame.Forward * FMath::Cos(PickupAngle)
-							+ SurfaceFrame.Right * FMath::Sin(PickupAngle)).GetSafeNormal();
-						PickupCandidateLocation = GroundLocation + TangentDirection * PickupDistance;
-					}
-					else
-					{
-						PickupCandidateLocation = GroundLocation + FVector(
-							FMath::Cos(PickupAngle) * PickupDistance,
-							FMath::Sin(PickupAngle) * PickupDistance,
-							0.0f);
-					}
-					if (IsCandidateExcludedByLandmarks(PickupCandidateLocation)
-						|| !ResolveGroundLocation(PickupCandidateLocation, PickupGroundLocation))
-					{
-						continue;
-					}
-				}
-
-				if (SpawnInitialPickup(PickupGroundLocation) != nullptr)
-				{
-					++SpawnedPickupCount;
-				}
-			}
-			if (SpawnedPickupCount == InitialPickupCount)
+			// Small rocks are intentionally loose world pickups: no mining tool is required.
+			if (SpawnInitialPickup(GroundLocation) != nullptr)
 			{
 				++SpawnedCount;
 				bSpawnedResourceAtCandidate = true;
@@ -405,6 +371,7 @@ void AJTSMoonResourceSpawner::ClearGeneratedResources()
 AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	EJTSResourceType ResourceType,
 	int32 TotalYieldUnits,
+	EJTSMoonResourceNodeSize NodeSize,
 	const FVector& ResourceScale,
 	const FRotator& ResourceRotation,
 	const FVector& GroundLocation)
@@ -437,7 +404,7 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 		return nullptr;
 	}
 
-	Resource->InitializeMiningNode(ResourceType, TotalYieldUnits);
+	Resource->InitializeMiningNode(ResourceType, TotalYieldUnits, NodeSize);
 	Resource->FinishSpawning(SpawnTransform);
 	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
 	{

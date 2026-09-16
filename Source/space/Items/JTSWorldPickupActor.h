@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "space/Interaction/IInteractable.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 
 #include "JTSWorldPickupActor.generated.h"
@@ -42,11 +43,23 @@ public:
 		AActor* SourceActor,
 		const FVector& PreferredDirection = FVector::ZeroVector);
 
+	/** Item-system overload used by mining, shop overflow, and inventory drops. */
+	static AJTSWorldPickupActor* SpawnGameplayDrop(
+		UWorld* World,
+		const FJTSItemInstance& NewItem,
+		const FVector& Origin,
+		APawn* SafetyPawn,
+		AActor* SourceActor,
+		const FVector& PreferredDirection = FVector::ZeroVector);
+
 	UFUNCTION(BlueprintPure, Category = "Pickup")
 	EJTSWorldPickupItemType GetItemType() const;
 
 	UFUNCTION(BlueprintPure, Category = "Pickup")
 	FText GetItemDisplayName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Pickup")
+	FJTSItemInstance GetItemInstance() const;
 
 	/** Bounds-based points used for forgiving target acquisition and world-space prompt placement. */
 	UFUNCTION(BlueprintPure, Category = "Pickup|Interaction")
@@ -58,6 +71,9 @@ public:
 	/** Sets this pickup's single-item payload before deferred spawning completes. */
 	UFUNCTION(BlueprintCallable, Category = "Pickup")
 	void InitializeItem(EJTSWorldPickupItemType NewItemType);
+
+	/** Assigns an inventory payload. ItemType remains populated for old Blueprints. */
+	void InitializeItemInstance(const FJTSItemInstance& NewItem);
 
 	/** World-space visual extent used by ground-placement helpers. */
 	virtual FVector GetVisualBoundsExtent() const;
@@ -119,6 +135,8 @@ private:
 	void ShowFailureFeedback(const FString& FailureReason);
 	FText GetFailureFeedback() const;
 	static FString ItemTypeToString(EJTSWorldPickupItemType InItemType);
+	static EJTSItemId ItemTypeToItemId(EJTSWorldPickupItemType InItemType);
+	static EJTSWorldPickupItemType ItemIdToItemType(EJTSItemId ItemId);
 
 	UPROPERTY(VisibleAnywhere, Category = "Pickup")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -145,6 +163,10 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_ItemState, Category = "Pickup", meta = (AllowPrivateAccess = "true"))
 	EJTSWorldPickupItemType ItemType = EJTSWorldPickupItemType::Rock;
+
+	/** Full runtime payload; resources can carry an entire stack while tools stay unique instances. */
+	UPROPERTY(ReplicatedUsing = OnRep_ItemState, VisibleAnywhere, Category = "Pickup")
+	FJTSItemInstance ItemInstance;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PickupMaterial;

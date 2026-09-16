@@ -13,7 +13,9 @@ enum class EJTSMeleeAttackType : uint8
 {
 	Punch UMETA(DisplayName = "Punch"),
 	Knife UMETA(DisplayName = "Knife"),
-	Axe UMETA(DisplayName = "Axe")
+	Axe UMETA(DisplayName = "Axe"),
+	Tool UMETA(DisplayName = "Tool"),
+	Improvised UMETA(DisplayName = "Improvised")
 };
 
 /** Contract for lightweight Moon targets that can be aimed at and struck by the shared melee component. */

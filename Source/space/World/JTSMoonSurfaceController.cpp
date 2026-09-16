@@ -1201,91 +1201,14 @@ bool AJTSMoonSurfaceController::TryBuyWorkshopEquipment(
 	AJTSSpacecraftActor* Spacecraft,
 	EJTSEquipmentType EquipmentType)
 {
-	if (!HasAuthority())
-	{
-		return false;
-	}
-	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
-	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-	if (MoonSettings == nullptr || !IsValid(GameState) || !GameState->IsMoonExploration()
-		|| !IsValid(Player) || !IsValid(Spacecraft)
-		|| Player->GetNearbySpacecraft() != Spacecraft || !Spacecraft->IsPawnInBoardingRange(Player))
-	{
-		return false;
-	}
-
-	UJTSPlayerEquipmentComponent* const EquipmentComponent = Player->GetEquipmentComponent();
-	if (!IsValid(EquipmentComponent))
-	{
-		return false;
-	}
-
-	int32 RockCost = MoonSettings->GetPickaxeRockCost();
-	int32 OreCost = 0;
-	EJTSWorldPickupItemType PickupItemType = EJTSWorldPickupItemType::Pickaxe;
-	switch (EquipmentType)
-	{
-	case EJTSEquipmentType::Backpack:
-		RockCost = MoonSettings->GetBackpackRockCost();
-		OreCost = MoonSettings->GetBackpackOreCost();
-		PickupItemType = EJTSWorldPickupItemType::Backpack;
-		break;
-	case EJTSEquipmentType::Knife:
-		RockCost = MoonSettings->GetKnifeRockCost();
-		OreCost = MoonSettings->GetKnifeOreCost();
-		PickupItemType = EJTSWorldPickupItemType::Knife;
-		break;
-	case EJTSEquipmentType::Axe:
-		RockCost = MoonSettings->GetAxeRockCost();
-		OreCost = MoonSettings->GetAxeOreCost();
-		PickupItemType = EJTSWorldPickupItemType::Axe;
-		break;
-	case EJTSEquipmentType::Pickaxe:
-		break;
-	default:
-		return false;
-	}
-
-	if (!Spacecraft->HasResource(EJTSResourceType::Rock, RockCost)
-		|| (OreCost > 0 && !Spacecraft->HasResource(EJTSResourceType::Ore, OreCost)))
-	{
-		return false;
-	}
-
-	TMap<EJTSResourceType, int32> ResourceCosts;
-	ResourceCosts.Add(EJTSResourceType::Rock, RockCost);
-	if (OreCost > 0)
-	{
-		ResourceCosts.Add(EJTSResourceType::Ore, OreCost);
-	}
-
-	const bool bCanAutoEquip = !EquipmentComponent->HasEquippedItem(EquipmentType) && EquipmentComponent->HasAvailableSlot();
-	if (bCanAutoEquip)
-	{
-		if (!EquipmentComponent->TryEquipItem(EquipmentType))
-		{
-			return false;
-		}
-		if (!Spacecraft->TryConsumeResourceAmounts(ResourceCosts))
-		{
-			EquipmentComponent->UnequipItem(EquipmentType);
-			return false;
-		}
-		return true;
-	}
-
-	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
-		GetWorld(), PickupItemType, Player->GetActorLocation(), Player, Spacecraft, Player->GetActorForwardVector());
-	if (!IsValid(Pickup))
-	{
-		return false;
-	}
-	if (!Spacecraft->TryConsumeResourceAmounts(ResourceCosts))
-	{
-		Pickup->Destroy();
-		return false;
-	}
-	return true;
+	// Kept for save/Blueprint ABI compatibility only.  The design no longer
+	// permits a second, Moon-local price list or a bypass around the SpaceWorld
+	// shared-wallet terminal.
+	static_cast<void>(Player);
+	static_cast<void>(Spacecraft);
+	static_cast<void>(EquipmentType);
+	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: ignored retired Moon workshop transaction."));
+	return false;
 }
 
 int32 AJTSMoonSurfaceController::GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit)

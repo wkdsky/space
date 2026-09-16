@@ -14,9 +14,11 @@ class AJTSPlayerState;
 class UCameraComponent;
 class UJTSCarryComponent;
 class UJTSHealthComponent;
+class UJTSInventoryComponent;
 class UJTSMeleeComponent;
 class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
+class UJTSRangedWeaponComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
 class UInputAction;
@@ -53,6 +55,10 @@ public:
 	/** Returns this character's resource carry inventory. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	UJTSCarryComponent* GetCarryComponent() const;
+
+	/** Replicated general item inventory. The first four slots are the quickbar. */
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	UJTSInventoryComponent* GetInventoryComponent() const;
 
 	/** Returns this character's four-slot equipment loadout. */
 	UFUNCTION(BlueprintPure, Category = "Equipment")
@@ -128,6 +134,9 @@ public:
 
 	/** Called by a spacecraft's pawn-only trigger when this character exits. */
 	void NotifySpacecraftExited(AJTSSpacecraftActor* Spacecraft);
+
+	/** Server-side safety net for resources collected after this character has already entered the ship range. */
+	bool TryDepositCarriedResourcesToNearbySpacecraft();
 
 	/** Applies the minimal attached/hidden state used while boarding. */
 	bool EnterBoardedState(AJTSSpacecraftActor* Spacecraft);
@@ -258,11 +267,15 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInteractionComponent> InteractionComponent;
 
-	/** Fixed-capacity resource carry inventory for the current player. */
+	/** Legacy resource-only projection retained for Earth gameplay and old Blueprint references. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Carry", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSCarryComponent> CarryComponent;
 
-	/** Separate fixed-capacity equipment loadout; never stores ordinary resources. */
+	/** Holds tools, weapons, ordinary items, and stackable materials. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSInventoryComponent> InventoryComponent;
+
+	/** Body-worn slots only; the compatibility class preserves old Blueprint references. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlayerEquipmentComponent> EquipmentComponent;
 
@@ -273,6 +286,10 @@ private:
 	/** One camera-agnostic Moon melee path for Punch, Knife, and Axe. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMeleeComponent> MeleeComponent;
+
+	/** Server-authoritative hitscan prototype for active RangedWeapon items. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSRangedWeaponComponent> RangedWeaponComponent;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;

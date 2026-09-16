@@ -2,9 +2,8 @@
 
 #include "space/Components/JTSCarryComponent.h"
 
-#include "space/Components/JTSPlayerEquipmentComponent.h"
-
-#include "Net/UnrealNetwork.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 
 UJTSCarryComponent::UJTSCarryComponent()
 {
@@ -12,15 +11,31 @@ UJTSCarryComponent::UJTSCarryComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+void UJTSCarryComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	if (UJTSInventoryComponent* const Inventory = GetInventoryComponent())
+	{
+		Inventory->OnInventoryChanged.AddDynamic(this, &UJTSCarryComponent::HandleInventoryChanged);
+	}
+	RebuildCarriedResourceAmounts();
+}
+
 bool UJTSCarryComponent::CanCarryResource(EJTSResourceType ResourceType) const
 {
-	return CanCarryResources(1);
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) && Inventory->CanAddItem(UJTSItemDefinitionLibrary::GetItemIdForResource(ResourceType), 1);
 }
 
 bool UJTSCarryComponent::CanCarryResources(int32 ResourceAmount) const
 {
-	return ResourceAmount > 0
-		&& ResourceAmount <= GetCarryCapacity() - GetCarriedItemCount();
+	if (ResourceAmount <= 0)
+	{
+		return false;
+	}
+	// The historic API did not carry a type. All regular materials use identical stack rules in v1.
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) && Inventory->CanAddItem(EJTSItemId::Rock, ResourceAmount);
 }
 
 bool UJTSCarryComponent::TryAddResource(EJTSResourceType ResourceType)
@@ -30,111 +45,105 @@ bool UJTSCarryComponent::TryAddResource(EJTSResourceType ResourceType)
 
 bool UJTSCarryComponent::TryAddResources(EJTSResourceType ResourceType, int32 ResourceAmount)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !CanCarryResources(ResourceAmount))
-	{
-		return false;
-	}
-
-	for (int32 ResourceIndex = 0; ResourceIndex < ResourceAmount; ++ResourceIndex)
-	{
-		CarriedItems.Add(ResourceType);
-	}
-	CarriedResources.FindOrAdd(ResourceType) += ResourceAmount;
-
-	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
-	return true;
+	UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	const EJTSItemId ItemId = UJTSItemDefinitionLibrary::GetItemIdForResource(ResourceType);
+	return IsValid(Inventory) && ItemId != EJTSItemId::None && Inventory->TryAddItemById(ItemId, ResourceAmount);
 }
 
 bool UJTSCarryComponent::TryTakeAllResources(TMap<EJTSResourceType, int32>& OutResources)
 {
-	OutResources.Reset();
-
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || CarriedItems.IsEmpty())
+	if (UJTSInventoryComponent* const Inventory = GetInventoryComponent())
 	{
-		return false;
+		return Inventory->TryTakeAllResources(OutResources);
 	}
-
-	OutResources = CarriedResources;
-	CarriedItems.Reset();
-	CarriedResources.Reset();
-	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
-	return true;
+	OutResources.Reset();
+	return false;
 }
 
 int32 UJTSCarryComponent::GetCarriedItemCount() const
 {
-	return CarriedItems.Num();
+	int32 Result = 0;
+	for (const TPair<EJTSResourceType, int32>& Pair : GetCarriedResources())
+	{
+		Result += Pair.Value;
+	}
+	return Result;
 }
 
 int32 UJTSCarryComponent::GetBaseCapacity() const
 {
-	return FMath::Max(1, BaseCapacity);
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) ? Inventory->GetBaseInventoryCapacity() : 0;
 }
 
 int32 UJTSCarryComponent::GetCarryCapacity() const
 {
-	return GetBaseCapacity() + GetEquipmentCapacityBonus();
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) ? Inventory->GetInventoryCapacity() : 0;
 }
 
 bool UJTSCarryComponent::IsFull() const
 {
-	return GetCarriedItemCount() >= GetCarryCapacity();
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) && !Inventory->HasAvailableSlot();
 }
 
 int32 UJTSCarryComponent::GetCarriedResourceAmount(EJTSResourceType ResourceType) const
 {
-	const int32* const ResourceAmount = CarriedResources.Find(ResourceType);
-	return ResourceAmount != nullptr ? FMath::Max(0, *ResourceAmount) : 0;
+	const UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	return IsValid(Inventory) ? Inventory->GetResourceAmount(ResourceType) : 0;
 }
 
 const TMap<EJTSResourceType, int32>& UJTSCarryComponent::GetCarriedResources() const
 {
+	RebuildCarriedResourceAmounts();
 	return CarriedResources;
 }
 
 const TArray<EJTSResourceType>& UJTSCarryComponent::GetCarriedItems() const
 {
+	RebuildCarriedResourceAmounts();
 	return CarriedItems;
 }
 
 bool UJTSCarryComponent::GetOverflowItemsForCapacity(int32 NewCapacity, TArray<EJTSResourceType>& OutOverflowItems) const
 {
 	OutOverflowItems.Reset();
-	if (NewCapacity < 0 || NewCapacity > CarriedItems.Num())
+	const TArray<EJTSResourceType>& Items = GetCarriedItems();
+	if (NewCapacity < 0 || NewCapacity > Items.Num())
 	{
 		return NewCapacity >= 0;
 	}
-
-	for (int32 SlotIndex = NewCapacity; SlotIndex < CarriedItems.Num(); ++SlotIndex)
+	for (int32 Index = NewCapacity; Index < Items.Num(); ++Index)
 	{
-		OutOverflowItems.Add(CarriedItems[SlotIndex]);
+		OutOverflowItems.Add(Items[Index]);
 	}
 	return true;
 }
 
-bool UJTSCarryComponent::CommitOverflowRemovalForCapacity(
-	int32 NewCapacity,
-	const TArray<EJTSResourceType>& ExpectedOverflowItems)
+bool UJTSCarryComponent::CommitOverflowRemovalForCapacity(int32 NewCapacity, const TArray<EJTSResourceType>& ExpectedOverflowItems)
 {
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
 	{
 		return false;
 	}
-	TArray<EJTSResourceType> CurrentOverflowItems;
-	if (!GetOverflowItemsForCapacity(NewCapacity, CurrentOverflowItems)
-		|| CurrentOverflowItems != ExpectedOverflowItems)
+	TArray<EJTSResourceType> CurrentOverflow;
+	if (!GetOverflowItemsForCapacity(NewCapacity, CurrentOverflow) || CurrentOverflow != ExpectedOverflowItems)
 	{
 		return false;
 	}
-
-	if (CurrentOverflowItems.IsEmpty())
+	UJTSInventoryComponent* const Inventory = GetInventoryComponent();
+	if (!IsValid(Inventory))
 	{
-		return true;
+		return false;
 	}
-
-	CarriedItems.SetNum(NewCapacity, EAllowShrinking::No);
-	RebuildCarriedResourceAmounts();
-	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
+	for (const EJTSResourceType Resource : CurrentOverflow)
+	{
+		if (!Inventory->TryRemoveItem(UJTSItemDefinitionLibrary::GetItemIdForResource(Resource), 1))
+		{
+			return false;
+		}
+	}
 	return true;
 }
 
@@ -145,17 +154,35 @@ void UJTSCarryComponent::NotifyCapacityChanged()
 
 void UJTSCarryComponent::RestoreCarriedItems(const TArray<EJTSResourceType>& NewItems)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	if (UJTSInventoryComponent* const Inventory = GetInventoryComponent())
 	{
-		return;
+		Inventory->RestoreLegacyResources(NewItems);
 	}
-	CarriedItems = NewItems;
-	CarriedItems.SetNum(FMath::Min(CarriedItems.Num(), GetCarryCapacity()), EAllowShrinking::No);
-	RebuildCarriedResourceAmounts();
-	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
 }
 
-void UJTSCarryComponent::OnRep_CarriedItems()
+UJTSInventoryComponent* UJTSCarryComponent::GetInventoryComponent() const
+{
+	return GetOwner() != nullptr ? GetOwner()->FindComponentByClass<UJTSInventoryComponent>() : nullptr;
+}
+
+void UJTSCarryComponent::RebuildCarriedResourceAmounts() const
+{
+	CarriedItems.Reset();
+	CarriedResources.Reset();
+	if (const UJTSInventoryComponent* const Inventory = GetInventoryComponent())
+	{
+		CarriedResources = Inventory->GetResourceAmounts();
+		for (const TPair<EJTSResourceType, int32>& Pair : CarriedResources)
+		{
+			for (int32 Index = 0; Index < Pair.Value; ++Index)
+			{
+				CarriedItems.Add(Pair.Key);
+			}
+		}
+	}
+}
+
+void UJTSCarryComponent::HandleInventoryChanged(int32 /*UsedSlots*/, int32 /*Capacity*/)
 {
 	RebuildCarriedResourceAmounts();
 	OnCarriedResourcesChanged.Broadcast(GetCarriedItemCount(), GetCarryCapacity());
@@ -164,22 +191,4 @@ void UJTSCarryComponent::OnRep_CarriedItems()
 void UJTSCarryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(UJTSCarryComponent, CarriedItems);
-}
-
-int32 UJTSCarryComponent::GetEquipmentCapacityBonus() const
-{
-	const UJTSPlayerEquipmentComponent* const EquipmentComponent = GetOwner() != nullptr
-		? GetOwner()->FindComponentByClass<UJTSPlayerEquipmentComponent>()
-		: nullptr;
-	return IsValid(EquipmentComponent) ? EquipmentComponent->GetInventoryCapacityBonus() : 0;
-}
-
-void UJTSCarryComponent::RebuildCarriedResourceAmounts()
-{
-	CarriedResources.Reset();
-	for (const EJTSResourceType ResourceType : CarriedItems)
-	{
-		++CarriedResources.FindOrAdd(ResourceType);
-	}
 }

@@ -13,9 +13,11 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSResourceType.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
@@ -512,6 +514,33 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 	return nullptr;
 }
 
+AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
+	UWorld* World,
+	const FJTSItemInstance& NewItem,
+	const FVector& Origin,
+	APawn* SafetyPawn,
+	AActor* SourceActor,
+	const FVector& PreferredDirection)
+{
+	if (NewItem.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	AJTSWorldPickupActor* const Pickup = SpawnGameplayDrop(
+		World,
+		ItemIdToItemType(NewItem.ItemId),
+		Origin,
+		SafetyPawn,
+		SourceActor,
+		PreferredDirection);
+	if (IsValid(Pickup))
+	{
+		Pickup->InitializeItemInstance(NewItem);
+	}
+	return Pickup;
+}
+
 AJTSWorldPickupActor::AJTSWorldPickupActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -576,7 +605,14 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::GetItemType() const
 
 FText AJTSWorldPickupActor::GetItemDisplayName() const
 {
-	return FText::FromString(ItemTypeToString(ItemType));
+	return ItemInstance.IsEmpty()
+		? FText::FromString(ItemTypeToString(ItemType))
+		: UJTSItemDefinitionLibrary::GetItemDisplayName(ItemInstance.ItemId);
+}
+
+FJTSItemInstance AJTSWorldPickupActor::GetItemInstance() const
+{
+	return ItemInstance;
 }
 
 FVector AJTSWorldPickupActor::GetInteractionTargetWorldLocation() const
@@ -621,6 +657,24 @@ void AJTSWorldPickupActor::InitializeItem(EJTSWorldPickupItemType NewItemType)
 		return;
 	}
 	ItemType = NewItemType;
+	ItemInstance = UJTSItemDefinitionLibrary::MakeInstance(ItemTypeToItemId(NewItemType));
+	bPickupConsumed = false;
+	ApplyItemAppearance();
+}
+
+void AJTSWorldPickupActor::InitializeItemInstance(const FJTSItemInstance& NewItem)
+{
+	if (!HasAuthority() || NewItem.IsEmpty())
+	{
+		return;
+	}
+
+	ItemInstance = NewItem;
+	if (!ItemInstance.InstanceId.IsValid())
+	{
+		ItemInstance.InstanceId = FGuid::NewGuid();
+	}
+	ItemType = ItemIdToItemType(ItemInstance.ItemId);
 	bPickupConsumed = false;
 	ApplyItemAppearance();
 }
@@ -818,6 +872,10 @@ void AJTSWorldPickupActor::Interact_Implementation(APawn* InteractingPawn)
 void AJTSWorldPickupActor::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HasAuthority() && ItemInstance.IsEmpty())
+	{
+		InitializeItem(ItemType);
+	}
 	ApplyItemAppearance();
 
 	if (UJTSWorldPickupRegistrySubsystem* const Registry = GetWorld() != nullptr
@@ -929,6 +987,7 @@ void AJTSWorldPickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AJTSWorldPickupActor, ItemType);
+	DOREPLIFETIME(AJTSWorldPickupActor, ItemInstance);
 	DOREPLIFETIME(AJTSWorldPickupActor, SurfaceUp);
 	DOREPLIFETIME(AJTSWorldPickupActor, bIsDropping);
 	DOREPLIFETIME(AJTSWorldPickupActor, bPickupConsumed);
@@ -1113,55 +1172,59 @@ UJTSMoonWrappedActorComponent* AJTSWorldPickupActor::GetMoonWrappedActorComponen
 
 bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailureReason)
 {
-	EJTSResourceType ResourceType = EJTSResourceType::Rock;
-	if (TryGetResourceType(ItemType, ResourceType))
+	if (!IsValid(InteractingPawn) || ItemInstance.IsEmpty())
 	{
-		UJTSCarryComponent* const CarryComponent = InteractingPawn->FindComponentByClass<UJTSCarryComponent>();
-		if (!IsValid(CarryComponent))
-		{
-			OutFailureReason = TEXT("InventoryUnavailable");
-			return false;
-		}
-		if (!CarryComponent->TryAddResource(ResourceType))
-		{
-			OutFailureReason = TEXT("InventoryFull");
-			return false;
-		}
+		OutFailureReason = TEXT("UnsupportedItem");
+		return false;
+	}
 
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemInstance.ItemId);
+	if (!IsValid(Definition))
+	{
+		OutFailureReason = TEXT("UnsupportedItem");
+		return false;
+	}
+
+	if (Definition->IsWearable())
+	{
+		UJTSPlayerEquipmentComponent* const Wearables = InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>();
+		if (!IsValid(Wearables))
+		{
+			OutFailureReason = TEXT("WearablesUnavailable");
+			return false;
+		}
+		if (!Wearables->TryEquipItem(ItemInstance))
+		{
+			OutFailureReason = TEXT("WearableSlotOccupied");
+			return false;
+		}
 		return true;
 	}
 
-	EJTSEquipmentType EquipmentType = EJTSEquipmentType::None;
-	if (TryGetEquipmentType(ItemType, EquipmentType))
+	UJTSInventoryComponent* const Inventory = InteractingPawn->FindComponentByClass<UJTSInventoryComponent>();
+	if (!IsValid(Inventory))
 	{
-		UJTSPlayerEquipmentComponent* const EquipmentComponent = InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>();
-		if (!IsValid(EquipmentComponent))
-		{
-			OutFailureReason = TEXT("EquipmentUnavailable");
-			return false;
-		}
-		if (EquipmentComponent->HasEquippedItem(EquipmentType))
-		{
-			OutFailureReason = TEXT("AlreadyEquipped");
-			return false;
-		}
-		if (!EquipmentComponent->TryEquipItem(EquipmentType))
-		{
-			OutFailureReason = TEXT("EquipmentFull");
-			return false;
-		}
-
-		return true;
+		OutFailureReason = TEXT("InventoryUnavailable");
+		return false;
 	}
-
-	OutFailureReason = TEXT("UnsupportedItem");
-	return false;
+	if (!Inventory->CanAddItem(ItemInstance.ItemId, ItemInstance.StackCount))
+	{
+		OutFailureReason = TEXT("InventoryFull");
+		return false;
+	}
+	int32 Remaining = ItemInstance.StackCount;
+	if (!Inventory->TryAddItem(ItemInstance, Remaining) || Remaining != 0)
+	{
+		OutFailureReason = TEXT("InventoryFull");
+		return false;
+	}
+	return true;
 }
 
 bool AJTSWorldPickupActor::IsResourceItem() const
 {
 	EJTSResourceType ResourceType = EJTSResourceType::Rock;
-	return TryGetResourceType(ItemType, ResourceType);
+	return UJTSItemDefinitionLibrary::TryGetResourceType(ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId, ResourceType);
 }
 
 void AJTSWorldPickupActor::ConfigureAppearance()
@@ -1188,6 +1251,14 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		else if (ItemType == EJTSWorldPickupItemType::Axe)
 		{
 			DesiredScale = FVector(0.44f, 0.18f, 0.28f);
+		}
+		else if (ItemType == EJTSWorldPickupItemType::MachineGun)
+		{
+			DesiredScale = FVector(0.62f, 0.18f, 0.14f);
+		}
+		else if (ItemType == EJTSWorldPickupItemType::Pistol)
+		{
+			DesiredScale = FVector(0.32f, 0.12f, 0.13f);
 		}
 		else
 		{
@@ -1219,6 +1290,14 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 	{
 		return;
 	}
+	if (!ItemInstance.IsEmpty())
+	{
+		if (const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemInstance.ItemId))
+		{
+			PickupMaterial->SetVectorParameterValue(TEXT("BaseColor"), Definition->AccentColor);
+			PickupMaterial->SetVectorParameterValue(TEXT("Color"), Definition->AccentColor);
+		}
+	}
 
 	FLinearColor ItemColor = FLinearColor(0.35f, 0.35f, 0.40f, 1.0f);
 	switch (ItemType)
@@ -1237,6 +1316,14 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 
 	case EJTSWorldPickupItemType::Knife:
 		ItemColor = FLinearColor(0.82f, 0.86f, 0.92f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::Pistol:
+		ItemColor = FLinearColor(0.24f, 0.62f, 1.0f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::MachineGun:
+		ItemColor = FLinearColor(1.0f, 0.30f, 0.16f, 1.0f);
 		break;
 
 	case EJTSWorldPickupItemType::Axe:
@@ -1331,10 +1418,56 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 	case EJTSWorldPickupItemType::Knife:
 		return TEXT("KNIFE");
 
+	case EJTSWorldPickupItemType::Pistol:
+		return TEXT("PISTOL");
+
+	case EJTSWorldPickupItemType::MachineGun:
+		return TEXT("MACHINE GUN");
+
 	case EJTSWorldPickupItemType::Axe:
 		return TEXT("AXE");
 
 	default:
 		return TEXT("UNKNOWN");
+	}
+}
+
+EJTSItemId AJTSWorldPickupActor::ItemTypeToItemId(EJTSWorldPickupItemType InItemType)
+{
+	switch (InItemType)
+	{
+	case EJTSWorldPickupItemType::Fuel: return EJTSItemId::Fuel;
+	case EJTSWorldPickupItemType::Water: return EJTSItemId::Water;
+	case EJTSWorldPickupItemType::Food: return EJTSItemId::Food;
+	case EJTSWorldPickupItemType::Rock: return EJTSItemId::Rock;
+	case EJTSWorldPickupItemType::Ore: return EJTSItemId::Ore;
+	case EJTSWorldPickupItemType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
+	case EJTSWorldPickupItemType::Pickaxe: return EJTSItemId::Pickaxe;
+	case EJTSWorldPickupItemType::Backpack: return EJTSItemId::Backpack;
+	case EJTSWorldPickupItemType::Knife: return EJTSItemId::Knife;
+	case EJTSWorldPickupItemType::Pistol: return EJTSItemId::Pistol;
+	case EJTSWorldPickupItemType::MachineGun: return EJTSItemId::MachineGun;
+	case EJTSWorldPickupItemType::Axe: return EJTSItemId::Axe;
+	default: return EJTSItemId::None;
+	}
+}
+
+EJTSWorldPickupItemType AJTSWorldPickupActor::ItemIdToItemType(EJTSItemId ItemId)
+{
+	switch (ItemId)
+	{
+	case EJTSItemId::Fuel: return EJTSWorldPickupItemType::Fuel;
+	case EJTSItemId::Water: return EJTSWorldPickupItemType::Water;
+	case EJTSItemId::Food: return EJTSWorldPickupItemType::Food;
+	case EJTSItemId::Rock: return EJTSWorldPickupItemType::Rock;
+	case EJTSItemId::Ore: return EJTSWorldPickupItemType::Ore;
+	case EJTSItemId::MoonAntCorpse: return EJTSWorldPickupItemType::MoonAntCorpse;
+	case EJTSItemId::Pickaxe: return EJTSWorldPickupItemType::Pickaxe;
+	case EJTSItemId::Backpack: return EJTSWorldPickupItemType::Backpack;
+	case EJTSItemId::Knife: return EJTSWorldPickupItemType::Knife;
+	case EJTSItemId::Pistol: return EJTSWorldPickupItemType::Pistol;
+	case EJTSItemId::MachineGun: return EJTSWorldPickupItemType::MachineGun;
+	case EJTSItemId::Axe: return EJTSWorldPickupItemType::Axe;
+	default: return EJTSWorldPickupItemType::Rock;
 	}
 }

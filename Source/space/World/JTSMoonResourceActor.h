@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "space/Interaction/IInteractable.h"
+#include "space/Interaction/JTSMeleeTarget.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSResourceType.h"
 
 #include "JTSMoonResourceActor.generated.h"
@@ -15,8 +17,17 @@ class UStaticMeshComponent;
 class UJTSMoonWrappedActorComponent;
 class AJTSPlanetAnchor;
 
+/** Physical Moon resource forms. Small rocks are loose pickups; the other forms are mineable nodes. */
+UENUM(BlueprintType)
+enum class EJTSMoonResourceNodeSize : uint8
+{
+	MediumRock UMETA(DisplayName = "Medium Rock"),
+	LargeRock UMETA(DisplayName = "Large Rock"),
+	OreVein UMETA(DisplayName = "Ore Vein")
+};
+
 UCLASS()
-class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable
+class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable, public IJTSMeleeTarget
 {
 	GENERATED_BODY()
 
@@ -31,6 +42,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Resource")
 	int32 GetRemainingYieldUnits() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Resource")
+	EJTSMoonResourceNodeSize GetNodeSize() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Mining")
+	float GetRemainingMiningWork() const;
 
 	/** Name and mesh-top anchor used by the native world interaction prompt. */
 	UFUNCTION(BlueprintPure, Category = "Moon|Interaction")
@@ -48,12 +65,21 @@ public:
 		const FVector& GroundLocation,
 		const FVector& PreferredForward);
 
-	/** Initializes a multi-use Large Rock or Ore Deposit mining node. */
-	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits);
+	/** Initializes a Medium Rock, Large Rock, or Ore Vein mining node. */
+	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits, EJTSMoonResourceNodeSize NewNodeSize = EJTSMoonResourceNodeSize::LargeRock);
+
+	/** Server-authoritative work application shared by melee and hitscan weapons. */
+	bool ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemId, float WorkAmount);
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
+
+	virtual bool CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const override;
+	virtual void ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType) override;
+	virtual FText GetMeleeTargetDisplayName_Implementation() const override;
+	virtual FText GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const override;
+	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -68,6 +94,8 @@ private:
 	void OnRep_SurfacePresentation();
 
 	FText GetMiningPrompt(APawn* InteractingPawn) const;
+	bool ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutItemId, float& OutWork) const;
+	bool SpawnAllResourceDrops(APawn* Miner);
 	void ConfigureResourceMesh();
 	void ApplyResourceAppearance();
 
@@ -99,6 +127,16 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 RemainingYieldUnits = 6;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
+	EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::LargeRock;
+
+	/** Work is intentionally separate from output count and combat damage. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float TotalMiningWork = 24.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float RemainingMiningWork = 24.0f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;

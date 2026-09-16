@@ -61,7 +61,6 @@ protected:
 
 private:
 	AActor* FindBestInteractable(APawn* InteractingPawn);
-	AActor* FindBestWorldPickup(APawn* InteractingPawn);
 	bool IsValidInteractable(AActor* Candidate, APawn* InteractingPawn) const;
 	bool TryGetInteractionView(APawn* InteractingPawn, FVector& OutViewLocation, FVector& OutViewForward) const;
 	bool IsInteractionTargetVisible(
@@ -74,7 +73,7 @@ private:
 		float& OutPawnDistanceSquared) const;
 	bool HasInteractionLineOfSight(APawn* InteractingPawn, AActor* Candidate, const FVector& ViewLocation, const FVector& TargetLocation) const;
 	bool CanServerInteractWith(APawn* InteractingPawn, AActor* Candidate) const;
-	FVector GetInteractionTargetWorldLocation(const AActor* Candidate) const;
+	FVector GetInteractionTargetWorldLocation(const AActor* Candidate, const FVector& ReferenceLocation = FVector::ZeroVector) const;
 	void SetCurrentInteractable(AActor* NewTarget);
 
 	/** Radius, in centimeters, used to look for IInteractable actors. */
@@ -88,9 +87,13 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Interaction|Targeting", meta = (ClampMin = "1.0", ClampMax = "89.0", UIMin = "15.0", UIMax = "89.0"))
 	float InteractionViewHalfAngleDegrees = 55.0f;
 
-	/** Slightly wider cone used to retain the current target and prevent prompt flicker at the edge. */
-	UPROPERTY(EditDefaultsOnly, Category = "Interaction|Targeting", meta = (ClampMin = "1.0", ClampMax = "89.0", UIMin = "15.0", UIMax = "89.0"))
-	float InteractionRetainViewHalfAngleDegrees = 65.0f;
+	/** Camera ray length used for the highest-priority, directly aimed interaction target. */
+	UPROPERTY(EditDefaultsOnly, Category = "Interaction|Targeting", meta = (ClampMin = "1.0", UIMin = "100.0"))
+	float InteractionAimTraceDistance = 1200.0f;
+
+	/** Camera alignment differences within this tolerance are resolved by physical proximity. */
+	UPROPERTY(EditDefaultsOnly, Category = "Interaction|Targeting", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "0.25"))
+	float InteractionAlignmentTieTolerance = 0.015f;
 
 	/** Rejects targets hidden behind blocking Visibility geometry after the cheap range/cone tests. */
 	UPROPERTY(EditDefaultsOnly, Category = "Interaction|Targeting")

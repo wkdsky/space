@@ -2,6 +2,7 @@
 
 #include "JTSPlayerController.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerInput.h"
@@ -21,7 +22,9 @@
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/UI/JTSShopWidget.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/World/JTSShopTerminalActor.h"
 #include "TimerManager.h"
 
 AJTSPlayerController::AJTSPlayerController()
@@ -68,6 +71,7 @@ void AJTSPlayerController::BeginPlay()
 
 void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	CloseSpaceShop();
 	CloseMoonShop();
 	HideLobby();
 	if (UWorld* const World = GetWorld())
@@ -225,20 +229,50 @@ void AJTSPlayerController::ServerRequestDisembarkSpacecraft_Implementation(AJTSS
 
 void AJTSPlayerController::ServerRequestCraft_Implementation(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft)
 {
+	// Retained as a harmless RPC symbol for old Blueprint/UI assets. Moon's
+	// former ship workshop is retired; all new purchases are validated through
+	// AJTSShopTerminalActor in SpaceWorld against the shared expedition wallet.
+	static_cast<void>(EquipmentType);
+	static_cast<void>(Spacecraft);
+	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: ignored retired Moon workshop request from %s."), *GetNameSafe(this));
+}
+
+void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSShopTerminalActor* Terminal, EJTSItemId ItemId)
+{
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
-	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	if (!IsValid(ControlledCharacter) || !IsValid(Spacecraft) || !IsValid(SurfaceController))
+	const EJTSShopPurchaseResult Result = IsValid(ControlledCharacter) && IsValid(Terminal)
+		? Terminal->TryPurchase(ControlledCharacter, ItemId)
+		: EJTSShopPurchaseResult::DeliveryFailed;
+	ClientReceiveShopPurchaseResult(Result);
+}
+
+void AJTSPlayerController::ServerRequestDepositShopMaterials_Implementation(AJTSShopTerminalActor* Terminal)
+{
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	const bool bSucceeded = IsValid(ControlledCharacter) && IsValid(Terminal)
+		&& Terminal->TryDepositPlayerMaterials(ControlledCharacter);
+	ClientReceiveShopDepositResult(bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSShopPurchaseResult Result)
+{
+	if (IsValid(SpaceShopWidget))
 	{
-		return;
+		SpaceShopWidget->NotifyPurchaseResult(Result);
 	}
-	switch (EquipmentType)
+}
+
+void AJTSPlayerController::ClientReceiveShopDepositResult_Implementation(bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget))
 	{
-	case EJTSEquipmentType::Pickaxe: SurfaceController->TryCraftPickaxe(ControlledCharacter, Spacecraft); break;
-	case EJTSEquipmentType::Backpack: SurfaceController->TryCraftBackpack(ControlledCharacter, Spacecraft); break;
-	case EJTSEquipmentType::Knife: SurfaceController->TryCraftKnife(ControlledCharacter, Spacecraft); break;
-	case EJTSEquipmentType::Axe: SurfaceController->TryCraftAxe(ControlledCharacter, Spacecraft); break;
-	default: break;
+		SpaceShopWidget->NotifyDepositResult(bSucceeded);
 	}
+}
+
+void AJTSPlayerController::ClientOpenSpaceShop_Implementation(AJTSShopTerminalActor* Terminal)
+{
+	OpenSpaceShop(Terminal);
 }
 
 void AJTSPlayerController::RestartCurrentLevel()
@@ -323,6 +357,30 @@ void AJTSPlayerController::ApplySpaceWorldInputMode()
 	ApplyEarthCollectionInputMode();
 }
 
+void AJTSPlayerController::ApplyModalUIInputMode(UUserWidget* FocusWidget)
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	FInputModeUIOnly InputMode;
+	if (IsValid(FocusWidget))
+	{
+		InputMode.SetWidgetToFocus(FocusWidget->TakeWidget());
+	}
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+	// Input-mode changes can be replayed after possession or replication. Reset first so repeated
+	// modal applications do not accumulate IgnoreInput stack entries.
+	ResetIgnoreInputFlags();
+	SetIgnoreMoveInput(true);
+	SetIgnoreLookInput(true);
+}
+
 void AJTSPlayerController::ApplyPreLaunchLobbyInputMode()
 {
 	if (!IsLocalController() || LobbyWidget == nullptr)
@@ -330,15 +388,7 @@ void AJTSPlayerController::ApplyPreLaunchLobbyInputMode()
 		return;
 	}
 
-	FInputModeUIOnly InputMode;
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	InputMode.SetWidgetToFocus(LobbyWidget->TakeWidget());
-	SetInputMode(InputMode);
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-	SetIgnoreMoveInput(true);
-	SetIgnoreLookInput(true);
+	ApplyModalUIInputMode(LobbyWidget);
 }
 
 bool AJTSPlayerController::IsPreLaunchLobbyWorld() const
@@ -388,33 +438,10 @@ void AJTSPlayerController::RestoreCharacterCameraViewTarget(AJTSCharacter* Chara
 
 void AJTSPlayerController::OpenMoonShop(AJTSCharacter* InPlayer)
 {
-	if (!IsLocalController() || !IsValid(InPlayer) || IsGameMenuOpen())
-	{
-		return;
-	}
-
-	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-	if (!IsValid(GameState) || !GameState->IsMoonExploration())
-	{
-		return;
-	}
-
-	AJTSPrototypeHUD* const PrototypeHud = Cast<AJTSPrototypeHUD>(GetHUD());
-	UJTSPrototypeHUDWidget* const PrototypeWidget = IsValid(PrototypeHud) ? PrototypeHud->GetPrototypeWidget() : nullptr;
-	if (!IsValid(PrototypeWidget) || !PrototypeWidget->OpenMoonShop(InPlayer))
-	{
-		return;
-	}
-
-	FInputModeGameAndUI InputMode;
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	InputMode.SetHideCursorDuringCapture(false);
-	SetInputMode(InputMode);
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-	SetIgnoreMoveInput(true);
-	SetIgnoreLookInput(true);
+	// Compatibility entry point only.  It intentionally cannot reopen the
+	// retired Moon prototype store and does not change input state.
+	static_cast<void>(InPlayer);
+	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: Moon workshop is retired; use the SpaceWorld supply terminal."));
 }
 
 void AJTSPlayerController::CloseMoonShop()
@@ -449,6 +476,61 @@ bool AJTSPlayerController::IsMoonShopOpen() const
 	return IsValid(PrototypeWidget) && PrototypeWidget->IsMoonShopOpen();
 }
 
+void AJTSPlayerController::OpenSpaceShop(AJTSShopTerminalActor* Terminal)
+{
+	if (!IsLocalController() || !IsValid(Terminal) || IsGameMenuOpen())
+	{
+		return;
+	}
+	CloseMoonShop();
+	if (!IsValid(SpaceShopWidget))
+	{
+		TSubclassOf<UJTSShopWidget> ShopWidgetClass = SpaceShopWidgetClass.IsNull()
+			? nullptr
+			: SpaceShopWidgetClass.LoadSynchronous();
+		SpaceShopWidget = CreateWidget<UJTSShopWidget>(
+			this,
+			ShopWidgetClass != nullptr ? ShopWidgetClass : TSubclassOf<UJTSShopWidget>(UJTSShopWidget::StaticClass()));
+		if (IsValid(SpaceShopWidget))
+		{
+			SpaceShopWidget->AddToViewport(300);
+		}
+	}
+	if (!IsValid(SpaceShopWidget) || !SpaceShopWidget->OpenForTerminal(Terminal))
+	{
+		return;
+	}
+
+	ApplyModalUIInputMode(SpaceShopWidget);
+}
+
+void AJTSPlayerController::CloseSpaceShop()
+{
+	if (IsValid(SpaceShopWidget))
+	{
+		SpaceShopWidget->CloseShop();
+		SpaceShopWidget->RemoveFromParent();
+		SpaceShopWidget = nullptr;
+	}
+	if (IsLocalController())
+	{
+		if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+			IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+		{
+			ApplySpaceWorldInputMode();
+		}
+		else if (const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+		{
+			ApplyInputModeForPhase(GameState->GetGameplayPhase());
+		}
+	}
+}
+
+bool AJTSPlayerController::IsSpaceShopOpen() const
+{
+	return IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen();
+}
+
 void AJTSPlayerController::OpenGameMenu()
 {
 	if (!IsLocalController() || !IsNormalGameplayPhase())
@@ -461,6 +543,11 @@ void AJTSPlayerController::OpenGameMenu()
 		CloseMoonShop();
 		return;
 	}
+	if (IsSpaceShopOpen())
+	{
+		CloseSpaceShop();
+		return;
+	}
 
 	AJTSPrototypeHUD* const PrototypeHud = Cast<AJTSPrototypeHUD>(GetHUD());
 	UJTSPrototypeHUDWidget* const PrototypeWidget = IsValid(PrototypeHud) ? PrototypeHud->GetPrototypeWidget() : nullptr;
@@ -470,14 +557,7 @@ void AJTSPlayerController::OpenGameMenu()
 	}
 
 	PrototypeWidget->OpenGameMenu();
-	FInputModeUIOnly InputMode;
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	SetInputMode(InputMode);
-	bShowMouseCursor = true;
-	bEnableClickEvents = true;
-	bEnableMouseOverEvents = true;
-	SetIgnoreMoveInput(true);
-	SetIgnoreLookInput(true);
+	ApplyModalUIInputMode(PrototypeWidget);
 }
 
 void AJTSPlayerController::CloseGameMenu()
@@ -518,6 +598,11 @@ bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
 	if (Params.Event == IE_Pressed && Params.Key == EKeys::Escape)
 	{
+		if (IsSpaceShopOpen())
+		{
+			CloseSpaceShop();
+			return true;
+		}
 		if (IsMoonShopOpen())
 		{
 			CloseMoonShop();
@@ -535,9 +620,9 @@ bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 	}
 
-	if (Params.Event == IE_Pressed && Params.Key == EKeys::E && IsMoonShopOpen())
+	if (Params.Event == IE_Pressed && Params.Key == EKeys::E && (IsMoonShopOpen() || IsSpaceShopOpen()))
 	{
-		CloseMoonShop();
+		if (IsSpaceShopOpen()) { CloseSpaceShop(); } else { CloseMoonShop(); }
 		return true;
 	}
 
@@ -680,22 +765,14 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 	}
 
 	case EJTSGameplayPhase::EarthCaptureFailure:
-		HideLobby();
-		ApplyEarthCollectionInputMode();
-		break;
-
 	case EJTSGameplayPhase::MoonArrivalSuccess:
 	{
-		// Keep the world running so the Earth GameMode transition timer can travel to the Moon.
+		// The result card has active Restart/Quit controls. It must own the cursor and keyboard just
+		// like the pause menu and store, while the world is still allowed to run behind it.
 		HideLobby();
-		FInputModeGameOnly InputMode;
-		InputMode.SetConsumeCaptureMouseDown(true);
-		SetInputMode(InputMode);
-		bShowMouseCursor = false;
-		bEnableClickEvents = false;
-		bEnableMouseOverEvents = false;
-		SetIgnoreMoveInput(true);
-		SetIgnoreLookInput(true);
+		AJTSPrototypeHUD* const PrototypeHud = Cast<AJTSPrototypeHUD>(GetHUD());
+		UJTSPrototypeHUDWidget* const PrototypeWidget = IsValid(PrototypeHud) ? PrototypeHud->GetPrototypeWidget() : nullptr;
+		ApplyModalUIInputMode(PrototypeWidget);
 		break;
 	}
 

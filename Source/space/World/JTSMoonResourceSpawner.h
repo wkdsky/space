@@ -3,10 +3,10 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "space/Items/JTSResourceType.h"
+#include "space/World/JTSMoonResourceActor.h"
 
 #include "JTSMoonResourceSpawner.generated.h"
 
-class AJTSMoonResourceActor;
 class AJTSMoonCorpseActor;
 class AJTSMoonSurfaceController;
 class AJTSPlanetAnchor;
@@ -93,6 +93,7 @@ private:
 	AJTSMoonResourceActor* SpawnMiningNode(
 		EJTSResourceType ResourceType,
 		int32 TotalYieldUnits,
+		EJTSMoonResourceNodeSize NodeSize,
 		const FVector& ResourceScale,
 		const FRotator& ResourceRotation,
 		const FVector& GroundLocation);

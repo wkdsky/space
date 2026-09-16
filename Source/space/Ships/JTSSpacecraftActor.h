@@ -82,6 +82,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool IsPawnInBoardingRange(const APawn* InteractingPawn) const;
 
+	/** Center of the shared boarding/deposit/workshop interaction volume. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	FVector GetBoardingInteractionCenter() const;
+
+	/** Radius of the shared boarding/deposit/workshop interaction volume. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	float GetBoardingInteractionRadius() const;
+
 	/** Closest physical spacecraft-mesh bounds point used by camera-cone and LOS interaction targeting. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	FVector GetBoardingInteractionTargetWorldLocation(const FVector& ReferenceLocation) const;
@@ -409,11 +417,11 @@ private:
 
 	/** Extra distance beyond the physical mesh bounds accepted for boarding and Moon workshop use. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float BoardingProximityMargin = 120.0f;
+	float BoardingProximityMargin = 80.0f;
 
 	/** Retains the legacy minimum range for compact spacecraft while large meshes grow automatically. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float BoardingTriggerMinimumRadius = 360.0f;
+	float BoardingTriggerMinimumRadius = 300.0f;
 
 	/** Location where a boarded character is attached. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))

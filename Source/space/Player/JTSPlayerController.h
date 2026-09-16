@@ -6,13 +6,17 @@
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Items/JTSItemTypes.h"
 
 #include "JTSPlayerController.generated.h"
 
 class AJTSCharacter;
 class AJTSPlayerState;
 class AJTSSpacecraftActor;
+class AJTSShopTerminalActor;
 class UJTSPreLaunchLobbyWidget;
+class UJTSShopWidget;
+class UUserWidget;
 enum class EJTSEquipmentType : uint8;
 struct FInputKeyEventArgs;
 
@@ -71,6 +75,22 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestCraft(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft);
 
+	/** Formal SpaceWorld terminal RPCs. The terminal validates range, wallet, and delivery on the server. */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestShopPurchase(AJTSShopTerminalActor* Terminal, EJTSItemId ItemId);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDepositShopMaterials(AJTSShopTerminalActor* Terminal);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopPurchaseResult(EJTSShopPurchaseResult Result);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopDepositResult(bool bSucceeded);
+
+	UFUNCTION(Client, Reliable)
+	void ClientOpenSpaceShop(AJTSShopTerminalActor* Terminal);
+
 	UFUNCTION(BlueprintCallable, Category = "Menu")
 	void RestartCurrentLevel();
 
@@ -104,6 +124,10 @@ public:
 	void CloseMoonShop();
 	bool IsMoonShopOpen() const;
 
+	void OpenSpaceShop(AJTSShopTerminalActor* Terminal);
+	void CloseSpaceShop();
+	bool IsSpaceShopOpen() const;
+
 	/** Opens the gameplay pause menu and applies paused UI-only input. */
 	void OpenGameMenu();
 	void CloseGameMenu();
@@ -123,6 +147,8 @@ private:
 	void ScheduleGameStateBind();
 	void RefreshGameplayInputAfterPossess();
 	void ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhase);
+	/** Gives a modal widget mouse/keyboard ownership and prevents camera input leaking through it. */
+	void ApplyModalUIInputMode(UUserWidget* FocusWidget);
 	void ApplyPreLaunchLobbyInputMode();
 	bool IsNormalGameplayPhase() const;
 	bool IsPreLaunchLobbyWorld() const;
@@ -137,9 +163,16 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSPreLaunchLobbyWidget> LobbyWidget;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UJTSShopWidget> SpaceShopWidget;
+
 	/** Blueprint-owned lobby composition. Native widget remains a recoverable fallback. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
 	TSoftClassPtr<UJTSPreLaunchLobbyWidget> PreLaunchLobbyWidgetClass;
+
+	/** Blueprint wrapper for the native large shop composition. Falls back safely if the asset is unavailable. */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
+	TSoftClassPtr<UJTSShopWidget> SpaceShopWidgetClass;
 
 	FTimerHandle GameStateBindingRetryTimer;
 	int32 GameStateBindingRetryCount = 0;
