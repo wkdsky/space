@@ -72,8 +72,11 @@ public:
 	/** Surface GameMode flow binds here instead of polling for player/ship creation. */
 	FOnJTSInitialLandingSequenceCompleted& OnInitialLandingSequenceCompleted();
 
-	/** Entry point used by AJTSSpacecraftActor::RequestLanding. */
-	bool RequestLanding(AJTSSpacecraftActor* Spacecraft, FJTSPlanetLandingValidationResult& OutResult);
+	/** Entry point used by explicit requests and hold-to-descend automatic capture. */
+	bool RequestLanding(
+		AJTSSpacecraftActor* Spacecraft,
+		FJTSPlanetLandingValidationResult& OutResult,
+		bool bAllowControlledDescentCapture = false);
 
 	/** Resolves a collision-checked exterior transform beside a landed craft inside the legal site union. */
 	bool FindPlayerRespawnTransform(
@@ -102,11 +105,13 @@ private:
 		AJTSPlanetAnchor* Planet,
 		AJTSPlanetLandingSite* LandingSite,
 		const struct FJTSSpacecraftGroundInfo& GroundInfo,
-		FJTSPlanetLandingValidationResult& OutResult) const;
+		FJTSPlanetLandingValidationResult& OutResult,
+		bool bAllowControlledDescentCapture) const;
 	bool QueryLandingAvailability(
 		AJTSSpacecraftActor* Spacecraft,
 		FJTSPlanetLandingValidationResult& OutResult,
-		AJTSPlanetAnchor*& OutPlanet) const;
+		AJTSPlanetAnchor*& OutPlanet,
+		bool bAllowControlledDescentCapture) const;
 	bool BuildRespawnTransformAtAreaPoint(
 		const AJTSSpacecraftActor* Spacecraft,
 		AJTSPlanetAnchor* Planet,

@@ -250,7 +250,7 @@ bool AJTSPlanetLandingManager::IsLandingAvailable(AJTSSpacecraftActor* Spacecraf
 {
 	FJTSPlanetLandingValidationResult ValidationResult;
 	AJTSPlanetAnchor* Planet = nullptr;
-	return QueryLandingAvailability(Spacecraft, ValidationResult, Planet) && ValidationResult.bIsValid;
+	return QueryLandingAvailability(Spacecraft, ValidationResult, Planet, true) && ValidationResult.bIsValid;
 }
 
 void AJTSPlanetLandingManager::DrawDebugLandingAreas(AJTSPlanetAnchor* Planet, float Duration) const
@@ -370,7 +370,8 @@ FOnJTSInitialLandingSequenceCompleted& AJTSPlanetLandingManager::OnInitialLandin
 
 bool AJTSPlanetLandingManager::RequestLanding(
 	AJTSSpacecraftActor* Spacecraft,
-	FJTSPlanetLandingValidationResult& OutResult)
+	FJTSPlanetLandingValidationResult& OutResult,
+	bool bAllowControlledDescentCapture)
 {
 	if (!HasAuthority())
 	{
@@ -393,7 +394,8 @@ bool AJTSPlanetLandingManager::RequestLanding(
 	}
 
 	AJTSPlanetAnchor* Planet = nullptr;
-	if (QueryLandingAvailability(Spacecraft, OutResult, Planet) && OutResult.bIsValid)
+	if (QueryLandingAvailability(Spacecraft, OutResult, Planet, bAllowControlledDescentCapture)
+		&& OutResult.bIsValid)
 	{
 		if (Spacecraft->BeginLandingAssist(OutResult, LandingAssistDuration))
 		{
@@ -404,7 +406,8 @@ bool AJTSPlanetLandingManager::RequestLanding(
 					SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Landing);
 				}
 			}
-			UE_LOG(LogJTSPlanetLanding, Log, TEXT("Landing Request accepted: Planet=%s Site=%s GroundDistance=%.1f Slope=%.1f"),
+			UE_LOG(LogJTSPlanetLanding, Log, TEXT("%s accepted: Planet=%s Site=%s GroundDistance=%.1f Slope=%.1f"),
+				bAllowControlledDescentCapture ? TEXT("Automatic landing capture") : TEXT("Landing Request"),
 				*Planet->GetPlanetId().ToString(),
 				*GetNameSafe(OutResult.LandingSite),
 				OutResult.GroundDistance,
@@ -417,10 +420,13 @@ bool AJTSPlanetLandingManager::RequestLanding(
 	}
 
 	Spacecraft->CancelLandingRequest(OutResult.Failure);
-	UE_LOG(LogJTSPlanetLanding, Warning, TEXT("Landing Request rejected: Planet=%s Spacecraft=%s Reason=%s"),
-		*GetNameSafe(Planet),
-		*GetNameSafe(Spacecraft),
-		GetLandingValidationFailureName(OutResult.Failure));
+	if (!bAllowControlledDescentCapture)
+	{
+		UE_LOG(LogJTSPlanetLanding, Warning, TEXT("Landing Request rejected: Planet=%s Spacecraft=%s Reason=%s"),
+			*GetNameSafe(Planet),
+			*GetNameSafe(Spacecraft),
+			GetLandingValidationFailureName(OutResult.Failure));
+	}
 	return false;
 }
 
@@ -585,7 +591,8 @@ AJTSPlanetAnchor* AJTSPlanetLandingManager::ResolvePlanetForSpacecraft(AJTSSpace
 bool AJTSPlanetLandingManager::QueryLandingAvailability(
 	AJTSSpacecraftActor* Spacecraft,
 	FJTSPlanetLandingValidationResult& OutResult,
-	AJTSPlanetAnchor*& OutPlanet) const
+	AJTSPlanetAnchor*& OutPlanet,
+	bool bAllowControlledDescentCapture) const
 {
 	OutResult = FJTSPlanetLandingValidationResult();
 	OutPlanet = ResolvePlanetForSpacecraft(Spacecraft);
@@ -643,7 +650,13 @@ bool AJTSPlanetLandingManager::QueryLandingAvailability(
 
 		bInsideAnyLandingArea = true;
 		FJTSPlanetLandingValidationResult SiteResult;
-		if (ValidateLandingSite(Spacecraft, OutPlanet, LandingSite, GroundInfo, SiteResult))
+		if (ValidateLandingSite(
+			Spacecraft,
+			OutPlanet,
+			LandingSite,
+			GroundInfo,
+			SiteResult,
+			bAllowControlledDescentCapture))
 		{
 			OutResult = SiteResult;
 			return true;
@@ -668,7 +681,8 @@ bool AJTSPlanetLandingManager::ValidateLandingSite(
 	AJTSPlanetAnchor* Planet,
 	AJTSPlanetLandingSite* LandingSite,
 	const FJTSSpacecraftGroundInfo& GroundInfo,
-	FJTSPlanetLandingValidationResult& OutResult) const
+	FJTSPlanetLandingValidationResult& OutResult,
+	bool bAllowControlledDescentCapture) const
 {
 	OutResult = FJTSPlanetLandingValidationResult();
 	OutResult.LandingSite = LandingSite;
@@ -680,12 +694,6 @@ bool AJTSPlanetLandingManager::ValidateLandingSite(
 	}
 
 	const FJTSPlanetLandingValidationData ValidationData = LandingSite->GetLandingValidationData();
-	if (Spacecraft->GetCurrentSpeed() > ValidationData.MaxLandingSpeed)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::TooFast;
-		return false;
-	}
-
 	OutResult.GroundDistance = GroundInfo.Distance;
 	OutResult.GroundLocation = GroundInfo.GroundLocation;
 	OutResult.GroundNormal = GroundInfo.SurfaceNormal.GetSafeNormal();
@@ -703,6 +711,30 @@ bool AJTSPlanetLandingManager::ValidateLandingSite(
 		return false;
 	}
 
+	const FVector SpacecraftVelocity = Spacecraft->GetFlightVelocity();
+	if (bAllowControlledDescentCapture)
+	{
+		FVector RadialUp = Planet->GetRadialUpVector(Spacecraft->GetActorLocation()).GetSafeNormal();
+		if (RadialUp.IsNearlyZero())
+		{
+			RadialUp = LandingUp;
+		}
+		const float SignedRadialSpeed = FVector::DotProduct(SpacecraftVelocity, RadialUp);
+		const float TangentialSpeed = FVector::VectorPlaneProject(SpacecraftVelocity, RadialUp).Size();
+		if (TangentialSpeed > ValidationData.MaxLandingSpeed
+			|| SignedRadialSpeed > ValidationData.MaxLandingSpeed
+			|| -SignedRadialSpeed > ValidationData.MaxAutomaticLandingRadialSpeed)
+		{
+			OutResult.Failure = EJTSLandingValidationFailure::TooFast;
+			return false;
+		}
+	}
+	else if (SpacecraftVelocity.Size() > ValidationData.MaxLandingSpeed)
+	{
+		OutResult.Failure = EJTSLandingValidationFailure::TooFast;
+		return false;
+	}
+
 	if (OutResult.GroundSlopeDegrees > ValidationData.MaxSlopeDegrees)
 	{
 		OutResult.Failure = EJTSLandingValidationFailure::TooSteep;
@@ -715,14 +747,21 @@ bool AJTSPlanetLandingManager::ValidateLandingSite(
 	const FQuat LandingRotation = FRotationMatrix::MakeFromXZ(LandingForward, LandingUp).ToQuat();
 	OutResult.LandingClearance = Spacecraft->GetLandingCollisionClearanceForRotation(LandingRotation, LandingUp)
 		+ FMath::Max(0.0f, ValidationData.SurfaceOffset);
-	OutResult.LandingTransform = FTransform(
+	const FTransform DesiredLandingTransform(
 		LandingRotation,
 		GroundInfo.GroundLocation + LandingUp * OutResult.LandingClearance);
-	if (!Spacecraft->CanOccupyLandingTransform(OutResult.LandingTransform))
+	float ClearanceAdjustment = 0.0f;
+	if (!Spacecraft->FindClearLandingTransform(
+		DesiredLandingTransform,
+		LandingUp,
+		ValidationData.MaxSurfaceClearanceAdjustment,
+		OutResult.LandingTransform,
+		ClearanceAdjustment))
 	{
 		OutResult.Failure = EJTSLandingValidationFailure::CollisionBlocked;
 		return false;
 	}
+	OutResult.LandingClearance += ClearanceAdjustment;
 
 	OutResult.bIsValid = true;
 	OutResult.Failure = EJTSLandingValidationFailure::None;

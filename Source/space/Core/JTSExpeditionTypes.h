@@ -86,29 +86,24 @@ struct SPACE_API FJTSResourceAmount
 	int32 Amount = 0;
 };
 
-/** Server-authoritative flight intent sent by the current driver at an intentionally low rate. */
+/** Server-authoritative third-person flight intent submitted by the current driver. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSSpacecraftInputState
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	float Throttle = 0.0f;
+	float MoveForward = 0.0f;
 
 	UPROPERTY()
-	float Strafe = 0.0f;
+	float MoveRight = 0.0f;
 
 	UPROPERTY()
-	float Vertical = 0.0f;
+	float Lift = 0.0f;
 
+	/** Full camera forward vector; surface flight projects it tangentially while deep space keeps 3D pitch. */
 	UPROPERTY()
-	float Roll = 0.0f;
-
-	UPROPERTY()
-	float Yaw = 0.0f;
-
-	UPROPERTY()
-	float Pitch = 0.0f;
+	FVector_NetQuantizeNormal ViewForward = FVector::ForwardVector;
 
 	UPROPERTY()
 	bool bBoosting = false;

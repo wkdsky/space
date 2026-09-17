@@ -148,6 +148,9 @@ public:
 	float GetCurrentSpeed() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	FVector GetFlightVelocity() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	float GetSpeedNormalized() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
@@ -219,6 +222,13 @@ public:
 
 	/** Tests the flight collision hull at a candidate landing transform without moving the ship. */
 	bool CanOccupyLandingTransform(const FTransform& LandingTransform) const;
+	/** Raises a surface-aligned candidate only as far as needed for the complete hull to clear terrain. */
+	bool FindClearLandingTransform(
+		const FTransform& DesiredLandingTransform,
+		const FVector& SurfaceUp,
+		float MaxClearanceAdjustment,
+		FTransform& OutLandingTransform,
+		float& OutClearanceAdjustment) const;
 
 	/** Hull support distance plus configured ground clearance along the supplied surface-up direction. */
 	float GetLandingCollisionClearance(const FVector& SurfaceUp) const;
@@ -303,9 +313,6 @@ public:
 	void ServerSetFlightInput(const FJTSSpacecraftInputState& InputState);
 
 	UFUNCTION(Server, Reliable)
-	void ServerRequestLanding();
-
-	UFUNCTION(Server, Reliable)
 	void ServerRequestSurfaceTakeoff();
 
 	/** Driver-only request sent through the possessed spacecraft's owning connection. */
@@ -352,6 +359,9 @@ protected:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FJTSBoardingRegression;
+	friend class FJTSHullCameraRegression;
+	friend class FJTSThirdPersonFlightRegression;
+	friend class FJTSAutomaticLandingRegression;
 #endif
 
 	void InitializeFlightInput();
@@ -359,8 +369,8 @@ private:
 	void UnregisterFlightInputMappingContext();
 	void FlightMoveForward(const FInputActionValue& Value);
 	void FlightMoveRight(const FInputActionValue& Value);
+	void FlightAscendStarted(const FInputActionValue& Value);
 	void FlightMoveVertical(const FInputActionValue& Value);
-	void FlightRoll(const FInputActionValue& Value);
 	void FlightLookYaw(const FInputActionValue& Value);
 	void FlightLookPitch(const FInputActionValue& Value);
 	void FlightCameraZoom(const FInputActionValue& Value);
@@ -368,13 +378,21 @@ private:
 	void FlightBoostStopped(const FInputActionValue& Value);
 	void FlightBrakeStarted(const FInputActionValue& Value);
 	void FlightBrakeStopped(const FInputActionValue& Value);
-	void FlightLandingStarted(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
 	void FlightDisembarkReleased(const FInputActionValue& Value);
 	void ProcessDeferredDisembarkRequest();
 	void UpdateDisembarkInputGate();
 	void InitializeFlightCameraDistance();
+	void InitializeFlightCameraFrame();
 	void UpdateFlightCamera(float DeltaSeconds);
+	void UpdateFlightCameraFrame(float DeltaSeconds);
+	FVector GetFlightReferenceUp() const;
+	FVector GetStableFlightTangent(const FVector& UpVector, const FVector& PreferredDirection) const;
+	FVector GetFlightCameraForward(const FVector& ReferenceUp) const;
+	void RefreshLocalFlightViewIntent();
+	bool RequestLandingInternal(bool bAllowControlledDescentCapture);
+	void UpdateAutomaticLanding(float DeltaSeconds);
+	void AbortLandingAssist();
 	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
 	void HandleAssistedLandingCompleted();
 	void HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure);
@@ -413,6 +431,7 @@ private:
 	void SavePersistentStorage() const;
 	void UpdateBoardingTriggerFromSpacecraftMeshBounds();
 	void UpdateFlightCollisionFromSpacecraftMeshBounds();
+	void ConfigureCameraCollisionResponses();
 	bool GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBounds) const;
 
 	/** Collision root moved by the flight component with Sweep enabled. */
@@ -435,7 +454,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Ground Probe", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftGroundProbeComponent> GroundProbeComponent;
 
-	/** Dedicated driving boom, attached to the ship rather than any planet frame. */
+	/** Dedicated driving boom whose rotation is maintained in the active planet-relative camera frame. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USpringArmComponent> FlightCameraBoom;
 
@@ -523,6 +542,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
 	float FlightCameraLookSensitivity = 0.18f;
 
+	/** High-response spring-arm damping removes visible mouse and replicated-movement stepping. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "60.0", UIMin = "1.0", UIMax = "40.0"))
+	float FlightCameraRotationLagSpeed = 24.0f;
+
 	/** Closest driving camera distance selectable with the mouse wheel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "3000.0", UIMin = "0.0", UIMax = "1600.0"))
 	float FlightCameraMinArmLength = 1000.0f;
@@ -534,10 +557,6 @@ private:
 	/** Camera-boom change, in centimeters, for one mouse-wheel step. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "500.0"))
 	float FlightCameraZoomStep = 180.0f;
-
-	/** Server-side cap for one raw mouse sample. Continuous axes remain clamped to [-1, 1]. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Flight|Input", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "64.0"))
-	float MaxFlightLookInputPerSample = 20.0f;
 
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
@@ -573,7 +592,7 @@ private:
 	TObjectPtr<UInputAction> FlightVerticalAction;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> FlightRollAction;
+	TObjectPtr<UInputAction> FlightAscendAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightLookYawAction;
@@ -590,10 +609,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightBrakeAction;
 
-	/** Default landing-request binding; projects can replace the presentation/input layer in Blueprint. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> FlightLandingAction;
-
 	/** Available only while a player is driving a grounded SpaceWorld spacecraft. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightDisembarkAction;
@@ -608,7 +623,7 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	bool bIsGroundedOnPlanet = false;
 
-	/** Planet that supplies free-flight gravity. It stays valid while the craft is Flying. */
+	/** Planet that supplies the radial Up frame and optional free-flight gravity. */
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> FlightPlanet;
 
@@ -625,15 +640,30 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	EJTSSpacecraftLandingAssistPhase LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 
+	/** Server check cadence while Ctrl is held; LandingSite data owns the actual capture height. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02", UIMax = "0.5"))
+	float AutomaticLandingCheckInterval = 0.08f;
+
+	/** Analog threshold below which downward lift is treated as a deliberate automatic-landing request. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", ClampMax = "1.0", UIMin = "0.05", UIMax = "1.0"))
+	float AutomaticLandingDescentInputThreshold = 0.5f;
+
 	TWeakObjectPtr<AJTSPlanetLandingSite> PendingLandingSite;
 	FTransform PendingLandingTransform = FTransform::Identity;
 	float PendingLandingClearance = 0.0f;
 	float CurrentFlightCameraArmLength = 0.0f;
+	FVector FlightCameraTangentForward = FVector::ForwardVector;
+	FVector LastFlightCameraUp = FVector::UpVector;
+	float FlightCameraPitch = 0.0f;
+	float AutomaticLandingCheckElapsed = 0.0f;
 	bool bDisembarkInputArmed = false;
 	bool bDisembarkRequestPending = false;
+	bool bAutomaticLandingDescentHeld = false;
+	bool bAutomaticLandingBlockedUntilDescentReleased = false;
 
 	bool bPersistedStorageRestoreAttempted = false;
 	bool bFlightCameraDistanceInitialized = false;
+	bool bFlightCameraFrameInitialized = false;
 	FJTSSpacecraftInputState LocalFlightInput;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "1", ClampMax = "4"))

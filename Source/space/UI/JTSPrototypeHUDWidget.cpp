@@ -1427,7 +1427,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	default:
 		if (bLandingAvailable)
 		{
-			StateLine = TEXT("LANDING AVAILABLE");
+			StateLine = TEXT("HOLD CTRL TO AUTO-LAND");
 		}
 		else if (LandingZoneDistance >= 0.0f)
 		{
@@ -1451,10 +1451,20 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	FlightTelemetryText->SetColorAndOpacity(FSlateColor(StateColor));
 	if (GameplayHelpText != nullptr)
 	{
-		GameplayHelpText->SetText(FText::FromString(
-			FlightState == EJTSSpacecraftFlightState::Landed
-				? TEXT("W/S THROTTLE    A/D STRAFE    MOUSE VIEW / STEER    WHEEL DISTANCE\nSPACE TAKE OFF    Q/E ROLL    SHIFT BOOST    C BRAKE    F DISEMBARK")
-				: TEXT("W/S THROTTLE    A/D STRAFE    MOUSE VIEW / STEER    WHEEL DISTANCE\nSPACE/CTRL UP/DOWN    Q/E ROLL    SHIFT BOOST    C BRAKE    L LAND")));
+		FString HelpText;
+		if (FlightState == EJTSSpacecraftFlightState::Landed)
+		{
+			HelpText = TEXT("W/S FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK    WHEEL DISTANCE\nSPACE TAKE OFF    SHIFT BOOST    C BRAKE    F DISEMBARK");
+		}
+		else if (FlightState == EJTSSpacecraftFlightState::LandingAssist)
+		{
+			HelpText = TEXT("AUTO-LANDING IN PROGRESS\nSPACE ABORT");
+		}
+		else
+		{
+			HelpText = TEXT("W/S SURFACE FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK\nSPACE/CTRL RADIAL UP/DOWN    HOLD CTRL IN LANDING ZONE TO AUTO-LAND");
+		}
+		GameplayHelpText->SetText(FText::FromString(HelpText));
 	}
 }
 

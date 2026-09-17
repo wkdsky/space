@@ -9,12 +9,15 @@
 #include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputActionValue.h"
+#include "InputCoreTypes.h"
+#include "InputMappingContext.h"
 #include "UObject/UnrealType.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Player/JTSCharacter.h"
@@ -22,6 +25,8 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSPlanetLandingManager.h"
+#include "space/World/JTSPlanetLandingSite.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
 namespace
@@ -199,23 +204,333 @@ bool FJTSHullCameraRegression::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Hull is clear of spherical terrain"), Fixture.Ship->CanOccupyLandingTransform(Fixture.Ship->GetActorTransform()));
 		TestTrue(TEXT("Landing support includes mesh bottom"), Fixture.Ship->GetLandingCollisionClearance() >= 201.9f);
 	}
+
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Fixture.Ship);
+	for (const UPrimitiveComponent* const PrimitiveComponent : PrimitiveComponents)
+	{
+		TestEqual(
+			*FString::Printf(TEXT("Spacecraft primitive %s ignores character camera probes"), *GetNameSafe(PrimitiveComponent)),
+			PrimitiveComponent->GetCollisionResponseToChannel(ECC_Camera),
+			ECR_Ignore);
+	}
+
 	AJTSCharacter* CameraCharacter = nullptr;
 	APlayerController* CameraController = Fixture.AddPlayer(CameraCharacter);
+	const FVector ReferenceUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation()).GetSafeNormal();
+	const FVector EntryTangent = FVector::VectorPlaneProject(Fixture.Ship->GetActorForwardVector(), ReferenceUp).GetSafeNormal();
+	const FVector EntryRight = FVector::CrossProduct(ReferenceUp, EntryTangent).GetSafeNormal();
+	const FVector EntryForward = FQuat(EntryRight, FMath::DegreesToRadians(18.0f)).RotateVector(EntryTangent).GetSafeNormal();
+	CameraController->SetControlRotation(EntryForward.Rotation());
 	TestTrue(TEXT("Camera test driver boards"), Fixture.Ship->TryBoardPlayer(CameraCharacter));
 	Fixture.Ship->ActivateFlightCameraThirdPerson();
 	USpringArmComponent* Boom = Fixture.Ship->GetFlightCameraBoom();
-	TestTrue(TEXT("Flight camera uses player control rotation"), Boom->bUsePawnControlRotation);
-	TestFalse(TEXT("Flight camera rotation is not welded to the ship"), Boom->IsUsingAbsoluteRotation());
-	const FRotator FirstView(-15.0f, 25.0f, 0.0f);
-	CameraController->SetControlRotation(FirstView);
-	Boom->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Flight camera is independent from pawn control rotation"), Boom->bUsePawnControlRotation);
+	TestTrue(TEXT("Flight camera keeps a world-space planet-relative orbit"), Boom->IsUsingAbsoluteRotation());
+	TestFalse(TEXT("Flight camera never retracts into the spacecraft hull"), Boom->bDoCollisionTest);
+	TestTrue(TEXT("Flight camera smooths orbit rotation"), Boom->bEnableCameraRotationLag);
+	TestTrue(TEXT("Flight camera lag uses frame-rate-independent substepping"), Boom->bUseCameraLagSubstepping);
+	TestTrue(TEXT("Flight camera retains a proper exterior arm length"), Boom->TargetArmLength >= Fixture.Ship->FlightCameraMinArmLength);
 	const FVector FirstForward = Fixture.Ship->GetFlightCamera()->GetForwardVector();
-	const FRotator SecondView(20.0f, 100.0f, 0.0f);
-	CameraController->SetControlRotation(SecondView);
-	Boom->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Boarding inherits the player's existing sight line"), FVector::DotProduct(FirstForward, EntryForward) > 0.999f);
+
+	const FQuat ShipRotationBeforeLook = Fixture.Ship->GetActorQuat();
+	Fixture.Ship->FlightLookYaw(FInputActionValue(120.0f));
+	Fixture.Ship->FlightLookPitch(FInputActionValue(-35.0f));
+	for (int32 CameraStep = 0; CameraStep < 12; ++CameraStep)
+	{
+		Boom->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	}
 	const FVector SecondForward = Fixture.Ship->GetFlightCamera()->GetForwardVector();
-	TestTrue(TEXT("Mouse-driven control rotation changes the flight view"), !FirstForward.Equals(SecondForward, 0.001));
-	TestTrue(TEXT("Flight camera follows the requested control rotation"), SecondForward.Equals(SecondView.Vector(), 0.001));
+	TestTrue(TEXT("Mouse input rotates the independent orbit camera"), !FirstForward.Equals(SecondForward, 0.001));
+	TestTrue(TEXT("Mouse look never directly rotates the spacecraft"), Fixture.Ship->GetActorQuat().Equals(ShipRotationBeforeLook, 0.0001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSThirdPersonFlightRegression, "JTS.Spacecraft.ThirdPersonFlightControls",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	if (!TestTrue(TEXT("Flight-control test parks on an oblique spherical surface"),
+		Fixture.Park(FVector(0.3f, 0.4f, 0.8660254f))))
+	{
+		return false;
+	}
+
+	AJTSCharacter* DriverCharacter = nullptr;
+	APlayerController* DriverController = Fixture.AddPlayer(DriverCharacter);
+	const FVector InitialUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation()).GetSafeNormal();
+	const FVector InitialViewForward = FVector::VectorPlaneProject(FVector::ForwardVector, InitialUp).GetSafeNormal();
+	DriverController->SetControlRotation(InitialViewForward.Rotation());
+	TestTrue(TEXT("Flight-control test driver boards"), Fixture.Ship->TryBoardPlayer(DriverCharacter));
+	TestTrue(TEXT("Surface takeoff enables authoritative flight movement"), Fixture.Ship->BeginSurfaceTakeoff());
+	Fixture.Ship->AddActorWorldOffset(InitialUp * 2000.0f);
+
+	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
+	const FJTSSpacecraftFlightStats BlueprintStats = Movement->GetBaseStats();
+	TestTrue(TEXT("BP_Spacecraft keeps usable third-person flight defaults"),
+		BlueprintStats.MaxMoveSpeed > 0.0f
+		&& BlueprintStats.LiftSpeed >= 2400.0f
+		&& BlueprintStats.Acceleration > 0.0f
+		&& BlueprintStats.Deceleration > 0.0f
+		&& BlueprintStats.FacingTurnRate > 0.0f
+		&& BlueprintStats.FacingTurnAcceleration > 0.0f);
+	FJTSSpacecraftFlightStats TestStats = Movement->GetEffectiveStats();
+	TestStats.MaxMoveSpeed = 1000.0f;
+	TestStats.LiftSpeed = 900.0f;
+	TestStats.Acceleration = 100000.0f;
+	TestStats.Deceleration = 100000.0f;
+	TestStats.FacingTurnRate = 3600.0f;
+	TestStats.FacingTurnAcceleration = 36000.0f;
+	Movement->SetEffectiveStats(TestStats);
+	TestEqual(TEXT("Test flight stats apply the requested facing rate"),
+		Movement->GetEffectiveStats().FacingTurnRate,
+		3600.0f);
+	TestTrue(TEXT("Planetary low flight uses the radial surface frame"),
+		Movement->IsUsingPlanetSurfaceFlightFrame());
+	Fixture.Ship->EnsureFlightInputMapping();
+	const bool bLegacyLandingKeyMapped = Fixture.Ship->FlightInputMappingContext->GetMappings().ContainsByPredicate(
+		[](const FEnhancedActionKeyMapping& Mapping)
+		{
+			return Mapping.Key == EKeys::L;
+		});
+	TestFalse(TEXT("L is no longer mapped to landing"), bLegacyLandingKeyMapped);
+	const bool bDedicatedSpaceActionMapped = Fixture.Ship->FlightInputMappingContext->GetMappings().ContainsByPredicate(
+		[&Fixture](const FEnhancedActionKeyMapping& Mapping)
+		{
+			return Mapping.Action == Fixture.Ship->FlightAscendAction && Mapping.Key == EKeys::SpaceBar;
+		});
+	TestTrue(TEXT("Space has a dedicated takeoff and landing-abort action"), bDedicatedSpaceActionMapped);
+
+	const FQuat RotationBeforeMouseLook = Fixture.Ship->GetActorQuat();
+	const float QuarterTurnMouseInput = 90.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER);
+	Fixture.Ship->FlightLookYaw(FInputActionValue(QuarterTurnMouseInput));
+	TestTrue(TEXT("Orbiting the camera does not steer the spacecraft"),
+		Fixture.Ship->GetActorQuat().Equals(RotationBeforeMouseLook, 0.0001f));
+
+	auto TestPlanarDirection = [this, &Fixture, Movement](
+		const TCHAR* Description,
+		float ForwardInput,
+		float RightInput,
+		bool bExpectRightAxis)
+	{
+		Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+		Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+		Movement->StopMovementImmediately();
+		Fixture.Ship->FlightMoveForward(FInputActionValue(ForwardInput));
+		Fixture.Ship->FlightMoveRight(FInputActionValue(RightInput));
+
+		const FVector ReferenceUp = Fixture.Ship->GetFlightReferenceUp();
+		const FVector ViewForward = FVector::VectorPlaneProject(
+			Fixture.Ship->LocalFlightInput.ViewForward,
+			ReferenceUp).GetSafeNormal();
+		const FVector ViewRight = FVector::CrossProduct(ReferenceUp, ViewForward).GetSafeNormal();
+		const FVector ExpectedDirection = bExpectRightAxis
+			? ViewRight * FMath::Sign(RightInput)
+			: ViewForward * FMath::Sign(ForwardInput);
+		const FVector StartLocation = Fixture.Ship->GetActorLocation();
+		Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+		const FVector Displacement = Fixture.Ship->GetActorLocation() - StartLocation;
+		const FVector PlanarDisplacement = FVector::VectorPlaneProject(Displacement, ReferenceUp).GetSafeNormal();
+		TestTrue(Description, FVector::DotProduct(PlanarDisplacement, ExpectedDirection) > 0.995f);
+		TestTrue(TEXT("Planar flight stays tangent to the current planet"),
+			FMath::Abs(FVector::DotProduct(Displacement.GetSafeNormal(), ReferenceUp)) < 0.02f);
+	};
+
+	TestPlanarDirection(TEXT("W moves along the camera-forward tangent"), 1.0f, 0.0f, false);
+	TestPlanarDirection(TEXT("S moves opposite the camera-forward tangent"), -1.0f, 0.0f, false);
+	TestPlanarDirection(TEXT("D moves along the camera-right tangent"), 0.0f, 1.0f, true);
+	TestPlanarDirection(TEXT("A moves opposite the camera-right tangent"), 0.0f, -1.0f, true);
+
+	FJTSSpacecraftFlightStats FacingStats = Movement->GetEffectiveStats();
+	FacingStats.MaxMoveSpeed = 0.0f;
+	Movement->SetEffectiveStats(FacingStats);
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+	Movement->StopMovementImmediately();
+	const FVector FacingUp = Fixture.Ship->GetFlightReferenceUp();
+	const FVector DesiredFacing = FVector::VectorPlaneProject(
+		Fixture.Ship->LocalFlightInput.ViewForward,
+		FacingUp).GetSafeNormal();
+	for (int32 TurnStep = 0; TurnStep < 3; ++TurnStep)
+	{
+		Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	}
+	const FVector ActualFacing = Fixture.Ship->GetActorForwardVector();
+	const float FacingDot = FVector::DotProduct(ActualFacing, DesiredFacing);
+	AddInfo(FString::Printf(TEXT("Third-person facing: dot=%.6f actual=%s desired=%s up=%s"),
+		FacingDot,
+		*ActualFacing.ToCompactString(),
+		*DesiredFacing.ToCompactString(),
+		*FacingUp.ToCompactString()));
+	TestTrue(TEXT("Spacecraft automatically faces the camera heading"),
+		FacingDot > 0.995f);
+	TestTrue(TEXT("Automatic facing keeps the spacecraft aligned to radial up"),
+		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), Fixture.Ship->GetFlightReferenceUp()) > 0.995f);
+
+	FJTSSpacecraftFlightStats ReverseStats = Movement->GetEffectiveStats();
+	ReverseStats.MaxMoveSpeed = 1000.0f;
+	Movement->SetEffectiveStats(ReverseStats);
+	Fixture.Ship->FlightMoveForward(FInputActionValue(-1.0f));
+	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+	Movement->StopMovementImmediately();
+	const FVector ReverseFacing = Fixture.Ship->GetActorForwardVector();
+	const FVector ReverseStart = Fixture.Ship->GetActorLocation();
+	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	const FVector ReverseDirection = (Fixture.Ship->GetActorLocation() - ReverseStart).GetSafeNormal();
+	TestTrue(TEXT("S applies direct reverse thrust"), FVector::DotProduct(ReverseDirection, ReverseFacing) < -0.995f);
+	TestTrue(TEXT("S does not turn the spacecraft around"),
+		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), ReverseFacing) > 0.995f);
+
+	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+	Movement->StopMovementImmediately();
+	const float PitchUpMouseInput = 30.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER);
+	Fixture.Ship->FlightLookPitch(FInputActionValue(PitchUpMouseInput));
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+	const FVector ClimbUp = Fixture.Ship->GetFlightReferenceUp();
+	const FVector ClimbForward = Fixture.Ship->LocalFlightInput.ViewForward.GetSafeNormal();
+	TestTrue(TEXT("Pitching up remains available for observing the planet and spacecraft"),
+		FVector::DotProduct(ClimbForward, ClimbUp) > 0.45f);
+	const FVector ClimbTangent = FVector::VectorPlaneProject(ClimbForward, ClimbUp).GetSafeNormal();
+	const FVector ClimbStart = Fixture.Ship->GetActorLocation();
+	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	const FVector ClimbDirection = (Fixture.Ship->GetActorLocation() - ClimbStart).GetSafeNormal();
+	TestTrue(TEXT("Camera pitch does not make W leave the planet tangent"),
+		FVector::DotProduct(ClimbDirection, ClimbTangent) > 0.995f
+		&& FMath::Abs(FVector::DotProduct(ClimbDirection, ClimbUp)) < 0.02f);
+	TestTrue(TEXT("Spacecraft remains radially level while the camera looks up"),
+		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), ClimbUp) > 0.995f
+		&& FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), ClimbTangent) > 0.995f);
+
+	Movement->StopMovementImmediately();
+	const float PitchDownMouseInput = -60.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER);
+	Fixture.Ship->FlightLookPitch(FInputActionValue(PitchDownMouseInput));
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+	const FVector DiveUp = Fixture.Ship->GetFlightReferenceUp();
+	const FVector DiveForward = Fixture.Ship->LocalFlightInput.ViewForward.GetSafeNormal();
+	TestTrue(TEXT("Pitching down remains available for inspecting the surface"),
+		FVector::DotProduct(DiveForward, DiveUp) < -0.45f);
+	const FVector DiveTangent = FVector::VectorPlaneProject(DiveForward, DiveUp).GetSafeNormal();
+	const FVector DiveStart = Fixture.Ship->GetActorLocation();
+	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	const FVector DiveDirection = (Fixture.Ship->GetActorLocation() - DiveStart).GetSafeNormal();
+	TestTrue(TEXT("Camera pitch does not make W dive toward the surface"),
+		FVector::DotProduct(DiveDirection, DiveTangent) > 0.995f
+		&& FMath::Abs(FVector::DotProduct(DiveDirection, DiveUp)) < 0.02f);
+	TestTrue(TEXT("Spacecraft remains radially level while the camera looks down"),
+		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), DiveUp) > 0.995f
+		&& FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), DiveTangent) > 0.995f);
+
+	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+	Movement->StopMovementImmediately();
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(1.0f));
+	const FVector LiftUp = Fixture.Ship->GetFlightReferenceUp();
+	const FVector LiftStart = Fixture.Ship->GetActorLocation();
+	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	const FVector LiftDisplacement = Fixture.Ship->GetActorLocation() - LiftStart;
+	const FVector LiftDirection = LiftDisplacement.GetSafeNormal();
+	TestTrue(TEXT("Space raises the spacecraft along radial up"), FVector::DotProduct(LiftDirection, LiftUp) > 0.995f);
+	TestTrue(TEXT("Radial lift has useful immediate authority"), LiftDisplacement.Size() >= 85.0f);
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
+	TestEqual(TEXT("Ctrl submits radial descent input"), Fixture.Ship->LocalFlightInput.Lift, -1.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSAutomaticLandingRegression, "JTS.Spacecraft.AutomaticLandingControls",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	if (!TestTrue(TEXT("Automatic-landing test parks on the spherical surface"), Fixture.Park(FVector::UpVector)))
+	{
+		return false;
+	}
+
+	FJTSPlanetSurfaceFrame LandingFrame;
+	if (!TestTrue(TEXT("Landing site resolves a real surface frame"), Fixture.Planet->GetSurfaceFrameAt(
+		Fixture.Ship->GetActorLocation(),
+		Fixture.Ship->GetActorForwardVector(),
+		LandingFrame)))
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SiteSpawnParameters;
+	SiteSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AJTSPlanetLandingManager* const PlanetLandingManager = Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
+	AJTSPlanetLandingSite* const LandingSite = Fixture.World->SpawnActor<AJTSPlanetLandingSite>(
+		AJTSPlanetLandingSite::StaticClass(),
+		LandingFrame.Transform,
+		SiteSpawnParameters);
+	FindFProperty<FObjectProperty>(LandingSite->GetClass(), TEXT("PlanetAnchor"))
+		->SetObjectPropertyValue_InContainer(LandingSite, Fixture.Planet);
+	TestTrue(TEXT("Landing site registers with the landing manager"),
+		PlanetLandingManager->RegisterLandingSite(LandingSite));
+	TestTrue(TEXT("Landing site contains the spacecraft surface point"),
+		LandingSite->IsLocationInsideLandingArea(LandingFrame.Location));
+
+	AJTSCharacter* DriverCharacter = nullptr;
+	Fixture.AddPlayer(DriverCharacter);
+	TestTrue(TEXT("Automatic-landing driver boards"), Fixture.Ship->TryBoardPlayer(DriverCharacter));
+	TestTrue(TEXT("Automatic-landing test takes off"), Fixture.Ship->BeginSurfaceTakeoff());
+	Fixture.Ship->AddActorWorldOffset(FVector::UpVector * 1800.0f);
+
+	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
+	for (int32 Step = 0; Step < 240
+		&& Fixture.Ship->GetFlightState() != EJTSSpacecraftFlightState::LandingAssist;
+		++Step)
+	{
+		Fixture.Ship->Tick(1.0f / 60.0f);
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	}
+	TestEqual(TEXT("Holding Ctrl inside the landing site triggers automatic takeover"),
+		Fixture.Ship->GetFlightState(),
+		EJTSSpacecraftFlightState::LandingAssist);
+	TestTrue(TEXT("Automatic takeover uses the existing landing movement"), Movement->IsAssistedLanding());
+
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+	Fixture.Ship->Tick(1.0f / 60.0f);
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Releasing Ctrl and pressing movement keys does not cancel automatic landing"),
+		Fixture.Ship->GetFlightState(),
+		EJTSSpacecraftFlightState::LandingAssist);
+
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
+	Fixture.Ship->FlightAscendStarted(FInputActionValue(true));
+	TestEqual(TEXT("Space aborts automatic landing"),
+		Fixture.Ship->GetFlightState(),
+		EJTSSpacecraftFlightState::Flying);
+	TestFalse(TEXT("Space stops the assisted-landing movement state"), Movement->IsAssistedLanding());
+	Fixture.Ship->Tick(0.2f);
+	TestEqual(TEXT("Holding Ctrl cannot immediately re-engage after a Space abort"),
+		Fixture.Ship->GetFlightState(),
+		EJTSSpacecraftFlightState::Flying);
+
+	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
+	for (int32 Step = 0; Step < 120
+		&& Fixture.Ship->GetFlightState() != EJTSSpacecraftFlightState::LandingAssist;
+		++Step)
+	{
+		Fixture.Ship->Tick(1.0f / 60.0f);
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	}
+	TestEqual(TEXT("Ctrl can engage automatic landing again after an abort"),
+		Fixture.Ship->GetFlightState(),
+		EJTSSpacecraftFlightState::LandingAssist);
+	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
+	for (int32 Step = 0; Step < 1200 && !Fixture.Ship->IsLanded(); ++Step)
+	{
+		Fixture.Ship->Tick(1.0f / 60.0f);
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	}
+	TestTrue(TEXT("Automatic landing completes after Ctrl is released"), Fixture.Ship->IsLanded());
 	return true;
 }
 

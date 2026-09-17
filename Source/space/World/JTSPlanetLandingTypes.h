@@ -71,6 +71,13 @@ struct SPACE_API FJTSPlanetLandingValidationData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float MaxLandingSpeed = 450.0f;
 
+	/**
+	 * Maximum radial speed that hold-to-descend automatic landing may capture. Tangential speed still
+	 * uses MaxLandingSpeed, so the assist cannot grab a craft sweeping sideways through the site.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float MaxAutomaticLandingRadialSpeed = 3200.0f;
+
 	/** Maximum angle between the resolved terrain normal and the radial local up vector. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "60.0"))
 	float MaxSlopeDegrees = 28.0f;
@@ -85,6 +92,10 @@ struct SPACE_API FJTSPlanetLandingValidationData
 	/** Extra clearance added above the spacecraft hull after the target surface is resolved. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SurfaceOffset = 12.0f;
+
+	/** Maximum extra lift used to fit the complete hull above uneven terrain around the probe point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float MaxSurfaceClearanceAdjustment = 500.0f;
 
 	/** Maximum local gravity-direction query length used to resolve the authored target onto terrain. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))

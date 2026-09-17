@@ -5,7 +5,6 @@
 #include "CollisionQueryParams.h"
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Math/RotationMatrix.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -45,22 +44,13 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 	SubmitExteriorAltitude();
 }
 
-void UJTSSpacecraftFlightMovementComponent::SetForwardInput(float Value)
+void UJTSSpacecraftFlightMovementComponent::SetMoveInput(const FVector2D& Value)
 {
 	if (bAssistedLanding)
 	{
 		return;
 	}
-	InputVector.X = FMath::Clamp(Value, -1.0f, 1.0f);
-}
-
-void UJTSSpacecraftFlightMovementComponent::SetStrafeInput(float Value)
-{
-	if (bAssistedLanding)
-	{
-		return;
-	}
-	InputVector.Y = FMath::Clamp(Value, -1.0f, 1.0f);
+	MoveInput = Value.GetClampedToMaxSize(1.0f);
 }
 
 void UJTSSpacecraftFlightMovementComponent::SetVerticalInput(float Value)
@@ -69,34 +59,20 @@ void UJTSSpacecraftFlightMovementComponent::SetVerticalInput(float Value)
 	{
 		return;
 	}
-	InputVector.Z = FMath::Clamp(Value, -1.0f, 1.0f);
+	VerticalInput = FMath::Clamp(Value, -1.0f, 1.0f);
 }
 
-void UJTSSpacecraftFlightMovementComponent::SetRollInput(float Value)
+void UJTSSpacecraftFlightMovementComponent::SetViewForward(const FVector& Value)
 {
-	if (bAssistedLanding)
+	if (Value.ContainsNaN())
 	{
 		return;
 	}
-	RollInput = FMath::Clamp(Value, -1.0f, 1.0f);
-}
-
-void UJTSSpacecraftFlightMovementComponent::AddYawInput(float Value)
-{
-	if (bAssistedLanding)
+	const FVector SafeForward = Value.GetSafeNormal();
+	if (!SafeForward.IsNearlyZero())
 	{
-		return;
+		ViewForward = SafeForward;
 	}
-	PendingYawInput += Value;
-}
-
-void UJTSSpacecraftFlightMovementComponent::AddPitchInput(float Value)
-{
-	if (bAssistedLanding)
-	{
-		return;
-	}
-	PendingPitchInput += Value;
 }
 
 void UJTSSpacecraftFlightMovementComponent::SetBoosting(bool bNewBoosting)
@@ -111,10 +87,9 @@ void UJTSSpacecraftFlightMovementComponent::SetBraking(bool bNewBraking)
 
 void UJTSSpacecraftFlightMovementComponent::ClearInput()
 {
-	InputVector = FVector::ZeroVector;
-	RollInput = 0.0f;
-	PendingYawInput = 0.0f;
-	PendingPitchInput = 0.0f;
+	MoveInput = FVector2D::ZeroVector;
+	VerticalInput = 0.0f;
+	CurrentFacingTurnSpeedRadians = 0.0f;
 	bBraking = false;
 	SetBoostState(false);
 }
@@ -180,6 +155,16 @@ bool UJTSSpacecraftFlightMovementComponent::IsAssistedLanding() const
 	return bAssistedLanding;
 }
 
+bool UJTSSpacecraftFlightMovementComponent::IsUsingPlanetSurfaceFlightFrame() const
+{
+	const APawn* const OwningPawn = GetPawnOwner();
+	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	return bUsePlanetSurfaceFlightFrame
+		&& IsValid(OwningPawn)
+		&& IsValid(Planet)
+		&& Planet->IsWithinSpaceExitRange(OwningPawn->GetActorLocation());
+}
+
 float UJTSSpacecraftFlightMovementComponent::GetCurrentSpeed() const
 {
 	return Velocity.Size();
@@ -187,13 +172,14 @@ float UJTSSpacecraftFlightMovementComponent::GetCurrentSpeed() const
 
 float UJTSSpacecraftFlightMovementComponent::GetSpeedNormalized() const
 {
-	const float MaximumSpeed = FMath::Max(1.0f, EffectiveStats.MaxForwardSpeed * FMath::Max(1.0f, EffectiveStats.BoostMultiplier));
+	const float MaximumPlanarSpeed = EffectiveStats.MaxMoveSpeed * FMath::Max(1.0f, EffectiveStats.BoostMultiplier);
+	const float MaximumSpeed = FMath::Max(1.0f, FMath::Max(MaximumPlanarSpeed, EffectiveStats.LiftSpeed));
 	return FMath::Clamp(GetCurrentSpeed() / MaximumSpeed, 0.0f, 1.0f);
 }
 
 float UJTSSpacecraftFlightMovementComponent::GetThrottleNormalized() const
 {
-	return InputVector.X;
+	return MoveInput.Y;
 }
 
 FJTSSpacecraftFlightStats UJTSSpacecraftFlightMovementComponent::GetBaseStats() const
@@ -300,10 +286,19 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 		if (FVector::DistSquared(UpdatedComponent->GetComponentLocation(), TargetLocation)
 			<= FMath::Square(FMath::Max(2.0f, LandingContactTolerance))
 			&& Spacecraft->CanOccupyLandingTransform(Spacecraft->GetActorTransform())
-			&& FVector::DotProduct(Spacecraft->GetActorUpVector(), SurfaceUp) >= CompletionCosine)
+			&& Spacecraft->RefreshGroundInfo(Planet))
 		{
-			CompleteAssistedLanding();
-			return;
+			const FJTSSpacecraftGroundInfo FinalGroundInfo = Spacecraft->GetGroundInfo();
+			const FVector FinalSurfaceUp = FinalGroundInfo.SurfaceNormal.GetSafeNormal();
+			const bool bFinalHeightValid = FinalGroundInfo.bHasGround
+				&& FMath::Abs(FinalGroundInfo.DockingHeight - AssistedLandingClearance) <= LandingContactTolerance;
+			const bool bFinalAlignmentValid = !FinalSurfaceUp.IsNearlyZero()
+				&& FVector::DotProduct(Spacecraft->GetActorUpVector(), FinalSurfaceUp) >= CompletionCosine;
+			if (bFinalHeightValid && bFinalAlignmentValid)
+			{
+				CompleteAssistedLanding();
+				return;
+			}
 		}
 	}
 
@@ -344,18 +339,14 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 
 void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 {
-	UpdateRotation(DeltaTime);
-	const FVector TargetVelocity = BuildTargetVelocity();
+	const FVector ReferenceUp = GetReferenceUp();
+	const FVector TargetVelocity = BuildTargetVelocity(ReferenceUp);
 	const float Rate = bBraking ? EffectiveStats.BrakeStrength : GetAccelerationRate();
 	Velocity = FMath::VInterpConstantTo(Velocity, TargetVelocity, DeltaTime, FMath::Max(1.0f, Rate));
-	if (InputVector.IsNearlyZero() && !bBraking)
-	{
-		Velocity = FMath::VInterpTo(Velocity, FVector::ZeroVector, DeltaTime, FMath::Max(0.0f, InertialDampeningRate));
-	}
 	ApplyPlanetGravity(DeltaTime);
 
 	FHitResult Hit;
-	MoveWithCollisionSweep(Velocity * DeltaTime, UpdatedComponent->GetComponentQuat(), Hit);
+	MoveWithCollisionSweep(Velocity * DeltaTime, UpdateRotation(DeltaTime, ReferenceUp), Hit);
 	if (Hit.IsValidBlockingHit())
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
@@ -364,7 +355,7 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 
 void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
 {
-	if (!bApplyPlanetaryGravity || DeltaTime <= 0.0f)
+	if (PlanetGravityScale <= 0.0f || DeltaTime <= 0.0f)
 	{
 		return;
 	}
@@ -384,88 +375,128 @@ void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
 		return;
 	}
 
-	Velocity += GravityDirection * Planet->GetGravityStrength() * DeltaTime;
-	if (MaximumPlanetGravitySpeed > 0.0f)
+	Velocity += GravityDirection * Planet->GetGravityStrength() * PlanetGravityScale * DeltaTime;
+}
+
+FVector UJTSSpacecraftFlightMovementComponent::GetReferenceUp() const
+{
+	const APawn* const OwningPawn = GetPawnOwner();
+	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	if (IsUsingPlanetSurfaceFlightFrame() && IsValid(OwningPawn) && IsValid(Planet))
 	{
-		Velocity = Velocity.GetClampedToMaxSize(MaximumPlanetGravitySpeed);
+		const FVector PlanetUp = Planet->GetRadialUpVector(OwningPawn->GetActorLocation()).GetSafeNormal();
+		if (!PlanetUp.IsNearlyZero())
+		{
+			return PlanetUp;
+		}
+	}
+
+	if (IsValid(OwningPawn))
+	{
+		const FVector ActorUp = OwningPawn->GetActorUpVector().GetSafeNormal();
+		if (!ActorUp.IsNearlyZero())
+		{
+			return ActorUp;
+		}
+	}
+	return FVector::UpVector;
+}
+
+void UJTSSpacecraftFlightMovementComponent::GetViewBasis(
+	const FVector& ReferenceUp,
+	FVector& OutForward,
+	FVector& OutRight) const
+{
+	const APawn* const OwningPawn = GetPawnOwner();
+	OutForward = ViewForward.GetSafeNormal();
+	if (OutForward.IsNearlyZero() && IsValid(OwningPawn))
+	{
+		OutForward = OwningPawn->GetActorForwardVector().GetSafeNormal();
+	}
+
+	FVector PlanarForward = FVector::VectorPlaneProject(OutForward, ReferenceUp).GetSafeNormal();
+	if (PlanarForward.IsNearlyZero() && IsValid(OwningPawn))
+	{
+		PlanarForward = FVector::VectorPlaneProject(OwningPawn->GetActorForwardVector(), ReferenceUp).GetSafeNormal();
+	}
+	if (PlanarForward.IsNearlyZero())
+	{
+		FVector FallbackRight;
+		ReferenceUp.FindBestAxisVectors(PlanarForward, FallbackRight);
+	}
+	if (IsUsingPlanetSurfaceFlightFrame()
+		|| OutForward.IsNearlyZero()
+		|| FVector::VectorPlaneProject(OutForward, ReferenceUp).IsNearlyZero())
+	{
+		OutForward = PlanarForward;
+	}
+
+	OutRight = FVector::CrossProduct(ReferenceUp, PlanarForward).GetSafeNormal();
+	if (OutRight.IsNearlyZero())
+	{
+		FVector FallbackForward;
+		ReferenceUp.FindBestAxisVectors(FallbackForward, OutRight);
 	}
 }
 
-void UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime)
+FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime, const FVector& ReferenceUp)
 {
-	APawn* const OwningPawn = GetPawnOwner();
-	if (!IsValid(OwningPawn))
+	if (!IsValid(UpdatedComponent))
 	{
-		return;
+		return FQuat::Identity;
 	}
 
+	FVector ViewBasisForward;
+	FVector ViewBasisRight;
+	GetViewBasis(ReferenceUp, ViewBasisForward, ViewBasisRight);
+	const FVector2D ClampedMoveInput = MoveInput.GetClampedToMaxSize(1.0f);
+	FVector DesiredForward = ViewBasisForward;
+	if (ClampedMoveInput.SizeSquared() <= FMath::Square(FMath::Clamp(MovementDeadZone, 0.0f, 1.0f)))
+	{
+		DesiredForward = FVector::VectorPlaneProject(UpdatedComponent->GetForwardVector(), ReferenceUp).GetSafeNormal();
+	}
+	if (DesiredForward.IsNearlyZero())
+	{
+		DesiredForward = ViewBasisForward;
+	}
+
+	const FQuat DesiredRotation = FRotationMatrix::MakeFromXZ(DesiredForward.GetSafeNormal(), ReferenceUp).ToQuat();
 	const float TurnMultiplier = bBoosting ? FMath::Max(0.0f, EffectiveStats.BoostTurnMultiplier) : 1.0f;
-	// Mouse input is a per-frame delta, not a held axis. Multiplying it by DeltaTime made steering
-	// frame-rate dependent and, together with the former [-1, 1] raw-mouse clamp, severely slowed it.
-	// Keep upgrade turn-rate effects by normalizing against the Blueprint-configured base rates while
-	// applying each delta exactly once.
-	const float YawRateScale = FMath::Max(0.0f, EffectiveStats.YawRate) / FMath::Max(1.0f, BaseStats.YawRate);
-	const float PitchRateScale = FMath::Max(0.0f, EffectiveStats.PitchRate) / FMath::Max(1.0f, BaseStats.PitchRate);
-	const float YawDelta = PendingYawInput * MouseLookSensitivity * YawRateScale * TurnMultiplier;
-	const float PitchDelta = PendingPitchInput * MouseLookSensitivity * PitchRateScale * TurnMultiplier;
-	const float RollDelta = RollInput * EffectiveStats.RollRate * DeltaTime;
-	FQuat NewRotation = UpdatedComponent->GetComponentQuat();
-	FVector ReferenceUp = NewRotation.GetAxisZ().GetSafeNormal();
-	AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
-	const bool bHasPlanetReference = bAutoLevelToPlanet
-		&& IsValid(Planet)
-		&& Planet->IsGravityEnabled()
-		&& Planet->IsWithinGravityInfluence(OwningPawn->GetActorLocation());
-	if (bHasPlanetReference)
+	const float MaximumTurnSpeedRadians = FMath::DegreesToRadians(
+		FMath::Max(0.0f, EffectiveStats.FacingTurnRate) * TurnMultiplier);
+	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
+	const float AngularDistance = DesiredRotation.AngularDistance(CurrentRotation);
+	if (AngularDistance <= KINDA_SMALL_NUMBER)
 	{
-		ReferenceUp = Planet->GetRadialUpVector(OwningPawn->GetActorLocation()).GetSafeNormal();
+		CurrentFacingTurnSpeedRadians = 0.0f;
+		return DesiredRotation;
 	}
-	if (ReferenceUp.IsNearlyZero())
+	if (MaximumTurnSpeedRadians <= 0.0f)
 	{
-		ReferenceUp = FVector::UpVector;
+		CurrentFacingTurnSpeedRadians = 0.0f;
+		return CurrentRotation;
 	}
 
-	if (!FMath::IsNearlyZero(YawDelta))
+	const float TurnAccelerationRadians = FMath::DegreesToRadians(
+		FMath::Max(0.0f, EffectiveStats.FacingTurnAcceleration));
+	if (TurnAccelerationRadians <= 0.0f)
 	{
-		NewRotation = (FQuat(ReferenceUp, FMath::DegreesToRadians(YawDelta)) * NewRotation).GetNormalized();
-	}
-	if (!FMath::IsNearlyZero(PitchDelta))
-	{
-		const FVector PitchAxis = NewRotation.GetAxisY().GetSafeNormal();
-		if (!PitchAxis.IsNearlyZero())
-		{
-			// Positive mouse Y pitches the nose up, matching the on-foot planet camera.
-			NewRotation = (FQuat(PitchAxis, FMath::DegreesToRadians(-PitchDelta)) * NewRotation).GetNormalized();
-		}
-	}
-	if (!FMath::IsNearlyZero(RollDelta))
-	{
-		const FVector RollAxis = NewRotation.GetAxisX().GetSafeNormal();
-		if (!RollAxis.IsNearlyZero())
-		{
-			NewRotation = (FQuat(RollAxis, FMath::DegreesToRadians(RollDelta)) * NewRotation).GetNormalized();
-		}
+		return FMath::QInterpConstantTo(
+			CurrentRotation,
+			DesiredRotation,
+			FMath::Max(0.0f, DeltaTime),
+			MaximumTurnSpeedRadians).GetNormalized();
 	}
 
-	if (bHasPlanetReference && FMath::IsNearlyZero(RollInput))
-	{
-		const FVector Forward = NewRotation.GetAxisX().GetSafeNormal();
-		const FVector LevelUp = FVector::VectorPlaneProject(ReferenceUp, Forward).GetSafeNormal();
-		if (!Forward.IsNearlyZero() && !LevelUp.IsNearlyZero())
-		{
-			const FQuat LevelRotation = FRotationMatrix::MakeFromXZ(Forward, LevelUp).ToQuat();
-			const float LevelAlpha = FMath::Clamp(
-				1.0f - FMath::Exp(-FMath::Max(0.0f, RollAutoLevelRate) * FMath::Max(0.0f, DeltaTime)),
-				0.0f,
-				1.0f);
-			NewRotation = FQuat::Slerp(NewRotation, LevelRotation, LevelAlpha).GetNormalized();
-		}
-	}
-
-	FHitResult RotationHit;
-	MoveWithCollisionSweep(FVector::ZeroVector, NewRotation, RotationHit);
-	PendingYawInput = 0.0f;
-	PendingPitchInput = 0.0f;
+	const float BrakingLimitedSpeed = FMath::Sqrt(2.0f * TurnAccelerationRadians * AngularDistance);
+	const float TargetTurnSpeed = FMath::Min(MaximumTurnSpeedRadians, BrakingLimitedSpeed);
+	CurrentFacingTurnSpeedRadians = FMath::FInterpConstantTo(
+		CurrentFacingTurnSpeedRadians,
+		TargetTurnSpeed,
+		FMath::Max(0.0f, DeltaTime),
+		TurnAccelerationRadians);
+	const float TurnStep = FMath::Min(AngularDistance, CurrentFacingTurnSpeedRadians * FMath::Max(0.0f, DeltaTime));
+	return FQuat::Slerp(CurrentRotation, DesiredRotation, TurnStep / AngularDistance).GetNormalized();
 }
 
 void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude()
@@ -566,28 +597,40 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 	return !bHit;
 }
 
-FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity() const
+FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity(const FVector& ReferenceUp) const
 {
-	const APawn* const OwningPawn = GetPawnOwner();
-	if (!IsValid(OwningPawn) || bBraking)
+	if (bBraking)
 	{
 		return FVector::ZeroVector;
 	}
 
-	const float ForwardSpeed = InputVector.X >= 0.0f
-		? EffectiveStats.MaxForwardSpeed * (bBoosting ? EffectiveStats.BoostMultiplier : 1.0f)
-		: EffectiveStats.MaxReverseSpeed;
-	return OwningPawn->GetActorForwardVector() * InputVector.X * ForwardSpeed
-		+ OwningPawn->GetActorRightVector() * InputVector.Y * EffectiveStats.StrafeSpeed
-		+ OwningPawn->GetActorUpVector() * InputVector.Z * EffectiveStats.VerticalSpeed;
+	FVector ViewBasisForward;
+	FVector ViewBasisRight;
+	GetViewBasis(ReferenceUp, ViewBasisForward, ViewBasisRight);
+	const FVector2D ClampedMoveInput = MoveInput.GetClampedToMaxSize(1.0f);
+	const float MoveMagnitude = ClampedMoveInput.Size();
+	FVector CameraRelativeDirection = ViewBasisForward * ClampedMoveInput.Y + ViewBasisRight * ClampedMoveInput.X;
+	if (MoveMagnitude <= FMath::Clamp(MovementDeadZone, 0.0f, 1.0f))
+	{
+		CameraRelativeDirection = FVector::ZeroVector;
+	}
+	else
+	{
+		CameraRelativeDirection.Normalize();
+	}
+
+	const float MoveSpeed = EffectiveStats.MaxMoveSpeed
+		* (bBoosting ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
+	return CameraRelativeDirection * MoveSpeed * MoveMagnitude
+		+ ReferenceUp * VerticalInput * EffectiveStats.LiftSpeed;
 }
 
 float UJTSSpacecraftFlightMovementComponent::GetAccelerationRate() const
 {
-	const bool bAcceleratingForward = InputVector.X > 0.0f;
-	return bAcceleratingForward && bBoosting
+	const bool bHasMoveInput = !MoveInput.IsNearlyZero() || !FMath::IsNearlyZero(VerticalInput);
+	return bHasMoveInput && bBoosting
 		? EffectiveStats.Acceleration * FMath::Max(0.0f, EffectiveStats.BoostAccelerationMultiplier)
-		: (InputVector.IsNearlyZero() ? EffectiveStats.Deceleration : EffectiveStats.Acceleration);
+		: (bHasMoveInput ? EffectiveStats.Acceleration : EffectiveStats.Deceleration);
 }
 
 void UJTSSpacecraftFlightMovementComponent::SetBoostState(bool bNewBoosting)

@@ -10,23 +10,17 @@
 
 class AJTSPlanetAnchor;
 
-/** Tuning values shared by the arcade flight model and future spacecraft upgrades. */
+/** Tuning values shared by the third-person flight model and future spacecraft upgrades. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSSpacecraftFlightStats
 {
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float MaxForwardSpeed = 3500.0f;
+	float MaxMoveSpeed = 3500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float MaxReverseSpeed = 1400.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float StrafeSpeed = 2000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float VerticalSpeed = 1800.0f;
+	float LiftSpeed = 2600.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float Acceleration = 4500.0f;
@@ -37,14 +31,13 @@ struct SPACE_API FJTSSpacecraftFlightStats
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float BrakeStrength = 9000.0f;
 
+	/** Maximum automatic facing change in degrees per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float PitchRate = 55.0f;
+	float FacingTurnRate = 180.0f;
 
+	/** Angular acceleration used to remove fixed-step, staircase-looking spacecraft turns. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float YawRate = 70.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float RollRate = 70.0f;
+	float FacingTurnAcceleration = 1080.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float BoostMultiplier = 1.8f;
@@ -61,7 +54,7 @@ DECLARE_MULTICAST_DELEGATE(FOnJTSSpacecraftAssistedLandingCompleted);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingFailed, EJTSLandingValidationFailure);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingPhaseChanged, EJTSSpacecraftLandingAssistPhase);
 
-/** Lightweight target-velocity flight movement for the persistent spacecraft Pawn. */
+/** Camera-relative target-velocity movement for the persistent spacecraft Pawn. */
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSSpacecraftFlightMovementComponent : public UPawnMovementComponent
 {
@@ -73,12 +66,9 @@ public:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	void SetForwardInput(float Value);
-	void SetStrafeInput(float Value);
+	void SetMoveInput(const FVector2D& Value);
 	void SetVerticalInput(float Value);
-	void SetRollInput(float Value);
-	void AddYawInput(float Value);
-	void AddPitchInput(float Value);
+	void SetViewForward(const FVector& Value);
 	void SetBoosting(bool bNewBoosting);
 	void SetBraking(bool bNewBraking);
 	void ClearInput();
@@ -97,6 +87,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	bool IsAssistedLanding() const;
+
+	/** True while movement uses the active planet's radial-up and surface-tangent frame. */
+	UFUNCTION(BlueprintPure, Category = "Flight")
+	bool IsUsingPlanetSurfaceFlightFrame() const;
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	float GetCurrentSpeed() const;
@@ -139,18 +133,13 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Flight|Stats")
 	FJTSSpacecraftFlightStats EffectiveStats;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float InertialDampeningRate = 1.0f;
+	/** Small input values are discarded before building a camera-relative movement direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.25"))
+	float MovementDeadZone = 0.05f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float RollAutoLevelRate = 10.0f;
-
+	/** Near a planet, camera pitch remains free-look while planar thrust stays tangent to the surface. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling")
-	bool bAutoLevelToPlanet = true;
-
-	/** Degrees added per raw mouse unit at the base turn rates. Mouse values are already frame deltas. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Input", meta = (ClampMin = "0.001", UIMin = "0.001"))
-	float MouseLookSensitivity = 0.18f;
+	bool bUsePlanetSurfaceFlightFrame = true;
 
 	/** Fallback desired descent duration used to derive a controlled initial vertical speed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
@@ -189,32 +178,31 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
 	float AssistedLandingTimeout = 20.0f;
 
-	/** While a planet is bound, normal flight receives the planet's radial acceleration. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Gravity", meta = (AllowPrivateAccess = "true"))
-	bool bApplyPlanetaryGravity = true;
-
+	/** Optional radial gravity scale. Zero models the craft's automatic hover compensation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Gravity", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float MaximumPlanetGravitySpeed = 12000.0f;
+	float PlanetGravityScale = 0.0f;
 
 private:
 	void TickAssistedLanding(float DeltaTime);
 	void TickFlight(float DeltaTime);
 	void ApplyPlanetGravity(float DeltaTime);
-	void UpdateRotation(float DeltaTime);
+	FQuat UpdateRotation(float DeltaTime, const FVector& ReferenceUp);
 	void SubmitExteriorAltitude();
 	void CompleteAssistedLanding();
 	void FailAssistedLanding(EJTSLandingValidationFailure Failure);
 	void SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase NewPhase);
 	bool MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit);
 
-	FVector BuildTargetVelocity() const;
+	FVector GetReferenceUp() const;
+	void GetViewBasis(const FVector& ReferenceUp, FVector& OutForward, FVector& OutRight) const;
+	FVector BuildTargetVelocity(const FVector& ReferenceUp) const;
 	float GetAccelerationRate() const;
 	void SetBoostState(bool bNewBoosting);
 
-	FVector InputVector = FVector::ZeroVector;
-	float RollInput = 0.0f;
-	float PendingYawInput = 0.0f;
-	float PendingPitchInput = 0.0f;
+	FVector2D MoveInput = FVector2D::ZeroVector;
+	float VerticalInput = 0.0f;
+	FVector ViewForward = FVector::ForwardVector;
+	float CurrentFacingTurnSpeedRadians = 0.0f;
 	bool bBoosting = false;
 	bool bBraking = false;
 	bool bAssistedLanding = false;
