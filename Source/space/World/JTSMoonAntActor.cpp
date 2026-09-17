@@ -12,16 +12,13 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/DamageType.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/UI/JTSHealthBarWidget.h"
 #include "space/World/JTSMoonAntCorpsePickupActor.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -33,22 +30,6 @@
 
 namespace
 {
-	APawn* GetLocalPresentationPawn(UWorld* World)
-	{
-		if (World == nullptr)
-		{
-			return nullptr;
-		}
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
-			{
-				return Controller->GetPawn();
-			}
-		}
-		return nullptr;
-	}
-
 	const TCHAR* GetMoonAntStateDebugName(EJTSMoonAntState State)
 	{
 		switch (State)
@@ -124,25 +105,15 @@ AJTSMoonAntActor::AJTSMoonAntActor()
 	MoonAntHealthBarComponent->SetVisibility(false);
 	MoonAntHealthBarComponent->SetHiddenInGame(true);
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
-
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
 	{
 		MoonAntFallbackMesh->SetStaticMesh(SphereMeshAsset.Object);
 	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
-	if (FakeMoonBendMaterialAsset.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicMaterialAsset.Succeeded())
 	{
-		MoonAntFallbackMesh->SetMaterial(0, FakeMoonBendMaterialAsset.Object);
-	}
-	else
-	{
-		static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BasicMaterialAsset.Succeeded())
-		{
-			MoonAntFallbackMesh->SetMaterial(0, BasicMaterialAsset.Object);
-		}
+		MoonAntFallbackMesh->SetMaterial(0, BasicMaterialAsset.Object);
 	}
 }
 
@@ -271,11 +242,6 @@ void AJTSMoonAntActor::BeginPlay()
 	{
 		ConfigureMoonAntVisuals();
 		ConfigureMoonAntHealthBar();
-		if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
-		{
-			MoonWrappedActorComponent->Deactivate();
-			MoonWrappedActorComponent->SetComponentTickEnabled(false);
-		}
 		UpdateMoonAntVisualTransform();
 		UpdateMoonAntHealthBarTransform();
 		return;
@@ -294,14 +260,8 @@ void AJTSMoonAntActor::BeginPlay()
 	ConfigureMoonAntVisuals();
 	ConfigureMoonAntHealthBar();
 	HideMoonAntHealthBar();
-	if (IsUsingRealPlanetSurface() && MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
 	PlaceOnGround(GroundLocation);
 	SetMoonAntState(EJTSMoonAntState::Emerging);
-	UpdateMoonWrappedLogicalPosition();
 	UpdateMoonAntVisualTransform();
 	UpdateMoonAntHealthBarTransform();
 
@@ -390,61 +350,37 @@ void AJTSMoonAntActor::Tick(float DeltaSeconds)
 			break;
 		}
 
-		if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+		AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
+		if (!IsValid(Planet))
 		{
-			RoamRetargetElapsed += SafeDeltaSeconds;
-			const float HomeDistance = GetDistanceToOriginNest();
-			FVector ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-			if (HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius())
-			{
-				FVector NestLocation;
-				const FVector ToNest = GetOriginNestLocation(NestLocation)
-					? GetSurfaceTangentTo(NestLocation)
-					: FVector::ZeroVector;
-				const float TargetAlignment = FVector::DotProduct(
-					ToRoamTarget.GetSafeNormal(),
-					ToNest.GetSafeNormal());
-				if (ToRoamTarget.IsNearlyZero() || TargetAlignment < 0.25f)
-				{
-					ChooseRoamTarget(true);
-					ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-				}
-			}
-
-			const float TargetDistance = Planet->ApproximateSurfaceArcDistance(GetActorLocation(), RoamTargetWorldLocation);
-			if (TargetDistance <= 30.0f || RoamRetargetElapsed >= RoamRetargetInterval)
-			{
-				ChooseRoamTarget(HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius());
-				ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-			}
-
-			MoveAlongGround(ToRoamTarget, MoonGameMode->GetMoonAntRoamSpeed(), SafeDeltaSeconds);
+			BeginBurrowing();
 			break;
 		}
 
 		RoamRetargetElapsed += SafeDeltaSeconds;
 		const float HomeDistance = GetDistanceToOriginNest();
-		FVector ToRoamTarget = GetShortestWrappedDeltaTo(RoamTargetLogicalPosition);
+		FVector ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
 		if (HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius())
 		{
 			FVector NestLocation;
 			const FVector ToNest = GetOriginNestLocation(NestLocation)
-				? GetShortestWrappedDeltaTo(FVector2D(NestLocation.X, NestLocation.Y))
+				? GetSurfaceTangentTo(NestLocation)
 				: FVector::ZeroVector;
 			const float TargetAlignment = FVector::DotProduct(
-				ToRoamTarget.GetSafeNormal2D(),
-				ToNest.GetSafeNormal2D());
+				ToRoamTarget.GetSafeNormal(),
+				ToNest.GetSafeNormal());
 			if (ToRoamTarget.IsNearlyZero() || TargetAlignment < 0.25f)
 			{
 				ChooseRoamTarget(true);
-				ToRoamTarget = GetShortestWrappedDeltaTo(RoamTargetLogicalPosition);
+				ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
 			}
 		}
 
-		if (ToRoamTarget.Size2D() <= 30.0f || RoamRetargetElapsed >= RoamRetargetInterval)
+		const float TargetDistance = Planet->ApproximateSurfaceArcDistance(GetActorLocation(), RoamTargetWorldLocation);
+		if (TargetDistance <= 30.0f || RoamRetargetElapsed >= RoamRetargetInterval)
 		{
 			ChooseRoamTarget(HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius());
-			ToRoamTarget = GetShortestWrappedDeltaTo(RoamTargetLogicalPosition);
+			ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
 		}
 
 		MoveAlongGround(ToRoamTarget, MoonGameMode->GetMoonAntRoamSpeed(), SafeDeltaSeconds);
@@ -463,13 +399,9 @@ void AJTSMoonAntActor::Tick(float DeltaSeconds)
 		const FVector PreviousLocation = GetActorLocation();
 		if (MoveAlongGround(FleeDirection, MoonGameMode->GetMoonAntFleeSpeed(), SafeDeltaSeconds))
 		{
-			if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+			if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
 			{
 				FleeDistanceTravelled += Planet->ApproximateSurfaceArcDistance(PreviousLocation, GetActorLocation());
-			}
-			else
-			{
-				FleeDistanceTravelled += FVector::Dist2D(PreviousLocation, GetActorLocation());
 			}
 		}
 		if (StateElapsed >= FleeDuration || FleeDistanceTravelled >= MoonGameMode->GetMoonAntMaxFleeDistance())
@@ -597,7 +529,7 @@ void AJTSMoonAntActor::CaptureBaseVisualTransforms()
 	}
 
 	// This is intentionally the only base-transform capture. It happens after Blueprint defaults and
-	// final visual scale are ready, but before Moon Bend or burrow offsets are ever applied.
+	// final visual scale are ready, but before burrow offsets are applied.
 	MoonAntMeshBaseRelativeLocation = IsValid(MoonAntMesh) ? MoonAntMesh->GetRelativeLocation() : FVector::ZeroVector;
 	MoonAntMeshBaseRelativeRotation = IsValid(MoonAntMesh) ? MoonAntMesh->GetRelativeRotation() : FRotator::ZeroRotator;
 	MoonAntFallbackBaseRelativeLocation = IsValid(MoonAntFallbackMesh) ? MoonAntFallbackMesh->GetRelativeLocation() : FVector::ZeroVector;
@@ -643,8 +575,7 @@ void AJTSMoonAntActor::RecalculateGroundMetrics()
 		return;
 	}
 
-	const float CenterOffsetZ = ActiveVisual->Bounds.Origin.Z - GetActorLocation().Z;
-	GroundSupportHeight = FMath::Max(1.0f, PhysicalExtent.Z - CenterOffsetZ);
+	GroundSupportHeight = FMath::Max(1.0f, PhysicalExtent.Z);
 	BurrowDepth = FMath::Max(4.0f, PhysicalExtent.Z * 2.0f + 2.0f);
 }
 
@@ -652,71 +583,10 @@ void AJTSMoonAntActor::ChooseRoamTarget(bool bForceNearNest)
 {
 	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
 	FVector NestLocation;
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
+	if (!IsValid(Planet) || MoonGameMode == nullptr || !GetOriginNestLocation(NestLocation))
 	{
-		if (MoonGameMode == nullptr || !GetOriginNestLocation(NestLocation))
-		{
-			RoamTargetWorldLocation = GetActorLocation();
-			RoamRetargetElapsed = 0.0f;
-			RoamRetargetInterval = 0.5f;
-			return;
-		}
-
-		const float RoamRadius = MoonGameMode->GetMoonAntRoamRadius();
-		float MinDistance = FMath::Min(40.0f, RoamRadius);
-		float MaxDistance = FMath::Clamp(170.0f, MinDistance, RoamRadius);
-		if (!bForceNearNest)
-		{
-			const float BandSelection = FMath::FRand();
-			if (BandSelection >= 0.60f && BandSelection < 0.90f)
-			{
-				MinDistance = FMath::Min(140.0f, RoamRadius);
-				MaxDistance = FMath::Clamp(300.0f, MinDistance, RoamRadius);
-			}
-			else if (BandSelection >= 0.90f)
-			{
-				MinDistance = FMath::Min(270.0f, RoamRadius);
-				MaxDistance = RoamRadius;
-			}
-		}
-
-		const float BaseDistance = FMath::FRandRange(MinDistance, MaxDistance);
-		const float RadialJitter = (MaxDistance - MinDistance) * 0.08f;
-		const float Distance = FMath::Clamp(
-			BaseDistance + FMath::FRandRange(-RadialJitter, RadialJitter),
-			MinDistance,
-			MaxDistance);
-		const float Angle = FMath::FRandRange(0.0f, UE_TWO_PI);
-		FJTSPlanetSurfaceFrame SurfaceFrame;
-		FJTSPlanetSurfaceHit SurfaceHit;
-		if (Planet->GetSurfaceFrameAt(NestLocation, FVector::ForwardVector, SurfaceFrame)
-			&& Planet->ProjectPointToSurface(
-				NestLocation + (SurfaceFrame.Forward * FMath::Cos(Angle)
-					+ SurfaceFrame.Right * FMath::Sin(Angle)).GetSafeNormal() * Distance,
-				SurfaceHit))
-		{
-			RoamTargetWorldLocation = SurfaceHit.ImpactPoint;
-		}
-		else
-		{
-			RoamTargetWorldLocation = NestLocation;
-		}
-
-		RoamRetargetElapsed = 0.0f;
-		RoamRetargetInterval = FMath::FRandRange(
-			MoonGameMode->GetMoonAntRoamRetargetIntervalMin(),
-			MoonGameMode->GetMoonAntRoamRetargetIntervalMax());
-		return;
-	}
-
-	const UWorld* const World = GetWorld();
-	const UJTSMoonWrapSubsystem* const MoonWrap = World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
-	const bool bUseMoonWrap = IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon();
-	if (MoonGameMode == nullptr || !GetOriginNestLocation(NestLocation))
-	{
-		RoamTargetLogicalPosition = bUseMoonWrap
-			? MoonWrap->GetLogicalPositionFromWorld(GetActorLocation())
-			: FVector2D(GetActorLocation().X, GetActorLocation().Y);
+		RoamTargetWorldLocation = GetActorLocation();
 		RoamRetargetElapsed = 0.0f;
 		RoamRetargetInterval = 0.5f;
 		return;
@@ -747,13 +617,19 @@ void AJTSMoonAntActor::ChooseRoamTarget(bool bForceNearNest)
 		MinDistance,
 		MaxDistance);
 	const float Angle = FMath::FRandRange(0.0f, UE_TWO_PI);
-	const FVector2D NestLogicalPosition = bUseMoonWrap
-		? MoonWrap->GetLogicalPositionFromWorld(NestLocation)
-		: FVector2D(NestLocation.X, NestLocation.Y);
-	RoamTargetLogicalPosition = NestLogicalPosition + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Distance;
-	if (bUseMoonWrap)
+	FJTSPlanetSurfaceFrame SurfaceFrame;
+	FJTSPlanetSurfaceHit SurfaceHit;
+	if (Planet->GetSurfaceFrameAt(NestLocation, FVector::ForwardVector, SurfaceFrame)
+		&& Planet->ProjectPointToSurface(
+			NestLocation + (SurfaceFrame.Forward * FMath::Cos(Angle)
+				+ SurfaceFrame.Right * FMath::Sin(Angle)).GetSafeNormal() * Distance,
+			SurfaceHit))
 	{
-		RoamTargetLogicalPosition = MoonWrap->CanonicalizePosition2D(RoamTargetLogicalPosition);
+		RoamTargetWorldLocation = SurfaceHit.ImpactPoint;
+	}
+	else
+	{
+		RoamTargetWorldLocation = NestLocation;
 	}
 
 	RoamRetargetElapsed = 0.0f;
@@ -776,32 +652,14 @@ bool AJTSMoonAntActor::GetOriginNestLocation(FVector& OutNestLocation) const
 float AJTSMoonAntActor::GetDistanceToOriginNest() const
 {
 	FVector NestLocation;
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
 	{
 		return GetOriginNestLocation(NestLocation)
 			? Planet->ApproximateSurfaceArcDistance(GetActorLocation(), NestLocation)
 			: TNumericLimits<float>::Max();
 	}
 
-	return GetOriginNestLocation(NestLocation)
-		? GetShortestWrappedDeltaTo(FVector2D(NestLocation.X, NestLocation.Y)).Size2D()
-		: TNumericLimits<float>::Max();
-}
-
-FVector AJTSMoonAntActor::GetShortestWrappedDeltaTo(const FVector2D& TargetLogicalPosition) const
-{
-	const UWorld* const World = GetWorld();
-	const UJTSMoonWrapSubsystem* const MoonWrap = World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
-	const FVector2D CurrentPosition(GetActorLocation().X, GetActorLocation().Y);
-	if (IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-	{
-		const FVector2D CurrentLogicalPosition = MoonWrap->GetLogicalPositionFromWorld(GetActorLocation());
-		const FVector2D Delta = MoonWrap->ShortestWrappedDelta2D(CurrentLogicalPosition, TargetLogicalPosition);
-		return FVector(Delta.X, Delta.Y, 0.0f);
-	}
-
-	const FVector2D Delta = TargetLogicalPosition - CurrentPosition;
-	return FVector(Delta.X, Delta.Y, 0.0f);
+	return TNumericLimits<float>::Max();
 }
 
 AJTSPlanetAnchor* AJTSMoonAntActor::GetSurfacePlanet() const
@@ -832,80 +690,39 @@ FVector AJTSMoonAntActor::GetSurfaceTangentTo(const FVector& TargetLocation) con
 		return Planet->ProjectDirectionToSurfaceTangent(TargetLocation - GetActorLocation(), GetActorLocation());
 	}
 
-	return FVector(TargetLocation.X - GetActorLocation().X, TargetLocation.Y - GetActorLocation().Y, 0.0f).GetSafeNormal();
+	return FVector::ZeroVector;
 }
 
 bool AJTSMoonAntActor::MoveAlongGround(const FVector& Direction, float Speed, float DeltaSeconds)
 {
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
-	{
-		const FVector SurfaceDirection = Planet->ProjectDirectionToSurfaceTangent(Direction, GetActorLocation());
-		if (SurfaceDirection.IsNearlyZero())
-		{
-			return false;
-		}
-
-		FJTSPlanetSurfaceHit SurfaceHit;
-		const FVector CandidateLocation = GetActorLocation()
-			+ SurfaceDirection * FMath::Max(0.0f, Speed) * FMath::Max(0.0f, DeltaSeconds);
-		if (!Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
-		{
-			return false;
-		}
-
-		PlaceOnGround(SurfaceHit.ImpactPoint);
-		RotateTowardsDirection(SurfaceDirection, DeltaSeconds);
-		return true;
-	}
-
-	FVector SafeDirection(Direction.X, Direction.Y, 0.0f);
-	SafeDirection = SafeDirection.GetSafeNormal();
-	if (SafeDirection.IsNearlyZero())
+	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
+	if (!IsValid(Planet))
 	{
 		return false;
 	}
 
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	if (MoonGameMode == nullptr)
+	const FVector SurfaceDirection = Planet->ProjectDirectionToSurfaceTangent(Direction, GetActorLocation());
+	if (SurfaceDirection.IsNearlyZero())
 	{
 		return false;
 	}
 
-	FVector CandidateLocation = GetActorLocation()
-		+ SafeDirection * FMath::Max(0.0f, Speed) * FMath::Max(0.0f, DeltaSeconds);
-	if (const UWorld* const World = GetWorld())
-	{
-		if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-			IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-		{
-			const FVector2D CurrentPhysicalXY(GetActorLocation().X, GetActorLocation().Y);
-			const FVector2D CurrentLogicalXY = MoonWrap->GetLogicalPositionFromWorld(GetActorLocation());
-			const FVector2D CandidateLogicalXY = MoonWrap->CanonicalizePosition2D(
-				CurrentLogicalXY + FVector2D(SafeDirection.X, SafeDirection.Y) * FMath::Max(0.0f, Speed) * FMath::Max(0.0f, DeltaSeconds));
-			const FVector2D CandidatePhysicalXY = MoonWrap->GetNearestPhysicalImage(CurrentPhysicalXY, CandidateLogicalXY);
-			CandidateLocation.X = CandidatePhysicalXY.X;
-			CandidateLocation.Y = CandidatePhysicalXY.Y;
-		}
-	}
-
-	FVector NewGroundLocation;
-	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	if (!IsValid(SurfaceController)
-		|| !SurfaceController->OwnsSurfaceActor(this)
-		|| !SurfaceController->ResolveMoonGroundLocation(CandidateLocation, NewGroundLocation, this))
+	FJTSPlanetSurfaceHit SurfaceHit;
+	const FVector CandidateLocation = GetActorLocation()
+		+ SurfaceDirection * FMath::Max(0.0f, Speed) * FMath::Max(0.0f, DeltaSeconds);
+	if (!Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
 	{
 		return false;
 	}
 
-	PlaceOnGround(NewGroundLocation);
-	RotateTowardsDirection(SafeDirection, DeltaSeconds);
-	UpdateMoonWrappedLogicalPosition();
+	PlaceOnGround(SurfaceHit.ImpactPoint);
+	RotateTowardsDirection(SurfaceDirection, DeltaSeconds);
 	return true;
 }
 
 void AJTSMoonAntActor::RotateTowardsDirection(const FVector& Direction, float DeltaSeconds)
 {
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
 	{
 		const FVector SurfaceDirection = Planet->ProjectDirectionToSurfaceTangent(Direction, GetActorLocation());
 		if (SurfaceDirection.IsNearlyZero())
@@ -930,37 +747,13 @@ void AJTSMoonAntActor::RotateTowardsDirection(const FVector& Direction, float De
 					MoonGameMode->GetMoonAntTurnSpeed()),
 				ETeleportType::TeleportPhysics);
 		}
-		return;
 	}
-
-	FVector FlatDirection(Direction.X, Direction.Y, 0.0f);
-	FlatDirection = FlatDirection.GetSafeNormal();
-	if (FlatDirection.IsNearlyZero())
-	{
-		return;
-	}
-
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	if (MoonGameMode == nullptr)
-	{
-		return;
-	}
-
-	FRotator CurrentRotation = GetActorRotation();
-	CurrentRotation.Pitch = 0.0f;
-	CurrentRotation.Roll = 0.0f;
-	FRotator DesiredRotation = FlatDirection.Rotation();
-	DesiredRotation.Pitch = 0.0f;
-	DesiredRotation.Roll = 0.0f;
-	SetActorRotation(
-		FMath::RInterpConstantTo(CurrentRotation, DesiredRotation, FMath::Max(0.0f, DeltaSeconds), MoonGameMode->GetMoonAntTurnSpeed()),
-		ETeleportType::TeleportPhysics);
 }
 
 void AJTSMoonAntActor::PlaceOnGround(const FVector& NewGroundLocation)
 {
 	GroundLocation = NewGroundLocation;
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
 	{
 		FJTSPlanetSurfaceFrame SurfaceFrame;
 		if (Planet->GetSurfaceFrameAt(NewGroundLocation, GetActorForwardVector(), SurfaceFrame))
@@ -976,12 +769,6 @@ void AJTSMoonAntActor::PlaceOnGround(const FVector& NewGroundLocation)
 			return;
 		}
 	}
-
-	SetActorLocation(
-		FVector(NewGroundLocation.X, NewGroundLocation.Y, NewGroundLocation.Z + GroundSupportHeight),
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
 }
 
 UPrimitiveComponent* AJTSMoonAntActor::GetActiveVisualComponent() const
@@ -1045,27 +832,14 @@ void AJTSMoonAntActor::UpdateMoonAntHealthBarTransform()
 			SurfaceUp,
 			VisualBounds))
 		{
-			FVector HealthBarLocation = VisualBounds.HighestPoint + SurfaceUp * 12.0f;
-			if (!bUsingSkeletalMoonAntMesh)
-			{
-				// Fallback mesh bend is material WPO, so its component bounds stay at the physical location.
-				HealthBarLocation += CurrentMoonBendWorldOffset;
-			}
-			MoonAntHealthBarComponent->SetWorldLocation(HealthBarLocation);
+			MoonAntHealthBarComponent->SetWorldLocation(VisualBounds.HighestPoint + SurfaceUp * 12.0f);
 			return;
 		}
 	}
 
 	const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
 	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
-	FVector HealthBarLocation = ActiveVisual->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 12.0f);
-	if (!bUsingSkeletalMoonAntMesh)
-	{
-		// Fallback mesh bend is material WPO, so its component bounds stay at the physical location.
-		HealthBarLocation += CurrentMoonBendWorldOffset;
-	}
-
-	MoonAntHealthBarComponent->SetWorldLocation(HealthBarLocation);
+	MoonAntHealthBarComponent->SetWorldLocation(ActiveVisual->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 12.0f));
 }
 
 void AJTSMoonAntActor::ShowMoonAntHealthBar()
@@ -1216,37 +990,20 @@ bool AJTSMoonAntActor::SpawnMoonAntCorpse()
 		: FRotator::ZeroRotator;
 
 	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	const bool bUseRealPlanetSurface = IsValid(SurfaceController)
-		&& SurfaceController->OwnsSurfaceActor(this)
-		&& SurfaceController->IsUsingRealPlanetSurfaceGameplay();
-	// GroundLocation retains the unbent support surface. Legacy Moon rebuilds its XY from the MoonAnt's
-	// wrapped logical position; real Moon keeps the resolved planet-mesh surface location.
 	FVector DeathGroundLocation = GroundLocation;
-	const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-	if (!bUseRealPlanetSurface && IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-	{
-		const FVector2D MoonAntLogicalPosition = IsValid(MoonWrappedActorComponent)
-			? MoonWrappedActorComponent->GetLogicalPosition2D()
-			: MoonWrap->GetLogicalPositionFromWorld(GetActorLocation());
-		const FVector2D DeathPhysicalPosition = MoonWrap->GetNearestPhysicalImage(
-			FVector2D(GetActorLocation().X, GetActorLocation().Y),
-			MoonAntLogicalPosition);
-		DeathGroundLocation.X = DeathPhysicalPosition.X;
-		DeathGroundLocation.Y = DeathPhysicalPosition.Y;
-	}
 
 	if (IsValid(SurfaceController))
 	{
 		FVector ResolvedDeathGroundLocation;
 		if (SurfaceController->OwnsSurfaceActor(this)
-			&& SurfaceController->ResolveMoonGroundLocation(DeathGroundLocation, ResolvedDeathGroundLocation, this))
+			&& SurfaceController->ResolveMoonGroundLocation(DeathGroundLocation, ResolvedDeathGroundLocation))
 		{
 			DeathGroundLocation = ResolvedDeathGroundLocation;
 		}
 	}
 
 	const FTransform SpawnTransform(
-		bUseRealPlanetSurface ? GetActorRotation() : FRotator(0.0f, GetActorRotation().Yaw, 0.0f),
+		GetActorRotation(),
 		DeathGroundLocation);
 	UE_LOG(
 		LogTemp,
@@ -1315,71 +1072,18 @@ void AJTSMoonAntActor::UpdateMoonAntVisualTransform()
 		return;
 	}
 
-	FVector MoonBendWorldOffset = FVector::ZeroVector;
-	CurrentMoonBendWorldOffset = FVector::ZeroVector;
-	FVector BendOriginLocation = FVector::ZeroVector;
-	float DistanceToBendOrigin = 0.0f;
 	UWorld* const World = GetWorld();
-	// Fake Moon bending is local presentation only; AI and damage selection never use this pawn.
-	const APawn* const LocalPawn = GetLocalPresentationPawn(World);
-	if (IsValid(LocalPawn))
-	{
-		// This is intentionally read on every visual update; only the pawn reference may be cached by
-		// the engine, never its spawn-time location.
-		BendOriginLocation = LocalPawn->GetActorLocation();
-	}
-
-	if (!IsUsingRealPlanetSurface() && World != nullptr && IsValid(LocalPawn))
-	{
-		if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-			IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-		{
-			// Skeletal MoonAnt visuals require a physical nearest-image refresh before their visual-only bend.
-			// The fallback material already evaluates its own WPO path, so do not alter its existing behavior.
-			if (bUsingSkeletalMoonAntMesh
-				&& MoonWrappedActorComponent != nullptr
-				&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
-			{
-				UpdateMoonWrappedLogicalPosition();
-				MoonWrappedActorComponent->RefreshPhysicalImage();
-			}
-
-			// AJTSMoonWorldActor writes BendOrigin from this pawn location, not from PlayerCameraManager.
-			const FVector ActorPhysicalLocation = GetActorLocation();
-			const FVector2D MoonAntLogicalPosition = MoonWrap->GetLogicalPositionFromWorld(ActorPhysicalLocation);
-			const FVector2D MoonAntPhysicalImage = MoonWrap->GetNearestPhysicalImage(
-				FVector2D(BendOriginLocation.X, BendOriginLocation.Y),
-				MoonAntLogicalPosition);
-			const FVector BendPhysicalPosition(MoonAntPhysicalImage.X, MoonAntPhysicalImage.Y, ActorPhysicalLocation.Z);
-			DistanceToBendOrigin = FVector2D::Distance(
-				FVector2D(BendPhysicalPosition.X, BendPhysicalPosition.Y),
-				FVector2D(BendOriginLocation.X, BendOriginLocation.Y));
-			const FVector BendVisualPosition = MoonWrap->GetMoonVisualWorldPosition(BendPhysicalPosition, BendOriginLocation);
-			MoonBendWorldOffset = BendVisualPosition - BendPhysicalPosition;
-		}
-	}
-	CurrentMoonBendWorldOffset = MoonBendWorldOffset;
-
-	FVector MoonBendRelativeOffset = MoonBendWorldOffset;
-	if (IsValid(SceneRoot))
-	{
-		MoonBendRelativeOffset = SceneRoot->GetComponentTransform().InverseTransformVector(MoonBendWorldOffset);
-	}
-
 	FVector FinalVisualRelativeLocation = MoonAntMeshBaseRelativeLocation
-		+ FVector(0.0f, 0.0f, BurrowVisualOffset)
-		+ MoonBendRelativeOffset;
+		+ FVector(0.0f, 0.0f, BurrowVisualOffset);
 	if (bUsingSkeletalMoonAntMesh && IsValid(MoonAntMesh))
 	{
-		// Stateless reconstruction: never add to the current relative location, because it may contain
-		// a prior frame's visual bend.
+		// Stateless reconstruction avoids accumulating burrow offsets across frames.
 		MoonAntMesh->SetRelativeLocation(FinalVisualRelativeLocation);
 		MoonAntMesh->SetRelativeRotation(MoonAntMeshBaseRelativeRotation + FRotator(0.0f, MoonAntMeshForwardYawOffset, 0.0f));
 	}
 
 	if (IsValid(MoonAntFallbackMesh))
 	{
-		// The fallback material evaluates JTSFakeMoon WPO itself; only rebuild its burrow contribution here.
 		MoonAntFallbackMesh->SetRelativeLocation(MoonAntFallbackBaseRelativeLocation + FVector(0.0f, 0.0f, BurrowVisualOffset));
 	}
 
@@ -1390,18 +1094,14 @@ void AJTSMoonAntActor::UpdateMoonAntVisualTransform()
 		UE_LOG(
 			LogTemp,
 			Log,
-		TEXT("MoonAnt visual: MoonAnt=%s State=%s ActorZ=%.2f MeshRelativeZ=%.2f BaseRelativeZ=%.2f BurrowOffsetZ=%.2f MoonBendOffsetZ=%.2f FinalRelativeZ=%.2f DistanceToBendOrigin=%.2f BendOriginXY=(%.2f, %.2f)"),
+		TEXT("MoonAnt visual: MoonAnt=%s State=%s ActorZ=%.2f MeshRelativeZ=%.2f BaseRelativeZ=%.2f BurrowOffsetZ=%.2f FinalRelativeZ=%.2f"),
 			*GetName(),
 			GetMoonAntStateDebugName(MoonAntState),
 			GetActorLocation().Z,
 			MeshRelativeZ,
 			MoonAntMeshBaseRelativeLocation.Z,
 			BurrowVisualOffset,
-			MoonBendRelativeOffset.Z,
-			FinalVisualRelativeLocation.Z,
-			DistanceToBendOrigin,
-			BendOriginLocation.X,
-			BendOriginLocation.Y);
+			FinalVisualRelativeLocation.Z);
 	}
 	else if (!bDebugMoonAntVisualTransform)
 	{
@@ -1549,15 +1249,5 @@ void AJTSMoonAntActor::UpdateFallbackMaterial()
 		MoonAntFallbackMaterial->SetVectorParameterValue(TEXT("Color"), MoonAntColor);
 		MoonAntFallbackMaterial->SetVectorParameterValue(TEXT("BaseColor"), MoonAntColor);
 		MoonAntFallbackMaterial->SetVectorParameterValue(TEXT("Tint"), MoonAntColor);
-	}
-}
-
-void AJTSMoonAntActor::UpdateMoonWrappedLogicalPosition()
-{
-	if (!IsUsingRealPlanetSurface()
-		&& MoonWrappedActorComponent != nullptr
-		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
-	{
-		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
 	}
 }

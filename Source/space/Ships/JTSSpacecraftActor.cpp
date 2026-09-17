@@ -3,6 +3,7 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Components/BoxComponent.h"
@@ -23,12 +24,14 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "Math/RotationMatrix.h"
-#include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Core/JTSGameState.h"
-#include "space/Modes/JTSMoonGameMode.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSWorldPickupActor.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -142,16 +145,16 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	// Retain the legacy subobject name so existing Blueprint component templates keep their camera tuning.
 	FlightCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	FlightCameraBoom->SetupAttachment(SceneRoot);
-	FlightCameraBoom->TargetArmLength = 900.0f;
-	FlightCameraBoom->SocketOffset = FVector(0.0f, 0.0f, 120.0f);
-	FlightCameraBoom->bUsePawnControlRotation = false;
+	FlightCameraBoom->TargetArmLength = FlightCameraDefaultArmLength;
+	FlightCameraBoom->SocketOffset = FlightCameraSocketOffset;
+	FlightCameraBoom->bUsePawnControlRotation = true;
 	// The ship is often parked directly on uneven terrain. A spring-arm collision retraction can
 	// collapse an otherwise valid exterior view to the cockpit, so driving always keeps its full arm.
 	FlightCameraBoom->bDoCollisionTest = false;
 	FlightCameraBoom->bEnableCameraLag = true;
-	FlightCameraBoom->CameraLagSpeed = 8.0f;
-	FlightCameraBoom->bEnableCameraRotationLag = true;
-	FlightCameraBoom->CameraRotationLagSpeed = 10.0f;
+	FlightCameraBoom->CameraLagSpeed = 14.0f;
+	// Mouse look must not pass through a rotation lag. Location lag is retained only to soften ship motion.
+	FlightCameraBoom->bEnableCameraRotationLag = false;
 	CameraBoom = FlightCameraBoom;
 
 	FlightCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FlightCamera"));
@@ -179,7 +182,6 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	ExitPoint->SetupAttachment(SceneRoot);
 	ExitPoint->SetRelativeLocation(FVector(0.0f, -380.0f, 105.0f));
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
 }
 
 void AJTSSpacecraftActor::OnConstruction(const FTransform& Transform)
@@ -196,7 +198,7 @@ bool AJTSSpacecraftActor::GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBou
 		return false;
 	}
 
-	// Keep WPO culling expansion out of both proximity and target calculations. The local bounds are
+	// Use physical mesh bounds for both proximity and target calculations. The local bounds are
 	// transformed later, so the selected mesh's relative transform and scale remain authoritative.
 	const FBoxSphereBounds LocalBounds = SpacecraftMesh->CalcBounds(FTransform::Identity);
 	const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
@@ -284,6 +286,11 @@ void AJTSSpacecraftActor::BeginPlay()
 	{
 		FlightMovementComponent->OnAssistedLandingFailed.AddUObject(this, &AJTSSpacecraftActor::HandleAssistedLandingFailed);
 	}
+	if (FlightMovementComponent != nullptr
+		&& !FlightMovementComponent->OnAssistedLandingPhaseChanged.IsBoundToObject(this))
+	{
+		FlightMovementComponent->OnAssistedLandingPhaseChanged.AddUObject(this, &AJTSSpacecraftActor::HandleAssistedLandingPhaseChanged);
+	}
 
 	if (!IsValid(BoardingTrigger))
 	{
@@ -357,6 +364,7 @@ void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		FlightMovementComponent->OnBoostStateChanged.RemoveDynamic(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged);
 		FlightMovementComponent->OnAssistedLandingCompleted.RemoveAll(this);
 		FlightMovementComponent->OnAssistedLandingFailed.RemoveAll(this);
+		FlightMovementComponent->OnAssistedLandingPhaseChanged.RemoveAll(this);
 	}
 	SavePersistentStorage();
 
@@ -563,16 +571,24 @@ void AJTSSpacecraftActor::FlightRoll(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightLookYaw(const FInputActionValue& Value)
 {
-	LocalFlightInput.Yaw = Value.Get<float>();
+	const float LookValue = Value.Get<float>();
+	AddControllerYawInput(LookValue * FlightCameraLookSensitivity);
+	LocalFlightInput.Yaw = LookValue;
 	SubmitFlightInput();
+	// Mouse look is a delta, unlike throttle/strafe. Do not resend the last delta with a later key input.
+	LocalFlightInput.Yaw = 0.0f;
 }
 
 void AJTSSpacecraftActor::FlightLookPitch(const FInputActionValue& Value)
 {
 	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
 	const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
-	LocalFlightInput.Pitch = Value.Get<float>() * PitchDirection;
+	const float LookValue = Value.Get<float>() * PitchDirection;
+	AddControllerPitchInput(LookValue * FlightCameraLookSensitivity);
+	LocalFlightInput.Pitch = LookValue;
 	SubmitFlightInput();
+	// Mouse look is a delta, unlike throttle/strafe. Do not resend the last delta with a later key input.
+	LocalFlightInput.Pitch = 0.0f;
 }
 
 void AJTSSpacecraftActor::FlightCameraZoom(const FInputActionValue& Value)
@@ -614,14 +630,21 @@ void AJTSSpacecraftActor::FlightLandingStarted(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
 {
-	if (!Value.Get<bool>() || !IsGroundedOnPlanet())
+	if (!Value.Get<bool>())
 	{
 		return;
 	}
 
-	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+	// The client can be one replication update behind the authoritative landed state. Always submit
+	// the driver's intent through the possessed ship; ServerRequestDisembark performs the real
+	// occupancy and landed checks on the server.
+	if (HasAuthority())
 	{
-		PlayerController->ServerRequestDisembarkSpacecraft(this);
+		ServerRequestDisembark_Implementation();
+	}
+	else
+	{
+		ServerRequestDisembark();
 	}
 }
 
@@ -634,7 +657,16 @@ void AJTSSpacecraftActor::InitializeFlightCameraDistance()
 
 	const float MinimumArmLength = FMath::Min(FlightCameraMinArmLength, FlightCameraMaxArmLength);
 	const float MaximumArmLength = FMath::Max(FlightCameraMinArmLength, FlightCameraMaxArmLength);
-	CurrentFlightCameraArmLength = FMath::Clamp(FlightCameraBoom->TargetArmLength, MinimumArmLength, MaximumArmLength);
+	const float ConfiguredDefaultArmLength = FMath::Clamp(
+		FlightCameraDefaultArmLength,
+		MinimumArmLength,
+		MaximumArmLength);
+	// Old Blueprints may still serialize the former 900 cm boom value. Never let that legacy value
+	// pull the exterior driving view back into the spacecraft.
+	CurrentFlightCameraArmLength = FMath::Clamp(
+		FMath::Max(FlightCameraBoom->TargetArmLength, ConfiguredDefaultArmLength),
+		MinimumArmLength,
+		MaximumArmLength);
 	FlightCameraBoom->TargetArmLength = CurrentFlightCameraArmLength;
 	bFlightCameraDistanceInitialized = true;
 }
@@ -669,6 +701,36 @@ bool AJTSSpacecraftActor::TryDepositResourcesFromPawn(APawn* InteractingPawn)
 	return DepositPlayerResources(Cast<AJTSCharacter>(InteractingPawn));
 }
 
+EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId)
+{
+	// The workshop belongs exclusively to the active SpaceWorld surface phase. This validation
+	// mirrors the prompt gate so a client cannot open/purchase from it during Earth collection.
+	if (!HasAuthority() || !IsSpaceWorldSurfaceActive() || !IsValid(Player) || !IsPawnInBoardingRange(Player))
+	{
+		return EJTSShopPurchaseResult::DeliveryFailed;
+	}
+
+	TMap<EJTSResourceType, int32> Costs;
+	if (!BuildShopCosts(ItemId, Costs))
+	{
+		return EJTSShopPurchaseResult::InvalidItem;
+	}
+	if (!TryConsumeResourceAmounts(Costs))
+	{
+		return EJTSShopPurchaseResult::InsufficientResources;
+	}
+
+	bool bDropped = false;
+	if (!DeliverShopPurchase(Player, UJTSItemDefinitionLibrary::MakeInstance(ItemId), bDropped))
+	{
+		// A transaction either yields the requested item or restores every material.
+		DepositResourceAmounts(Costs);
+		return EJTSShopPurchaseResult::DeliveryFailed;
+	}
+
+	return bDropped ? EJTSShopPurchaseResult::SucceededDropped : EJTSShopPurchaseResult::Succeeded;
+}
+
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 {
 	if (!HasAuthority())
@@ -678,10 +740,8 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 	AJTSCharacter* const InteractingCharacter = Cast<AJTSCharacter>(InteractingPawn);
 	AJTSPlayerState* const OccupantPlayerState = IsValid(InteractingCharacter) ? InteractingCharacter->GetPlayerState<AJTSPlayerState>() : nullptr;
 	const bool bEarthCollectionActive = IsEarthCollectionActive();
-	const bool bMoonExplorationActive = IsMoonExplorationActive();
 	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
-	if (bMoonExplorationActive
-		|| (!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
+	if ((!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
 		|| !IsValid(InteractingCharacter)
 		|| !IsValid(OccupantPlayerState)
 		|| IsPlayerStateOccupying(OccupantPlayerState)
@@ -761,17 +821,11 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 	}
 	AJTSPlayerState* const OccupantPlayerState = BoardedCharacter != nullptr ? BoardedCharacter->GetPlayerState<AJTSPlayerState>() : nullptr;
 	const bool bPlayerIsDriving = IsValid(PlayerController) && OccupantPlayerState != nullptr && DriverPlayerState == OccupantPlayerState;
-	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceActive();
-	if ((!IsEarthCollectionActive() && !IsMoonExplorationActive() && !bSpaceWorldSurfaceActive)
-		|| !IsValid(BoardedCharacter)
+	if (!IsValid(BoardedCharacter)
 		|| !IsValid(OccupantPlayerState)
-		|| !IsPlayerStateOccupying(OccupantPlayerState))
+		|| !IsPlayerStateOccupying(OccupantPlayerState)
+		|| !CanDisembarkPlayer(BoardedCharacter))
 	{
-		return false;
-	}
-	if (bPlayerIsDriving && (!bSpaceWorldSurfaceActive || !IsGroundedOnPlanet()))
-	{
-		// Airborne ejection is intentionally outside this first surface-flight slice.
 		return false;
 	}
 
@@ -810,13 +864,24 @@ bool AJTSSpacecraftActor::TryDisembarkPlayerForController(APlayerController* Pla
 		return false;
 	}
 	AJTSPlayerState* const ControllerPlayerState = PlayerController->GetPlayerState<AJTSPlayerState>();
-	return TryDisembarkPlayer(FindBoardedCharacterForPlayerState(ControllerPlayerState));
+	AJTSCharacter* BoardedCharacter = BoardedPlayer.Get();
+	if (!IsValid(BoardedCharacter) || BoardedCharacter->GetPlayerState<AJTSPlayerState>() != ControllerPlayerState)
+	{
+		BoardedCharacter = FindBoardedCharacterForPlayerState(ControllerPlayerState);
+	}
+	return TryDisembarkPlayer(BoardedCharacter);
 }
 
 bool AJTSSpacecraftActor::IsPlayerBoarded(const APawn* InteractingPawn) const
 {
 	const AJTSCharacter* const InteractingCharacter = Cast<AJTSCharacter>(InteractingPawn);
 	return IsValid(InteractingCharacter) && IsPlayerStateOccupying(InteractingCharacter->GetPlayerState<AJTSPlayerState>());
+}
+
+bool AJTSSpacecraftActor::CanDisembarkPlayer(const APawn* InteractingPawn) const
+{
+	return IsPlayerBoarded(InteractingPawn)
+		&& (IsEarthCollectionActive() || IsLanded());
 }
 
 bool AJTSSpacecraftActor::HasBoardedPlayer() const
@@ -866,6 +931,46 @@ FVector AJTSSpacecraftActor::GetBoardingInteractionTargetWorldLocation(const FVe
 	}
 
 	return IsValid(BoardingTrigger) ? BoardingTrigger->GetComponentLocation() : GetActorLocation();
+}
+
+float AJTSSpacecraftActor::GetExteriorHullSupportDistance(const FVector& WorldDirection) const
+{
+	const FVector SafeDirection = WorldDirection.GetSafeNormal();
+	if (SafeDirection.IsNearlyZero())
+	{
+		return 0.0f;
+	}
+
+	// The Blueprint mesh is the visual hull the player must clear. Its physical local bounds retain
+	// authored component scale, rotation, and offset, unlike FlightCollision's deliberately compact
+	// movement proxy.
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	if (IsValid(SpacecraftMesh)
+		&& SpacecraftMesh->IsRegistered()
+		&& JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+			SpacecraftMesh,
+			GetActorLocation(),
+			SafeDirection,
+			VisualBounds)
+		&& VisualBounds.bIsValid)
+	{
+		return FMath::Max(0.0f, VisualBounds.HighestProjectionFromRoot);
+	}
+
+	if (IsValid(FlightCollision))
+	{
+		const FVector HullExtent = FlightCollision->GetScaledBoxExtent();
+		const FTransform CollisionTransform = FlightCollision->GetComponentTransform();
+		const float HullSupport = FMath::Abs(FVector::DotProduct(CollisionTransform.GetUnitAxis(EAxis::X), SafeDirection)) * HullExtent.X
+			+ FMath::Abs(FVector::DotProduct(CollisionTransform.GetUnitAxis(EAxis::Y), SafeDirection)) * HullExtent.Y
+			+ FMath::Abs(FVector::DotProduct(CollisionTransform.GetUnitAxis(EAxis::Z), SafeDirection)) * HullExtent.Z;
+		const float CenterProjection = FVector::DotProduct(
+			CollisionTransform.GetLocation() - GetActorLocation(),
+			SafeDirection);
+		return FMath::Max(0.0f, CenterProjection + HullSupport);
+	}
+
+	return 0.0f;
 }
 
 USceneComponent* AJTSSpacecraftActor::GetBoardingPoint() const
@@ -921,9 +1026,18 @@ void AJTSSpacecraftActor::ActivateFlightCameraThirdPerson()
 		const float MaximumArmLength = FMath::Max(FlightCameraMinArmLength, FlightCameraMaxArmLength);
 		CurrentFlightCameraArmLength = FMath::Clamp(CurrentFlightCameraArmLength, MinimumArmLength, MaximumArmLength);
 		FlightCameraBoom->TargetArmLength = CurrentFlightCameraArmLength;
-		FlightCameraBoom->bUsePawnControlRotation = false;
+		FlightCameraBoom->SocketOffset = FlightCameraSocketOffset;
+		// A driving camera orbits from controller rotation. It is not welded to the ship's transform.
+		FlightCameraBoom->bUsePawnControlRotation = true;
 		FlightCameraBoom->SetUsingAbsoluteRotation(false);
+		FlightCameraBoom->SetRelativeRotation(FRotator::ZeroRotator);
 		FlightCameraBoom->bDoCollisionTest = false;
+		FlightCameraBoom->bEnableCameraLag = true;
+		FlightCameraBoom->CameraLagSpeed = 14.0f;
+		FlightCameraBoom->bEnableCameraRotationLag = false;
+		FlightCameraBoom->bInheritPitch = true;
+		FlightCameraBoom->bInheritYaw = true;
+		FlightCameraBoom->bInheritRoll = false;
 	}
 
 	TArray<UCameraComponent*> CameraComponents;
@@ -939,7 +1053,21 @@ void AJTSSpacecraftActor::ActivateFlightCameraThirdPerson()
 	if (FlightCamera != nullptr)
 	{
 		FlightCamera->bUsePawnControlRotation = false;
+		FlightCamera->SetRelativeRotation(FRotator::ZeroRotator);
 		FlightCamera->SetActive(true);
+	}
+
+	if (APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+		IsValid(PlayerController) && PlayerController->IsLocalController())
+	{
+		FRotator InitialCameraRotation = GetActorRotation();
+		InitialCameraRotation.Roll = 0.0f;
+		PlayerController->SetControlRotation(InitialCameraRotation);
+		if (APlayerCameraManager* const CameraManager = PlayerController->PlayerCameraManager)
+		{
+			CameraManager->ViewPitchMin = FMath::Min(FlightCameraPitchMin, FlightCameraPitchMax);
+			CameraManager->ViewPitchMax = FMath::Max(FlightCameraPitchMin, FlightCameraPitchMax);
+		}
 	}
 }
 
@@ -1009,6 +1137,7 @@ void AJTSSpacecraftActor::InitializeForPlanetArrival(AJTSPlanetAnchor* Planet)
 	PendingLandingClearance = 0.0f;
 	FlightState = EJTSSpacecraftFlightState::Flying;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
+	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 
 	if (FlightMovementComponent != nullptr)
 	{
@@ -1108,6 +1237,10 @@ void AJTSSpacecraftActor::CancelLandingRequest(EJTSLandingValidationFailure Fail
 		PendingLandingClearance = 0.0f;
 	}
 	LastLandingFailure = Failure;
+	if (FlightState != EJTSSpacecraftFlightState::Landed)
+	{
+		LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
+	}
 }
 
 EJTSSpacecraftFlightState AJTSSpacecraftActor::GetFlightState() const
@@ -1125,6 +1258,11 @@ bool AJTSSpacecraftActor::IsLanded() const
 EJTSLandingValidationFailure AJTSSpacecraftActor::GetLastLandingFailure() const
 {
 	return LastLandingFailure;
+}
+
+EJTSSpacecraftLandingAssistPhase AJTSSpacecraftActor::GetLandingAssistPhase() const
+{
+	return LandingAssistPhase;
 }
 
 AJTSPlanetAnchor* AJTSSpacecraftActor::GetLandedPlanet() const
@@ -1177,9 +1315,11 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 	if (!bIsGroundedOnPlanet)
 	{
 		FlightState = EJTSSpacecraftFlightState::Flying;
+		LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 		return;
 	}
 	FlightState = EJTSSpacecraftFlightState::Landed;
+	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::Touchdown;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
 
 	if (FlightMovementComponent != nullptr)
@@ -1209,6 +1349,7 @@ bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 
 	SetFlightTargetPlanet(Planet);
 	ClearGroundedPlanet();
+	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
 		Manager->SetTravelState(EJTSSpaceTravelState::Takeoff);
@@ -1230,6 +1371,7 @@ void AJTSSpacecraftActor::ClearGroundedPlanet()
 	PendingLandingSite = nullptr;
 	PendingLandingTransform = FTransform::Identity;
 	PendingLandingClearance = 0.0f;
+	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 	if (FlightState == EJTSSpacecraftFlightState::Landed)
 	{
 		FlightState = EJTSSpacecraftFlightState::Flying;
@@ -1427,19 +1569,6 @@ bool AJTSSpacecraftActor::GetPlayerRespawnTransform(FJTSPlayerRespawnTransformRe
 			return true;
 		}
 	}
-
-	if (GetTopRespawnTransform(OutResult.Transform))
-	{
-		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::SpacecraftTop;
-		return true;
-	}
-	if (GetExitRespawnTransform(OutResult.Transform))
-	{
-		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::SpacecraftExit;
-		return true;
-	}
 	return false;
 }
 
@@ -1556,6 +1685,14 @@ void AJTSSpacecraftActor::HandleAssistedLandingCompleted()
 		*GetNameSafe(ActiveLandingSite));
 }
 
+void AJTSSpacecraftActor::HandleAssistedLandingPhaseChanged(EJTSSpacecraftLandingAssistPhase NewPhase)
+{
+	if (HasAuthority())
+	{
+		LandingAssistPhase = NewPhase;
+	}
+}
+
 void AJTSSpacecraftActor::HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure)
 {
 	if (FlightState != EJTSSpacecraftFlightState::LandingAssist)
@@ -1627,7 +1764,7 @@ FVector AJTSSpacecraftActor::GetNavigationMarkerWorldLocation() const
 		return GetActorLocation() + NavigationUp * NavigationMarkerHeightOffset;
 	}
 
-	// Earth and Legacy Fake Moon retain their existing World-Z marker behavior.
+	// Earth and other non-planet contexts retain World-Z marker behavior.
 	if (IsValid(SpacecraftMesh) && SpacecraftMesh->IsRegistered())
 	{
 		const float BoundsScale = FMath::Max(FMath::Abs(SpacecraftMesh->BoundsScale), KINDA_SMALL_NUMBER);
@@ -1643,8 +1780,17 @@ FVector AJTSSpacecraftActor::GetNavigationMarkerWorldLocation() const
 
 bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
-	return IsValid(InteractingPawn)
-		&& (IsEarthCollectionActive() || IsMoonExplorationActive() || IsSpaceWorldSurfaceActive())
+	if (!IsValid(InteractingPawn))
+	{
+		return false;
+	}
+
+	if (IsPlayerBoarded(InteractingPawn))
+	{
+		return CanDisembarkPlayer(InteractingPawn);
+	}
+
+	return (IsEarthCollectionActive() || IsSpaceWorldSurfaceActive())
 		&& IsPawnInBoardingRange(InteractingPawn);
 }
 
@@ -1655,26 +1801,37 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 		return FText::GetEmpty();
 	}
 
-	if (IsPlayerBoarded(InteractingPawn))
+	if (!IsPlayerBoarded(InteractingPawn))
 	{
-		return FText::FromString(TEXT("[E] EXIT"));
+		if (IsEarthCollectionActive())
+		{
+			return FText::FromString(TEXT("HOLD [F] BOARD"));
+		}
+
+		return FText::FromString(TEXT("[E] SUPPLY\nHOLD [F] BOARD"));
 	}
 
-	if (IsMoonExplorationActive())
-	{
-		return FText::FromString(TEXT("[E] WORKSHOP"));
-	}
-
-	if (IsEarthCollectionActive() || IsSpaceWorldSurfaceActive())
-	{
-		return FText::FromString(TEXT("HOLD [E] BOARD"));
-	}
-
-	return FText::GetEmpty();
+	return CanDisembarkPlayer(InteractingPawn)
+		? FText::FromString(TEXT("[F] DISEMBARK"))
+		: FText::GetEmpty();
 }
 
-void AJTSSpacecraftActor::Interact_Implementation(APawn* /*InteractingPawn*/)
+void AJTSSpacecraftActor::Interact_Implementation(APawn* InteractingPawn)
 {
+	// Earth exposes the ship as an interaction target solely so its hold-F boarding path and prompt
+	// use the shared interaction validation. The supply screen remains a SpaceWorld-only feature.
+	if (!HasAuthority()
+		|| !IsSpaceWorldSurfaceActive()
+		|| !CanInteract_Implementation(InteractingPawn)
+		|| IsPlayerBoarded(InteractingPawn))
+	{
+		return;
+	}
+
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(InteractingPawn->GetController()))
+	{
+		PlayerController->ClientOpenSpaceShop(this);
+	}
 }
 
 int32 AJTSSpacecraftActor::GetResourceAmount(EJTSResourceType ResourceType) const
@@ -1914,8 +2071,9 @@ void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputStat
 	FlightMovementComponent->SetStrafeInput(FMath::Clamp(InputState.Strafe, -1.0f, 1.0f));
 	FlightMovementComponent->SetVerticalInput(FMath::Clamp(InputState.Vertical, -1.0f, 1.0f));
 	FlightMovementComponent->SetRollInput(FMath::Clamp(InputState.Roll, -1.0f, 1.0f));
-	FlightMovementComponent->AddYawInput(FMath::Clamp(InputState.Yaw, -1.0f, 1.0f));
-	FlightMovementComponent->AddPitchInput(FMath::Clamp(InputState.Pitch, -1.0f, 1.0f));
+	const float MaximumLookInput = FMath::Max(1.0f, MaxFlightLookInputPerSample);
+	FlightMovementComponent->AddYawInput(FMath::Clamp(InputState.Yaw, -MaximumLookInput, MaximumLookInput));
+	FlightMovementComponent->AddPitchInput(FMath::Clamp(InputState.Pitch, -MaximumLookInput, MaximumLookInput));
 	FlightMovementComponent->SetBoosting(InputState.bBoosting);
 	FlightMovementComponent->SetBraking(InputState.bBraking);
 }
@@ -1939,6 +2097,18 @@ void AJTSSpacecraftActor::ServerRequestSurfaceTakeoff_Implementation()
 	if (DriverPlayerState != nullptr) BeginSurfaceTakeoff();
 }
 
+void AJTSSpacecraftActor::ServerRequestDisembark_Implementation()
+{
+	APlayerController* const DriverController = Cast<APlayerController>(GetController());
+	if (!IsValid(DriverController)
+		|| DriverController->GetPlayerState<AJTSPlayerState>() != DriverPlayerState)
+	{
+		return;
+	}
+
+	TryDisembarkPlayerForController(DriverController);
+}
+
 void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -1951,6 +2121,7 @@ void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AJTSSpacecraftActor, ActiveLandingSite);
 	DOREPLIFETIME(AJTSSpacecraftActor, FlightState);
 	DOREPLIFETIME(AJTSSpacecraftActor, LastLandingFailure);
+	DOREPLIFETIME(AJTSSpacecraftActor, LandingAssistPhase);
 }
 
 void AJTSSpacecraftActor::RestoreStorageFromExpedition(const TMap<EJTSResourceType, int32>& NewStorage)
@@ -1998,12 +2169,6 @@ bool AJTSSpacecraftActor::IsSpaceWorldRuntimeActive() const
 
 bool AJTSSpacecraftActor::IsMoonSurfaceRuntimeActive() const
 {
-	const UWorld* const World = GetWorld();
-	if (World != nullptr && World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr)
-	{
-		return true;
-	}
-
 	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
 	{
 		return SurfaceController->OwnsSurfaceActor(this);
@@ -2018,12 +2183,11 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 	{
 		return false;
 	}
-	// SpaceWorld resources remain in the player's replicated Item Inventory until the player uses
-	// the supply terminal's explicit deposit action. Earth keeps its original automatic collection
-	// transfer, while SpaceWorld gains a visible shared-wallet handoff for the shop economy.
+	// Rock and Ore enter the ship wallet immediately on overlap. There is deliberately no separate
+	// deposit interaction: gathering near the craft is enough to fund the shared supply screen.
 	if (IsSpaceWorldRuntimeActive())
 	{
-		return false;
+		return TryDepositPlayerMaterials(Player);
 	}
 
 	UJTSCarryComponent* const CarryComponent = Player->FindComponentByClass<UJTSCarryComponent>();
@@ -2062,6 +2226,130 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 	}
 
 	return true;
+}
+
+bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
+{
+	if (!HasAuthority() || !IsValid(Player) || !IsPawnInBoardingRange(Player))
+	{
+		return false;
+	}
+
+	UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent();
+	if (!IsValid(Inventory))
+	{
+		return false;
+	}
+
+	const int32 RockCount = Inventory->GetItemCount(EJTSItemId::Rock);
+	const int32 OreCount = Inventory->GetItemCount(EJTSItemId::Ore);
+	TMap<EJTSResourceType, int32> Materials;
+	if (RockCount > 0)
+	{
+		Materials.Add(EJTSResourceType::Rock, RockCount);
+	}
+	if (OreCount > 0)
+	{
+		Materials.Add(EJTSResourceType::Ore, OreCount);
+	}
+	if (Materials.IsEmpty())
+	{
+		return false;
+	}
+
+	const bool bRemovedRock = RockCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Rock, RockCount);
+	const bool bRemovedOre = bRemovedRock && (OreCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Ore, OreCount));
+	if (!bRemovedRock || !bRemovedOre)
+	{
+		if (bRemovedRock && RockCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::Rock, RockCount);
+		}
+		if (bRemovedOre && OreCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
+		}
+		return false;
+	}
+
+	if (!DepositResourceAmounts(Materials))
+	{
+		if (RockCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::Rock, RockCount);
+		}
+		if (OreCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
+		}
+		return false;
+	}
+
+	return true;
+}
+
+bool AJTSSpacecraftActor::BuildShopCosts(EJTSItemId ItemId, TMap<EJTSResourceType, int32>& OutCosts) const
+{
+	OutCosts.Reset();
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if (!IsValid(Definition) || !Definition->IsShopPurchasable())
+	{
+		return false;
+	}
+
+	for (const FJTSItemCost& Cost : Definition->ShopCosts)
+	{
+		if (Cost.Amount > 0)
+		{
+			OutCosts.FindOrAdd(Cost.ResourceType) += Cost.Amount;
+		}
+	}
+	return !OutCosts.IsEmpty();
+}
+
+bool AJTSSpacecraftActor::DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item, bool& bOutDropped)
+{
+	bOutDropped = false;
+	if (!IsValid(Player) || Item.IsEmpty())
+	{
+		return false;
+	}
+
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Item.ItemId);
+	if (!IsValid(Definition))
+	{
+		return false;
+	}
+
+	bool bDelivered = false;
+	if (Definition->IsWearable())
+	{
+		if (UJTSPlayerEquipmentComponent* const Equipment = Player->GetEquipmentComponent())
+		{
+			bDelivered = Equipment->TryEquipItem(Item);
+		}
+	}
+	else if (UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent())
+	{
+		if (Inventory->CanAddItem(Item.ItemId, Item.StackCount))
+		{
+			int32 Remaining = Item.StackCount;
+			bDelivered = Inventory->TryAddItem(Item, Remaining) && Remaining == 0;
+		}
+	}
+
+	if (bDelivered)
+	{
+		return true;
+	}
+
+	const FVector DropOrigin = IsValid(ExitPoint)
+		? ExitPoint->GetComponentLocation()
+		: GetActorLocation() + GetActorRightVector() * FMath::Max(150.0f, GetBoardingInteractionRadius() * 0.55f);
+	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
+		GetWorld(), Item, DropOrigin, Player, this, Player->GetActorForwardVector());
+	bOutDropped = IsValid(Pickup);
+	return bOutDropped;
 }
 
 void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
@@ -2119,10 +2407,6 @@ void AJTSSpacecraftActor::RestorePersistentStorage()
 		}
 	}
 
-	if (MoonWrappedActorComponent != nullptr && FakeMoonBendMaterial != nullptr)
-	{
-		MoonWrappedActorComponent->SetFakeMoonBendMaterial(FakeMoonBendMaterial);
-	}
 }
 
 void AJTSSpacecraftActor::RestoreStorageForMoonTravel()

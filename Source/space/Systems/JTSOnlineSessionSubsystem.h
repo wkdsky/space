@@ -173,7 +173,9 @@ private:
 	{
 		None,
 		ReturnToFrontEnd,
-		QuitApplication
+		QuitApplication,
+		/** A host is starting a new or resumed expedition while an old local session record still exists. */
+		RecreateExpedition
 	};
 
 	bool AcquireInterfaces();

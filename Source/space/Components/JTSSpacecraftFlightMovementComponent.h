@@ -59,6 +59,7 @@ struct SPACE_API FJTSSpacecraftFlightStats
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftBoostStateChanged, bool, bIsBoosting);
 DECLARE_MULTICAST_DELEGATE(FOnJTSSpacecraftAssistedLandingCompleted);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingFailed, EJTSLandingValidationFailure);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingPhaseChanged, EJTSSpacecraftLandingAssistPhase);
 
 /** Lightweight target-velocity flight movement for the persistent spacecraft Pawn. */
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))
@@ -127,6 +128,8 @@ public:
 
 	FOnJTSSpacecraftAssistedLandingCompleted OnAssistedLandingCompleted;
 	FOnJTSSpacecraftAssistedLandingFailed OnAssistedLandingFailed;
+	/** Kept separate from the completion event so the pawn can replicate concise landing status to every client. */
+	FOnJTSSpacecraftAssistedLandingPhaseChanged OnAssistedLandingPhaseChanged;
 
 protected:
 	/** Base tuning is stable; EffectiveStats is the runtime upgrade-adjusted copy. */
@@ -139,8 +142,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float InertialDampeningRate = 1.0f;
 
+	/** Degrees added per raw mouse unit at the base turn rates. Mouse values are already frame deltas. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Input", meta = (ClampMin = "0.001", UIMin = "0.001"))
-	float MouseLookSensitivity = 0.08f;
+	float MouseLookSensitivity = 0.18f;
 
 	/** Fallback desired descent duration used to derive a controlled initial vertical speed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
@@ -155,8 +159,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float AssistedLandingRotationInterpolationSpeed = 5.0f;
 
+	/** Landing holds altitude until the local Z axis is this close to the real surface normal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", ClampMax = "45.0", UIMin = "0.1", UIMax = "15.0"))
+	float AssistedLandingAlignmentToleranceDegrees = 4.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
 	float AssistedLandingVelocityResponse = 1800.0f;
+
+	/** The final metres slow smoothly to this cap instead of creeping for the whole descent. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingTouchdownSpeed = 85.0f;
+
+	/** Height at which the controlled descent starts braking for a soft surface contact. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingBrakingDistance = 220.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float LandingContactTolerance = 12.0f;
@@ -182,6 +198,7 @@ private:
 	void SubmitExteriorAltitude();
 	void CompleteAssistedLanding();
 	void FailAssistedLanding(EJTSLandingValidationFailure Failure);
+	void SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase NewPhase);
 	bool MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit);
 
 	FVector BuildTargetVelocity() const;
@@ -198,5 +215,6 @@ private:
 	float AssistedLandingClearance = 0.0f;
 	float AssistedLandingDescentSpeed = 0.0f;
 	float AssistedLandingElapsed = 0.0f;
+	EJTSSpacecraftLandingAssistPhase AssistedLandingPhase = EJTSSpacecraftLandingAssistPhase::None;
 	TWeakObjectPtr<AJTSPlanetAnchor> TargetPlanet;
 };

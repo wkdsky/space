@@ -14,7 +14,6 @@ class UMaterialInterface;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
-class UJTSMoonWrappedActorComponent;
 class AJTSPlanetAnchor;
 
 /** Physical Moon resource forms. Small rocks are loose pickups; the other forms are mineable nodes. */
@@ -97,6 +96,7 @@ private:
 	bool ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutItemId, float& OutWork) const;
 	bool SpawnAllResourceDrops(APawn* Miner);
 	void ConfigureResourceMesh();
+	void ApplySurfacePresentationMaterial();
 	void ApplyResourceAppearance();
 
 	UPROPERTY(VisibleAnywhere, Category = "Moon|Resource")
@@ -105,11 +105,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> ResourceMesh;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
+	/** Surface material used by every resource node. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Rendering", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> RealPlanetSurfaceMaterial;
 
 	/** Engine primitive used by all rock variants. */
 	UPROPERTY(Transient)
@@ -140,6 +138,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ResourceMaterial;
+
+	/** Base material currently selected before the dynamic color instance is created. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> AppliedPresentationMaterial;
 
 	/** Cached normal used by interaction UI after a real-surface placement. */
 	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)

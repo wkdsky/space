@@ -14,11 +14,11 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSInventoryComponent.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSResourceType.h"
+#include "space/Player/JTSCharacter.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "space/World/JTSMoonResourceActor.h"
@@ -561,8 +561,6 @@ AJTSWorldPickupActor::AJTSWorldPickupActor()
 	PickupMesh->SetCastShadow(false);
 	PickupMesh->bCastDynamicShadow = false;
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
-
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
 	{
@@ -582,19 +580,11 @@ AJTSWorldPickupActor::AJTSWorldPickupActor()
 		EquipmentMesh = CubeMeshAsset.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
-	if (FakeMoonBendMaterialAsset.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicMaterialAsset.Succeeded())
 	{
-		FakeMoonBendMaterial = FakeMoonBendMaterialAsset.Object;
-		PickupMesh->SetMaterial(0, FakeMoonBendMaterialAsset.Object);
-	}
-	else
-	{
-		static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BasicMaterialAsset.Succeeded())
-		{
-			PickupMesh->SetMaterial(0, BasicMaterialAsset.Object);
-		}
+		RealPlanetSurfaceMaterial = BasicMaterialAsset.Object;
+		PickupMesh->SetMaterial(0, BasicMaterialAsset.Object);
 	}
 }
 
@@ -713,6 +703,7 @@ void AJTSWorldPickupActor::AdjustToGround(const FVector& GroundHitLocation)
 	bUsesRealPlanetSurface = false;
 	SurfacePlanet.Reset();
 	SurfaceUp = FVector::UpVector;
+	ApplyItemAppearance();
 	if (!IsValid(PickupMesh) || !PickupMesh->IsRegistered())
 	{
 		return;
@@ -725,7 +716,6 @@ void AJTSWorldPickupActor::AdjustToGround(const FVector& GroundHitLocation)
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	UpdateMoonWrappedLogicalPosition();
 }
 
 void AJTSWorldPickupActor::PlaceOnPlanetSurface(
@@ -751,6 +741,7 @@ void AJTSWorldPickupActor::PlaceOnPlanetSurface(
 	SurfacePlanet = Planet;
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
+	ApplyItemAppearance();
 	PickupMesh->UpdateBounds();
 	FJTSSurfaceVisualProjectionBounds VisualBounds;
 	const float VisualSupportDistance = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
@@ -769,11 +760,6 @@ void AJTSWorldPickupActor::PlaceOnPlanetSurface(
 		nullptr,
 		ETeleportType::TeleportPhysics);
 
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
 }
 
 bool AJTSWorldPickupActor::IsUsingRealPlanetSurface() const
@@ -802,7 +788,6 @@ void AJTSWorldPickupActor::StartDropMotion(
 	PlannedGroundLocation = SafeGroundLocation;
 	DropElapsedSeconds = 0.0f;
 	BuildDropTraceIgnoredActors(SourceActor, SafetyPawn);
-	UpdateMoonWrappedLogicalPosition();
 
 	if (DropGravityAcceleration.IsNearlyZero())
 	{
@@ -859,6 +844,12 @@ void AJTSWorldPickupActor::Interact_Implementation(APawn* InteractingPawn)
 	FString FailureReason;
 	if (TryPickup(InteractingPawn, FailureReason))
 	{
+		if (AJTSCharacter* const Character = Cast<AJTSCharacter>(InteractingPawn))
+		{
+			// The ship overlap owns material submission. Picking up beside it should fund the
+			// shared wallet immediately, without a second deposit button or interaction.
+			Character->TryDepositCarriedResourcesToNearbySpacecraft();
+		}
 		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Pickup: Item=%s Success=true"), *ItemTypeToString(ItemType));
 		Destroy();
 		return;
@@ -885,21 +876,6 @@ void AJTSWorldPickupActor::BeginPlay()
 		Registry->RegisterPickup(this);
 	}
 
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		if (IsUsingRealPlanetSurface())
-		{
-			MoonWrappedActorComponent->Deactivate();
-			MoonWrappedActorComponent->SetComponentTickEnabled(false);
-			return;
-		}
-
-		UMaterialInterface* const BendMaterial = GetMoonBendMaterialForPickup();
-		if (BendMaterial != nullptr)
-		{
-			MoonWrappedActorComponent->SetFakeMoonBendMaterial(BendMaterial);
-		}
-	}
 }
 
 void AJTSWorldPickupActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -979,7 +955,6 @@ void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 	}
 
 	SetActorLocation(NextLocation, false, nullptr, ETeleportType::TeleportPhysics);
-	UpdateMoonWrappedLogicalPosition();
 }
 
 void AJTSWorldPickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -1007,11 +982,7 @@ void AJTSWorldPickupActor::OnRep_DropState()
 
 void AJTSWorldPickupActor::OnRep_SurfacePresentation()
 {
-	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
+	ApplyItemAppearance();
 }
 
 bool AJTSWorldPickupActor::TraceDropGround(
@@ -1134,7 +1105,6 @@ void AJTSWorldPickupActor::SettleDropOnGround(const FVector& GroundHitLocation)
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	UpdateMoonWrappedLogicalPosition();
 
 	DropVelocity = FVector::ZeroVector;
 	bIsDropping = false;
@@ -1143,31 +1113,9 @@ void AJTSWorldPickupActor::SettleDropOnGround(const FVector& GroundHitLocation)
 	UE_LOG(LogTemp, Log, TEXT("JumpToSpace Pickup Landed: Item=%s"), *ItemTypeToString(ItemType));
 }
 
-void AJTSWorldPickupActor::UpdateMoonWrappedLogicalPosition()
-{
-	if (!IsUsingRealPlanetSurface()
-		&& MoonWrappedActorComponent != nullptr
-		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
-	{
-		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
-	}
-}
-
-UMaterialInterface* AJTSWorldPickupActor::GetMoonBendMaterialForPickup() const
-{
-	return PickupMaterial != nullptr
-		? PickupMaterial.Get()
-		: FakeMoonBendMaterial.Get();
-}
-
 UStaticMeshComponent* AJTSWorldPickupActor::GetPickupMeshComponent() const
 {
 	return PickupMesh.Get();
-}
-
-UJTSMoonWrappedActorComponent* AJTSWorldPickupActor::GetMoonWrappedActorComponent() const
-{
-	return MoonWrappedActorComponent.Get();
 }
 
 bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailureReason)
@@ -1274,6 +1222,24 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 	PickupMesh->UpdateBounds();
 }
 
+void AJTSWorldPickupActor::ApplySurfacePresentationMaterial()
+{
+	if (!IsValid(PickupMesh))
+	{
+		return;
+	}
+
+	UMaterialInterface* const DesiredMaterial = RealPlanetSurfaceMaterial.Get();
+	if (!IsValid(DesiredMaterial) || AppliedPresentationMaterial == DesiredMaterial)
+	{
+		return;
+	}
+
+	PickupMaterial = nullptr;
+	PickupMesh->SetMaterial(0, DesiredMaterial);
+	AppliedPresentationMaterial = DesiredMaterial;
+}
+
 void AJTSWorldPickupActor::ApplyItemAppearance()
 {
 	if (!IsValid(PickupMesh))
@@ -1282,6 +1248,7 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 	}
 
 	ConfigureAppearance();
+	ApplySurfacePresentationMaterial();
 	if (!IsValid(PickupMaterial))
 	{
 		PickupMaterial = PickupMesh->CreateAndSetMaterialInstanceDynamic(0);

@@ -14,7 +14,7 @@ class UCharacterMovementComponent;
 
 /**
  * Applies UE 5.8 CharacterMovement custom gravity for one real gameplay planet.
- * It deliberately does nothing in Earth and Legacy Fake Moon worlds, where normal World-Z gravity
+ * It deliberately does nothing in Earth and non-planet worlds, where normal World-Z gravity
  * remains authoritative.
  */
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))

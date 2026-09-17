@@ -1,24 +1,16 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 
-#include "CollisionQueryParams.h"
-#include "Engine/Level.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
 #include "Math/RandomStream.h"
 #include "space/Items/JTSResourceType.h"
-#include "space/Modes/JTSMoonGameMode.h"
-#include "space/Player/JTSCharacter.h"
 #include "space/Ships/JTSSpacecraftActor.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonCorpseActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSMoonAntNestActor.h"
-#include "space/World/JTSSpaceWorldManager.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
 
@@ -26,28 +18,6 @@ namespace
 {
 	constexpr float MinimumScaleMultiplier = 0.85f;
 	constexpr float MaximumScaleMultiplier = 1.15f;
-
-	bool IsCandidateInsideWrappedBounds(
-		const FVector2D& CandidatePosition,
-		const FBox& LandmarkBounds,
-		const UJTSMoonWrapSubsystem* WrapSubsystem,
-		float Padding)
-	{
-		if (!LandmarkBounds.IsValid)
-		{
-			return false;
-		}
-
-		const FVector LandmarkCenter = LandmarkBounds.GetCenter();
-		const FVector LandmarkExtent = LandmarkBounds.GetExtent();
-		const FVector2D LandmarkCenterXY(LandmarkCenter.X, LandmarkCenter.Y);
-		const FVector2D RelativeCandidate = WrapSubsystem != nullptr && WrapSubsystem->IsConfiguredForMoon()
-			? WrapSubsystem->ShortestWrappedDelta2D(LandmarkCenterXY, CandidatePosition)
-			: CandidatePosition - LandmarkCenterXY;
-		const float SafePadding = FMath::Max(0.0f, Padding);
-		return FMath::Abs(RelativeCandidate.X) <= LandmarkExtent.X + SafePadding
-			&& FMath::Abs(RelativeCandidate.Y) <= LandmarkExtent.Y + SafePadding;
-	}
 
 	float GetSurfaceClearanceRadius(const FBox& Bounds, const float Padding)
 	{
@@ -67,16 +37,7 @@ void AJTSMoonResourceSpawner::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// MoonSurfaceController applies balance and landmark exclusions only after the active surface is visible.
-	// Standalone maps without either Moon runtime retain the old self-contained spawner behavior.
-	UWorld* const World = GetWorld();
-	const bool bMoonRuntimeWillInitialize = World != nullptr
-		&& (World->GetAuthGameMode<AJTSMoonGameMode>() != nullptr
-			|| AJTSSpaceWorldManager::FindSpaceWorldManager(this) != nullptr);
-	if (HasAuthority() && !bMoonRuntimeWillInitialize)
-	{
-		GenerateResources();
-	}
+	// The active MoonSurfaceController applies settings, landmarks, and its PlanetAnchor before generation.
 }
 
 void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings)
@@ -123,6 +84,12 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	}
 
 	ClearGeneratedResources();
+	AJTSPlanetAnchor* const Planet = OwningPlanet.Get();
+	if (!IsValid(Planet))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Moon resource generation requires an active Moon PlanetAnchor."));
+		return 0;
+	}
 
 	const int32 SafeResourceCount = FMath::Max(0, ResourceCount);
 	if (SafeResourceCount <= 0)
@@ -153,19 +120,10 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	const float SafeRadius = FMath::Max(0.0f, Radius);
 	const float SafeMinimumSpacing = FMath::Max(0.0f, MinimumResourceSpacing);
 	const FVector Origin = GetActorLocation();
-	AJTSPlanetAnchor* const Planet = OwningPlanet.Get();
-	const bool bUseRealPlanetSurface = IsValid(Planet);
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
 	const IJTSMoonSurfaceGameplaySettings* MoonSettings = IsValid(SurfaceController)
 		? SurfaceController->GetMoonSettings()
 		: nullptr;
-	if (MoonSettings == nullptr)
-	{
-		if (const AJTSMoonGameMode* const LegacyGameMode = World->GetAuthGameMode<AJTSMoonGameMode>())
-		{
-			MoonSettings = static_cast<const IJTSMoonSurfaceGameplaySettings*>(LegacyGameMode);
-		}
-	}
 	const int32 LargeRockYieldUnits = MoonSettings != nullptr ? MoonSettings->GetLargeRockTotalYieldUnits() : 6;
 	const int32 OreDepositYieldUnits = MoonSettings != nullptr ? MoonSettings->GetOreDepositTotalYieldUnits() : 6;
 	int32 SpawnedCount = 0;
@@ -207,22 +165,10 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	while (SpawnedCount < SafeResourceCount && CandidateAttemptCount < MaxCandidateAttempts)
 	{
 		++CandidateAttemptCount;
-		const float Angle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
-		const float Distance = SafeRadius * FMath::Sqrt(RandomStream.FRand());
 		FVector CandidateLocation;
-		if (bUseRealPlanetSurface)
+		if (!FindRealSurfaceCandidate(CandidateLocation))
 		{
-			if (!FindRealSurfaceCandidate(CandidateLocation))
-			{
-				continue;
-			}
-		}
-		else
-		{
-			CandidateLocation = Origin + FVector(
-				FMath::Cos(Angle) * Distance,
-				FMath::Sin(Angle) * Distance,
-				0.0f);
+			continue;
 		}
 		if (IsCandidateExcludedByLandmarks(CandidateLocation))
 		{
@@ -239,12 +185,9 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		if (SafeMinimumSpacing > 0.0f)
 		{
 			const bool bTooCloseToExistingResource = AcceptedResourceLocations.ContainsByPredicate(
-				[Planet, bUseRealPlanetSurface, &GroundLocation, SafeMinimumSpacing](const FVector& ExistingLocation)
+				[Planet, &GroundLocation, SafeMinimumSpacing](const FVector& ExistingLocation)
 				{
-					const float Separation = bUseRealPlanetSurface && IsValid(Planet)
-						? Planet->ApproximateSurfaceArcDistance(ExistingLocation, GroundLocation)
-						: FVector::Dist2D(ExistingLocation, GroundLocation);
-					return Separation < SafeMinimumSpacing;
+					return Planet->ApproximateSurfaceArcDistance(ExistingLocation, GroundLocation) < SafeMinimumSpacing;
 				});
 			if (bTooCloseToExistingResource)
 			{
@@ -294,15 +237,12 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			BaseResourceScale.Y * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier),
 			BaseResourceScale.Z * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier));
 		FRotator ResourceRotation(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f);
-		if (bUseRealPlanetSurface)
+		FJTSPlanetSurfaceFrame SurfaceFrame;
+		if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
 		{
-			FJTSPlanetSurfaceFrame SurfaceFrame;
-			if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
-			{
-				const float YawRadians = FMath::DegreesToRadians(ResourceRotation.Yaw);
-				const FVector SurfaceForward = FQuat(SurfaceFrame.Up, YawRadians).RotateVector(SurfaceFrame.Forward);
-				ResourceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
-			}
+			const float YawRadians = FMath::DegreesToRadians(ResourceRotation.Yaw);
+			const FVector SurfaceForward = FQuat(SurfaceFrame.Up, YawRadians).RotateVector(SurfaceFrame.Forward);
+			ResourceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
 		}
 		bool bSpawnedResourceAtCandidate = false;
 		if (bMiningNode)
@@ -410,10 +350,6 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	{
 		Resource->PlaceOnPlanetSurface(Planet, GroundLocation, ResourceRotation.Vector());
 	}
-	else
-	{
-		Resource->AdjustToGround(GroundLocation);
-	}
 	if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
 	{
 		Controller->RegisterSurfaceRuntimeActor(Resource);
@@ -458,83 +394,6 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateLoca
 		}
 		return false;
 	}
-
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return false;
-	}
-
-	const float SafeTraceStartHeight = FMath::Max(0.0f, GroundTraceStartHeight);
-	const float SafeTraceDistance = FMath::Max(0.0f, GroundTraceDistance);
-	const FVector TraceStart(CandidateLocation.X, CandidateLocation.Y, GetActorLocation().Z + SafeTraceStartHeight);
-	const FVector TraceEnd(CandidateLocation.X, CandidateLocation.Y, GetActorLocation().Z + SafeTraceStartHeight - SafeTraceDistance);
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSMoonResourceGroundTrace), false, this);
-	TraceParams.AddIgnoredActor(this);
-
-	// Ground placement must only see Moon terrain, never gameplay actors or a prior resource node.
-	if (const AJTSMoonSurfaceController* const SurfaceController = SurfaceGameplayController.Get())
-	{
-		for (AJTSCharacter* const SurfacePlayer : SurfaceController->GetActivePlayers())
-		{
-			TraceParams.AddIgnoredActor(SurfacePlayer);
-		}
-	}
-	else
-	{
-		for (FConstPlayerControllerIterator ControllerIt = World->GetPlayerControllerIterator(); ControllerIt; ++ControllerIt)
-		{
-			if (APawn* const PlayerPawn = ControllerIt->Get() != nullptr ? ControllerIt->Get()->GetPawn() : nullptr)
-			{
-				TraceParams.AddIgnoredActor(PlayerPawn);
-			}
-		}
-	}
-	if (SpacecraftLandmark.IsValid())
-	{
-		TraceParams.AddIgnoredActor(SpacecraftLandmark.Get());
-	}
-	for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CorpseLandmarks)
-	{
-		if (Corpse.IsValid())
-		{
-			TraceParams.AddIgnoredActor(Corpse.Get());
-		}
-	}
-	for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : MoonAntNestLandmarks)
-	{
-		if (Nest.IsValid())
-		{
-			TraceParams.AddIgnoredActor(Nest.Get());
-		}
-	}
-	if (ULevel* const SurfaceLevel = GetLevel())
-	{
-		for (AActor* const Actor : SurfaceLevel->Actors)
-		{
-			if (AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Actor); IsValid(Resource))
-			{
-				TraceParams.AddIgnoredActor(Resource);
-			}
-		}
-	}
-	for (const TObjectPtr<AJTSMoonResourceActor>& Resource : GeneratedResources)
-	{
-		if (IsValid(Resource))
-		{
-			TraceParams.AddIgnoredActor(Resource.Get());
-		}
-	}
-
-	FHitResult GroundHit;
-	if (SafeTraceDistance > 0.0f
-		&& World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, TraceParams)
-		&& GroundHit.bBlockingHit)
-	{
-		OutGroundLocation = GroundHit.ImpactPoint;
-		return true;
-	}
-
 	return false;
 }
 
@@ -573,51 +432,6 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 		}
 		return false;
 	}
-
-	const UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return false;
-	}
-
-	const UJTSMoonWrapSubsystem* const WrapSubsystem = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-	const FVector2D CandidatePosition(CandidateLocation.X, CandidateLocation.Y);
-	if (SpacecraftLandmark.IsValid()
-		&& IsCandidateInsideWrappedBounds(
-			CandidatePosition,
-			SpacecraftLandmark->GetResourceExclusionBounds(),
-			WrapSubsystem,
-			SpacecraftExclusionPadding))
-	{
-		return true;
-	}
-
-	for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CorpseLandmarks)
-	{
-		if (Corpse.IsValid()
-			&& IsCandidateInsideWrappedBounds(
-				CandidatePosition,
-				Corpse->GetComponentsBoundingBox(true),
-				WrapSubsystem,
-				LandmarkExclusionPadding))
-		{
-			return true;
-		}
-	}
-
-	for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : MoonAntNestLandmarks)
-	{
-		if (Nest.IsValid()
-			&& IsCandidateInsideWrappedBounds(
-				CandidatePosition,
-				Nest->GetComponentsBoundingBox(true),
-				WrapSubsystem,
-				LandmarkExclusionPadding))
-		{
-			return true;
-		}
-	}
-
 	return false;
 }
 

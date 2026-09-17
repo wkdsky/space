@@ -24,7 +24,6 @@
 #include "space/UI/JTSPrototypeHUDWidget.h"
 #include "space/UI/JTSShopWidget.h"
 #include "space/World/JTSSpaceWorldManager.h"
-#include "space/World/JTSShopTerminalActor.h"
 #include "TimerManager.h"
 
 AJTSPlayerController::AJTSPlayerController()
@@ -71,6 +70,7 @@ void AJTSPlayerController::BeginPlay()
 
 void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bGameplayInputModeActive = false;
 	CloseSpaceShop();
 	CloseMoonShop();
 	HideLobby();
@@ -223,35 +223,29 @@ void AJTSPlayerController::ServerRequestDisembarkSpacecraft_Implementation(AJTSS
 {
 	if (IsValid(Spacecraft))
 	{
-		Spacecraft->TryDisembarkPlayer(GetPawn());
+		// This RPC also serves hidden passengers, whose current pawn is their character rather than
+		// the spacecraft. Resolve from this controller's PlayerState on the server instead of relying
+		// on whichever pawn possession is currently replicating.
+		Spacecraft->TryDisembarkPlayerForController(this);
 	}
 }
 
 void AJTSPlayerController::ServerRequestCraft_Implementation(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft)
 {
-	// Retained as a harmless RPC symbol for old Blueprint/UI assets. Moon's
-	// former ship workshop is retired; all new purchases are validated through
-	// AJTSShopTerminalActor in SpaceWorld against the shared expedition wallet.
+	// Retained as a harmless RPC symbol for old Blueprint/UI assets. New purchases
+	// are validated through the nearby shared spacecraft.
 	static_cast<void>(EquipmentType);
 	static_cast<void>(Spacecraft);
 	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: ignored retired Moon workshop request from %s."), *GetNameSafe(this));
 }
 
-void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSShopTerminalActor* Terminal, EJTSItemId ItemId)
+void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId)
 {
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
-	const EJTSShopPurchaseResult Result = IsValid(ControlledCharacter) && IsValid(Terminal)
-		? Terminal->TryPurchase(ControlledCharacter, ItemId)
+	const EJTSShopPurchaseResult Result = IsValid(ControlledCharacter) && IsValid(Spacecraft)
+		? Spacecraft->TryPurchase(ControlledCharacter, ItemId)
 		: EJTSShopPurchaseResult::DeliveryFailed;
 	ClientReceiveShopPurchaseResult(Result);
-}
-
-void AJTSPlayerController::ServerRequestDepositShopMaterials_Implementation(AJTSShopTerminalActor* Terminal)
-{
-	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
-	const bool bSucceeded = IsValid(ControlledCharacter) && IsValid(Terminal)
-		&& Terminal->TryDepositPlayerMaterials(ControlledCharacter);
-	ClientReceiveShopDepositResult(bSucceeded);
 }
 
 void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSShopPurchaseResult Result)
@@ -262,17 +256,9 @@ void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSSh
 	}
 }
 
-void AJTSPlayerController::ClientReceiveShopDepositResult_Implementation(bool bSucceeded)
+void AJTSPlayerController::ClientOpenSpaceShop_Implementation(AJTSSpacecraftActor* Spacecraft)
 {
-	if (IsValid(SpaceShopWidget))
-	{
-		SpaceShopWidget->NotifyDepositResult(bSucceeded);
-	}
-}
-
-void AJTSPlayerController::ClientOpenSpaceShop_Implementation(AJTSShopTerminalActor* Terminal)
-{
-	OpenSpaceShop(Terminal);
+	OpenSpaceShop(Spacecraft);
 }
 
 void AJTSPlayerController::RestartCurrentLevel()
@@ -325,6 +311,14 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 	{
 		return;
 	}
+	if (bGameplayInputModeActive)
+	{
+		if (AJTSCharacter* const CharacterPawn = Cast<AJTSCharacter>(GetPawn()))
+		{
+			CharacterPawn->EnsureGameplayInputMapping();
+		}
+		return;
+	}
 
 	// The lobby uses UI-only focus and pushes both Ignore flags. Merely collapsing its widget leaves
 	// Slate focus and input-stack state alive across seamless travel, which is why attack could still
@@ -350,6 +344,7 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 	{
 		CharacterPawn->EnsureGameplayInputMapping();
 	}
+	bGameplayInputModeActive = true;
 }
 
 void AJTSPlayerController::ApplySpaceWorldInputMode()
@@ -363,6 +358,7 @@ void AJTSPlayerController::ApplyModalUIInputMode(UUserWidget* FocusWidget)
 	{
 		return;
 	}
+	bGameplayInputModeActive = false;
 
 	FInputModeUIOnly InputMode;
 	if (IsValid(FocusWidget))
@@ -441,7 +437,7 @@ void AJTSPlayerController::OpenMoonShop(AJTSCharacter* InPlayer)
 	// Compatibility entry point only.  It intentionally cannot reopen the
 	// retired Moon prototype store and does not change input state.
 	static_cast<void>(InPlayer);
-	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: Moon workshop is retired; use the SpaceWorld supply terminal."));
+	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: Moon workshop is retired; use the nearby spacecraft supply screen."));
 }
 
 void AJTSPlayerController::CloseMoonShop()
@@ -476,9 +472,9 @@ bool AJTSPlayerController::IsMoonShopOpen() const
 	return IsValid(PrototypeWidget) && PrototypeWidget->IsMoonShopOpen();
 }
 
-void AJTSPlayerController::OpenSpaceShop(AJTSShopTerminalActor* Terminal)
+void AJTSPlayerController::OpenSpaceShop(AJTSSpacecraftActor* Spacecraft)
 {
-	if (!IsLocalController() || !IsValid(Terminal) || IsGameMenuOpen())
+	if (!IsLocalController() || !IsValid(Spacecraft) || IsGameMenuOpen())
 	{
 		return;
 	}
@@ -496,7 +492,7 @@ void AJTSPlayerController::OpenSpaceShop(AJTSShopTerminalActor* Terminal)
 			SpaceShopWidget->AddToViewport(300);
 		}
 	}
-	if (!IsValid(SpaceShopWidget) || !SpaceShopWidget->OpenForTerminal(Terminal))
+	if (!IsValid(SpaceShopWidget) || !SpaceShopWidget->OpenForSpacecraft(Spacecraft))
 	{
 		return;
 	}
@@ -778,6 +774,7 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 
 	case EJTSGameplayPhase::Launching:
 	{
+		bGameplayInputModeActive = false;
 		HideLobby();
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(true);
@@ -807,6 +804,7 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 
 	case EJTSGameplayPhase::EarthCollectionFinished:
 	{
+		bGameplayInputModeActive = false;
 		HideLobby();
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(true);

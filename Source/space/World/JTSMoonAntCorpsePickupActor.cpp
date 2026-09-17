@@ -9,12 +9,9 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
@@ -22,22 +19,6 @@
 
 namespace
 {
-	APawn* GetLocalPresentationPawn(UWorld* World)
-	{
-		if (World == nullptr)
-		{
-			return nullptr;
-		}
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (APlayerController* const Controller = It->Get(); Controller != nullptr && Controller->IsLocalController())
-			{
-				return Controller->GetPawn();
-			}
-		}
-		return nullptr;
-	}
-
 	FVector SanitizeVisualScale(const FVector& InScale)
 	{
 		const FVector AbsoluteScale(
@@ -197,6 +178,7 @@ bool AJTSMoonAntCorpsePickupActor::CanInteract_Implementation(APawn* Interacting
 void AJTSMoonAntCorpsePickupActor::BeginPlay()
 {
 	Super::BeginPlay();
+	RealSurfacePlanet = GetRealSurfacePlanet();
 	if (!HasAuthority())
 	{
 		ConfigureCorpseVisual();
@@ -205,15 +187,11 @@ void AJTSMoonAntCorpsePickupActor::BeginPlay()
 		return;
 	}
 
-	RealSurfacePlanet = GetRealSurfacePlanet();
-	bUsingRealPlanetSurfaceForPop = RealSurfacePlanet.IsValid();
-	if (bUsingRealPlanetSurfaceForPop)
+	if (!RealSurfacePlanet.IsValid())
 	{
-		if (UJTSMoonWrappedActorComponent* const MoonWrapped = GetMoonWrappedActorComponent(); IsValid(MoonWrapped))
-		{
-			MoonWrapped->Deactivate();
-			MoonWrapped->SetComponentTickEnabled(false);
-		}
+		UE_LOG(LogTemp, Error, TEXT("MoonAnt corpse '%s' requires an active Moon PlanetAnchor and was discarded."), *GetName());
+		Destroy();
+		return;
 	}
 
 	if (!bInitializedFromMoonAnt)
@@ -236,8 +214,8 @@ void AJTSMoonAntCorpsePickupActor::BeginPlay()
 
 void AJTSMoonAntCorpsePickupActor::Tick(float DeltaSeconds)
 {
-	// AJTSWorldPickupActor only ticks its generic ballistic drops. Corpse pop and Fake Moon visual
-	// alignment are separate, visual-only work, so do not call the base implementation here.
+	// AJTSWorldPickupActor only ticks its generic ballistic drops. Corpse pop is visual-only work,
+	// so do not call the base implementation here.
 	AActor::Tick(DeltaSeconds);
 	if (!HasAuthority())
 	{
@@ -264,8 +242,6 @@ void AJTSMoonAntCorpsePickupActor::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Skeletal MoonAnt materials use the CPU Fake Moon bend, so the visual must follow the local player
-	// even after the one-shot pop has settled. No gameplay position is changed here.
 	UpdateCorpseVisualTransform(1.0f);
 }
 
@@ -283,18 +259,15 @@ FVector AJTSMoonAntCorpsePickupActor::GetInteractionAnchorWorldLocation() const
 {
 	if (const UPrimitiveComponent* const ActiveVisual = GetActiveCorpseVisual(); IsValid(ActiveVisual) && ActiveVisual->IsRegistered())
 	{
-		if (bUsingRealPlanetSurfaceForPop)
+		const FVector CorpseSurfaceUp = GetCorpseSurfaceUp(ActiveVisual->Bounds.Origin);
+		FJTSSurfaceVisualProjectionBounds VisualBounds;
+		if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
+			ActiveVisual,
+			GetActorLocation(),
+			CorpseSurfaceUp,
+			VisualBounds))
 		{
-			const FVector CorpseSurfaceUp = GetCorpseSurfaceUp(ActiveVisual->Bounds.Origin);
-			FJTSSurfaceVisualProjectionBounds VisualBounds;
-			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-				ActiveVisual,
-				GetActorLocation(),
-				CorpseSurfaceUp,
-				VisualBounds))
-			{
-				return VisualBounds.HighestPoint + CorpseSurfaceUp * 18.0f;
-			}
+			return VisualBounds.HighestPoint + CorpseSurfaceUp * 18.0f;
 		}
 
 		const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
@@ -327,7 +300,7 @@ void AJTSMoonAntCorpsePickupActor::AdjustToGround(const FVector& GroundHitLocati
 		return;
 	}
 	// This override is retained for shared pickup helpers. A corpse is always placed from its own
-	// unbent, side-flipped bounds so generic pickup support calculations cannot pollute its ground state.
+	// side-flipped bounds so generic pickup support calculations cannot pollute its ground state.
 	SettledGroundLocation = GroundHitLocation;
 	PlaceAtSettledGroundLocation();
 	UpdateCorpseVisualTransform(bCorpseSettled ? 1.0f : 0.0f);
@@ -357,13 +330,6 @@ void AJTSMoonAntCorpsePickupActor::OnRep_CorpseSettled()
 	SetCorpseInteractionEnabled(bCorpseSettled);
 }
 
-UMaterialInterface* AJTSMoonAntCorpsePickupActor::GetMoonBendMaterialForPickup() const
-{
-	// Do not replace copied MoonAnt materials. Skeletal and debug fallback visuals receive an equivalent
-	// CPU bend, while the MoonAnt's original static fallback retains its existing WPO material.
-	return nullptr;
-}
-
 UPrimitiveComponent* AJTSMoonAntCorpsePickupActor::GetActiveCorpseVisual() const
 {
 	return bUseSkeletalCorpseVisual
@@ -388,7 +354,6 @@ void AJTSMoonAntCorpsePickupActor::ConfigureCorpseVisual()
 	CorpseMesh->SetSkeletalMesh(SourceSkeletalMeshAsset);
 	bUseSkeletalCorpseVisual = SourceSkeletalMeshAsset != nullptr && CorpseMesh->GetSkeletalMeshAsset() != nullptr;
 	bUseDebugFallbackVisual = !bUseSkeletalCorpseVisual && SourceFallbackMeshAsset == nullptr;
-	bVisualUsesMaterialMoonBend = !bUseSkeletalCorpseVisual && !bUseDebugFallbackVisual;
 
 	CorpseMesh->SetRelativeLocation(CorpseBaseRelativeLocation);
 	CorpseMesh->SetRelativeRotation(CorpseBaseRelativeRotation);
@@ -456,14 +421,12 @@ void AJTSMoonAntCorpsePickupActor::RecalculateGroundSupport()
 		return;
 	}
 
-	// This executes before any pop or CPU bend location is applied. The side-flip rotation and the final
+	// This executes before any pop location is applied. The side-flip rotation and the final
 	// copied scale are already set, which makes these bounds the correct support shape for a lying MoonAnt.
 	ActiveVisual->SetRelativeLocation(CorpseBaseRelativeLocation);
 	ActiveVisual->SetRelativeRotation(CorpseBaseRelativeRotation);
 	ActiveVisual->UpdateBounds();
-	const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
-	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
-	if (bUsingRealPlanetSurfaceForPop)
+	if (AJTSPlanetAnchor* const Planet = GetRealSurfacePlanet())
 	{
 		FJTSSurfaceVisualProjectionBounds VisualBounds;
 		const FVector CorpseSurfaceUp = GetCorpseSurfaceUp(GetActorLocation());
@@ -480,6 +443,8 @@ void AJTSMoonAntCorpsePickupActor::RecalculateGroundSupport()
 		return;
 	}
 
+	const float BoundsScale = FMath::Max(FMath::Abs(ActiveVisual->BoundsScale), KINDA_SMALL_NUMBER);
+	const FVector PhysicalExtent = ActiveVisual->Bounds.BoxExtent.GetAbs() / BoundsScale;
 	const float CenterOffsetZ = ActiveVisual->Bounds.Origin.Z - GetActorLocation().Z;
 	GroundSupportHeight = FMath::Max(1.0f, PhysicalExtent.Z - CenterOffsetZ + 1.0f);
 	UpdateInteractionCollider();
@@ -488,10 +453,7 @@ void AJTSMoonAntCorpsePickupActor::RecalculateGroundSupport()
 void AJTSMoonAntCorpsePickupActor::ResolveInitialSettledGroundLocation()
 {
 	SettledGroundLocation = DeathGroundLocation;
-	DeathLogicalPosition = FVector2D(DeathGroundLocation.X, DeathGroundLocation.Y);
-	SettledLogicalPosition = DeathLogicalPosition;
-	bUsingMoonWrapForPop = false;
-	if (AJTSPlanetAnchor* const Planet = bUsingRealPlanetSurfaceForPop ? GetRealSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetRealSurfacePlanet())
 	{
 		FJTSPlanetSurfaceFrame SurfaceFrame;
 		FJTSPlanetSurfaceHit SurfaceHit;
@@ -507,96 +469,24 @@ void AJTSMoonAntCorpsePickupActor::ResolveInitialSettledGroundLocation()
 		{
 			SettledGroundLocation = SurfaceHit.ImpactPoint;
 		}
-		return;
 	}
-
-	UWorld* const World = GetWorld();
-	const UJTSMoonWrapSubsystem* const MoonWrap = World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
-	if (IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-	{
-		bUsingMoonWrapForPop = true;
-		DeathLogicalPosition = MoonWrap->GetLogicalPositionFromWorld(DeathGroundLocation);
-	}
-
-	const float SafeMinDistance = FMath::Max(0.0f, CorpsePopHorizontalDistanceMin);
-	const float SafeMaxDistance = FMath::Max(SafeMinDistance, CorpsePopHorizontalDistanceMax);
-	const float PopAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
-	const FVector2D PopDelta(FMath::Cos(PopAngle), FMath::Sin(PopAngle));
-	const float PopDistance = FMath::FRandRange(SafeMinDistance, SafeMaxDistance);
-
-	FVector CandidateGroundLocation = DeathGroundLocation;
-	if (bUsingMoonWrapForPop)
-	{
-		SettledLogicalPosition = MoonWrap->CanonicalizePosition2D(DeathLogicalPosition + PopDelta * PopDistance);
-		const FVector2D CandidatePhysicalPosition = MoonWrap->GetNearestPhysicalImage(
-			FVector2D(DeathGroundLocation.X, DeathGroundLocation.Y),
-			SettledLogicalPosition);
-		CandidateGroundLocation.X = CandidatePhysicalPosition.X;
-		CandidateGroundLocation.Y = CandidatePhysicalPosition.Y;
-	}
-	else
-	{
-		CandidateGroundLocation.X += PopDelta.X * PopDistance;
-		CandidateGroundLocation.Y += PopDelta.Y * PopDistance;
-		SettledLogicalPosition = FVector2D(CandidateGroundLocation.X, CandidateGroundLocation.Y);
-	}
-
-	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
-	{
-		FVector ResolvedGroundLocation;
-		if (SurfaceController->OwnsSurfaceActor(this)
-			&& SurfaceController->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
-		{
-			SettledGroundLocation = ResolvedGroundLocation;
-			return;
-		}
-	}
-
-	SettledGroundLocation = CandidateGroundLocation;
 }
 
 void AJTSMoonAntCorpsePickupActor::ResolveFinalSettledGroundLocation()
 {
-	if (AJTSPlanetAnchor* const Planet = bUsingRealPlanetSurfaceForPop ? GetRealSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetRealSurfacePlanet())
 	{
 		FJTSPlanetSurfaceHit SurfaceHit;
 		if (Planet->ProjectPointToSurface(SettledGroundLocation, SurfaceHit))
 		{
 			SettledGroundLocation = SurfaceHit.ImpactPoint;
 		}
-		return;
-	}
-
-	UWorld* const World = GetWorld();
-	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
-	if (World == nullptr || !IsValid(SurfaceController) || !SurfaceController->OwnsSurfaceActor(this))
-	{
-		return;
-	}
-
-	FVector CandidateGroundLocation = SettledGroundLocation;
-	if (bUsingMoonWrapForPop)
-	{
-		if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>(); IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-		{
-			const FVector2D CandidatePhysicalPosition = MoonWrap->GetNearestPhysicalImage(
-				FVector2D(GetActorLocation().X, GetActorLocation().Y),
-				SettledLogicalPosition);
-			CandidateGroundLocation.X = CandidatePhysicalPosition.X;
-			CandidateGroundLocation.Y = CandidatePhysicalPosition.Y;
-		}
-	}
-
-	FVector ResolvedGroundLocation;
-	if (SurfaceController->ResolveMoonGroundLocation(CandidateGroundLocation, ResolvedGroundLocation, this))
-	{
-		SettledGroundLocation = ResolvedGroundLocation;
 	}
 }
 
 void AJTSMoonAntCorpsePickupActor::PlaceAtSettledGroundLocation()
 {
-	if (AJTSPlanetAnchor* const Planet = bUsingRealPlanetSurfaceForPop ? GetRealSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetRealSurfacePlanet())
 	{
 		FJTSPlanetSurfaceFrame SurfaceFrame;
 		if (Planet->GetSurfaceFrameAt(SettledGroundLocation, GetActorForwardVector(), SurfaceFrame))
@@ -611,29 +501,6 @@ void AJTSMoonAntCorpsePickupActor::PlaceAtSettledGroundLocation()
 				nullptr,
 				ETeleportType::TeleportPhysics);
 		}
-		return;
-	}
-
-	SetActorLocation(
-		FVector(
-			SettledGroundLocation.X,
-			SettledGroundLocation.Y,
-			SettledGroundLocation.Z + GroundSupportHeight),
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
-
-	if (UJTSMoonWrappedActorComponent* const MoonWrapped = GetMoonWrappedActorComponent(); IsValid(MoonWrapped))
-	{
-		if (bUsingMoonWrapForPop)
-		{
-			MoonWrapped->SetLogicalPosition2D(SettledLogicalPosition);
-			MoonWrapped->RefreshPhysicalImage();
-		}
-		else
-		{
-			UpdateMoonWrappedLogicalPosition();
-		}
 	}
 }
 
@@ -646,7 +513,7 @@ void AJTSMoonAntCorpsePickupActor::UpdateCorpseVisualTransform(float PopAlpha)
 	}
 
 	const float ClampedAlpha = FMath::Clamp(PopAlpha, 0.0f, 1.0f);
-	if (AJTSPlanetAnchor* const Planet = bUsingRealPlanetSurfaceForPop ? GetRealSurfacePlanet() : nullptr)
+	if (AJTSPlanetAnchor* const Planet = GetRealSurfacePlanet())
 	{
 		FJTSPlanetSurfaceHit SurfaceHit;
 		const FVector InterpolatedSurfacePoint = FMath::Lerp(
@@ -671,76 +538,8 @@ void AJTSMoonAntCorpsePickupActor::UpdateCorpseVisualTransform(float PopAlpha)
 		return;
 	}
 
-	if (UJTSMoonWrappedActorComponent* const MoonWrapped = GetMoonWrappedActorComponent(); IsValid(MoonWrapped) && MoonWrapped->IsMoonWrappingEnabled())
-	{
-		MoonWrapped->RefreshPhysicalImage();
-	}
-	const FVector RootLocation = GetActorLocation();
-	FVector VisualPhysicalLocation = RootLocation + GetPopVisualWorldOffset(ClampedAlpha);
-	FVector MoonBendWorldOffset = FVector::ZeroVector;
-
-	UWorld* const World = GetWorld();
-	// The nearest-image/pop bend is purely local mesh presentation; pickup authority remains server-side.
-	const APawn* const LocalPawn = GetLocalPresentationPawn(World);
-	if (World != nullptr)
-	{
-		const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-		if (bUsingMoonWrapForPop && IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-		{
-			const FVector2D StartDelta = MoonWrap->ShortestWrappedDelta2D(SettledLogicalPosition, DeathLogicalPosition);
-			const FVector2D VisualLogicalPosition = MoonWrap->CanonicalizePosition2D(
-				SettledLogicalPosition + StartDelta * (1.0f - ClampedAlpha));
-			const FVector2D ImageAnchor = IsValid(LocalPawn)
-				? FVector2D(LocalPawn->GetActorLocation().X, LocalPawn->GetActorLocation().Y)
-				: FVector2D(RootLocation.X, RootLocation.Y);
-			const FVector2D VisualPhysicalPosition = MoonWrap->GetNearestPhysicalImage(ImageAnchor, VisualLogicalPosition);
-			VisualPhysicalLocation.X = VisualPhysicalPosition.X;
-			VisualPhysicalLocation.Y = VisualPhysicalPosition.Y;
-		}
-
-		if (!bVisualUsesMaterialMoonBend && IsValid(LocalPawn) && IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-		{
-			MoonBendWorldOffset = MoonWrap->GetMoonVisualWorldPosition(VisualPhysicalLocation, LocalPawn->GetActorLocation())
-				- VisualPhysicalLocation;
-		}
-	}
-
-	FVector VisualRelativeWorldOffset = VisualPhysicalLocation - RootLocation + MoonBendWorldOffset;
-	if (const USceneComponent* const RootSceneComponent = GetRootComponent(); IsValid(RootSceneComponent))
-	{
-		VisualRelativeWorldOffset = RootSceneComponent->GetComponentTransform().InverseTransformVector(VisualRelativeWorldOffset);
-	}
-
-	ActiveVisual->SetRelativeLocation(CorpseBaseRelativeLocation + VisualRelativeWorldOffset);
+	ActiveVisual->SetRelativeLocation(CorpseBaseRelativeLocation);
 	ActiveVisual->SetRelativeRotation(CorpseBaseRelativeRotation);
-}
-
-FVector AJTSMoonAntCorpsePickupActor::GetPopVisualWorldOffset(float PopAlpha) const
-{
-	const float ClampedAlpha = FMath::Clamp(PopAlpha, 0.0f, 1.0f);
-	FVector PopOffset = FVector::ZeroVector;
-	if (bUsingMoonWrapForPop)
-	{
-		if (const UWorld* const World = GetWorld())
-		{
-			if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>(); IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
-			{
-				const FVector2D StartDelta = MoonWrap->ShortestWrappedDelta2D(SettledLogicalPosition, DeathLogicalPosition);
-				PopOffset.X = StartDelta.X * (1.0f - ClampedAlpha);
-				PopOffset.Y = StartDelta.Y * (1.0f - ClampedAlpha);
-			}
-		}
-	}
-	else
-	{
-		PopOffset.X = (DeathGroundLocation.X - SettledGroundLocation.X) * (1.0f - ClampedAlpha);
-		PopOffset.Y = (DeathGroundLocation.Y - SettledGroundLocation.Y) * (1.0f - ClampedAlpha);
-	}
-
-	const float LinearGroundOffset = (DeathGroundLocation.Z - SettledGroundLocation.Z) * (1.0f - ClampedAlpha);
-	const float ArcOffset = 4.0f * FMath::Max(0.0f, CorpsePopHeight) * ClampedAlpha * (1.0f - ClampedAlpha);
-	PopOffset.Z = LinearGroundOffset + ArcOffset;
-	return PopOffset;
 }
 
 AJTSPlanetAnchor* AJTSMoonAntCorpsePickupActor::GetRealSurfacePlanet() const
@@ -752,7 +551,6 @@ AJTSPlanetAnchor* AJTSMoonAntCorpsePickupActor::GetRealSurfacePlanet() const
 
 	if (const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
 		IsValid(SurfaceController)
-		&& SurfaceController->OwnsSurfaceActor(this)
 		&& SurfaceController->IsUsingRealPlanetSurfaceGameplay())
 	{
 		return SurfaceController->GetOwningPlanet();

@@ -5,6 +5,7 @@
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SceneComponent.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
@@ -291,22 +292,10 @@ bool AJTSPlanetLandingManager::StartLandingSequence(APlayerController* PlayerCon
 		return false;
 	}
 
-	AJTSCharacter* Character = nullptr;
-	const bool bCharacterSpawned = SpawnAndConfigureCharacter(PlayerController, Planet, PlayerSpawnTransform, Character);
-	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Character Spawn Success: %s Planet=%s Spawn Location=%s Character=%s"),
-		bCharacterSpawned ? TEXT("TRUE") : TEXT("FALSE"),
-		*Planet->GetPlanetId().ToString(),
-		*PlayerSpawnTransform.GetLocation().ToCompactString(),
-		*GetNameSafe(Character));
-	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Gravity Enabled: %s Planet=%s Character=%s"),
-		bCharacterSpawned && Character->IsPlanetGravityEnabled() ? TEXT("TRUE") : TEXT("FALSE"),
-		*Planet->GetPlanetId().ToString(),
-		*GetNameSafe(Character));
-
 	AJTSSpacecraftActor* const Spacecraft = FindOrSpawnArrivalSpacecraft(
 		Planet,
 		SpacecraftSpawnTransform,
-		Character != nullptr ? Character->GetActorLocation() : PlayerSpawnTransform.GetLocation());
+		PlayerSpawnTransform.GetLocation());
 	const bool bSpacecraftSpawned = IsValid(Spacecraft);
 	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Spacecraft Spawn Success: %s Planet=%s Requested Location=%s Final Location=%s Grounded=%s Spacecraft=%s"),
 		bSpacecraftSpawned ? TEXT("TRUE") : TEXT("FALSE"),
@@ -329,15 +318,43 @@ bool AJTSPlanetLandingManager::StartLandingSequence(APlayerController* PlayerCon
 			TEXT("InitialSpacecraftSpawn"));
 	}
 
-	if (bSpacecraftSpawned)
+	if (!bSpacecraftSpawned || !Spacecraft->IsGroundedOnPlanet())
+	{
+		UE_LOG(LogJTSPlanetLanding, Error, TEXT("Landing Start failed: Planet=%s has no grounded arrival spacecraft for safe player placement."),
+			*Planet->GetPlanetId().ToString());
+		return false;
+	}
+
+	FJTSPlayerRespawnTransformResult PlayerRespawnTransform;
+	if (!FindPlayerRespawnTransform(Spacecraft, PlayerRespawnTransform, GetPlayerSpawnSlot(PlayerController))
+		|| !PlayerRespawnTransform.bIsValid)
+	{
+		UE_LOG(LogJTSPlanetLanding, Error, TEXT("Landing Start failed: Planet=%s could not find a safe exterior spawn beside Spacecraft=%s."),
+			*Planet->GetPlanetId().ToString(), *GetNameSafe(Spacecraft));
+		return false;
+	}
+
+	AJTSCharacter* Character = nullptr;
+	const bool bCharacterSpawned = SpawnAndConfigureCharacter(PlayerController, Planet, PlayerRespawnTransform.Transform, Character);
+	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Character Spawn Success: %s Planet=%s Spawn Location=%s Character=%s Source=%d"),
+		bCharacterSpawned ? TEXT("TRUE") : TEXT("FALSE"),
+		*Planet->GetPlanetId().ToString(),
+		*PlayerRespawnTransform.Transform.GetLocation().ToCompactString(),
+		*GetNameSafe(Character),
+		static_cast<int32>(PlayerRespawnTransform.Source));
+	UE_LOG(LogJTSPlanetLanding, Log, TEXT("Gravity Enabled: %s Planet=%s Character=%s"),
+		bCharacterSpawned && Character->IsPlanetGravityEnabled() ? TEXT("TRUE") : TEXT("FALSE"),
+		*Planet->GetPlanetId().ToString(),
+		*GetNameSafe(Character));
+
+	if (bCharacterSpawned)
 	{
 		RegisterPlayerSpacecraft(PlayerController, Spacecraft);
 	}
 
-	// The two spawns are intentionally independent, but the arrival sequence is complete only once
-	// both runtime actors exist. Surface gameplay must start from the completed event rather than
-	// player-only polling, so its controller receives one coherent context.
-	const bool bArrivalCompleted = bCharacterSpawned && bSpacecraftSpawned;
+	// Arrival is complete only after the landed craft exists and the character is placed at a
+	// clearance-tested exterior point. This prevents replication from ever showing a top-of-ship spawn.
+	const bool bArrivalCompleted = bCharacterSpawned;
 	if (bArrivalCompleted)
 	{
 		InitialLandingSequenceCompletedDelegate.Broadcast(PlayerController, Planet, Character, Spacecraft);
@@ -409,7 +426,8 @@ bool AJTSPlanetLandingManager::RequestLanding(
 
 bool AJTSPlanetLandingManager::FindPlayerRespawnTransform(
 	const AJTSSpacecraftActor* Spacecraft,
-	FJTSPlayerRespawnTransformResult& OutResult) const
+	FJTSPlayerRespawnTransformResult& OutResult,
+	int32 PreferredSlot) const
 {
 	OutResult = FJTSPlayerRespawnTransformResult();
 	if (!IsValid(Spacecraft) || !Spacecraft->IsLanded())
@@ -423,99 +441,10 @@ bool AJTSPlanetLandingManager::FindPlayerRespawnTransform(
 		return false;
 	}
 
-	const FVector SpacecraftLocation = Spacecraft->GetActorLocation();
-	const float SearchRadius = Spacecraft->GetPlayerRespawnSearchRadius();
-	const TArray<AJTSPlanetLandingSite*> LandingSites = GetLandingSitesForPlanet(Planet);
-	TArray<FTransform> RandomCandidates;
-	for (int32 AttemptIndex = 0; AttemptIndex < FMath::Max(1, RespawnRandomAttempts); ++AttemptIndex)
-	{
-		if (LandingSites.IsEmpty())
-		{
-			break;
-		}
-
-		AJTSPlanetLandingSite* const LandingSite = LandingSites[FMath::RandRange(0, LandingSites.Num() - 1)];
-		if (!IsValid(LandingSite) || !LandingSite->IsLandingEnabled())
-		{
-			continue;
-		}
-
-		FVector AreaPoint;
-		if (!LandingSite->FindRandomValidRespawnPoint(SpacecraftLocation, SearchRadius, AreaPoint)
-			|| !IsLocationInsideLandingArea(Planet, AreaPoint))
-		{
-			continue;
-		}
-
-		FTransform CandidateTransform;
-		if (BuildRespawnTransformAtAreaPoint(Spacecraft, Planet, AreaPoint, CandidateTransform, true))
-		{
-			RandomCandidates.Add(CandidateTransform);
-			if (RandomCandidates.Num() >= 8)
-			{
-				break;
-			}
-		}
-	}
-
-	if (!RandomCandidates.IsEmpty())
+	if (BuildSafeSpacecraftExitTransform(Spacecraft, Planet, PreferredSlot, OutResult.Transform))
 	{
 		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::LandingAreaRandom;
-		OutResult.Transform = RandomCandidates[FMath::RandRange(0, RandomCandidates.Num() - 1)];
-		return true;
-	}
-
-	bool bFoundNearestPoint = false;
-	float NearestDistanceSquared = TNumericLimits<float>::Max();
-	FTransform NearestTransform;
-	for (AJTSPlanetLandingSite* const LandingSite : LandingSites)
-	{
-		if (!IsValid(LandingSite) || !LandingSite->IsLandingEnabled())
-		{
-			continue;
-		}
-
-		FVector AreaPoint;
-		if (!LandingSite->FindClosestPointInLandingArea(SpacecraftLocation, AreaPoint))
-		{
-			continue;
-		}
-
-		FTransform CandidateTransform;
-		if (!BuildRespawnTransformAtAreaPoint(Spacecraft, Planet, AreaPoint, CandidateTransform, false))
-		{
-			continue;
-		}
-
-		const float DistanceSquared = FVector::DistSquared(SpacecraftLocation, CandidateTransform.GetLocation());
-		if (DistanceSquared < NearestDistanceSquared)
-		{
-			NearestDistanceSquared = DistanceSquared;
-			NearestTransform = CandidateTransform;
-			bFoundNearestPoint = true;
-		}
-	}
-
-	if (bFoundNearestPoint)
-	{
-		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::LandingAreaNearest;
-		OutResult.Transform = NearestTransform;
-		return true;
-	}
-
-	if (Spacecraft->GetTopRespawnTransform(OutResult.Transform))
-	{
-		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::SpacecraftTop;
-		return true;
-	}
-
-	if (Spacecraft->GetExitRespawnTransform(OutResult.Transform))
-	{
-		OutResult.bIsValid = true;
-		OutResult.Source = EJTSRespawnTransformSource::SpacecraftExit;
+		OutResult.Source = EJTSRespawnTransformSource::SpacecraftExitSafe;
 		return true;
 	}
 
@@ -537,7 +466,8 @@ bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController
 	}
 
 	FJTSPlayerRespawnTransformResult RespawnResult;
-	if (!Spacecraft->GetPlayerRespawnTransform(RespawnResult) || !RespawnResult.bIsValid)
+	if (!FindPlayerRespawnTransform(Spacecraft, RespawnResult, GetPlayerSpawnSlot(PlayerController))
+		|| !RespawnResult.bIsValid)
 	{
 		UE_LOG(LogJTSPlanetLanding, Warning, TEXT("Player Respawn failed: PlayerController=%s Spacecraft=%s Reason=NoRespawnTransform"),
 			*GetNameSafe(PlayerController), *GetNameSafe(Spacecraft));
@@ -830,6 +760,113 @@ bool AJTSPlanetLandingManager::BuildRespawnTransformAtAreaPoint(
 	return !bRequireClearance || IsRespawnTransformClear(Spacecraft, OutTransform);
 }
 
+bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
+	const AJTSSpacecraftActor* Spacecraft,
+	AJTSPlanetAnchor* Planet,
+	int32 PreferredSlot,
+	FTransform& OutTransform) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(Planet))
+	{
+		return false;
+	}
+
+	const FVector SpacecraftLocation = Spacecraft->GetActorLocation();
+	const FVector SurfaceUp = Planet->GetRadialUpVector(SpacecraftLocation).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero())
+	{
+		return false;
+	}
+
+	FVector PreferredDirection;
+	float ExitDistance = 0.0f;
+	if (const USceneComponent* const ExitPoint = Spacecraft->GetExitPoint())
+	{
+		const FVector ExitOffset = FVector::VectorPlaneProject(ExitPoint->GetComponentLocation() - SpacecraftLocation, SurfaceUp);
+		ExitDistance = ExitOffset.Size();
+		PreferredDirection = ExitOffset.GetSafeNormal();
+	}
+	if (PreferredDirection.IsNearlyZero())
+	{
+		PreferredDirection = FVector::VectorPlaneProject(-Spacecraft->GetActorRightVector(), SurfaceUp).GetSafeNormal();
+	}
+	if (PreferredDirection.IsNearlyZero())
+	{
+		PreferredDirection = MakeTangentForward(Spacecraft->GetActorForwardVector(), SurfaceUp);
+	}
+
+	const float SearchRadius = FMath::Max(200.0f, Spacecraft->GetPlayerRespawnSearchRadius());
+	// The boarding trigger is deliberately generous so players can interact with a large craft.
+	// It is not hull geometry and must never push a spawn outside a small, authored landing zone.
+	// Use the airlock offset as the preferred safe radius and let the real collision test reject
+	// any candidate still inside the physical ship.
+	const float MinimumExteriorRadius = FMath::Max(
+		180.0f,
+		FMath::Max(
+			ExitDistance + Spacecraft->GetPlayerRespawnCapsuleRadius() + 55.0f,
+			Spacecraft->GetPlayerRespawnCapsuleRadius() * 2.0f + 160.0f));
+	const float BaseRadius = FMath::Min(SearchRadius, MinimumExteriorRadius);
+	constexpr int32 DirectionCount = 12;
+	constexpr int32 RingCount = 6;
+	const int32 SafePreferredSlot = FMath::Max(0, PreferredSlot);
+	const auto FindCandidate = [this, Spacecraft, Planet, SpacecraftLocation, SurfaceUp, PreferredDirection, SearchRadius, BaseRadius, SafePreferredSlot](
+		const bool bRequireLandingArea,
+		FTransform& CandidateOutTransform)
+	{
+		float PreviousRadius = -1.0f;
+		for (int32 RingIndex = 0; RingIndex < RingCount; ++RingIndex)
+		{
+			const float Radius = FMath::Min(SearchRadius, BaseRadius + RingIndex * 120.0f);
+			if (FMath::IsNearlyEqual(Radius, PreviousRadius))
+			{
+				continue;
+			}
+			PreviousRadius = Radius;
+
+			for (int32 StepIndex = 0; StepIndex < DirectionCount; ++StepIndex)
+			{
+				const int32 DirectionIndex = (SafePreferredSlot + StepIndex) % DirectionCount;
+				const float Angle = 2.0f * PI * static_cast<float>(DirectionIndex) / static_cast<float>(DirectionCount);
+				const FVector CandidateDirection = FQuat(SurfaceUp, Angle).RotateVector(PreferredDirection).GetSafeNormal();
+				const FVector CandidateAreaPoint = SpacecraftLocation + CandidateDirection * Radius;
+
+				FTransform CandidateTransform;
+				if (!BuildRespawnTransformAtAreaPoint(Spacecraft, Planet, CandidateAreaPoint, CandidateTransform, true))
+				{
+					continue;
+				}
+
+				const FVector CandidateSurfacePoint = CandidateTransform.GetLocation()
+					- CandidateTransform.GetUnitAxis(EAxis::Z).GetSafeNormal()
+						* (Spacecraft->GetPlayerRespawnCapsuleHalfHeight() + Spacecraft->GetPlayerRespawnClearance());
+				if (!bRequireLandingArea || IsLocationInsideLandingArea(Planet, CandidateSurfacePoint))
+				{
+					CandidateOutTransform = CandidateTransform;
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	if (FindCandidate(true, OutTransform))
+	{
+		return true;
+	}
+
+	// A landing site constrains the ship, not a player's capsule. An author may reasonably make the
+	// marked footprint only as wide as the craft. Preserve the no-overlap guarantee by falling back
+	// to a collision-checked airlock-side position rather than failing the entire SpaceWorld entry.
+	if (FindCandidate(false, OutTransform))
+	{
+		UE_LOG(LogJTSPlanetLanding, Log, TEXT("Landing exit used safe exterior fallback: Spacecraft=%s Planet=%s"),
+			*GetNameSafe(Spacecraft), *GetNameSafe(Planet));
+		return true;
+	}
+
+	return false;
+}
+
 bool AJTSPlanetLandingManager::IsRespawnTransformClear(const AJTSSpacecraftActor* Spacecraft, const FTransform& Transform) const
 {
 	UWorld* const World = GetWorld();
@@ -838,16 +875,43 @@ bool AJTSPlanetLandingManager::IsRespawnTransformClear(const AJTSSpacecraftActor
 		return false;
 	}
 
-	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSLandingRespawnPlacement), false, Spacecraft);
+	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSLandingRespawnPlacement), false);
 	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(
 		Spacecraft->GetPlayerRespawnCapsuleRadius(),
 		Spacecraft->GetPlayerRespawnCapsuleHalfHeight());
-	return !World->OverlapBlockingTestByChannel(
+	const bool bHitsShipOrWorld = World->OverlapBlockingTestByChannel(
+		Transform.GetLocation(),
+		Transform.GetRotation(),
+		ECC_Visibility,
+		CapsuleShape,
+		PlacementParams);
+	const bool bHitsPawn = World->OverlapBlockingTestByChannel(
 		Transform.GetLocation(),
 		Transform.GetRotation(),
 		ECC_Pawn,
 		CapsuleShape,
 		PlacementParams);
+	return !bHitsShipOrWorld && !bHitsPawn;
+}
+
+int32 AJTSPlanetLandingManager::GetPlayerSpawnSlot(const APlayerController* PlayerController) const
+{
+	const UWorld* const World = GetWorld();
+	if (!IsValid(PlayerController) || World == nullptr)
+	{
+		return 0;
+	}
+
+	int32 SlotIndex = 0;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It, ++SlotIndex)
+	{
+		if (It->Get() == PlayerController)
+		{
+			return SlotIndex;
+		}
+	}
+
+	return 0;
 }
 
 bool AJTSPlanetLandingManager::SpawnAndConfigureCharacter(

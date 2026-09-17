@@ -10,7 +10,6 @@ import unreal
 ITEM_PATH = "/Game/Space/Data/Items"
 UI_PATH = "/Game/Space/UI"
 SPACE_WORLD_PATH = "/Game/Space/Maps/L_SpaceWorld"
-FAKE_MOON_MATERIAL_PATH = "/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop"
 
 HOLDABLE = 1 << 0
 WEARABLE = 1 << 1
@@ -37,27 +36,6 @@ def text(value):
 
 def asset_path(name):
     return ITEM_PATH + "/" + name
-
-
-def ensure_fake_moon_placeholder_material():
-    """Supply the existing prototype actors with a valid project-local material.
-
-    The prior levels referenced this path but did not contain an asset there,
-    making every resource/pickup CDO emit an editor startup error.  A simple
-    material is intentionally adequate for this v1 placeholder pass and can be
-    art-replaced later without touching game code.
-    """
-    if unreal.EditorAssetLibrary.does_asset_exist(FAKE_MOON_MATERIAL_PATH):
-        return
-
-    factory = unreal.MaterialFactoryNew()
-    material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-        "MI_JTSFakeMoon_Prop", "/Game/Space/Materials/FakeMoon", unreal.Material, factory)
-    if not material:
-        raise RuntimeError("Could not create FakeMoon placeholder material")
-    if not unreal.EditorAssetLibrary.save_loaded_asset(material, only_if_is_dirty=False):
-        raise RuntimeError("Could not save FakeMoon placeholder material")
-    unreal.log("JTS_SUPPLY_ASSETS: saved " + material.get_path_name())
 
 
 def get_or_create_item_asset(name):
@@ -229,8 +207,6 @@ definitions = {
         "capabilities": HOLDABLE, "max_stack": 1, "combat_damage": 1.0,
     },
 }
-
-ensure_fake_moon_placeholder_material()
 
 for asset_name, definition in definitions.items():
     apply_definition(asset_name, definition)

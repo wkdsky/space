@@ -30,7 +30,7 @@ enum class EJTSSpaceTravelState : uint8
 
 /**
  * Persistent-world coordinator for real gameplay planets, current travel state, and optional
- * planet content streaming. It deliberately does not know Moon-only gameplay, Fake Moon wrapping,
+ * planet content streaming. It deliberately does not know Moon-only gameplay, surface presentation,
  * or AJTSMoonSurfaceController.
  */
 UCLASS(BlueprintType)

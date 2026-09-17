@@ -2,52 +2,27 @@
 
 #include "space/World/JTSMoonSurfaceController.h"
 
-#include "CollisionQueryParams.h"
 #include "Engine/Level.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "HAL/PlatformTime.h"
-#include "Kismet/GameplayStatics.h"
 #include "Math/RandomStream.h"
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
-#include "space/Modes/JTSMoonGameMode.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Ships/JTSSpacecraftActor.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonCorpseActor.h"
 #include "space/World/JTSMoonSurfaceGameplayData.h"
 #include "space/World/JTSMoonResourceSpawner.h"
-#include "space/World/JTSMoonWorldActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
-#include "space/World/JTSMoonAntActor.h"
 #include "space/World/JTSMoonAntNestActor.h"
 
 namespace
 {
 	constexpr double SecondsPerMinute = 60.0;
-
-	template <typename TActorType>
-	void GetSurfaceActors(const ULevel* SurfaceLevel, TArray<TActorType*>& OutActors)
-	{
-		OutActors.Reset();
-		if (!IsValid(SurfaceLevel))
-		{
-			return;
-		}
-
-		for (AActor* const Actor : SurfaceLevel->Actors)
-		{
-			if (TActorType* const TypedActor = Cast<TActorType>(Actor); IsValid(TypedActor))
-			{
-				OutActors.Add(TypedActor);
-			}
-		}
-	}
 }
 
 AJTSMoonSurfaceController::AJTSMoonSurfaceController()
@@ -55,7 +30,6 @@ AJTSMoonSurfaceController::AJTSMoonSurfaceController()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	bAlwaysRelevant = true;
-	MoonGameplaySettingsClass = AJTSMoonGameMode::StaticClass();
 	MoonCorpseClass = AJTSMoonCorpseActor::StaticClass();
 }
 
@@ -64,16 +38,6 @@ AJTSMoonSurfaceController* AJTSMoonSurfaceController::FindMoonSurfaceController(
 	FName RequestedPlanetId)
 {
 	UWorld* const World = WorldContextObject != nullptr ? WorldContextObject->GetWorld() : nullptr;
-	if (const AJTSMoonGameMode* const LegacyGameMode = World != nullptr ? World->GetAuthGameMode<AJTSMoonGameMode>() : nullptr)
-	{
-		AJTSMoonSurfaceController* const Controller = LegacyGameMode->GetMoonSurfaceController();
-		if (IsValid(Controller)
-			&& (RequestedPlanetId.IsNone() || Controller->GetPlanetId() == RequestedPlanetId))
-		{
-			return Controller;
-		}
-	}
-
 	if (World == nullptr)
 	{
 		return nullptr;
@@ -126,7 +90,7 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay(const FJTSSurfaceGamep
 	{
 		RegisterSurfacePlayer(Player);
 	}
-	return InitializeSurfaceGameplay();
+	return InitializeConfiguredSurfaceGameplay();
 }
 
 void AJTSMoonSurfaceController::RegisterSurfacePlayer(AJTSCharacter* Player)
@@ -155,14 +119,12 @@ void AJTSMoonSurfaceController::ShutdownSurfaceGameplay()
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
-		World->GetTimerManager().ClearTimer(SurfaceInitializationTimerHandle);
 	}
 
 	if (HasAuthority())
 	{
 		ClearGeneratedMoonAntNests();
 	}
-	bSurfaceGameplayInitializationRequested = false;
 	bSurfaceGameplayInitialized = false;
 	bMissingSpacecraftLogged = false;
 	FoodConsumptionAccumulator = 0.0;
@@ -174,22 +136,6 @@ bool AJTSMoonSurfaceController::IsSurfaceGameplayReady() const
 	return IsSurfaceGameplayInitialized();
 }
 
-void AJTSMoonSurfaceController::ConfigureLegacyRuntime(AJTSMoonGameMode* InLegacyGameMode)
-{
-	bUsingRealPlanetSurfaceGameplay = false;
-	ActiveMoonGameplayData = nullptr;
-	LegacySettingsSource = InLegacyGameMode;
-	if (IsValid(InLegacyGameMode))
-	{
-		MoonGameplaySettingsClass = InLegacyGameMode->GetClass();
-	}
-
-	if (UJTSMoonWrapSubsystem* const MoonWrap = GetWorld() != nullptr ? GetWorld()->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr)
-	{
-		MoonWrap->RefreshConfiguration();
-	}
-}
-
 void AJTSMoonSurfaceController::SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet)
 {
 	OwningPlanet = InOwningPlanet;
@@ -197,49 +143,17 @@ void AJTSMoonSurfaceController::SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet
 	{
 		PlanetId = InOwningPlanet->GetPlanetId();
 	}
-
-	if (UJTSMoonWrapSubsystem* const MoonWrap = GetWorld() != nullptr ? GetWorld()->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr)
-	{
-		MoonWrap->RefreshConfiguration();
-	}
-}
-
-void AJTSMoonSurfaceController::SetMoonGameplaySettingsClass(TSubclassOf<AJTSMoonGameMode> InMoonGameplaySettingsClass)
-{
-	if (!LegacySettingsSource.IsValid() && InMoonGameplaySettingsClass != nullptr)
-	{
-		MoonGameplaySettingsClass = InMoonGameplaySettingsClass;
-	}
 }
 
 const IJTSMoonSurfaceGameplaySettings* AJTSMoonSurfaceController::GetMoonSettings() const
 {
-	if (bUsingRealPlanetSurfaceGameplay)
+	if (IsValid(ActiveMoonGameplayData))
 	{
-		if (IsValid(ActiveMoonGameplayData))
-		{
-			return static_cast<const IJTSMoonSurfaceGameplaySettings*>(ActiveMoonGameplayData.Get());
-		}
-		if (IsValid(MoonGameplayData))
-		{
-			return static_cast<const IJTSMoonSurfaceGameplaySettings*>(MoonGameplayData.Get());
-		}
-
-		return nullptr;
+		return static_cast<const IJTSMoonSurfaceGameplaySettings*>(ActiveMoonGameplayData.Get());
 	}
 
-	if (LegacySettingsSource.IsValid())
-	{
-		return static_cast<const IJTSMoonSurfaceGameplaySettings*>(LegacySettingsSource.Get());
-	}
-
-	TSubclassOf<AJTSMoonGameMode> SettingsClass = MoonGameplaySettingsClass;
-	if (SettingsClass == nullptr)
-	{
-		SettingsClass = AJTSMoonGameMode::StaticClass();
-	}
-	return SettingsClass != nullptr
-		? static_cast<const IJTSMoonSurfaceGameplaySettings*>(SettingsClass->GetDefaultObject<AJTSMoonGameMode>())
+	return IsValid(MoonGameplayData)
+		? static_cast<const IJTSMoonSurfaceGameplaySettings*>(MoonGameplayData.Get())
 		: nullptr;
 }
 
@@ -250,7 +164,7 @@ const UJTSMoonSurfaceGameplayData* AJTSMoonSurfaceController::GetMoonGameplayDat
 		return ActiveMoonGameplayData.Get();
 	}
 
-	return bUsingRealPlanetSurfaceGameplay && IsValid(MoonGameplayData) ? MoonGameplayData.Get() : nullptr;
+	return IsValid(MoonGameplayData) ? MoonGameplayData.Get() : nullptr;
 }
 
 AJTSPlanetAnchor* AJTSMoonSurfaceController::GetOwningPlanet() const
@@ -260,7 +174,7 @@ AJTSPlanetAnchor* AJTSMoonSurfaceController::GetOwningPlanet() const
 
 bool AJTSMoonSurfaceController::IsUsingRealPlanetSurfaceGameplay() const
 {
-	return bUsingRealPlanetSurfaceGameplay && OwningPlanet.IsValid();
+	return OwningPlanet.IsValid();
 }
 
 AJTSSpacecraftActor* AJTSMoonSurfaceController::GetSpacecraft() const
@@ -269,30 +183,7 @@ AJTSSpacecraftActor* AJTSMoonSurfaceController::GetSpacecraft() const
 	{
 		return CachedSpacecraft.Get();
 	}
-	if (IsUsingRealPlanetSurfaceGameplay())
-	{
-		return nullptr;
-	}
-
-	TArray<AJTSSpacecraftActor*> SurfaceSpacecraft;
-	GetSurfaceActors(GetSurfaceLevel(), SurfaceSpacecraft);
-	if (SurfaceSpacecraft.IsEmpty())
-	{
-		return nullptr;
-	}
-
-	SurfaceSpacecraft.Sort([](const AJTSSpacecraftActor& Left, const AJTSSpacecraftActor& Right)
-	{
-		return Left.GetPathName() < Right.GetPathName();
-	});
-	if (SurfaceSpacecraft.Num() > 1)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has %d spacecraft actors; using %s."),
-			*PlanetId.ToString(), SurfaceSpacecraft.Num(), *GetNameSafe(SurfaceSpacecraft[0]));
-	}
-
-	CachedSpacecraft = SurfaceSpacecraft[0];
-	return CachedSpacecraft.Get();
+	return nullptr;
 }
 
 void AJTSMoonSurfaceController::SetSurfaceSpacecraft(AJTSSpacecraftActor* InSpacecraft)
@@ -305,8 +196,6 @@ void AJTSMoonSurfaceController::ApplySurfaceGameplayContext(const FJTSSurfaceGam
 {
 	OwningPlanet = Context.Planet;
 	PlanetId = Context.Planet->GetPlanetId();
-	bUsingRealPlanetSurfaceGameplay = true;
-	LegacySettingsSource.Reset();
 	ActiveMoonGameplayData = Cast<UJTSMoonSurfaceGameplayData>(Context.GameplayData);
 
 	SetSurfaceSpacecraft(Context.Spacecraft);
@@ -399,38 +288,6 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnConfiguredCorpseAtPlanetSur
 	return SpawnCorpseAtPlanetSurfaceAnchor(CorpseSurfaceAnchor.Get());
 }
 
-AJTSMoonWorldActor* AJTSMoonSurfaceController::GetMoonWorldActor() const
-{
-	if (IsValid(MoonWorldActor))
-	{
-		return MoonWorldActor.Get();
-	}
-	if (CachedMoonWorld.IsValid())
-	{
-		return CachedMoonWorld.Get();
-	}
-
-	TArray<AJTSMoonWorldActor*> SurfaceMoonWorldActors;
-	GetSurfaceActors(GetSurfaceLevel(), SurfaceMoonWorldActors);
-	if (SurfaceMoonWorldActors.IsEmpty())
-	{
-		return nullptr;
-	}
-
-	SurfaceMoonWorldActors.Sort([](const AJTSMoonWorldActor& Left, const AJTSMoonWorldActor& Right)
-	{
-		return Left.GetPathName() < Right.GetPathName();
-	});
-	if (SurfaceMoonWorldActors.Num() > 1)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has %d JTSMoonWorldActor instances; using %s."),
-			*PlanetId.ToString(), SurfaceMoonWorldActors.Num(), *GetNameSafe(SurfaceMoonWorldActors[0]));
-	}
-
-	CachedMoonWorld = SurfaceMoonWorldActors[0];
-	return CachedMoonWorld.Get();
-}
-
 bool AJTSMoonSurfaceController::OwnsSurfaceActor(const AActor* Candidate) const
 {
 	if (!IsValid(Candidate))
@@ -438,21 +295,6 @@ bool AJTSMoonSurfaceController::OwnsSurfaceActor(const AActor* Candidate) const
 		return false;
 	}
 	if (Candidate == this)
-	{
-		return true;
-	}
-
-	// SpaceWorld is persistent and can contain more than one planet. In that route level ownership is
-	// deliberately too broad; actors are explicitly registered as part of the current surface context.
-	if (IsUsingRealPlanetSurfaceGameplay())
-	{
-		return RegisteredSurfaceRuntimeActors.ContainsByPredicate([Candidate](const TWeakObjectPtr<AActor>& RegisteredActor)
-		{
-			return RegisteredActor.Get() == Candidate;
-		});
-	}
-
-	if (Candidate->GetLevel() == GetSurfaceLevel())
 	{
 		return true;
 	}
@@ -491,12 +333,6 @@ FTransform AJTSMoonSurfaceController::GetSurfaceSpacecraftSpawnTransform(const F
 void AJTSMoonSurfaceController::BeginPlay()
 {
 	Super::BeginPlay();
-
-	if (UJTSMoonWrapSubsystem* const MoonWrap = GetWorld() != nullptr ? GetWorld()->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr)
-	{
-		MoonWrap->RefreshConfiguration();
-	}
-
 }
 
 void AJTSMoonSurfaceController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -504,44 +340,22 @@ void AJTSMoonSurfaceController::EndPlay(const EEndPlayReason::Type EndPlayReason
 	ShutdownSurfaceGameplay();
 	CachedSpacecraft.Reset();
 	ActivePlayers.Reset();
-	CachedMoonWorld.Reset();
 	LevelMoonCorpseLandmark.Reset();
 	RealSurfaceMoonCorpse.Reset();
 	CachedLevelMoonCorpseLandmarks.Reset();
 	RegisteredSurfaceRuntimeActors.Reset();
 	bLevelCorpseLandmarkSearchCompleted = false;
 	ActiveMoonGameplayData = nullptr;
-	bUsingRealPlanetSurfaceGameplay = false;
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void AJTSMoonSurfaceController::RequestSurfaceGameplayInitialization()
-{
-	if (bSurfaceGameplayInitialized || bSurfaceGameplayInitializationRequested)
-	{
-		return;
-	}
-
-	bSurfaceGameplayInitializationRequested = true;
-	if (UWorld* const World = GetWorld())
-	{
-		World->GetTimerManager().SetTimerForNextTick(this, &AJTSMoonSurfaceController::AttemptSurfaceGameplayInitialization);
-	}
-}
-
-void AJTSMoonSurfaceController::AttemptSurfaceGameplayInitialization()
-{
-	InitializeSurfaceGameplay();
-}
-
-bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
+bool AJTSMoonSurfaceController::InitializeConfiguredSurfaceGameplay()
 {
 	if (!HasAuthority())
 	{
 		return false;
 	}
-	bSurfaceGameplayInitializationRequested = false;
 	if (bSurfaceGameplayInitialized)
 	{
 		return true;
@@ -549,29 +363,19 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 
 	UWorld* const World = GetWorld();
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
-	const bool bRequiresLegacyMoon = !IsUsingRealPlanetSurfaceGameplay();
-	AJTSMoonWorldActor* const MoonWorld = bRequiresLegacyMoon ? GetMoonWorldActor() : nullptr;
-	UJTSMoonWrapSubsystem* const MoonWrap = bRequiresLegacyMoon && World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
+	AJTSPlanetAnchor* const Planet = GetOwningPlanet();
 	AJTSSpacecraftActor* const Spacecraft = GetSpacecraft();
 	if (IsValid(Spacecraft))
 	{
 		Spacecraft->RestorePersistentStorage();
 	}
-	const bool bLegacyPrerequisitesReady = !bRequiresLegacyMoon
-		|| (IsValid(MoonWorld) && IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon());
-	if (World == nullptr || MoonSettings == nullptr || !bLegacyPrerequisitesReady || !IsValid(Spacecraft))
+	if (World == nullptr || MoonSettings == nullptr || !IsValid(Planet) || !IsValid(Spacecraft))
 	{
-		if (bRequiresLegacyMoon)
-		{
-			ScheduleInitializationRetry();
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("Moon surface controller %s cannot initialize real Moon gameplay: Settings=%s Spacecraft=%s."),
-				*GetName(),
-				MoonSettings != nullptr ? TEXT("Valid") : TEXT("Missing Data Asset"),
-				*GetNameSafe(Spacecraft));
-		}
+		UE_LOG(LogTemp, Error, TEXT("Moon surface controller %s cannot initialize Moon gameplay: Planet=%s Settings=%s Spacecraft=%s."),
+			*GetName(),
+			*GetNameSafe(Planet),
+			MoonSettings != nullptr ? TEXT("Valid") : TEXT("Missing Data Asset"),
+			*GetNameSafe(Spacecraft));
 		return false;
 	}
 
@@ -591,7 +395,7 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 		FMath::Max(0.0f, MoonSettings->GetMoonResourceSpawnSettings().SpawnRadius),
 		MoonSettings->GetMoonAntNestCount());
 
-	if (IsUsingRealPlanetSurfaceGameplay() && IsValid(CorpseSurfaceAnchor))
+	if (IsValid(CorpseSurfaceAnchor))
 	{
 		SpawnConfiguredCorpseAtPlanetSurfaceAnchor();
 	}
@@ -623,28 +427,6 @@ bool AJTSMoonSurfaceController::InitializeSurfaceGameplay()
 	return true;
 }
 
-void AJTSMoonSurfaceController::ScheduleInitializationRetry()
-{
-	if (bSurfaceGameplayInitialized || bSurfaceGameplayInitializationRequested)
-	{
-		return;
-	}
-
-	UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
-	bSurfaceGameplayInitializationRequested = true;
-	World->GetTimerManager().SetTimer(
-		SurfaceInitializationTimerHandle,
-		this,
-		&AJTSMoonSurfaceController::AttemptSurfaceGameplayInitialization,
-		0.10f,
-		false);
-}
-
 void AJTSMoonSurfaceController::InitializeMoonResources()
 {
 	if (!HasAuthority())
@@ -657,43 +439,17 @@ void AJTSMoonSurfaceController::InitializeMoonResources()
 		return;
 	}
 
-	AJTSMoonResourceSpawner* ResourceSpawner = nullptr;
-	if (IsUsingRealPlanetSurfaceGameplay())
+	AJTSMoonResourceSpawner* const ResourceSpawner = MoonResourceSpawner.Get();
+	if (!IsValid(ResourceSpawner))
 	{
-		ResourceSpawner = MoonResourceSpawner.Get();
-		if (!IsValid(ResourceSpawner))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no explicitly configured MoonResourceSpawner for real SpaceWorld gameplay."),
-				*PlanetId.ToString());
-			return;
-		}
-	}
-	else
-	{
-		TArray<AJTSMoonResourceSpawner*> ResourceSpawners;
-		GetSurfaceActors(GetSurfaceLevel(), ResourceSpawners);
-		if (ResourceSpawners.IsEmpty())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no AJTSMoonResourceSpawner."), *PlanetId.ToString());
-			return;
-		}
-
-		ResourceSpawners.Sort([](const AJTSMoonResourceSpawner& Left, const AJTSMoonResourceSpawner& Right)
-		{
-			return Left.GetPathName() < Right.GetPathName();
-		});
-		if (ResourceSpawners.Num() > 1)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has %d resource spawners; using %s."),
-				*PlanetId.ToString(), ResourceSpawners.Num(), *GetNameSafe(ResourceSpawners[0]));
-		}
-		ResourceSpawner = ResourceSpawners[0];
+		UE_LOG(LogTemp, Error, TEXT("Moon surface %s has no configured MoonResourceSpawner."), *PlanetId.ToString());
+		return;
 	}
 
 	RegisterSurfaceRuntimeActor(ResourceSpawner);
 	ResourceSpawner->SetSurfaceGameplayController(this);
 	ResourceSpawner->ApplyMoonSpawnSettings(MoonSettings->GetMoonResourceSpawnSettings());
-	ResourceSpawner->SetOwningPlanet(IsUsingRealPlanetSurfaceGameplay() ? GetOwningPlanet() : nullptr);
+	ResourceSpawner->SetOwningPlanet(GetOwningPlanet());
 	ResourceSpawner->SetLandmarkExclusions(GetSpacecraft(), CachedLevelMoonCorpseLandmarks, GeneratedMoonAntNests);
 	ResourceSpawner->GenerateResources();
 }
@@ -708,44 +464,16 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::FindLevelCorpseLandmark()
 	bLevelCorpseLandmarkSearchCompleted = true;
 	LevelMoonCorpseLandmark.Reset();
 	CachedLevelMoonCorpseLandmarks.Reset();
-	if (IsUsingRealPlanetSurfaceGameplay())
+	if (RealSurfaceMoonCorpse.IsValid())
 	{
-		if (RealSurfaceMoonCorpse.IsValid())
-		{
-			LevelMoonCorpseLandmark = RealSurfaceMoonCorpse;
-			CachedLevelMoonCorpseLandmarks.Add(RealSurfaceMoonCorpse);
-			return RealSurfaceMoonCorpse.Get();
-		}
-
-		UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no configured real-surface corpse landmark; MoonAnt Nest generation is skipped."),
-			*PlanetId.ToString());
-		return nullptr;
+		LevelMoonCorpseLandmark = RealSurfaceMoonCorpse;
+		CachedLevelMoonCorpseLandmarks.Add(RealSurfaceMoonCorpse);
+		return RealSurfaceMoonCorpse.Get();
 	}
 
-	TArray<AJTSMoonCorpseActor*> Corpses;
-	GetSurfaceActors(GetSurfaceLevel(), Corpses);
-	Corpses.Sort([](const AJTSMoonCorpseActor& Left, const AJTSMoonCorpseActor& Right)
-	{
-		return Left.GetPathName() < Right.GetPathName();
-	});
-	for (AJTSMoonCorpseActor* const Corpse : Corpses)
-	{
-		CachedLevelMoonCorpseLandmarks.Add(Corpse);
-	}
-
-	if (Corpses.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no corpse landmark; MoonAnt Nest generation is skipped."), *PlanetId.ToString());
-		return nullptr;
-	}
-
-	LevelMoonCorpseLandmark = Corpses[0];
-	if (Corpses.Num() > 1)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has %d corpse landmarks; using %s."),
-			*PlanetId.ToString(), Corpses.Num(), *GetNameSafe(Corpses[0]));
-	}
-	return Corpses[0];
+	UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no configured corpse landmark; MoonAnt Nest generation is skipped."),
+		*PlanetId.ToString());
+	return nullptr;
 }
 
 void AJTSMoonSurfaceController::ClearGeneratedMoonAntNests()
@@ -766,110 +494,30 @@ void AJTSMoonSurfaceController::ClearGeneratedMoonAntNests()
 
 bool AJTSMoonSurfaceController::ResolveMoonGroundLocation(
 	const FVector& CandidateLocation,
-	FVector& OutGroundLocation,
-	const AActor* AdditionalIgnoredActor) const
+	FVector& OutGroundLocation) const
 {
-	UWorld* const World = GetWorld();
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
-	if (World == nullptr || MoonSettings == nullptr)
+	AJTSPlanetAnchor* const Planet = GetOwningPlanet();
+	if (MoonSettings == nullptr || !IsValid(Planet))
 	{
 		return false;
 	}
 
-	if (IsUsingRealPlanetSurfaceGameplay())
+	const float StartHeight = FMath::Max(0.0f, MoonSettings->GetMoonAntGroundTraceStartHeight());
+	const float TraceDistance = FMath::Max(0.0f, MoonSettings->GetMoonAntGroundTraceDistance());
+	const FVector RadialUp = Planet->GetRadialUpVector(CandidateLocation);
+	FJTSPlanetSurfaceHit SurfaceHit;
+	if (Planet->ProbeSurfaceAlongGravity(
+		CandidateLocation + RadialUp * StartHeight,
+		StartHeight + TraceDistance,
+		SurfaceHit)
+		|| Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
 	{
-		AJTSPlanetAnchor* const Planet = GetOwningPlanet();
-		if (!IsValid(Planet))
-		{
-			return false;
-		}
-
-		const float StartHeight = FMath::Max(0.0f, MoonSettings->GetMoonAntGroundTraceStartHeight());
-		const float TraceDistance = FMath::Max(0.0f, MoonSettings->GetMoonAntGroundTraceDistance());
-		const FVector RadialUp = Planet->GetRadialUpVector(CandidateLocation);
-		FJTSPlanetSurfaceHit SurfaceHit;
-		if (Planet->ProbeSurfaceAlongGravity(
-			CandidateLocation + RadialUp * StartHeight,
-			StartHeight + TraceDistance,
-			SurfaceHit)
-			|| Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
-		{
-			OutGroundLocation = SurfaceHit.ImpactPoint;
-			return true;
-		}
-
-		return false;
+		OutGroundLocation = SurfaceHit.ImpactPoint;
+		return true;
 	}
 
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(JTSMoonAntGroundTrace), false, this);
-	if (IsValid(AdditionalIgnoredActor))
-	{
-		TraceParams.AddIgnoredActor(AdditionalIgnoredActor);
-	}
-	if (AJTSSpacecraftActor* const Spacecraft = GetSpacecraft())
-	{
-		TraceParams.AddIgnoredActor(Spacecraft);
-	}
-	for (const TWeakObjectPtr<AJTSMoonCorpseActor>& Corpse : CachedLevelMoonCorpseLandmarks)
-	{
-		if (Corpse.IsValid())
-		{
-			TraceParams.AddIgnoredActor(Corpse.Get());
-		}
-	}
-	for (const TWeakObjectPtr<AJTSMoonAntNestActor>& Nest : GeneratedMoonAntNests)
-	{
-		if (Nest.IsValid())
-		{
-			TraceParams.AddIgnoredActor(Nest.Get());
-		}
-	}
-	for (AJTSCharacter* const PlayerPawn : GetActivePlayers())
-	{
-		TraceParams.AddIgnoredActor(PlayerPawn);
-	}
-	for (AActor* const Actor : GetSurfaceLevel()->Actors)
-	{
-		if (AJTSMoonAntActor* const MoonAnt = Cast<AJTSMoonAntActor>(Actor); IsValid(MoonAnt))
-		{
-			TraceParams.AddIgnoredActor(MoonAnt);
-		}
-	}
-
-	FHitResult GroundHit;
-	const float StartHeight = MoonSettings->GetMoonAntGroundTraceStartHeight();
-	const float TraceDistance = MoonSettings->GetMoonAntGroundTraceDistance();
-	if (!World->LineTraceSingleByChannel(
-		GroundHit,
-		CandidateLocation + FVector(0.0f, 0.0f, StartHeight),
-		CandidateLocation + FVector(0.0f, 0.0f, StartHeight - TraceDistance),
-		ECC_Visibility,
-		TraceParams)
-		|| !GroundHit.bBlockingHit)
-	{
-		return false;
-	}
-
-	OutGroundLocation = GroundHit.ImpactPoint;
-	return true;
-}
-
-bool AJTSMoonSurfaceController::IsMoonAntNestCandidateFarFromShip(
-	const FVector2D& CandidateLogicalPosition,
-	const FVector2D& ShipLogicalPosition) const
-{
-	const UWorld* const World = GetWorld();
-	const UJTSMoonWrapSubsystem* const MoonWrap = World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
-	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
-	if (MoonSettings == nullptr)
-	{
-		return false;
-	}
-
-	const FVector2D Delta = IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon()
-		? MoonWrap->ShortestWrappedDelta2D(ShipLogicalPosition, CandidateLogicalPosition)
-		: CandidateLogicalPosition - ShipLogicalPosition;
-	return Delta.Size() >= MoonSettings->GetMoonAntNestMinDistanceFromShip();
+	return false;
 }
 
 void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
@@ -882,12 +530,11 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 
 	UWorld* const World = GetWorld();
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = GetMoonSettings();
-	UJTSMoonWrapSubsystem* const MoonWrap = World != nullptr ? World->GetSubsystem<UJTSMoonWrapSubsystem>() : nullptr;
 	AJTSSpacecraftActor* const Spacecraft = GetSpacecraft();
-	const bool bUseRealPlanetSurface = IsUsingRealPlanetSurfaceGameplay();
+	AJTSPlanetAnchor* const Planet = GetOwningPlanet();
 	if (World == nullptr
 		|| MoonSettings == nullptr
-		|| (!bUseRealPlanetSurface && (!IsValid(MoonWrap) || !MoonWrap->IsConfiguredForMoon()))
+		|| !IsValid(Planet)
 		|| !IsValid(Spacecraft))
 	{
 		return;
@@ -906,23 +553,12 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 		return;
 	}
 
-	const FVector ShipPhysicalLocation = Spacecraft->GetActorLocation();
-	const FVector2D ShipLogicalPosition = !bUseRealPlanetSurface && IsValid(MoonWrap)
-		? MoonWrap->GetLogicalPositionFromWorld(ShipPhysicalLocation)
-		: FVector2D::ZeroVector;
 	FRandomStream RandomStream(static_cast<int32>(FPlatformTime::Cycles64() & static_cast<uint64>(MAX_uint32)));
-	const FVector CorpsePhysicalLocation = Corpse->GetActorLocation();
-	const FVector2D CorpseLogicalPosition = !bUseRealPlanetSurface && IsValid(MoonWrap)
-		? MoonWrap->GetLogicalPositionFromWorld(CorpsePhysicalLocation)
-		: FVector2D::ZeroVector;
-	TArray<FVector2D> AcceptedNestLogicalPositions;
 	const int32 DesiredNestCount = MoonSettings->GetMoonAntNestCount();
 	const int32 MaxNestAttempts = FMath::Max(64, DesiredNestCount * 48);
 	const FBox CorpseBounds = Corpse->GetComponentsBoundingBox(true);
 	const FVector CorpseBoundsExtent = CorpseBounds.IsValid ? CorpseBounds.GetExtent() : FVector::ZeroVector;
-	const float CorpseMeshClearance = (bUseRealPlanetSurface
-		? CorpseBoundsExtent.Size()
-		: FVector2D(CorpseBoundsExtent.X, CorpseBoundsExtent.Y).Size()) + 50.0f;
+	const float CorpseMeshClearance = CorpseBoundsExtent.Size() + 50.0f;
 	const float InnerNestRadius = FMath::Max(MoonSettings->GetMoonAntNestMinDistanceFromCorpse(), CorpseMeshClearance);
 	const float OuterNestRadius = FMath::Max(InnerNestRadius, MoonSettings->GetMoonAntNestOuterRadiusAroundCorpse());
 	const float InnerZoneMaxRadius = FMath::Max(InnerNestRadius, OuterNestRadius * 0.45f);
@@ -968,14 +604,7 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 			OuterNestRadius);
 	};
 
-	if (bUseRealPlanetSurface)
 	{
-		AJTSPlanetAnchor* const Planet = GetOwningPlanet();
-		if (!IsValid(Planet))
-		{
-			return;
-		}
-
 		const FVector ShipLocation = Spacecraft->GetActorLocation();
 		const FVector CorpseLocation = Corpse->GetActorLocation();
 		FJTSPlanetSurfaceFrame CorpseSurfaceFrame;
@@ -1058,71 +687,9 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 			AcceptedNestLocations.Add(CandidateLocation);
 		}
 
-			UE_LOG(LogTemp, Log, TEXT("JumpToSpace MoonAnt Nests: Planet=%s Requested=%d Spawned=%d"),
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace MoonAnt Nests: Planet=%s Requested=%d Spawned=%d"),
 			*PlanetId.ToString(), DesiredNestCount, GeneratedMoonAntNests.Num());
-		return;
 	}
-
-	for (int32 Attempt = 0; Attempt < MaxNestAttempts && GeneratedMoonAntNests.Num() < DesiredNestCount; ++Attempt)
-	{
-		const float Angle = RandomStream.FRandRange(0.0f, UE_TWO_PI);
-		FVector2D CandidateLogicalPosition = MoonWrap->CanonicalizePosition2D(
-			CorpseLogicalPosition + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * ChooseNestRadius());
-		if (!IsMoonAntNestCandidateFarFromShip(CandidateLogicalPosition, ShipLogicalPosition))
-		{
-			continue;
-		}
-
-		const float CandidateMinSpacing = MoonSettings->GetMoonAntNestBaseMinSpacing()
-			* RandomStream.FRandRange(
-				MoonSettings->GetMoonAntNestCandidateSpacingScaleMin(),
-				MoonSettings->GetMoonAntNestCandidateSpacingScaleMax());
-		bool bOverlapsExistingNest = false;
-		for (const FVector2D& ExistingLogicalPosition : AcceptedNestLogicalPositions)
-		{
-			if (MoonWrap->ShortestWrappedDelta2D(ExistingLogicalPosition, CandidateLogicalPosition).Size() < CandidateMinSpacing)
-			{
-				bOverlapsExistingNest = true;
-				break;
-			}
-		}
-		if (bOverlapsExistingNest)
-		{
-			continue;
-		}
-
-		const FVector2D CandidatePhysicalXY = MoonWrap->GetNearestPhysicalImage(
-			FVector2D(CorpsePhysicalLocation.X, CorpsePhysicalLocation.Y), CandidateLogicalPosition);
-		FVector NestGroundLocation;
-		if (!ResolveMoonGroundLocation(FVector(CandidatePhysicalXY.X, CandidatePhysicalXY.Y, CorpsePhysicalLocation.Z), NestGroundLocation))
-		{
-			continue;
-		}
-
-		const FTransform NestTransform(FRotator(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f), NestGroundLocation);
-		AJTSMoonAntNestActor* const Nest = World->SpawnActorDeferred<AJTSMoonAntNestActor>(
-			NestActorClass,
-			NestTransform,
-			Corpse,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		if (!IsValid(Nest))
-		{
-			continue;
-		}
-
-		Nest->SetMoonAntActorClass(MoonSettings->GetMoonAntActorClass());
-		Nest->SetMoonAntNestVisualScale(RandomStream.FRandRange(
-			MoonSettings->GetMoonAntNestVisualScaleVariationMin(),
-			MoonSettings->GetMoonAntNestVisualScaleVariationMax()));
-		Nest->FinishSpawning(NestTransform);
-		Nest->AdjustToGround(NestGroundLocation);
-		GeneratedMoonAntNests.Add(Nest);
-		AcceptedNestLogicalPositions.Add(CandidateLogicalPosition);
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("JumpToSpace MoonAnt Nests: Planet=%s Requested=%d Spawned=%d"),
-		*PlanetId.ToString(), DesiredNestCount, GeneratedMoonAntNests.Num());
 }
 
 void AJTSMoonSurfaceController::ConsumeExpeditionSupplies()

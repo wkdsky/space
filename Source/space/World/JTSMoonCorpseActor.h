@@ -7,7 +7,6 @@
 
 class USceneComponent;
 class UStaticMeshComponent;
-class UJTSMoonWrappedActorComponent;
 class UMaterialInterface;
 class AJTSPlanetSurfaceAnchor;
 
@@ -26,7 +25,7 @@ public:
 	/** Aligns the complete lying figure to a validated Moon ground hit. */
 	void AdjustToGround(const FVector& GroundLocation);
 
-	/** Places this landmark once on an authored real-planet surface anchor and disables Fake Moon presentation. */
+	/** Places this landmark once on an authored real-planet surface anchor. */
 	bool SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* SurfaceAnchor);
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Real Surface")
@@ -41,8 +40,7 @@ private:
 	void OnRep_RealSurfacePlacement();
 
 	void ApplyPrototypeMaterials();
-	void UpdateMoonWrappedLogicalPosition();
-	void DisableLegacyMoonPresentation();
+	void ApplySurfacePresentation();
 
 	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -68,11 +66,7 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt Event")
 	TObjectPtr<UStaticMeshComponent> RightLegBoneMesh;
 
-	/** Keeps the event landmark at the nearest periodic physical image in Moon Wrap worlds. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
-
-	/** The non-WPO material used by the real gameplay-planet placement path. */
+	/** The material used by the gameplay-planet placement path. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> BasicPrototypeMaterial;
 

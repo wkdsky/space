@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "ProceduralMeshComponent.h"
 #include "space/World/JTSPlanetLandingTypes.h"
 
 #include "JTSPlanetLandingSite.generated.h"
@@ -41,7 +42,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Landing Site")
 	bool IsLandingEnabled() const;
 
-	/** True if Location belongs to any of this site's configured Box/Sphere/Capsule volumes. */
+	/**
+	 * True if Location belongs to any configured Box/Sphere/Capsule surface footprint.
+	 * A landing site's local Z depth is authoring/projection slack, never a smaller legal band on
+	 * an uneven spherical surface.
+	 */
 	UFUNCTION(BlueprintPure, Category = "Planet|Landing Site")
 	bool IsLocationInsideLandingArea(const FVector& Location) const;
 
@@ -75,7 +80,22 @@ public:
 	void DrawDebugLandingSite(float Duration = 5.0f) const;
 
 private:
+	void BuildRuntimeLandingMarker();
+	bool ProjectMarkerPointToSurface(const FVector& SourcePoint, FVector& OutPoint, FVector& OutNormal) const;
+	void AppendMarkerSegment(
+		const FVector& Start,
+		const FVector& End,
+		const FVector& StartNormal,
+		const FVector& EndNormal,
+		TArray<FVector>& OutVertices,
+		TArray<int32>& OutTriangles,
+		TArray<FVector>& OutNormals,
+		TArray<FVector2D>& OutUVs,
+		TArray<FLinearColor>& OutColors,
+		TArray<FProcMeshTangent>& OutTangents) const;
 	void GetLandingVolumes(TArray<UShapeComponent*>& OutVolumes) const;
+	/** Maps a world point to the volume's authored local XY footprint along this planet's gravity line. */
+	bool GetSurfaceFootprintLocalLocation(const UShapeComponent* Volume, const FVector& Location, FVector& OutLocalLocation) const;
 	bool IsPointInsideVolume(const UShapeComponent* Volume, const FVector& Location) const;
 	bool FindClosestPointInVolume(const UShapeComponent* Volume, const FVector& Location, FVector& OutLocation) const;
 	FVector MakeRandomCandidateInVolumeBounds(const UShapeComponent* Volume) const;
@@ -86,6 +106,10 @@ private:
 	/** Default legal region. Blueprint children can add more Box, Sphere, or Capsule components. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UBoxComponent> LandingVolume;
+
+	/** Runtime-only ground ribbon generated from the same authored landing volumes used by validation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UProceduralMeshComponent> RuntimeLandingMarker;
 
 	/** Optional designer orientation marker for future scripted landing presentation. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site", meta = (AllowPrivateAccess = "true"))
@@ -105,4 +129,25 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDebugDrawLandingSite = false;
+
+	/** Shows a bright, terrain-projected outline for this scene-configured legal landing area in game. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true"))
+	bool bShowRuntimeLandingMarker = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float RuntimeMarkerLineWidth = 28.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float RuntimeMarkerSurfaceOffset = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true", ClampMin = "100.0", UIMin = "100.0"))
+	float RuntimeMarkerSurfaceProbeLift = 1600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true", ClampMin = "100.0", UIMin = "100.0"))
+	float RuntimeMarkerSurfaceProbeDistance = 6000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Landing Site|Marker", meta = (AllowPrivateAccess = "true"))
+	FLinearColor RuntimeMarkerColor = FLinearColor(0.04f, 0.85f, 1.0f, 1.0f);
+
+	int32 RuntimeMarkerBuildAttempts = 0;
 };

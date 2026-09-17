@@ -5,7 +5,6 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
-#include "Math/RotationMatrix.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -18,7 +17,6 @@
 #include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSSpaceWorldManager.h"
-#include "space/World/JTSShopTerminalActor.h"
 
 AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 {
@@ -28,7 +26,6 @@ AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 	SpaceWorldManagerClass = AJTSSpaceWorldManager::StaticClass();
 	PlanetLandingManagerClass = AJTSPlanetLandingManager::StaticClass();
 	SpacecraftClass = AJTSSpacecraftActor::StaticClass();
-	ShopTerminalClass = AJTSShopTerminalActor::StaticClass();
 
 	FJTSSurfaceGameplayControllerDefinition MoonSurfaceGameplay;
 	MoonSurfaceGameplay.PlanetId = TEXT("Moon");
@@ -125,7 +122,6 @@ void AJTSSpaceWorldGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ActiveSurfaceGameplayControllers.Empty();
 	InitializedSurfacePlanets.Empty();
 	StartedLandingSequences.Empty();
-	ShopTerminal.Reset();
 	PlanetLandingManager.Reset();
 	SpaceWorldManager.Reset();
 
@@ -313,7 +309,6 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 		ActiveSurfaceGameplayControllers.Add(PlanetId, ControllerActor);
 	}
 	SurfaceGameplay->RegisterSurfacePlayer(Character);
-	FindOrSpawnShopTerminal(Spacecraft, Planet);
 	WorldManager->SetSurfaceGameplayReady(true);
 	if (AJTSGameState* const JTSGameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
 	{
@@ -326,66 +321,6 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	}
 	UE_LOG(LogTemp, Log, TEXT("SpaceWorld surface gameplay ready: PlanetId=%s Controller=%s."),
 		*Planet->GetPlanetId().ToString(), *GetNameSafe(ControllerActor));
-}
-
-AJTSShopTerminalActor* AJTSSpaceWorldGameMode::FindOrSpawnShopTerminal(AJTSSpacecraftActor* Spacecraft, AJTSPlanetAnchor* Planet)
-{
-	if (GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client || !IsValid(Spacecraft))
-	{
-		return nullptr;
-	}
-	FVector SurfaceUp = IsValid(Planet) ? Planet->GetRadialUpVector(Spacecraft->GetActorLocation()) : FVector::UpVector;
-	if (!SurfaceUp.Normalize()) SurfaceUp = FVector::UpVector;
-	FVector TangentRight = IsValid(Planet)
-		? Planet->ProjectDirectionToSurfaceTangent(Spacecraft->GetActorRightVector(), Spacecraft->GetActorLocation())
-		: FVector::VectorPlaneProject(Spacecraft->GetActorRightVector(), SurfaceUp).GetSafeNormal();
-	if (TangentRight.IsNearlyZero())
-	{
-		FVector UnusedAxis;
-		SurfaceUp.FindBestAxisVectors(TangentRight, UnusedAxis);
-	}
-	FVector TangentForward = FVector::CrossProduct(TangentRight, SurfaceUp).GetSafeNormal();
-	if (TangentForward.IsNearlyZero()) TangentForward = Spacecraft->GetActorForwardVector();
-	const FVector TerminalLocation = Spacecraft->GetActorLocation() + TangentRight * 360.0f + SurfaceUp * 145.0f;
-	const FTransform TerminalTransform(FRotationMatrix::MakeFromXZ(TangentForward, SurfaceUp).Rotator(), TerminalLocation);
-	const auto InitializeAndPlaceTerminal = [Spacecraft, &TerminalTransform](AJTSShopTerminalActor* Terminal)
-	{
-		if (IsValid(Terminal))
-		{
-			Terminal->InitializeTerminal(Spacecraft);
-			Terminal->SetActorTransform(TerminalTransform, false, nullptr, ETeleportType::TeleportPhysics);
-		}
-		return Terminal;
-	};
-	if (AJTSShopTerminalActor* const Existing = ShopTerminal.Get())
-	{
-		return InitializeAndPlaceTerminal(Existing);
-	}
-	for (TActorIterator<AJTSShopTerminalActor> It(GetWorld()); It; ++It)
-	{
-		if (AJTSShopTerminalActor* const Existing = *It; IsValid(Existing))
-		{
-			ShopTerminal = Existing;
-			return InitializeAndPlaceTerminal(Existing);
-		}
-	}
-
-	TSubclassOf<AJTSShopTerminalActor> SpawnClass = ShopTerminalClass;
-	if (SpawnClass == nullptr)
-	{
-		SpawnClass = AJTSShopTerminalActor::StaticClass();
-	}
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Name = TEXT("JTSSupplyTerminal");
-	SpawnParameters.OverrideLevel = GetWorld()->PersistentLevel;
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AJTSShopTerminalActor* const Terminal = GetWorld()->SpawnActor<AJTSShopTerminalActor>(SpawnClass, TerminalTransform, SpawnParameters);
-	if (IsValid(Terminal))
-	{
-		ShopTerminal = Terminal;
-		return InitializeAndPlaceTerminal(Terminal);
-	}
-	return nullptr;
 }
 
 const FJTSSurfaceGameplayControllerDefinition* AJTSSpaceWorldGameMode::FindSurfaceGameplayDefinition(

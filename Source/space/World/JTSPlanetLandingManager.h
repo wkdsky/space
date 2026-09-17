@@ -75,10 +75,11 @@ public:
 	/** Entry point used by AJTSSpacecraftActor::RequestLanding. */
 	bool RequestLanding(AJTSSpacecraftActor* Spacecraft, FJTSPlanetLandingValidationResult& OutResult);
 
-	/** Resolves a respawn transform using the union of nearby legal site areas and documented fallbacks. */
+	/** Resolves a collision-checked exterior transform beside a landed craft inside the legal site union. */
 	bool FindPlayerRespawnTransform(
 		const AJTSSpacecraftActor* Spacecraft,
-		FJTSPlayerRespawnTransformResult& OutResult) const;
+		FJTSPlayerRespawnTransformResult& OutResult,
+		int32 PreferredSlot = 0) const;
 
 	/** Respawns a controller only when its associated spacecraft is legally Landed. */
 	bool RespawnPlayerAtLandedSpacecraft(APlayerController* PlayerController);
@@ -112,7 +113,13 @@ private:
 		const FVector& AreaPoint,
 		FTransform& OutTransform,
 		bool bRequireClearance) const;
+	bool BuildSafeSpacecraftExitTransform(
+		const AJTSSpacecraftActor* Spacecraft,
+		AJTSPlanetAnchor* Planet,
+		int32 PreferredSlot,
+		FTransform& OutTransform) const;
 	bool IsRespawnTransformClear(const AJTSSpacecraftActor* Spacecraft, const FTransform& Transform) const;
+	int32 GetPlayerSpawnSlot(const APlayerController* PlayerController) const;
 	bool SpawnAndConfigureCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet, const FTransform& SpawnTransform, AJTSCharacter*& OutCharacter) const;
 	AJTSSpacecraftActor* FindOrSpawnArrivalSpacecraft(
 		AJTSPlanetAnchor* Planet,

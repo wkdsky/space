@@ -13,7 +13,6 @@
 class AJTSCharacter;
 class AJTSPlayerState;
 class AJTSSpacecraftActor;
-class AJTSShopTerminalActor;
 class UJTSPreLaunchLobbyWidget;
 class UJTSShopWidget;
 class UUserWidget;
@@ -75,21 +74,15 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestCraft(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft);
 
-	/** Formal SpaceWorld terminal RPCs. The terminal validates range, wallet, and delivery on the server. */
+	/** Ship-owned shop RPC. The server validates ship range, shared materials, and delivery. */
 	UFUNCTION(Server, Reliable)
-	void ServerRequestShopPurchase(AJTSShopTerminalActor* Terminal, EJTSItemId ItemId);
-
-	UFUNCTION(Server, Reliable)
-	void ServerRequestDepositShopMaterials(AJTSShopTerminalActor* Terminal);
+	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(EJTSShopPurchaseResult Result);
 
 	UFUNCTION(Client, Reliable)
-	void ClientReceiveShopDepositResult(bool bSucceeded);
-
-	UFUNCTION(Client, Reliable)
-	void ClientOpenSpaceShop(AJTSShopTerminalActor* Terminal);
+	void ClientOpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
 
 	UFUNCTION(BlueprintCallable, Category = "Menu")
 	void RestartCurrentLevel();
@@ -124,7 +117,7 @@ public:
 	void CloseMoonShop();
 	bool IsMoonShopOpen() const;
 
-	void OpenSpaceShop(AJTSShopTerminalActor* Terminal);
+	void OpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
 	void CloseSpaceShop();
 	bool IsSpaceShopOpen() const;
 
@@ -176,6 +169,9 @@ private:
 
 	FTimerHandle GameStateBindingRetryTimer;
 	int32 GameStateBindingRetryCount = 0;
+
+	/** Prevents repeated GameState binding retries from flushing held gameplay keys. */
+	bool bGameplayInputModeActive = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spacecraft|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftCameraBlendTime = 0.35f;

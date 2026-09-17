@@ -421,7 +421,7 @@ void AJTSCharacter::NotifySpacecraftEntered(AJTSSpacecraftActor* Spacecraft)
 	}
 
 	NearbySpacecraft = Spacecraft;
-	// A startup overlap can arrive after Enhanced Input has already observed a held E key.
+	// A startup overlap can arrive after Enhanced Input has already observed a held F key.
 	// Re-evaluate the same view-gated boarding path once the known nearby candidate is available.
 	if (bInteractKeyHeld && !bBoardingHoldActive)
 	{
@@ -623,9 +623,10 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
-	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleInteractTriggered);
-	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractCompleted);
-	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractCanceled);
+	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleBoardStarted);
+	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleBoardTriggered);
+	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleBoardCompleted);
+	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleBoardCanceled);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
@@ -666,6 +667,7 @@ void AJTSCharacter::InitializeInput()
 	JumpAction = NewObject<UInputAction>(this, TEXT("JumpAction"), RF_Transient);
 	SprintAction = NewObject<UInputAction>(this, TEXT("SprintAction"), RF_Transient);
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
+	BoardAction = NewObject<UInputAction>(this, TEXT("BoardAction"), RF_Transient);
 	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
 	CameraZoomAction = NewObject<UInputAction>(this, TEXT("CameraZoomAction"), RF_Transient);
@@ -682,6 +684,7 @@ void AJTSCharacter::InitializeInput()
 	JumpAction->ValueType = EInputActionValueType::Boolean;
 	SprintAction->ValueType = EInputActionValueType::Boolean;
 	InteractAction->ValueType = EInputActionValueType::Boolean;
+	BoardAction->ValueType = EInputActionValueType::Boolean;
 	AttackAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
 	CameraZoomAction->ValueType = EInputActionValueType::Axis1D;
@@ -697,6 +700,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputMappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
+	InputMappingContext->MapKey(BoardAction, EKeys::F);
 	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
 	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
@@ -892,11 +896,6 @@ void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& Out
 
 void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 {
-	if (IsBoarded())
-	{
-		return;
-	}
-
 	if (IsRealPlanetGameplayActive())
 	{
 		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
@@ -910,7 +909,7 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 		return;
 	}
 
-	if (!IsBoarded())
+	if (Controller != nullptr)
 	{
 		AddControllerYawInput(Value.Get<float>() * MouseSensitivityX);
 	}
@@ -918,11 +917,6 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 
 void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
-	if (IsBoarded())
-	{
-		return;
-	}
-
 	if (IsRealPlanetGameplayActive())
 	{
 		const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
@@ -940,7 +934,7 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 		return;
 	}
 
-	if (!IsBoarded())
+	if (Controller != nullptr)
 	{
 		const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
 		const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
@@ -973,20 +967,18 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 {
-	// E is both the world-interaction key and the lightweight close shortcut for
-	// the terminal.  Check modal shop state before the general gameplay-input
-	// guard so a visible shop can never trap the player in UI input mode.
+	static_cast<void>(Value);
+	// E is a one-press world action. Check the modal shop first so it also remains
+	// the lightweight close shortcut without sharing state with the boarding hold.
 	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 	{
 		if (PlayerController->IsSpaceShopOpen())
 		{
-			bInteractKeyHeld = false;
 			PlayerController->CloseSpaceShop();
 			return;
 		}
 		if (PlayerController->IsMoonShopOpen())
 		{
-			bInteractKeyHeld = false;
 			PlayerController->CloseMoonShop();
 			return;
 		}
@@ -997,83 +989,43 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 		return;
 	}
 
-	// TODO(FakeMoon): Re-evaluate camera-ray versus flat-world trajectory for future long-range hitscan/projectiles.
-	bInteractKeyHeld = true;
-	if (IsBoarded())
-	{
-		bInteractKeyHeld = false;
-		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
-		{
-			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
-			{
-				PlayerController->ServerRequestDisembarkSpacecraft(Spacecraft);
-			}
-		}
-		return;
-	}
-
-	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
-	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
-	const bool bSpaceWorldSurfaceActive = IsSpaceWorldSurfaceGameplayActive();
-	// MoonExploration has priority over SpaceWorld's generic surface-ready state. The latter is
-	// deliberately true for the real Moon, but Moon's spacecraft interaction is a one-press
-	// workshop rather than the hold-to-board surface-flight interaction.
-	if (bMoonExplorationActive)
-	{
-		bInteractKeyHeld = false;
-		if (InteractionComponent != nullptr)
-		{
-			InteractionComponent->RefreshInteractable();
-			if (AActor* const InteractionTarget = InteractionComponent->GetCurrentInteractable())
-			{
-				if (!InteractionTarget->IsA<AJTSSpacecraftActor>())
-				{
-					InteractionComponent->TryInteract();
-					return;
-				}
-
-				if (AJTSSpacecraftActor* const TargetSpacecraft = Cast<AJTSSpacecraftActor>(InteractionTarget))
-				{
-					// The interaction scan can discover a valid mesh-sized ship before an initial overlap
-					// notification reaches this pawn. Keep the existing workshop API's NearbySpacecraft
-					// contract true without introducing a second shop path.
-					if (NearbySpacecraft.Get() != TargetSpacecraft && TargetSpacecraft->IsPawnInBoardingRange(this))
-					{
-						NotifySpacecraftEntered(TargetSpacecraft);
-					}
-				}
-			}
-		}
-
-		// The former ship-click workshop is retired.  Supplies now use the replicated physical
-		// terminal in SpaceWorld, so aiming at the terminal (rather than the ship mesh) opens the
-		// shared-wallet shop through IInteractable.
-		return;
-	}
-
-	if (bEarthCollectionActive || bSpaceWorldSurfaceActive)
-	{
-		if (BeginBoardingHold())
-		{
-			return;
-		}
-
-		// Preserve the held-key state until release. If the pawn-only boarding overlap finishes
-		// initializing this frame, NotifySpacecraftEntered will retry the same directional test.
-		if (InteractionComponent != nullptr)
-		{
-			InteractionComponent->TryInteract();
-		}
-		return;
-	}
-	bInteractKeyHeld = false;
 	if (InteractionComponent != nullptr)
 	{
 		InteractionComponent->TryInteract();
 	}
 }
 
-void AJTSCharacter::HandleInteractTriggered(const FInputActionValue& Value)
+void AJTSCharacter::HandleBoardStarted(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+
+	bInteractKeyHeld = true;
+	if (IsBoarded())
+	{
+		bInteractKeyHeld = false;
+		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
+		{
+			// F is deliberately not an airborne-ejection control. The client-side gate avoids a
+			// misleading prompt/action, while TryDisembarkPlayer repeats the same rule on the server.
+			if (Spacecraft->CanDisembarkPlayer(this))
+			{
+				if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+				{
+					PlayerController->ServerRequestDisembarkSpacecraft(Spacecraft);
+				}
+			}
+		}
+		return;
+	}
+
+	BeginBoardingHold();
+}
+
+void AJTSCharacter::HandleBoardTriggered(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
 	if (IsGameplayInputBlocked() || IsBoarded())
@@ -1081,10 +1033,8 @@ void AJTSCharacter::HandleInteractTriggered(const FInputActionValue& Value)
 		return;
 	}
 
-	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
-	const bool bCanBeginBoarding = !bMoonExplorationActive
-		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-			|| IsSpaceWorldSurfaceGameplayActive());
+	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
 	if (!bCanBeginBoarding || bBoardingHoldActive)
 	{
 		return;
@@ -1094,21 +1044,22 @@ void AJTSCharacter::HandleInteractTriggered(const FInputActionValue& Value)
 		return;
 	}
 
-	// Enhanced Input can begin evaluating a key that was already held while a startup overlap or
-	// mapping context was still initializing. Re-evaluate only the hold-to-board path here; ordinary
-	// interactions remain one-shot in HandleInteractStarted.
+	// A startup overlap can arrive after F begins evaluating. Re-check the same
+	// view-gated hold path without turning ordinary E interactions into holds.
 	bInteractKeyHeld = true;
 	BeginBoardingHold();
 }
 
-void AJTSCharacter::HandleInteractCompleted(const FInputActionValue& Value)
+void AJTSCharacter::HandleBoardCompleted(const FInputActionValue& Value)
 {
+	static_cast<void>(Value);
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
 }
 
-void AJTSCharacter::HandleInteractCanceled(const FInputActionValue& Value)
+void AJTSCharacter::HandleBoardCanceled(const FInputActionValue& Value)
 {
+	static_cast<void>(Value);
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
 }
@@ -1544,10 +1495,8 @@ void AJTSCharacter::ApplyCameraView()
 
 bool AJTSCharacter::BeginBoardingHold()
 {
-	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
-	const bool bCanBeginBoarding = !bMoonExplorationActive
-		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-			|| IsSpaceWorldSurfaceGameplayActive());
+	const bool bCanBeginBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
 	if (bBoardingHoldActive || IsBoarded() || !bCanBeginBoarding)
 	{
 		return false;
@@ -1593,10 +1542,8 @@ void AJTSCharacter::CompleteBoardingHold()
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = BoardingSpacecraft.Get();
-	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
-	const bool bCanCompleteBoarding = !bMoonExplorationActive
-		&& ((BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
-			|| IsSpaceWorldSurfaceGameplayActive());
+	const bool bCanCompleteBoarding = (BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive())
+		|| IsSpaceWorldSurfaceGameplayActive();
 	if (!bCanCompleteBoarding
 		|| !IsValid(Spacecraft)
 		|| GetCurrentBoardingSpacecraft() != Spacecraft)
@@ -1706,12 +1653,8 @@ bool AJTSCharacter::FindSafeDisembarkLocation(
 
 	if (AJTSPlanetAnchor* const GroundedPlanet = Spacecraft->GetGroundedPlanet())
 	{
-		if (!GroundedPlanet->HasGameplaySurface())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s has an invalid gameplay planet for disembark."), *Spacecraft->GetName());
-			return false;
-		}
-
+		// A streamed-out or temporarily missing mesh falls through to the spacecraft-local fallback
+		// in FindGroundedSpacecraftDisembarkLocation rather than trapping the player inside.
 		return FindGroundedSpacecraftDisembarkLocation(Spacecraft, GroundedPlanet, OutLocation, OutSurfaceFrame);
 	}
 
@@ -1832,29 +1775,16 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 		ExitDirection = -SurfaceRight;
 	}
 
-	FVector ShipExtent(180.0f, 180.0f, 90.0f);
-	if (const UBoxComponent* const FlightCollision = Spacecraft->FindComponentByClass<UBoxComponent>())
-	{
-		ShipExtent = FlightCollision->GetScaledBoxExtent();
-	}
-
-	auto GetProjectedShipExtent = [&SurfaceForward, &SurfaceRight, &SurfaceUp, &ShipExtent](const FVector& Direction)
-	{
-		return FMath::Abs(FVector::DotProduct(Direction, SurfaceForward)) * ShipExtent.X
-			+ FMath::Abs(FVector::DotProduct(Direction, SurfaceRight)) * ShipExtent.Y
-			+ FMath::Abs(FVector::DotProduct(Direction, SurfaceUp)) * ShipExtent.Z;
-	};
-
 	const float CapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
 	const float CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 	const FVector RequestedTangentOffset = FVector::VectorPlaneProject(RequestedExitLocation - ShipLocation, SurfaceUp);
 	const float RequestedDistance = FMath::Max(0.0f, FVector::DotProduct(RequestedTangentOffset, ExitDirection));
 	const float StartDistance = FMath::Max(
-		GetProjectedShipExtent(ExitDirection) + CapsuleRadius + 32.0f,
+		Spacecraft->GetExteriorHullSupportDistance(ExitDirection) + CapsuleRadius + 32.0f,
 		RequestedDistance);
 	const float RequestedHeight = FMath::Abs(FVector::DotProduct(RequestedExitLocation - ShipLocation, SurfaceUp));
 	const float SurfaceHeightOffset = FMath::Max(
-		ShipExtent.Z + CapsuleHalfHeight + 80.0f,
+		Spacecraft->GetExteriorHullSupportDistance(SurfaceUp) + CapsuleHalfHeight + 80.0f,
 		RequestedHeight + CapsuleHalfHeight + 80.0f);
 
 	TArray<FVector> CandidateDirections;
@@ -1890,25 +1820,23 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 		{
 			const float CandidateDistance = FMath::Max(
 				StartDistance + SearchDistanceStep * static_cast<float>(DistanceRing),
-				GetProjectedShipExtent(CandidateDirection) + CapsuleRadius + 32.0f);
+				Spacecraft->GetExteriorHullSupportDistance(CandidateDirection) + CapsuleRadius + 32.0f);
 			const FVector CandidateReferenceLocation = ShipLocation
 				+ CandidateDirection * CandidateDistance
 				+ SurfaceUp * SurfaceHeightOffset;
 
-			FVector CandidateLocation;
 			FJTSPlanetSurfaceFrame CandidateSurfaceFrame;
-			if (!FindSafeCharacterSurfaceLocation(
-				Planet,
-				CandidateReferenceLocation,
-				SurfaceForward,
-				nullptr,
-				CandidateLocation,
-				&CandidateSurfaceFrame))
+			// Disembark is intentionally best-effort. A ship can be parked beside a ridge, prop, or
+			// uneven terrain; those obstacles must not trap the player inside. Use the real surface when
+			// one is available, but do not require a clear capsule overlap before allowing the exit.
+			if (!Planet->GetSurfaceFrameAt(CandidateReferenceLocation, SurfaceForward, CandidateSurfaceFrame)
+				|| CandidateSurfaceFrame.Up.IsNearlyZero())
 			{
 				continue;
 			}
 
-			OutLocation = CandidateLocation;
+			OutLocation = CandidateSurfaceFrame.Location
+				+ CandidateSurfaceFrame.Up * (CapsuleHalfHeight + PlanetSurfaceSnapClearance);
 			if (OutSurfaceFrame != nullptr)
 			{
 				*OutSurfaceFrame = CandidateSurfaceFrame;
@@ -1917,9 +1845,24 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft disembark candidates exhausted for %s on planet %s."),
-		*Spacecraft->GetName(), *Planet->GetPlanetId().ToString());
-	return false;
+	// A missing or temporarily unloaded terrain collision must never prevent F from leaving the
+	// spacecraft. Put the capsule beside the hull in the landed local frame; gravity will settle it
+	// once a surface becomes available.
+	const float FallbackHeight = FMath::Max(
+		CapsuleHalfHeight + PlanetSurfaceSnapClearance,
+		Spacecraft->GetExteriorHullSupportDistance(SurfaceUp) + CapsuleHalfHeight + 16.0f);
+	OutLocation = ShipLocation + ExitDirection * StartDistance + SurfaceUp * FallbackHeight;
+	if (OutSurfaceFrame != nullptr)
+	{
+		OutSurfaceFrame->Location = OutLocation - SurfaceUp * (CapsuleHalfHeight + PlanetSurfaceSnapClearance);
+		OutSurfaceFrame->Up = SurfaceUp;
+		OutSurfaceFrame->Forward = SurfaceForward;
+		OutSurfaceFrame->Right = SurfaceRight;
+		OutSurfaceFrame->Transform = FTransform(
+			FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat(),
+			OutSurfaceFrame->Location);
+	}
+	return true;
 }
 
 bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const
@@ -1941,14 +1884,7 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 		RequestedExitLocation = ExitPoint->GetComponentLocation();
 	}
 
-	FVector ShipCenter = Spacecraft->GetActorLocation();
-	FVector ShipExtent(180.0f, 180.0f, 90.0f);
-	if (const UStaticMeshComponent* const ShipMesh = Spacecraft->FindComponentByClass<UStaticMeshComponent>())
-	{
-		const FBoxSphereBounds MeshBounds = ShipMesh->Bounds;
-		ShipCenter = MeshBounds.Origin;
-		ShipExtent = MeshBounds.BoxExtent;
-	}
+	const FVector ShipCenter = Spacecraft->GetActorLocation();
 
 	FVector ExitDirection = RequestedExitLocation - ShipCenter;
 	ExitDirection.Z = 0.0f;
@@ -1964,11 +1900,9 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 		ExitDirection = FVector(1.0f, 0.0f, 0.0f);
 	}
 
-	const float ProjectedShipExtent = FMath::Abs(ExitDirection.X) * ShipExtent.X
-		+ FMath::Abs(ExitDirection.Y) * ShipExtent.Y;
 	const float CapsuleRadius = GetCapsuleComponent()->GetScaledCapsuleRadius();
 	const float CapsuleHalfHeight = GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-	const float MinimumOutsideDistance = ProjectedShipExtent + CapsuleRadius + 16.0f;
+	const float MinimumOutsideDistance = Spacecraft->GetExteriorHullSupportDistance(ExitDirection) + CapsuleRadius + 16.0f;
 	const FVector RequestedHorizontalOffset = RequestedExitLocation - ShipCenter;
 	const float RequestedDistance = FMath::Max(
 		0.0f,
@@ -1979,19 +1913,16 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 	GroundTraceParams.AddIgnoredActor(this);
 	GroundTraceParams.AddIgnoredActor(Spacecraft);
 
-	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSBoardingExitPlacement), false, this);
-	PlacementParams.AddIgnoredActor(this);
-	const FCollisionShape CharacterShape = GetCapsuleComponent()->GetCollisionShape();
-	const FQuat CharacterRotation = GetCapsuleComponent()->GetComponentQuat();
-
-	FVector FarthestGroundLocation = FVector::ZeroVector;
-	bool bHasGroundLocation = false;
+	FVector FallbackLocation = ShipCenter + ExitDirection * StartDistance
+		+ FVector(0.0f, 0.0f, FMath::Max(CapsuleHalfHeight + 4.0f, RequestedExitLocation.Z - ShipCenter.Z));
 	constexpr int32 MaxExitSearchAttempts = 16;
 	constexpr float ExitSearchStep = 75.0f;
 	for (int32 AttemptIndex = 0; AttemptIndex < MaxExitSearchAttempts; ++AttemptIndex)
 	{
 		const float CandidateDistance = StartDistance + (ExitSearchStep * static_cast<float>(AttemptIndex));
 		const FVector CandidateHorizontal = ShipCenter + ExitDirection * CandidateDistance;
+		FallbackLocation = CandidateHorizontal
+			+ FVector(0.0f, 0.0f, FMath::Max(CapsuleHalfHeight + 4.0f, RequestedExitLocation.Z - ShipCenter.Z));
 		const FVector TraceStart = CandidateHorizontal + FVector(0.0f, 0.0f, 1000.0f);
 		const FVector TraceEnd = CandidateHorizontal - FVector(0.0f, 0.0f, 2000.0f);
 
@@ -2006,34 +1937,26 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 			CandidateHorizontal.X,
 			CandidateHorizontal.Y,
 			GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 4.0f);
-		FarthestGroundLocation = CandidateLocation;
-		bHasGroundLocation = true;
-		if (World->OverlapBlockingTestByChannel(
-			CandidateLocation,
-			CharacterRotation,
-			ECC_Pawn,
-			CharacterShape,
-			PlacementParams))
-		{
-			continue;
-		}
-
+		// Earth follows the same best-effort rule as a landed planet: terrain supplies the height,
+		// but an obstacle at the door never vetoes the player's exit.
 		OutLocation = CandidateLocation;
 		return true;
 	}
 
-	if (bHasGroundLocation)
-	{
-		OutLocation = FarthestGroundLocation;
-		return true;
-	}
-
-	return false;
+	// No terrain collision (for example, a streaming gap) is still not a reason to keep the player
+	// inside. Spawn beside the exit at the spacecraft's local height and let normal falling resolve it.
+	OutLocation = FallbackLocation;
+	return true;
 }
 
 void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)
 {
-	if (NewGameplayPhase != EJTSGameplayPhase::EarthCollection)
+	// Boarding is deliberately available through the same hold-F affordance on Earth and
+	// on a ready planetary surface. Do not cancel a just-started hold merely because the
+	// replicated SpaceWorld phase arrived a frame after the player did.
+	const bool bBoardingSupportedInCurrentWorld = NewGameplayPhase == EJTSGameplayPhase::EarthCollection
+		|| IsSpaceWorldSurfaceGameplayActive();
+	if (!bBoardingSupportedInCurrentWorld)
 	{
 		bInteractKeyHeld = false;
 		CancelBoardingHold();

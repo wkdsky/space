@@ -15,8 +15,7 @@ class UStaticMeshComponent;
 class AJTSPlanetAnchor;
 
 /**
- * A manually collected MoonAnt corpse. The gameplay root remains on the logical Moon surface;
- * the copied MoonAnt visual owns its short pop and Fake Moon bend separately.
+ * A manually collected MoonAnt corpse placed on the active Moon PlanetAnchor surface.
  */
 UCLASS()
 class SPACE_API AJTSMoonAntCorpsePickupActor : public AJTSWorldPickupActor
@@ -53,7 +52,6 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
-	virtual UMaterialInterface* GetMoonBendMaterialForPickup() const override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
@@ -70,7 +68,6 @@ private:
 	void ResolveFinalSettledGroundLocation();
 	void PlaceAtSettledGroundLocation();
 	void UpdateCorpseVisualTransform(float PopAlpha);
-	FVector GetPopVisualWorldOffset(float PopAlpha) const;
 	void UpdateInteractionCollider();
 	void SetCorpseInteractionEnabled(bool bEnabled);
 	AJTSPlanetAnchor* GetRealSurfacePlanet() const;
@@ -132,20 +129,15 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	FVector DeathGroundLocation = FVector::ZeroVector;
 	FVector SettledGroundLocation = FVector::ZeroVector;
-	FVector2D DeathLogicalPosition = FVector2D::ZeroVector;
-	FVector2D SettledLogicalPosition = FVector2D::ZeroVector;
 	TWeakObjectPtr<AJTSPlanetAnchor> RealSurfacePlanet;
 	float GroundSupportHeight = 1.0f;
 	float CorpsePopElapsed = 0.0f;
 	float CorpsePopDuration = 0.35f;
 	bool bUseSkeletalCorpseVisual = false;
 	bool bUseDebugFallbackVisual = true;
-	bool bVisualUsesMaterialMoonBend = false;
 	UPROPERTY(ReplicatedUsing = OnRep_CorpseSettled)
 	bool bCorpseSettled = false;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CorpseVisualData)
 	bool bInitializedFromMoonAnt = false;
-	bool bUsingMoonWrapForPop = false;
-	bool bUsingRealPlanetSurfaceForPop = false;
 };

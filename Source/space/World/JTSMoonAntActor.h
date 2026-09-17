@@ -18,7 +18,6 @@ class USphereComponent;
 class UStaticMeshComponent;
 class UWidgetComponent;
 class UJTSHealthComponent;
-class UJTSMoonWrappedActorComponent;
 class IJTSMoonSurfaceGameplaySettings;
 class AJTSPlanetAnchor;
 
@@ -78,7 +77,6 @@ private:
 	void ChooseRoamTarget(bool bForceNearNest = false);
 	bool GetOriginNestLocation(FVector& OutNestLocation) const;
 	float GetDistanceToOriginNest() const;
-	FVector GetShortestWrappedDeltaTo(const FVector2D& TargetLogicalPosition) const;
 	AJTSPlanetAnchor* GetSurfacePlanet() const;
 	bool IsUsingRealPlanetSurface() const;
 	FVector GetSurfaceTangentTo(const FVector& TargetLocation) const;
@@ -99,7 +97,6 @@ private:
 	bool SpawnMoonAntCorpse();
 	void SetMoonAntState(EJTSMoonAntState NewState);
 	void UpdateFallbackMaterial();
-	void UpdateMoonWrappedLogicalPosition();
 
 	UFUNCTION()
 	void HandleHealthDamaged(float CurrentHealth, float MaxHealth, float Damage, AActor* DamageCauser);
@@ -125,12 +122,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Collision", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USphereComponent> MoonAntHitCollider;
 
-	/** Native screen-space health bar that follows the visual Moon-bend transform without inheriting MoonAnt scale. */
+	/** Native screen-space health bar that follows the MoonAnt visual without inheriting its scale. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Health", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UWidgetComponent> MoonAntHealthBarComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|MoonAnt|Visual", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float MoonAntTargetBodyLength = 28.0f;
@@ -163,7 +157,6 @@ private:
 
 	TWeakObjectPtr<AJTSMoonAntNestActor> OriginNest;
 	FVector GroundLocation = FVector::ZeroVector;
-	FVector2D RoamTargetLogicalPosition = FVector2D::ZeroVector;
 	FVector RoamTargetWorldLocation = FVector::ZeroVector;
 	FVector FleeSourceLocation = FVector::ZeroVector;
 	FVector FleeDirection = FVector::ForwardVector;
@@ -171,7 +164,6 @@ private:
 	FRotator MoonAntMeshBaseRelativeRotation = FRotator::ZeroRotator;
 	FVector MoonAntFallbackBaseRelativeLocation = FVector::ZeroVector;
 	FVector MoonAntFallbackBaseMeshScale = FVector(0.55f, 0.34f, 0.16f);
-	FVector CurrentMoonBendWorldOffset = FVector::ZeroVector;
 	float MoonAntMeshUniformScale = 1.0f;
 	float GroundSupportHeight = 12.0f;
 	float BurrowDepth = 30.0f;

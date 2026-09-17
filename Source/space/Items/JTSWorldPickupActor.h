@@ -14,7 +14,6 @@ class APawn;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
-class UJTSMoonWrappedActorComponent;
 class AJTSPlanetAnchor;
 struct FHitResult;
 
@@ -100,12 +99,7 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	/** Allows specialized pickups to preserve source visual materials instead of receiving the shared prop material. */
-	virtual UMaterialInterface* GetMoonBendMaterialForPickup() const;
-
 	UStaticMeshComponent* GetPickupMeshComponent() const;
-	UJTSMoonWrappedActorComponent* GetMoonWrappedActorComponent() const;
-	void UpdateMoonWrappedLogicalPosition();
 
 private:
 	UFUNCTION()
@@ -131,6 +125,7 @@ private:
 	void BuildDropTraceIgnoredActors(AActor* SourceActor, APawn* SafetyPawn);
 	void SettleDropOnGround(const FVector& GroundHitLocation);
 	void ConfigureAppearance();
+	void ApplySurfacePresentationMaterial();
 	void ApplyItemAppearance();
 	void ShowFailureFeedback(const FString& FailureReason);
 	FText GetFailureFeedback() const;
@@ -145,12 +140,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pickup", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> PickupMesh;
 
-	/** Reuses the existing Moon wrapping and Fake World WPO behavior. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
+	/** Surface material used by every pickup, including Earth drops and planet-surface placements. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Rendering", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> RealPlanetSurfaceMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> RockMesh;
@@ -170,6 +162,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PickupMaterial;
+
+	/** Base material currently selected before the dynamic item-color instance is created. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> AppliedPresentationMaterial;
 
 	/** A failed manual pickup remains attached to this target instead of drawing over the inventory. */
 	UPROPERTY(EditDefaultsOnly, Category = "Pickup|Interaction", meta = (ClampMin = "0.1", UIMin = "0.1"))

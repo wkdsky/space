@@ -11,7 +11,6 @@ class APawn;
 class UMaterialInstanceDynamic;
 class USceneComponent;
 class UStaticMeshComponent;
-class UJTSMoonWrappedActorComponent;
 class IJTSMoonSurfaceGameplaySettings;
 class AJTSPlanetAnchor;
 
@@ -25,7 +24,7 @@ public:
 	AJTSMoonAntNestActor();
 
 	void AdjustToGround(const FVector& GroundLocation);
-	/** Aligns the nest with real planet collision and disables Fake Moon wrapping for this instance. */
+	/** Aligns the nest with real planet collision. */
 	void PlaceOnPlanetSurface(
 		AJTSPlanetAnchor* Planet,
 		const FVector& GroundLocation,
@@ -51,11 +50,9 @@ private:
 
 	const IJTSMoonSurfaceGameplaySettings* GetMoonGameMode() const;
 	FVector GetVisualBoundsExtent() const;
-	bool ResolveMoonAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
 	float ChooseMoonAntSpawnDistance(const IJTSMoonSurfaceGameplaySettings& MoonGameMode) const;
 	void ScheduleNextMoonAntSpawn();
 	void TrySpawnMoonAnt();
-	void UpdateMoonWrappedLogicalPosition();
 	AJTSPlanetAnchor* GetSurfacePlanet() const;
 	bool IsUsingRealPlanetSurface() const;
 
@@ -65,13 +62,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Nest", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> NestMesh;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
-
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> MoonAntNestMaterial;
 
-	/** Explicitly supplied by AJTSMoonGameMode when this runtime Nest is created. */
+	/** Explicitly supplied by the active Moon surface controller when this runtime Nest is created. */
 	UPROPERTY(Transient)
 	TSubclassOf<AJTSMoonAntActor> MoonAntActorClass;
 

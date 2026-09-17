@@ -38,7 +38,7 @@ namespace JTSSurfacePlacementBounds
 
 	/**
 	 * Adds one primitive's uninflated physical local bounds to a SurfaceUp projection.
-	 * BoundsScale is deliberately removed because Fake Moon WPO uses it only for culling expansion.
+	 * BoundsScale is deliberately removed because it represents render culling expansion, not geometry.
 	 */
 	SPACE_API bool AccumulateVisualProjectionBounds(
 		const UPrimitiveComponent* VisualComponent,
@@ -46,4 +46,3 @@ namespace JTSSurfacePlacementBounds
 		const FVector& SurfaceUp,
 		FJTSSurfaceVisualProjectionBounds& InOutBounds);
 }
-

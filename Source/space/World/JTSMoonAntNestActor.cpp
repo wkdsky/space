@@ -8,9 +8,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/World/JTSMoonAntActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -36,25 +34,15 @@ AJTSMoonAntNestActor::AJTSMoonAntNestActor()
 	NestMesh->SetGenerateOverlapEvents(false);
 	NestMesh->SetCanEverAffectNavigation(false);
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
-
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
 	{
 		NestMesh->SetStaticMesh(SphereMeshAsset.Object);
 	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
-	if (FakeMoonBendMaterialAsset.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicMaterialAsset.Succeeded())
 	{
-		NestMesh->SetMaterial(0, FakeMoonBendMaterialAsset.Object);
-	}
-	else
-	{
-		static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BasicMaterialAsset.Succeeded())
-		{
-			NestMesh->SetMaterial(0, BasicMaterialAsset.Object);
-		}
+		NestMesh->SetMaterial(0, BasicMaterialAsset.Object);
 	}
 }
 
@@ -73,7 +61,6 @@ void AJTSMoonAntNestActor::AdjustToGround(const FVector& GroundLocation)
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	UpdateMoonWrappedLogicalPosition();
 }
 
 void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
@@ -116,11 +103,6 @@ void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
 }
 
 void AJTSMoonAntNestActor::SetMoonAntNestVisualScale(float InVisualScale)
@@ -227,11 +209,6 @@ void AJTSMoonAntNestActor::BeginPlay()
 	{
 		PunchHitsRemaining = MoonGameMode->GetMoonAntNestPunchHitsToDestroy();
 	}
-	if (IsUsingRealPlanetSurface() && MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
 	MoonAntNestMaterial = NestMesh != nullptr ? NestMesh->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
 	if (MoonAntNestMaterial != nullptr)
 	{
@@ -309,17 +286,6 @@ FVector AJTSMoonAntNestActor::GetVisualBoundsExtent() const
 	return FVector(34.0f, 34.0f, 10.0f);
 }
 
-bool AJTSMoonAntNestActor::ResolveMoonAntGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const
-{
-	if (const AJTSMoonSurfaceController* const Controller = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
-	{
-		return Controller->OwnsSurfaceActor(this)
-			&& Controller->ResolveMoonGroundLocation(CandidateLocation, OutGroundLocation, this);
-	}
-
-	return false;
-}
-
 float AJTSMoonAntNestActor::ChooseMoonAntSpawnDistance(const IJTSMoonSurfaceGameplaySettings& MoonGameMode) const
 {
 	const float NearWeight = MoonGameMode.GetMoonAntSpawnNearWeight();
@@ -395,90 +361,50 @@ void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 
 	const float SpawnAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
 	const float SpawnDistance = ChooseMoonAntSpawnDistance(*MoonGameMode);
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
+	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
+	if (!IsValid(Planet))
 	{
-		FJTSPlanetSurfaceFrame NestSurfaceFrame;
-		FJTSPlanetSurfaceHit SpawnSurfaceHit;
-		if (Planet->GetSurfaceFrameAt(GetActorLocation(), GetActorForwardVector(), NestSurfaceFrame))
-		{
-			const FVector SpawnDirection = (
-				NestSurfaceFrame.Forward * FMath::Cos(SpawnAngle)
-				+ NestSurfaceFrame.Right * FMath::Sin(SpawnAngle)).GetSafeNormal();
-			const FVector CandidateLocation = GetActorLocation() + SpawnDirection * SpawnDistance;
-			if (Planet->ProjectPointToSurface(CandidateLocation, SpawnSurfaceHit))
-			{
-				const FVector SpawnForward = FQuat(
-					SpawnSurfaceHit.ImpactNormal,
-					FMath::FRandRange(0.0f, UE_TWO_PI)).RotateVector(SpawnDirection);
-				const FTransform SpawnTransform(
-					FRotationMatrix::MakeFromXZ(SpawnForward, SpawnSurfaceHit.ImpactNormal).ToQuat(),
-					SpawnSurfaceHit.ImpactPoint);
-				TSubclassOf<AJTSMoonAntActor> SpawnClass = MoonAntActorClass;
-				if (SpawnClass == nullptr)
-				{
-					SpawnClass = AJTSMoonAntActor::StaticClass();
-				}
-				AJTSMoonAntActor* const MoonAnt = World->SpawnActorDeferred<AJTSMoonAntActor>(
-					SpawnClass,
-					SpawnTransform,
-					this,
-					nullptr,
-					ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-				if (IsValid(MoonAnt))
-				{
-					MoonAnt->InitializeMoonAnt(this, SpawnSurfaceHit.ImpactPoint);
-					if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
-					{
-						SurfaceController->RegisterSurfaceRuntimeActor(MoonAnt);
-					}
-					MoonAnt->FinishSpawning(SpawnTransform);
-					ActiveMoonAnts.Add(MoonAnt);
-				}
-			}
-		}
-
 		ScheduleNextMoonAntSpawn();
 		return;
 	}
 
-	const FVector SpawnOffset(FMath::Cos(SpawnAngle), FMath::Sin(SpawnAngle), 0.0f);
-	FVector CandidateLocation = GetActorLocation() + SpawnOffset * SpawnDistance;
-	if (const UJTSMoonWrapSubsystem* const MoonWrap = World->GetSubsystem<UJTSMoonWrapSubsystem>();
-		IsValid(MoonWrap) && MoonWrap->IsConfiguredForMoon())
+	FJTSPlanetSurfaceFrame NestSurfaceFrame;
+	FJTSPlanetSurfaceHit SpawnSurfaceHit;
+	if (Planet->GetSurfaceFrameAt(GetActorLocation(), GetActorForwardVector(), NestSurfaceFrame))
 	{
-		const FVector NestLocation = GetActorLocation();
-		const FVector2D NestPhysicalXY(NestLocation.X, NestLocation.Y);
-		const FVector2D NestLogicalXY = MoonWrap->GetLogicalPositionFromWorld(NestLocation);
-		const FVector2D CandidateLogicalXY = MoonWrap->CanonicalizePosition2D(
-			NestLogicalXY + FVector2D(SpawnOffset.X, SpawnOffset.Y) * SpawnDistance);
-		const FVector2D CandidatePhysicalXY = MoonWrap->GetNearestPhysicalImage(NestPhysicalXY, CandidateLogicalXY);
-		CandidateLocation.X = CandidatePhysicalXY.X;
-		CandidateLocation.Y = CandidatePhysicalXY.Y;
-	}
-	FVector GroundLocation;
-	if (ResolveMoonAntGroundLocation(CandidateLocation, GroundLocation))
-	{
-		const FTransform SpawnTransform(FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f), GroundLocation);
-		TSubclassOf<AJTSMoonAntActor> SpawnClass = MoonAntActorClass;
-		if (SpawnClass == nullptr)
+		const FVector SpawnDirection = (
+			NestSurfaceFrame.Forward * FMath::Cos(SpawnAngle)
+			+ NestSurfaceFrame.Right * FMath::Sin(SpawnAngle)).GetSafeNormal();
+		const FVector CandidateLocation = GetActorLocation() + SpawnDirection * SpawnDistance;
+		if (Planet->ProjectPointToSurface(CandidateLocation, SpawnSurfaceHit))
 		{
-			SpawnClass = AJTSMoonAntActor::StaticClass();
-		}
-		AJTSMoonAntActor* const MoonAnt = World->SpawnActorDeferred<AJTSMoonAntActor>(
-			SpawnClass,
-			SpawnTransform,
-			this,
-			nullptr,
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		if (IsValid(MoonAnt))
-		{
-			MoonAnt->InitializeMoonAnt(this, GroundLocation);
-			if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+			const FVector SpawnForward = FQuat(
+				SpawnSurfaceHit.ImpactNormal,
+				FMath::FRandRange(0.0f, UE_TWO_PI)).RotateVector(SpawnDirection);
+			const FTransform SpawnTransform(
+				FRotationMatrix::MakeFromXZ(SpawnForward, SpawnSurfaceHit.ImpactNormal).ToQuat(),
+				SpawnSurfaceHit.ImpactPoint);
+			TSubclassOf<AJTSMoonAntActor> SpawnClass = MoonAntActorClass;
+			if (SpawnClass == nullptr)
 			{
-				SurfaceController->RegisterSurfaceRuntimeActor(MoonAnt);
+				SpawnClass = AJTSMoonAntActor::StaticClass();
 			}
-			MoonAnt->FinishSpawning(SpawnTransform);
-			ActiveMoonAnts.Add(MoonAnt);
+			AJTSMoonAntActor* const MoonAnt = World->SpawnActorDeferred<AJTSMoonAntActor>(
+				SpawnClass,
+				SpawnTransform,
+				this,
+				nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+			if (IsValid(MoonAnt))
+			{
+				MoonAnt->InitializeMoonAnt(this, SpawnSurfaceHit.ImpactPoint);
+				if (AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this))
+				{
+					SurfaceController->RegisterSurfaceRuntimeActor(MoonAnt);
+				}
+				MoonAnt->FinishSpawning(SpawnTransform);
+				ActiveMoonAnts.Add(MoonAnt);
+			}
 		}
 	}
 
@@ -501,20 +427,5 @@ void AJTSMoonAntNestActor::OnRep_NestPresentation()
 	if (IsValid(NestMesh))
 	{
 		NestMesh->SetRelativeScale3D(BaseMoonAntNestMeshScale * FMath::Max(0.1f, NestVisualScale));
-	}
-	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
-}
-
-void AJTSMoonAntNestActor::UpdateMoonWrappedLogicalPosition()
-{
-	if (!IsUsingRealPlanetSurface()
-		&& MoonWrappedActorComponent != nullptr
-		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
-	{
-		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
 	}
 }

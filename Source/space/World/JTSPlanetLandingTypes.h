@@ -18,6 +18,16 @@ enum class EJTSSpacecraftFlightState : uint8
 	Landed UMETA(DisplayName = "Landed")
 };
 
+/** The visible/server-authoritative sub-state of a controlled touchdown. */
+UENUM(BlueprintType)
+enum class EJTSSpacecraftLandingAssistPhase : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Aligning UMETA(DisplayName = "Aligning"),
+	Descending UMETA(DisplayName = "Descending"),
+	Touchdown UMETA(DisplayName = "Touchdown")
+};
+
 /** Why a landing request could not become a controlled landing. */
 UENUM(BlueprintType)
 enum class EJTSLandingValidationFailure : uint8
@@ -40,6 +50,7 @@ enum class EJTSLandingValidationFailure : uint8
 UENUM(BlueprintType)
 enum class EJTSRespawnTransformSource : uint8
 {
+	SpacecraftExitSafe UMETA(DisplayName = "Safe Spacecraft Exit"),
 	LandingAreaRandom UMETA(DisplayName = "Landing Area Random"),
 	LandingAreaNearest UMETA(DisplayName = "Landing Area Nearest"),
 	SpacecraftTop UMETA(DisplayName = "Spacecraft Top"),

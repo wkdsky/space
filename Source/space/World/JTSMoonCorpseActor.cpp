@@ -6,7 +6,6 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
@@ -97,8 +96,6 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 	RightLegBoneMesh->SetRelativeScale3D(FVector(0.085f, 0.55f, 0.065f));
 	ConfigureCorpsePrimitive(RightLegBoneMesh);
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
-
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (SphereMeshAsset.Succeeded())
@@ -115,26 +112,13 @@ AJTSMoonCorpseActor::AJTSMoonCorpseActor()
 		RightLegBoneMesh->SetStaticMesh(CubeMeshAsset.Object);
 	}
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (BasicMaterialAsset.Succeeded())
 	{
 		BasicPrototypeMaterial = BasicMaterialAsset.Object;
 	}
 
-	if (FakeMoonBendMaterialAsset.Succeeded())
-	{
-		for (UStaticMeshComponent* Component : {
-			SkullMesh.Get(), TorsoClothingMesh.Get(), HipClothingMesh.Get(), LeftArmBoneMesh.Get(),
-			RightArmBoneMesh.Get(), LeftLegBoneMesh.Get(), RightLegBoneMesh.Get()})
-		{
-			if (IsValid(Component))
-			{
-				Component->SetMaterial(0, FakeMoonBendMaterialAsset.Object);
-			}
-		}
-	}
-	else if (BasicPrototypeMaterial != nullptr)
+	if (BasicPrototypeMaterial != nullptr)
 	{
 		for (UStaticMeshComponent* Component : {
 			SkullMesh.Get(), TorsoClothingMesh.Get(), HipClothingMesh.Get(), LeftArmBoneMesh.Get(),
@@ -165,7 +149,6 @@ void AJTSMoonCorpseActor::AdjustToGround(const FVector& GroundLocation)
 		FVector AdjustedLocation = GetActorLocation();
 		AdjustedLocation.Z += GroundLocation.Z - Bounds.Min.Z + 2.0f;
 		SetActorLocation(AdjustedLocation, false, nullptr, ETeleportType::TeleportPhysics);
-		UpdateMoonWrappedLogicalPosition();
 	}
 }
 
@@ -192,7 +175,7 @@ bool AJTSMoonCorpseActor::SnapToPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* Sur
 		return false;
 	}
 
-	DisableLegacyMoonPresentation();
+	ApplySurfacePresentation();
 	SetActorRotation(SurfaceTransform.Rotator(), ETeleportType::TeleportPhysics);
 
 	// The landmark is composed from several meshes with intentionally positive local Z offsets.
@@ -250,7 +233,7 @@ void AJTSMoonCorpseActor::OnRep_RealSurfacePlacement()
 {
 	if (bUsesRealPlanetSurfacePlacement)
 	{
-		DisableLegacyMoonPresentation();
+		ApplySurfacePresentation();
 	}
 }
 
@@ -268,25 +251,9 @@ void AJTSMoonCorpseActor::ApplyPrototypeMaterials()
 	ApplyColor(HipClothingMesh, TornFabricAccent);
 }
 
-void AJTSMoonCorpseActor::UpdateMoonWrappedLogicalPosition()
-{
-	if (!bUsesRealPlanetSurfacePlacement
-		&& MoonWrappedActorComponent != nullptr
-		&& MoonWrappedActorComponent->IsMoonWrappingEnabled())
-	{
-		MoonWrappedActorComponent->SetLogicalPositionFromWorld();
-	}
-}
-
-void AJTSMoonCorpseActor::DisableLegacyMoonPresentation()
+void AJTSMoonCorpseActor::ApplySurfacePresentation()
 {
 	bUsesRealPlanetSurfacePlacement = true;
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
-
 	if (BasicPrototypeMaterial == nullptr)
 	{
 		return;

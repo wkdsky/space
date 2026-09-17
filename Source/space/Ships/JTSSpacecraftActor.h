@@ -8,6 +8,7 @@
 #include "space/Core/JTSGameState.h"
 #include "space/Core/JTSExpeditionTypes.h"
 #include "space/Interaction/IInteractable.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSResourceTypes.h"
 #include "space/World/JTSPlanetLandingTypes.h"
 
@@ -32,8 +33,6 @@ class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 class UJTSSpacecraftFlightMovementComponent;
-class UJTSMoonWrappedActorComponent;
-class UMaterialInterface;
 struct FHitResult;
 struct FInputActionValue;
 
@@ -55,17 +54,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ship|Resources")
 	bool TryDepositResourcesFromPawn(APawn* InteractingPawn);
 
+	/** Server-authoritative purchase backed by this ship's shared material storage. */
+	EJTSShopPurchaseResult TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId);
+
 	/** Boards a character that is currently inside the spacecraft trigger. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryBoardPlayer(APawn* InteractingPawn);
 
-	/** Immediately disembarks the currently boarded character during active exploration. */
+	/** Server-authoritative disembark; succeeds only while the boarded craft is parked. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryDisembarkPlayer(APawn* InteractingPawn);
 	bool TryDisembarkPlayerForController(APlayerController* PlayerController);
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool IsPlayerBoarded(const APawn* InteractingPawn) const;
+
+	/**
+	 * A boarded player may exit only while the craft is parked: Earth collection treats its static
+	 * launch craft as parked, while SpaceWorld requires a completed real-planet landing.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	bool CanDisembarkPlayer(const APawn* InteractingPawn) const;
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	bool HasBoardedPlayer() const;
@@ -93,6 +102,13 @@ public:
 	/** Closest physical spacecraft-mesh bounds point used by camera-cone and LOS interaction targeting. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
 	FVector GetBoardingInteractionTargetWorldLocation(const FVector& ReferenceLocation) const;
+
+	/**
+	 * Furthest physical hull projection from this actor's root in a world-space direction.
+	 * Used to keep a disembarking character outside Blueprint-authored visual hulls, rather than
+	 * relying on the smaller flight collision proxy.
+	 */
+	float GetExteriorHullSupportDistance(const FVector& WorldDirection) const;
 
 	USceneComponent* GetBoardingPoint() const;
 	USceneComponent* GetExitPoint() const;
@@ -160,6 +176,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
 	EJTSLandingValidationFailure GetLastLandingFailure() const;
 
+	/** Concise status for the visible controlled-landing flow. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	EJTSSpacecraftLandingAssistPhase GetLandingAssistPhase() const;
+
 	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
 	AJTSPlanetAnchor* GetLandedPlanet() const;
 
@@ -214,7 +234,7 @@ public:
 	float GetPlayerRespawnCapsuleHalfHeight() const;
 	float GetPlayerRespawnClearance() const;
 
-	/** Physical spacecraft mesh bounds, excluding Fake Moon WPO culling expansion. */
+	/** Physical spacecraft mesh bounds, excluding render-only bounds expansion. */
 	FBox GetResourceExclusionBounds() const;
 
 	/** Physical bounds-top anchor shared by the world interaction prompt and Moon navigation marker. */
@@ -286,6 +306,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestSurfaceTakeoff();
 
+	/** Driver-only request sent through the possessed spacecraft's owning connection. */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDisembark();
+
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
 	FOnShipResourcesChanged OnShipResourcesChanged;
@@ -344,6 +368,7 @@ private:
 	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
 	void HandleAssistedLandingCompleted();
 	void HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure);
+	void HandleAssistedLandingPhaseChanged(EJTSSpacecraftLandingAssistPhase NewPhase);
 	void SubmitFlightInput();
 	void ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState);
 	void SyncReplicatedStorage();
@@ -369,6 +394,9 @@ private:
 	bool IsSpaceWorldRuntimeActive() const;
 	bool IsMoonSurfaceRuntimeActive() const;
 	bool DepositPlayerResources(AJTSCharacter* Player);
+	bool TryDepositPlayerMaterials(AJTSCharacter* Player);
+	bool BuildShopCosts(EJTSItemId ItemId, TMap<EJTSResourceType, int32>& OutCosts) const;
+	bool DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item, bool& bOutDropped);
 	void DepositResourcesFromOverlappingPlayers();
 	/** Reconciles occupants once after all startup BeginPlay calls have completed. */
 	void ReconcileInitialBoardingOverlaps();
@@ -431,15 +459,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> ExitPoint;
 
-	/** Supplies the single authoritative spacecraft with a nearest-image representation in Fake Moon worlds. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Wrapping", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSMoonWrappedActorComponent> MoonWrappedActorComponent;
-
-	/** Optional shared Fake Moon WPO material. Earth worlds leave this untouched. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Rendering", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UMaterialInterface> FakeMoonBendMaterial;
-
-	/** Small visual clearance above the spacecraft mesh top; Moon HUD applies WPO curvature separately. */
+	/** Small visual clearance above the spacecraft mesh top for the navigation marker. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float NavigationMarkerHeightOffset = 20.0f;
 
@@ -461,25 +481,48 @@ private:
 	float PlayerRespawnClearance = 20.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
-	float NormalFlightFOV = 85.0f;
+	float NormalFlightFOV = 90.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0"))
-	float BoostFlightFOV = 95.0f;
+	float BoostFlightFOV = 100.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float FlightFOVInterpolationSpeed = 5.0f;
 
+	/** Exterior driving camera default. This is deliberately independent of the character's camera range. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "5000.0", UIMin = "800.0", UIMax = "3200.0"))
+	float FlightCameraDefaultArmLength = 1800.0f;
+
+	/** Keeps the craft below the sight line instead of locking it in the centre of the screen. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
+	FVector FlightCameraSocketOffset = FVector(0.0f, 0.0f, 300.0f);
+
+	/** Dedicated exterior-camera pitch limits; player-character limits are never reused while driving. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "-89.0", ClampMax = "0.0", UIMin = "-89.0", UIMax = "0.0"))
+	float FlightCameraPitchMin = -70.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
+	float FlightCameraPitchMax = 55.0f;
+
+	/** Multiplies raw mouse look for the exterior camera only. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
+	float FlightCameraLookSensitivity = 0.18f;
+
 	/** Closest driving camera distance selectable with the mouse wheel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "3000.0", UIMin = "0.0", UIMax = "1600.0"))
-	float FlightCameraMinArmLength = 500.0f;
+	float FlightCameraMinArmLength = 1000.0f;
 
 	/** Furthest driving camera distance selectable with the mouse wheel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "5000.0", UIMin = "900.0", UIMax = "3200.0"))
-	float FlightCameraMaxArmLength = 2400.0f;
+	float FlightCameraMaxArmLength = 3600.0f;
 
 	/** Camera-boom change, in centimeters, for one mouse-wheel step. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "500.0"))
-	float FlightCameraZoomStep = 120.0f;
+	float FlightCameraZoomStep = 180.0f;
+
+	/** Server-side cap for one raw mouse sample. Continuous axes remain clamped to [-1, 1]. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Flight|Input", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "64.0"))
+	float MaxFlightLookInputPerSample = 20.0f;
 
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
@@ -543,7 +586,7 @@ private:
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;
 
-	/** Transient real-planet parking state. Earth and Legacy Fake Moon spacecraft leave this unset. */
+	/** Transient real-planet parking state. Earth spacecraft leave this unset. */
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> GroundedPlanet;
 
@@ -563,6 +606,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	EJTSLandingValidationFailure LastLandingFailure = EJTSLandingValidationFailure::None;
+
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	EJTSSpacecraftLandingAssistPhase LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 
 	TWeakObjectPtr<AJTSPlanetLandingSite> PendingLandingSite;
 	FTransform PendingLandingTransform = FTransform::Identity;

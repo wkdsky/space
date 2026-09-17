@@ -265,6 +265,15 @@ void UJTSOnlineSessionSubsystem::BeginCreateSession()
 	}
 	if (SessionInterface->GetNamedSession(JTSSessionName) != nullptr)
 	{
+		// Front-end creation always means "host this selected expedition". A local provider can retain
+		// the prior named session after returning to Entry, so both a new slot and a resumed save must
+		// replace that stale host record before creating their fresh lobby.
+		if (!DestroySessionCompleteHandle.IsValid())
+		{
+			BeginDestroySession(EDestroyCompletionAction::RecreateExpedition);
+			return;
+		}
+
 		FinishOperation(false, TEXT("A local expedition session already exists."));
 		return;
 	}
@@ -447,6 +456,10 @@ void UJTSOnlineSessionSubsystem::BeginDestroySession(EDestroyCompletionAction Co
 		if (FailedAction == EDestroyCompletionAction::QuitApplication)
 		{
 			CompleteApplicationQuit();
+		}
+		else if (FailedAction == EDestroyCompletionAction::RecreateExpedition)
+		{
+			FinishOperation(false, TEXT("Could not replace the previous local expedition session."));
 		}
 		else
 		{
@@ -742,6 +755,28 @@ void UJTSOnlineSessionSubsystem::HandleDestroySessionComplete(FName SessionName,
 	if (CompletionAction == EDestroyCompletionAction::QuitApplication)
 	{
 		CompleteApplicationQuit();
+		return;
+	}
+
+	if (CompletionAction == EDestroyCompletionAction::RecreateExpedition)
+	{
+		if (!bWasSuccessful)
+		{
+			FinishOperation(false, TEXT("Could not replace the previous local expedition session."));
+			return;
+		}
+
+		// The selected host snapshot (whether new or resumed) is intentionally retained. It already
+		// owns the save slot and must survive replacement of the provider's local session record.
+		if (UJTSVoiceSubsystem* const Voice = GetGameInstance()->GetSubsystem<UJTSVoiceSubsystem>())
+		{
+			Voice->ShutdownVoice();
+		}
+		OperationState = EJTSSessionOperationState::Creating;
+		if (EnsureAuthenticated())
+		{
+			BeginCreateSession();
+		}
 		return;
 	}
 

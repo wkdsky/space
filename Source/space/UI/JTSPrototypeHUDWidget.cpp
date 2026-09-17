@@ -38,7 +38,6 @@
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
-#include "space/Systems/JTSMoonWrapSubsystem.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/Systems/JTSVoiceSubsystem.h"
 #include "space/UI/JTSCircularProgressWidget.h"
@@ -47,7 +46,6 @@
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
-#include "space/World/JTSShopTerminalActor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
 namespace
@@ -836,8 +834,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
 
-		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA    WHEEL: ZOOM"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
-		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(760.0f, 52.0f), FVector2D(1.0f, 1.0f));
+		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    HOLD F: BOARD    V: CAMERA    WHEEL: ZOOM"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
+		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(960.0f, 56.0f), FVector2D(1.0f, 1.0f));
 	}
 
 	if (LaunchingLayer != nullptr)
@@ -1344,6 +1342,10 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 
 void UJTSPrototypeHUDWidget::RefreshFlightHud()
 {
+	// A driver possesses the spacecraft rather than their character, so the normal gameplay HUD
+	// refresh does not run for the person who needs the landed-state exit prompt.
+	RefreshInteractionPrompt();
+
 	if (FlightTelemetryText == nullptr)
 	{
 		return;
@@ -1384,12 +1386,30 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	const bool bLandingAvailable = FlightState == EJTSSpacecraftFlightState::Flying
 		&& IsValid(LandingManager)
 		&& LandingManager->IsLandingAvailable(Spacecraft);
+	const float LandingZoneDistance = IsValid(LandingManager)
+		? LandingManager->GetLandingDistance(const_cast<AJTSPlanetAnchor*>(Planet), Spacecraft->GetActorLocation())
+		: -1.0f;
 	FString StateLine;
 	FLinearColor StateColor(0.70f, 0.92f, 1.0f, 1.0f);
 	switch (FlightState)
 	{
 	case EJTSSpacecraftFlightState::LandingAssist:
-		StateLine = TEXT("LANDING ASSIST\nALIGNING TO SURFACE");
+		switch (Spacecraft->GetLandingAssistPhase())
+		{
+		case EJTSSpacecraftLandingAssistPhase::Aligning:
+			StateLine = TEXT("LANDING ASSIST\nALIGNING");
+			break;
+		case EJTSSpacecraftLandingAssistPhase::Descending:
+			StateLine = TEXT("LANDING ASSIST\nCONTROLLED DESCENT");
+			break;
+		case EJTSSpacecraftLandingAssistPhase::Touchdown:
+			StateLine = TEXT("LANDING ASSIST\nTOUCHDOWN");
+			break;
+		case EJTSSpacecraftLandingAssistPhase::None:
+		default:
+			StateLine = TEXT("LANDING ASSIST\nSTABILIZING");
+			break;
+		}
 		StateColor = FLinearColor(1.0f, 0.84f, 0.32f, 1.0f);
 		break;
 
@@ -1405,9 +1425,18 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 
 	case EJTSSpacecraftFlightState::Flying:
 	default:
-		StateLine = bLandingAvailable
-			? TEXT("LANDING AVAILABLE")
-			: TEXT("CANNOT LAND HERE");
+		if (bLandingAvailable)
+		{
+			StateLine = TEXT("LANDING AVAILABLE");
+		}
+		else if (LandingZoneDistance >= 0.0f)
+		{
+			StateLine = FString::Printf(TEXT("LANDING ZONE %dm"), FMath::RoundToInt(LandingZoneDistance / 100.0f));
+		}
+		else
+		{
+			StateLine = TEXT("CANNOT LAND HERE");
+		}
 		StateColor = bLandingAvailable
 			? FLinearColor(0.35f, 1.0f, 0.68f, 1.0f)
 			: FLinearColor(1.0f, 0.48f, 0.38f, 1.0f);
@@ -1423,7 +1452,9 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	if (GameplayHelpText != nullptr)
 	{
 		GameplayHelpText->SetText(FText::FromString(
-			TEXT("W/S THROTTLE    A/D STRAFE    MOUSE CONTROL    WHEEL ZOOM\nSPACE/CTRL VERTICAL    SHIFT BOOST    L LANDING    F EXIT")));
+			FlightState == EJTSSpacecraftFlightState::Landed
+				? TEXT("W/S THROTTLE    A/D STRAFE    MOUSE VIEW / STEER    WHEEL DISTANCE\nSPACE TAKE OFF    Q/E ROLL    SHIFT BOOST    C BRAKE    F DISEMBARK")
+				: TEXT("W/S THROTTLE    A/D STRAFE    MOUSE VIEW / STEER    WHEEL DISTANCE\nSPACE/CTRL UP/DOWN    Q/E ROLL    SHIFT BOOST    C BRAKE    L LAND")));
 	}
 }
 
@@ -1460,7 +1491,9 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	if (GameplayHelpText != nullptr && bShowGameplayAiming)
 	{
 		GameplayHelpText->SetText(FText::FromString(
-			TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: INTERACT    V: CAMERA    WHEEL: ZOOM")));
+			bSpaceWorldSurfaceActive
+				? TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    E: USE / SUPPLY    HOLD F: BOARD    V: CAMERA    WHEEL: ZOOM")
+				: TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    HOLD F: BOARD    V: CAMERA    WHEEL: ZOOM")));
 	}
 
 	AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
@@ -1733,87 +1766,99 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	FText TargetName;
 	FVector PromptAnchor = FVector::ZeroVector;
 	bool bHasPromptAnchor = false;
+	bool bUseCenteredPrompt = false;
 	const AJTSPlayerController* const OwningController = Cast<AJTSPlayerController>(GetOwningPlayer());
 	if (!bMoonShopOpen && !bGameMenuOpen && (!IsValid(OwningController) || !OwningController->IsSpaceShopOpen()))
 	{
-		if (AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
+		AJTSSpacecraftActor* const DrivenSpacecraft = Cast<AJTSSpacecraftActor>(
+			GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr);
+		if (IsValid(DrivenSpacecraft) && DrivenSpacecraft->IsLanded())
 		{
-			// Combat owns its own context prompt, but shares the same world-to-widget projection path
-			// as normal interaction targets. This keeps LMB feedback separate from [E] interactions.
-			if (const UJTSMeleeComponent* const MeleeComponent = PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>())
+			TargetName = FText::FromString(TEXT("SPACECRAFT LANDED"));
+			PromptText = FText::FromString(TEXT("[F] DISEMBARK"));
+			bUseCenteredPrompt = true;
+		}
+		else if (AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
+		{
+			if (AJTSSpacecraftActor* const BoardedSpacecraft = PlayerCharacter->GetBoardedSpacecraft();
+				IsValid(BoardedSpacecraft) && BoardedSpacecraft->CanDisembarkPlayer(PlayerCharacter))
 			{
-				if (AActor* const MeleeTarget = MeleeComponent->GetCurrentMeleeTarget())
-				{
-					PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
-					TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
-					PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
-					bHasPromptAnchor = !PromptText.IsEmpty() && !TargetName.IsEmpty();
-				}
+				TargetName = FText::FromString(TEXT("SPACECRAFT LANDED"));
+				PromptText = FText::FromString(TEXT("[F] DISEMBARK"));
+				bUseCenteredPrompt = true;
 			}
-
-			if (!bHasPromptAnchor)
+			else if (!PlayerCharacter->IsBoarded())
 			{
-				const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>();
-				if (InteractionComponent != nullptr)
+				// Combat owns its own context prompt, but shares the same world-to-widget projection path
+				// as normal interaction targets. This keeps LMB feedback separate from [E] interactions.
+				if (const UJTSMeleeComponent* const MeleeComponent = PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>())
 				{
-					if (AActor* const Target = InteractionComponent->GetCurrentInteractable())
+					if (AActor* const MeleeTarget = MeleeComponent->GetCurrentMeleeTarget())
 					{
-						PromptText = InteractionComponent->GetCurrentInteractionPrompt();
-						if (const AJTSWorldPickupActor* const Pickup = Cast<AJTSWorldPickupActor>(Target))
-						{
-							TargetName = Pickup->GetItemDisplayName();
-							PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
-							bHasPromptAnchor = true;
-						}
-						else if (const AJTSResourcePickupActor* const ResourcePickup = Cast<AJTSResourcePickupActor>(Target))
-						{
-							TargetName = ResourcePickup->GetInteractionDisplayName();
-							PromptAnchor = ResourcePickup->GetInteractionAnchorWorldLocation();
-							bHasPromptAnchor = true;
-						}
-						else if (const AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Target))
-						{
-							TargetName = Resource->GetInteractionDisplayName();
-							PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
-							bHasPromptAnchor = true;
-						}
-					else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
-					{
-						TargetName = FText::FromString(TEXT("SPACECRAFT"));
-						PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
-						bHasPromptAnchor = true;
-					}
-					else if (const AJTSShopTerminalActor* const Terminal = Cast<AJTSShopTerminalActor>(Target))
-					{
-						TargetName = FText::FromString(TEXT("EXPEDITION SUPPLY"));
-						PromptAnchor = Terminal->GetActorLocation() + FVector(0.0f, 0.0f, 130.0f);
-						bHasPromptAnchor = true;
-					}
+						PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
+						TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
+						PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
+						bHasPromptAnchor = !PromptText.IsEmpty() && !TargetName.IsEmpty();
 					}
 				}
 
-				// The ship's pawn-only boarding trigger is authoritative for nearby-ship state. It is
-				// intentionally independent from generic object-overlap discovery, but must still pass
-				// the shared camera-cone and Visibility policy before receiving a prompt.
 				if (!bHasPromptAnchor)
 				{
-					if (AJTSSpacecraftActor* const NearbySpacecraft = PlayerCharacter->GetNearbySpacecraft();
-						IsValid(NearbySpacecraft) && InteractionComponent->IsInteractableInView(NearbySpacecraft))
+					const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>();
+					if (InteractionComponent != nullptr)
 					{
-						PromptText = IInteractable::Execute_GetInteractionPrompt(NearbySpacecraft, PlayerCharacter);
-						TargetName = FText::FromString(TEXT("SPACECRAFT"));
-						PromptAnchor = NearbySpacecraft->GetNavigationMarkerWorldLocation();
-						bHasPromptAnchor = !PromptText.IsEmpty();
+						if (AActor* const Target = InteractionComponent->GetCurrentInteractable())
+						{
+							PromptText = InteractionComponent->GetCurrentInteractionPrompt();
+							if (const AJTSWorldPickupActor* const Pickup = Cast<AJTSWorldPickupActor>(Target))
+							{
+								TargetName = Pickup->GetItemDisplayName();
+								PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
+								bHasPromptAnchor = true;
+							}
+							else if (const AJTSResourcePickupActor* const ResourcePickup = Cast<AJTSResourcePickupActor>(Target))
+							{
+								TargetName = ResourcePickup->GetInteractionDisplayName();
+								PromptAnchor = ResourcePickup->GetInteractionAnchorWorldLocation();
+								bHasPromptAnchor = true;
+							}
+							else if (const AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Target))
+							{
+								TargetName = Resource->GetInteractionDisplayName();
+								PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
+								bHasPromptAnchor = true;
+							}
+							else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
+							{
+								TargetName = FText::FromString(TEXT("SPACECRAFT"));
+								PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+								bHasPromptAnchor = true;
+							}
+						}
+					}
+
+					// The ship's pawn-only boarding trigger is authoritative for nearby-ship state. It is
+					// intentionally independent from generic object-overlap discovery, but must still pass
+					// the shared camera-cone and Visibility policy before receiving a prompt.
+					if (!bHasPromptAnchor && InteractionComponent != nullptr)
+					{
+						if (AJTSSpacecraftActor* const NearbySpacecraft = PlayerCharacter->GetNearbySpacecraft();
+							IsValid(NearbySpacecraft) && InteractionComponent->IsInteractableInView(NearbySpacecraft))
+						{
+							PromptText = IInteractable::Execute_GetInteractionPrompt(NearbySpacecraft, PlayerCharacter);
+							TargetName = FText::FromString(TEXT("SPACECRAFT"));
+							PromptAnchor = NearbySpacecraft->GetNavigationMarkerWorldLocation();
+							bHasPromptAnchor = !PromptText.IsEmpty();
+						}
 					}
 				}
 			}
-
 		}
 	}
 
 	FVector2D PromptScreenPosition = FVector2D::ZeroVector;
 	const bool bProjected = bHasPromptAnchor && ProjectWorldToViewportWidget(PromptAnchor, PromptScreenPosition);
-	const bool bShowPrompt = !PromptText.IsEmpty() && !TargetName.IsEmpty() && bProjected;
+	const bool bShowPrompt = !PromptText.IsEmpty() && !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
 	if (InteractionPromptText != nullptr)
 	{
 		InteractionPromptText->SetText(bShowPrompt
@@ -1821,9 +1866,25 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 			: FText::GetEmpty());
 		InteractionPromptText->SetVisibility(bShowPrompt ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
-	if (bShowPrompt && InteractionPromptSlot != nullptr)
+	if (InteractionPromptSlot != nullptr)
 	{
-		InteractionPromptSlot->SetPosition(PromptScreenPosition);
+		if (bUseCenteredPrompt)
+		{
+			InteractionPromptSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			InteractionPromptSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			InteractionPromptSlot->SetPosition(FVector2D(0.0f, 76.0f));
+			InteractionPromptSlot->SetSize(FVector2D(360.0f, 64.0f));
+		}
+		else
+		{
+			InteractionPromptSlot->SetAnchors(FAnchors(0.0f, 0.0f));
+			InteractionPromptSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+			InteractionPromptSlot->SetSize(FVector2D(280.0f, 54.0f));
+			if (bShowPrompt)
+			{
+				InteractionPromptSlot->SetPosition(PromptScreenPosition);
+			}
+		}
 	}
 }
 
@@ -2028,8 +2089,8 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 		return;
 	}
 
-	UJTSMoonWrapSubsystem* const WrapSubsystem = GetWorld()->GetSubsystem<UJTSMoonWrapSubsystem>();
-	if (!IsValid(WrapSubsystem) || !WrapSubsystem->IsConfiguredForMoon())
+	AJTSPlanetAnchor* const Planet = SurfaceController->GetOwningPlanet();
+	if (!IsValid(Planet))
 	{
 		SetSpacecraftNavigationVisibility(false, false);
 		return;
@@ -2037,22 +2098,15 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 
 	const FVector PlayerLocation = PlayerCharacter->GetActorLocation();
 	const FVector ShipLocation = Spacecraft->GetActorLocation();
-	const FVector2D PlayerLogicalPosition = WrapSubsystem->GetLogicalPositionFromWorld(PlayerLocation);
-	const FVector2D ShipLogicalPosition = WrapSubsystem->GetLogicalPositionFromWorld(ShipLocation);
-	const FVector2D WrappedDelta = WrapSubsystem->ShortestWrappedDelta2D(PlayerLogicalPosition, ShipLogicalPosition);
-	const float HorizontalDistance = WrappedDelta.Size();
-	if (HorizontalDistance < MoonSettings->GetSpacecraftMarkerShowDistance())
+	const float SurfaceDistance = Planet->ApproximateSurfaceArcDistance(PlayerLocation, ShipLocation);
+	if (SurfaceDistance < MoonSettings->GetSpacecraftMarkerShowDistance())
 	{
 		SetSpacecraftNavigationVisibility(false, false);
 		return;
 	}
 
-	const FVector PhysicalNavigationAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
-	const FVector VisualNavigationAnchor = WrapSubsystem->GetMoonVisualWorldPosition(
-		PhysicalNavigationAnchor,
-		PlayerLocation);
-	const FVector DistanceDelta(WrappedDelta.X, WrappedDelta.Y, ShipLocation.Z - PlayerLocation.Z);
-	const int32 DistanceMeters = FMath::Max(0, FMath::RoundToInt(DistanceDelta.Size() / 100.0f));
+	const FVector NavigationAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
+	const int32 DistanceMeters = FMath::Max(0, FMath::RoundToInt(SurfaceDistance / 100.0f));
 
 	const FVector2D ViewportSize = GetViewportWidgetLocalSize();
 	if (ViewportSize.X <= 1.0f || ViewportSize.Y <= 1.0f)
@@ -2065,11 +2119,10 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	FRotator CameraRotation;
 	PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
 	const FRotationMatrix CameraMatrix(CameraRotation);
-	// Projection must use the same player-relative WPO bend as the visible spacecraft mesh.
-	const FVector ToNavigationAnchor = VisualNavigationAnchor - CameraLocation;
+	const FVector ToNavigationAnchor = NavigationAnchor - CameraLocation;
 	const float ForwardDot = FVector::DotProduct(ToNavigationAnchor.GetSafeNormal(), CameraMatrix.GetUnitAxis(EAxis::X));
 	FVector2D ProjectedLocation;
-	const bool bProjected = ProjectWorldToViewportWidget(VisualNavigationAnchor, ProjectedLocation);
+	const bool bProjected = ProjectWorldToViewportWidget(NavigationAnchor, ProjectedLocation);
 	const float BaseSafeInset = MoonSettings->GetSpacecraftMarkerScreenSafeMargin();
 	const float HysteresisInset = bSpacecraftWasOnScreen ? -12.0f : 12.0f;
 	const float SafeInset = FMath::Max(16.0f, BaseSafeInset + HysteresisInset);
@@ -2099,17 +2152,14 @@ void UJTSPrototypeHUDWidget::RefreshSpacecraftNavigation(AJTSSpacecraftActor* Sp
 	}
 
 	const FVector2D ViewportCenter = ViewportSize * 0.5f;
-	// The off-screen indicator remains topology-driven: it uses the shortest wrapped direction,
-	// not a projected virtual image of the spacecraft.
-	const FVector WrappedDirectionWorld(WrappedDelta.X, WrappedDelta.Y, PhysicalNavigationAnchor.Z - PlayerLocation.Z);
-	const FVector SafeWrappedDirection = WrappedDirectionWorld.GetSafeNormal();
+	const FVector SafeNavigationDirection = (NavigationAnchor - PlayerLocation).GetSafeNormal();
 	FVector2D EdgeDirection(
-		FVector::DotProduct(SafeWrappedDirection, CameraMatrix.GetUnitAxis(EAxis::Y)),
-		-FVector::DotProduct(SafeWrappedDirection, CameraMatrix.GetUnitAxis(EAxis::Z)));
-	const float WrappedForwardDot = FVector::DotProduct(SafeWrappedDirection, CameraMatrix.GetUnitAxis(EAxis::X));
-	if (WrappedForwardDot <= 0.0f)
+		FVector::DotProduct(SafeNavigationDirection, CameraMatrix.GetUnitAxis(EAxis::Y)),
+		-FVector::DotProduct(SafeNavigationDirection, CameraMatrix.GetUnitAxis(EAxis::Z)));
+	const float NavigationForwardDot = FVector::DotProduct(SafeNavigationDirection, CameraMatrix.GetUnitAxis(EAxis::X));
+	if (NavigationForwardDot <= 0.0f)
 	{
-		EdgeDirection.Y += FMath::Max(0.35f, -WrappedForwardDot);
+		EdgeDirection.Y += FMath::Max(0.35f, -NavigationForwardDot);
 	}
 	if (EdgeDirection.IsNearlyZero())
 	{

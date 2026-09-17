@@ -9,7 +9,6 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSInventoryComponent.h"
-#include "space/Components/JTSMoonWrappedActorComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWorldPickupActor.h"
@@ -68,8 +67,6 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 	ResourceMesh->SetGenerateOverlapEvents(true);
 	ResourceMesh->SetCanEverAffectNavigation(false);
 
-	MoonWrappedActorComponent = CreateDefaultSubobject<UJTSMoonWrappedActorComponent>(TEXT("MoonWrappedActorComponent"));
-
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
 	{
@@ -91,19 +88,11 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 		}
 	}
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FakeMoonBendMaterialAsset(TEXT("/Game/Space/Materials/FakeMoon/MI_JTSFakeMoon_Prop.MI_JTSFakeMoon_Prop"));
-	if (FakeMoonBendMaterialAsset.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicMaterialAsset.Succeeded())
 	{
-		FakeMoonBendMaterial = FakeMoonBendMaterialAsset.Object;
-		ResourceMesh->SetMaterial(0, FakeMoonBendMaterialAsset.Object);
-	}
-	else
-	{
-		static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMaterialAsset(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BasicMaterialAsset.Succeeded())
-		{
-			ResourceMesh->SetMaterial(0, BasicMaterialAsset.Object);
-		}
+		RealPlanetSurfaceMaterial = BasicMaterialAsset.Object;
+		ResourceMesh->SetMaterial(0, BasicMaterialAsset.Object);
 	}
 }
 
@@ -187,6 +176,7 @@ void AJTSMoonResourceActor::AdjustToGround(const FVector& GroundHitLocation)
 {
 	bUsesRealPlanetSurface = false;
 	SurfaceUp = FVector::UpVector;
+	ApplyResourceAppearance();
 	const FVector OriginalLocation = GetActorLocation();
 	const FVector FinalScale = GetActorScale3D();
 	if (!IsValid(ResourceMesh) || !ResourceMesh->IsRegistered())
@@ -277,6 +267,7 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 	bUsesRealPlanetSurface = true;
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
+	ApplyResourceAppearance();
 	ResourceMesh->UpdateBounds();
 
 	FJTSSurfaceVisualProjectionBounds VisualBounds;
@@ -293,10 +284,6 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 		nullptr,
 		ETeleportType::TeleportPhysics);
 
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-	}
 }
 
 void AJTSMoonResourceActor::InitializeMiningNode(
@@ -477,25 +464,6 @@ void AJTSMoonResourceActor::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyResourceAppearance();
-	if (bUsesRealPlanetSurface)
-	{
-		if (MoonWrappedActorComponent != nullptr)
-		{
-			MoonWrappedActorComponent->Deactivate();
-		}
-		return;
-	}
-
-	if (MoonWrappedActorComponent != nullptr)
-	{
-		UMaterialInterface* const BendMaterial = ResourceMaterial != nullptr
-			? ResourceMaterial.Get()
-			: FakeMoonBendMaterial.Get();
-		if (BendMaterial != nullptr)
-		{
-			MoonWrappedActorComponent->SetFakeMoonBendMaterial(BendMaterial);
-		}
-	}
 }
 
 void AJTSMoonResourceActor::OnConstruction(const FTransform& Transform)
@@ -529,11 +497,7 @@ void AJTSMoonResourceActor::OnRep_ResourceData()
 
 void AJTSMoonResourceActor::OnRep_SurfacePresentation()
 {
-	if (bUsesRealPlanetSurface && MoonWrappedActorComponent != nullptr)
-	{
-		MoonWrappedActorComponent->Deactivate();
-		MoonWrappedActorComponent->SetComponentTickEnabled(false);
-	}
+	ApplyResourceAppearance();
 }
 
 FText AJTSMoonResourceActor::GetMiningPrompt(APawn* InteractingPawn) const
@@ -572,6 +536,24 @@ void AJTSMoonResourceActor::ConfigureResourceMesh()
 	ResourceMesh->UpdateBounds();
 }
 
+void AJTSMoonResourceActor::ApplySurfacePresentationMaterial()
+{
+	if (!IsValid(ResourceMesh))
+	{
+		return;
+	}
+
+	UMaterialInterface* const DesiredMaterial = RealPlanetSurfaceMaterial.Get();
+	if (!IsValid(DesiredMaterial) || AppliedPresentationMaterial == DesiredMaterial)
+	{
+		return;
+	}
+
+	ResourceMaterial = nullptr;
+	ResourceMesh->SetMaterial(0, DesiredMaterial);
+	AppliedPresentationMaterial = DesiredMaterial;
+}
+
 void AJTSMoonResourceActor::ApplyResourceAppearance()
 {
 	if (!IsValid(ResourceMesh))
@@ -580,6 +562,7 @@ void AJTSMoonResourceActor::ApplyResourceAppearance()
 	}
 
 	ConfigureResourceMesh();
+	ApplySurfacePresentationMaterial();
 
 	if (!IsValid(ResourceMaterial))
 	{
@@ -593,11 +576,14 @@ void AJTSMoonResourceActor::ApplyResourceAppearance()
 
 	const bool bIsOre = ResourceType == EJTSResourceType::Ore;
 	const FLinearColor ResourceColor = bIsOre
-		? FLinearColor(0.08f, 0.20f, 0.32f, 1.0f)
-		: FLinearColor(0.10f, 0.11f, 0.13f, 1.0f);
+		? FLinearColor(0.10f, 0.52f, 0.84f, 1.0f)
+		: FLinearColor(0.34f, 0.30f, 0.26f, 1.0f);
 	const float ResourceRoughness = bIsOre ? 0.26f : 0.90f;
 	const float ResourceMetallic = bIsOre ? 0.62f : 0.0f;
 	ResourceMaterial->SetVectorParameterValue(TEXT("ResourceColor"), ResourceColor);
+	ResourceMaterial->SetVectorParameterValue(TEXT("Color"), ResourceColor);
+	ResourceMaterial->SetVectorParameterValue(TEXT("BaseColor"), ResourceColor);
+	ResourceMaterial->SetVectorParameterValue(TEXT("Tint"), ResourceColor);
 	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceRoughness"), ResourceRoughness);
 	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceMetallic"), ResourceMetallic);
 }

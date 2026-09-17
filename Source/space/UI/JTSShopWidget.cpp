@@ -7,8 +7,6 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "Components/HorizontalBox.h"
-#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -17,13 +15,10 @@
 #include "Components/WrapBoxSlot.h"
 #include "InputCoreTypes.h"
 #include "Styling/CoreStyle.h"
-#include "space/Components/JTSInventoryComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
-#include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
-#include "space/World/JTSShopTerminalActor.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 
 namespace
 {
@@ -35,7 +30,11 @@ namespace
 		const FVector2D& Size,
 		const FVector2D& Alignment = FVector2D::ZeroVector)
 	{
-		if (Parent == nullptr || Child == nullptr) return nullptr;
+		if (Parent == nullptr || Child == nullptr)
+		{
+			return nullptr;
+		}
+
 		UCanvasPanelSlot* const Slot = Parent->AddChildToCanvas(Child);
 		if (Slot != nullptr)
 		{
@@ -47,14 +46,24 @@ namespace
 		return Slot;
 	}
 
-	UTextBlock* MakeText(UWidgetTree* Tree, const FName Name, const FString& Text, const float Size, const FLinearColor& Color, const ETextJustify::Type Justify = ETextJustify::Left)
+	UTextBlock* MakeText(
+		UWidgetTree* Tree,
+		const FName Name,
+		const FString& Text,
+		const float FontSize,
+		const FLinearColor& Color,
+		const ETextJustify::Type Justify = ETextJustify::Left)
 	{
-		if (Tree == nullptr) return nullptr;
+		if (Tree == nullptr)
+		{
+			return nullptr;
+		}
+
 		UTextBlock* const Result = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
 		if (Result != nullptr)
 		{
 			Result->SetText(FText::FromString(Text));
-			Result->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), Size));
+			Result->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), FontSize));
 			Result->SetColorAndOpacity(FSlateColor(Color));
 			Result->SetAutoWrapText(true);
 			Result->SetJustification(Justify);
@@ -62,9 +71,13 @@ namespace
 		return Result;
 	}
 
-	UBorder* MakeBorder(UWidgetTree* Tree, const FName Name, const FLinearColor Color, const float Padding = 0.0f)
+	UBorder* MakeBorder(UWidgetTree* Tree, const FName Name, const FLinearColor& Color, const float Padding = 0.0f)
 	{
-		if (Tree == nullptr) return nullptr;
+		if (Tree == nullptr)
+		{
+			return nullptr;
+		}
+
 		UBorder* const Result = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
 		if (Result != nullptr)
 		{
@@ -74,52 +87,53 @@ namespace
 		return Result;
 	}
 
-	UButton* MakeButton(UWidgetTree* Tree, const FName Name, const FString& Label, const FLinearColor Color, const float FontSize = 17.0f)
+	void AddVertical(UVerticalBox* Parent, UWidget* Child, const FMargin Padding)
 	{
-		if (Tree == nullptr) return nullptr;
-		UButton* const Result = Tree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
-		if (Result != nullptr)
+		if (Parent == nullptr || Child == nullptr)
 		{
-			Result->SetBackgroundColor(Color);
-			if (UTextBlock* const Text = MakeText(Tree, *FString::Printf(TEXT("%s_Label"), *Name.ToString()), Label, FontSize, FLinearColor::White, ETextJustify::Center))
-			{
-				Result->SetContent(Text);
-			}
+			return;
 		}
-		return Result;
-	}
 
-	void AddVertical(UVerticalBox* Parent, UWidget* Child, const FMargin Padding, const EHorizontalAlignment HorizontalAlignment = HAlign_Fill)
-	{
-		if (Parent == nullptr || Child == nullptr) return;
 		if (UVerticalBoxSlot* const Slot = Parent->AddChildToVerticalBox(Child))
 		{
 			Slot->SetPadding(Padding);
-			Slot->SetHorizontalAlignment(HorizontalAlignment);
+			Slot->SetHorizontalAlignment(HAlign_Fill);
 		}
 	}
 
-	FString GetShopCategoryLabel(const EJTSShopCategory Category)
+	FString ResourceLabel(const EJTSResourceType ResourceType)
 	{
-		switch (Category)
+		switch (ResourceType)
 		{
-		case EJTSShopCategory::Weapons: return TEXT("WEAPONS");
-		case EJTSShopCategory::Mining: return TEXT("MINING");
-		case EJTSShopCategory::Utility: return TEXT("UTILITY");
-		case EJTSShopCategory::Resources: return TEXT("RESOURCES / MATERIALS");
-		case EJTSShopCategory::Wearables: return TEXT("WEARABLES");
-		default: return TEXT("ALL SUPPLIES");
+		case EJTSResourceType::Rock: return TEXT("ROCK");
+		case EJTSResourceType::Ore: return TEXT("ORE");
+		case EJTSResourceType::Fuel: return TEXT("FUEL");
+		case EJTSResourceType::Water: return TEXT("WATER");
+		case EJTSResourceType::Food: return TEXT("FOOD");
+		case EJTSResourceType::Organic: return TEXT("ORGANIC");
+		default: return TEXT("MATERIAL");
 		}
 	}
 
-	FString GetSupplyCardPlaceholderLabel(const UJTSItemDefinition* Definition)
+	FString ItemRoleLabel(const UJTSItemDefinition* Definition)
 	{
-		if (!IsValid(Definition)) return TEXT("SUPPLY");
-		if (Definition->IsWearable()) return TEXT("WEARABLE  //  CAPACITY");
-		if (Definition->IsRangedWeapon()) return TEXT("RANGED  //  PROTOTYPE");
-		if (Definition->PrimaryCategory == EJTSItemCategory::Mining) return TEXT("MINING  //  TOOL");
-		if (Definition->PrimaryCategory == EJTSItemCategory::Weapons) return TEXT("MELEE  //  WEAPON");
-		return TEXT("EXPEDITION  //  SUPPLY");
+		if (!IsValid(Definition))
+		{
+			return TEXT("SUPPLY");
+		}
+		if (Definition->IsWearable())
+		{
+			return TEXT("WEARABLE");
+		}
+		if (Definition->IsRangedWeapon())
+		{
+			return TEXT("RANGED");
+		}
+		if (Definition->PrimaryCategory == EJTSItemCategory::Mining)
+		{
+			return TEXT("MINING");
+		}
+		return TEXT("FIELD GEAR");
 	}
 }
 
@@ -143,15 +157,19 @@ FReply UJTSShopWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const
 	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
 
-bool UJTSShopWidget::OpenForTerminal(AJTSShopTerminalActor* Terminal)
+bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 {
-	if (!IsValid(Terminal))
+	if (!IsValid(Spacecraft))
 	{
 		return false;
 	}
+
 	BuildWidgetTree();
 	SetIsFocusable(true);
-	ActiveTerminal = Terminal;
+	ActiveSpacecraft = Spacecraft;
+	LastDisplayedResourceAmounts.Reset();
+	LastRequestedItem = EJTSItemId::None;
+	RefreshAccumulator = 0.0f;
 	bShopOpen = true;
 	SetVisibility(ESlateVisibility::Visible);
 	RefreshAll();
@@ -161,13 +179,15 @@ bool UJTSShopWidget::OpenForTerminal(AJTSShopTerminalActor* Terminal)
 void UJTSShopWidget::CloseShop()
 {
 	bShopOpen = false;
-	ActiveTerminal.Reset();
+	LastRequestedItem = EJTSItemId::None;
+	LastDisplayedResourceAmounts.Reset();
+	ActiveSpacecraft.Reset();
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
 bool UJTSShopWidget::IsShopOpen() const
 {
-	return bShopOpen && ActiveTerminal.IsValid();
+	return bShopOpen && ActiveSpacecraft.IsValid();
 }
 
 void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
@@ -176,47 +196,44 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 	{
 		return;
 	}
+
 	switch (Result)
 	{
 	case EJTSShopPurchaseResult::Succeeded:
-		StatusText->SetText(FText::FromString(TEXT("Purchase authorized. Supply transferred to your inventory.")));
+		StatusText->SetText(FText::FromString(TEXT("PURCHASED")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::SucceededDropped:
-		StatusText->SetText(FText::FromString(TEXT("Purchase authorized. No destination slot: supply deployed beside the terminal.")));
+		StatusText->SetText(FText::FromString(TEXT("PURCHASED / AIRLOCK DROP")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::InsufficientResources:
-		StatusText->SetText(FText::FromString(TEXT("Purchase denied: the shared ship wallet lacks the required materials.")));
+		StatusText->SetText(FText::FromString(FString::Printf(TEXT("MISSING %s"), *FormatMissingCosts(LastRequestedItem))));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::InvalidItem:
-		StatusText->SetText(FText::FromString(TEXT("Purchase denied: this catalog entry is no longer valid.")));
+		StatusText->SetText(FText::FromString(TEXT("ITEM UNAVAILABLE")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::DeliveryFailed:
 	default:
-		StatusText->SetText(FText::FromString(TEXT("Purchase could not be delivered. No shared materials were spent.")));
+		StatusText->SetText(FText::FromString(TEXT("DELIVERY FAILED / MATERIALS RESTORED")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	}
-	RefreshAll();
-}
 
-void UJTSShopWidget::NotifyDepositResult(bool bSucceeded)
-{
-	if (StatusText != nullptr)
-	{
-		StatusText->SetText(FText::FromString(bSucceeded
-			? TEXT("Carried Rock and Ore deposited into the shared ship wallet.")
-			: TEXT("No carried Rock or Ore could be deposited from this terminal.")));
-	}
 	RefreshAll();
 }
 
 void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (!bShopOpen) return;
-	if (!ActiveTerminal.IsValid())
+	if (!bShopOpen)
 	{
-		// Closing through the controller also restores viewport/game input. A local
-		// collapse here would leave a UI-only input mode active after a terminal is removed.
+		return;
+	}
+	if (!ActiveSpacecraft.IsValid())
+	{
 		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 		{
 			Controller->CloseSpaceShop();
@@ -227,356 +244,296 @@ void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		}
 		return;
 	}
+
 	RefreshAccumulator += InDeltaTime;
-	if (RefreshAccumulator >= 0.15f)
+	if (RefreshAccumulator >= 0.20f)
 	{
 		RefreshAccumulator = 0.0f;
-		RefreshWallet();
-		RefreshDetail();
+		RefreshAll();
 	}
 }
 
 void UJTSShopWidget::BuildWidgetTree()
 {
-	if (WidgetTree == nullptr || RootCanvas != nullptr) return;
-	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShopRootCanvas"));
+	if (WidgetTree == nullptr || RootCanvas != nullptr)
+	{
+		return;
+	}
+
+	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyRoot"));
 	WidgetTree->RootWidget = RootCanvas;
 
-	UBorder* const Dimmer = MakeBorder(WidgetTree, TEXT("ShopDimmer"), FLinearColor(0.004f, 0.012f, 0.030f, 0.94f));
+	UBorder* const Dimmer = MakeBorder(WidgetTree, TEXT("ShipSupplyDimmer"), FLinearColor(0.003f, 0.008f, 0.018f, 0.91f));
 	AddCanvas(RootCanvas, Dimmer, FAnchors(0.0f, 0.0f, 1.0f, 1.0f), FVector2D::ZeroVector, FVector2D::ZeroVector);
-	ShopFrame = MakeBorder(WidgetTree, TEXT("ExpeditionSupplyFrame"), FLinearColor(0.025f, 0.065f, 0.115f, 0.995f), 18.0f);
-	AddCanvas(RootCanvas, ShopFrame, FAnchors(0.5f, 0.5f), FVector2D::ZeroVector, FVector2D(1420.0f, 800.0f), FVector2D(0.5f, 0.5f));
-	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShopFrameCanvas"));
+
+	ShopFrame = MakeBorder(WidgetTree, TEXT("ShipSupplyFrame"), FLinearColor(0.025f, 0.060f, 0.105f, 0.995f), 18.0f);
+	AddCanvas(RootCanvas, ShopFrame, FAnchors(0.5f, 0.5f), FVector2D::ZeroVector, FVector2D(1160.0f, 600.0f), FVector2D(0.5f, 0.5f));
+	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyFrameCanvas"));
 	ShopFrame->SetContent(FrameCanvas);
 
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShopKicker"), TEXT("JUMP TO SPACE  /  SHARED EXPEDITION MARKET"), 14.0f, FLinearColor(0.35f, 0.78f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 20.0f), FVector2D(620.0f, 24.0f));
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShopTitle"), TEXT("EXPEDITION SUPPLY TERMINAL"), 32.0f, FLinearColor(0.90f, 0.96f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 44.0f), FVector2D(760.0f, 48.0f));
-	WalletText = MakeText(WidgetTree, TEXT("SharedWallet"), TEXT("SHIP WALLET  ROCK 0  |  ORE 0"), 18.0f, FLinearColor(0.35f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
-	AddCanvas(FrameCanvas, WalletText, FAnchors(1.0f, 0.0f), FVector2D(-270.0f, 35.0f), FVector2D(240.0f, 46.0f), FVector2D(1.0f, 0.0f));
+	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("SHIP SUPPLY"), 31.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(24.0f, 28.0f), FVector2D(450.0f, 48.0f));
+	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTransfer"), TEXT("AUTO-TRANSFER"), 12.0f, FLinearColor(0.50f, 0.64f, 0.78f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(27.0f, 76.0f), FVector2D(180.0f, 20.0f));
 
-	UBorder* const CategoryPanel = MakeBorder(WidgetTree, TEXT("ShopCategories"), FLinearColor(0.035f, 0.105f, 0.175f, 1.0f), 12.0f);
-	AddCanvas(FrameCanvas, CategoryPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 112.0f), FVector2D(200.0f, 630.0f));
-	CategoryList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CategoryList"));
-	CategoryPanel->SetContent(CategoryList);
-	AddVertical(CategoryList, MakeText(WidgetTree, TEXT("CategoryLabel"), TEXT("SUPPLY FILTER"), 14.0f, FLinearColor(0.38f, 0.70f, 0.93f, 1.0f)), FMargin(6.0f, 4.0f, 6.0f, 15.0f));
+	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("ROCK 0   ORE 0"), 18.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
+	AddCanvas(FrameCanvas, WalletText, FAnchors(1.0f, 0.0f), FVector2D(-76.0f, 39.0f), FVector2D(310.0f, 40.0f), FVector2D(1.0f, 0.0f));
 
-	const TArray<FString> CategoryLabels = { TEXT("ALL"), TEXT("WEAPONS"), TEXT("MINING"), TEXT("UTILITY"), TEXT("MATERIALS"), TEXT("WEARABLES") };
-	for (int32 Index = 0; Index < CategoryLabels.Num(); ++Index)
-	{
-		UButton* const Button = MakeButton(WidgetTree, *FString::Printf(TEXT("Category_%d"), Index), CategoryLabels[Index], FLinearColor(0.06f, 0.16f, 0.25f, 1.0f));
-		CategoryButtons.Add(Button);
-		AddVertical(CategoryList, Button, FMargin(4.0f, 3.0f));
-	}
-	CategoryButtons[0]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAllCategory);
-	CategoryButtons[1]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWeaponsCategory);
-	CategoryButtons[2]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMiningCategory);
-	CategoryButtons[3]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleUtilityCategory);
-	CategoryButtons[4]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleResourcesCategory);
-	CategoryButtons[5]->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWearablesCategory);
-	AddVertical(CategoryList, MakeText(WidgetTree, TEXT("FilterFootnote"), TEXT("Tags describe combat, mining, capacity and expedition roles. More catalogs can be attached without changing this terminal."), 12.0f, FLinearColor(0.48f, 0.62f, 0.75f, 1.0f)), FMargin(6.0f, 22.0f, 6.0f, 0.0f));
-
-	UBorder* const CatalogPanel = MakeBorder(WidgetTree, TEXT("ShopCatalogPanel"), FLinearColor(0.018f, 0.050f, 0.090f, 1.0f), 12.0f);
-	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(245.0f, 112.0f), FVector2D(725.0f, 630.0f));
-	CatalogScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ShopCatalogScroll"));
-	CatalogWrap = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("ShopCatalogCards"));
-	CatalogWrap->SetInnerSlotPadding(FVector2D(10.0f, 10.0f));
-	CatalogScroll->AddChild(CatalogWrap);
-	CatalogPanel->SetContent(CatalogScroll);
-
-	DetailPanel = MakeBorder(WidgetTree, TEXT("ShopDetailPanel"), FLinearColor(0.045f, 0.125f, 0.190f, 1.0f), 16.0f);
-	AddCanvas(FrameCanvas, DetailPanel, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 112.0f), FVector2D(390.0f, 630.0f), FVector2D(1.0f, 0.0f));
-	UVerticalBox* const DetailBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ShopDetailBox"));
-	DetailPanel->SetContent(DetailBox);
-	AddVertical(DetailBox, MakeText(WidgetTree, TEXT("DetailKicker"), TEXT("SELECTED SUPPLY"), 13.0f, FLinearColor(0.36f, 0.78f, 1.0f, 1.0f)), FMargin(2.0f, 2.0f, 2.0f, 4.0f));
-	DetailNameText = MakeText(WidgetTree, TEXT("DetailName"), TEXT("PICKAXE"), 27.0f, FLinearColor::White);
-	DetailTagsText = MakeText(WidgetTree, TEXT("DetailTags"), TEXT("MINING  /  MELEE  /  UTILITY"), 13.0f, FLinearColor(1.0f, 0.76f, 0.26f, 1.0f));
-	DetailDescriptionText = MakeText(WidgetTree, TEXT("DetailDescription"), TEXT(""), 15.0f, FLinearColor(0.80f, 0.87f, 0.95f, 1.0f));
-	DetailStatsText = MakeText(WidgetTree, TEXT("DetailStats"), TEXT(""), 15.0f, FLinearColor(0.62f, 0.88f, 1.0f, 1.0f));
-	DetailCostText = MakeText(WidgetTree, TEXT("DetailCost"), TEXT(""), 20.0f, FLinearColor(0.35f, 1.0f, 0.72f, 1.0f));
-	DeliveryHintText = MakeText(WidgetTree, TEXT("DeliveryHint"), TEXT("NO OPEN INVENTORY OR WEARABLE SLOT? PURCHASED SUPPLIES DEPLOY AS A WORLD PICKUP BESIDE THIS TERMINAL."), 12.0f, FLinearColor(1.0f, 0.80f, 0.34f, 1.0f));
-	StatusText = MakeText(WidgetTree, TEXT("ShopStatus"), TEXT("Ready for expedition requisition."), 13.0f, FLinearColor(0.72f, 0.87f, 1.0f, 1.0f));
-	AddVertical(DetailBox, DetailNameText, FMargin(2.0f, 0.0f, 2.0f, 3.0f));
-	AddVertical(DetailBox, DetailTagsText, FMargin(2.0f, 0.0f, 2.0f, 14.0f));
-	AddVertical(DetailBox, DetailDescriptionText, FMargin(2.0f, 0.0f, 2.0f, 16.0f));
-	AddVertical(DetailBox, DetailStatsText, FMargin(2.0f, 0.0f, 2.0f, 16.0f));
-	AddVertical(DetailBox, DetailCostText, FMargin(2.0f, 0.0f, 2.0f, 15.0f));
-	PurchaseButton = MakeButton(WidgetTree, TEXT("PurchaseSelected"), TEXT("AUTHORIZE PURCHASE"), FLinearColor(0.06f, 0.54f, 0.42f, 1.0f), 20.0f);
-	DepositButton = MakeButton(WidgetTree, TEXT("DepositMaterials"), TEXT("DEPOSIT CARRIED ROCK + ORE"), FLinearColor(0.16f, 0.31f, 0.66f, 1.0f), 15.0f);
-	CloseButton = MakeButton(WidgetTree, TEXT("CloseSupplyTerminal"), TEXT("CLOSE [E]"), FLinearColor(0.20f, 0.25f, 0.33f, 1.0f), 15.0f);
-	PurchaseButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePurchaseClicked);
-	DepositButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDepositClicked);
+	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
+	CloseButton->SetBackgroundColor(FLinearColor(0.16f, 0.22f, 0.30f, 1.0f));
+	CloseButton->SetContent(MakeText(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("CLOSE [E]"), 13.0f, FLinearColor::White, ETextJustify::Center));
 	CloseButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCloseClicked);
-	AddVertical(DetailBox, PurchaseButton, FMargin(2.0f, 0.0f, 2.0f, 8.0f));
-	AddVertical(DetailBox, DepositButton, FMargin(2.0f, 0.0f, 2.0f, 12.0f));
-	AddVertical(DetailBox, DeliveryHintText, FMargin(2.0f, 0.0f, 2.0f, 10.0f));
-	AddVertical(DetailBox, StatusText, FMargin(2.0f, 0.0f, 2.0f, 10.0f));
-	AddVertical(DetailBox, CloseButton, FMargin(2.0f, 0.0f, 2.0f, 0.0f));
+	AddCanvas(FrameCanvas, CloseButton, FAnchors(1.0f, 0.0f), FVector2D(-24.0f, 23.0f), FVector2D(112.0f, 34.0f), FVector2D(1.0f, 0.0f));
+
+	UBorder* const CatalogPanel = MakeBorder(WidgetTree, TEXT("ShipSupplyGridFrame"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f), 12.0f);
+	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(24.0f, 118.0f), FVector2D(1112.0f, 378.0f));
+	CatalogWrap = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("ShipSupplyGrid"));
+	CatalogWrap->SetInnerSlotPadding(FVector2D(10.0f, 10.0f));
+	CatalogPanel->SetContent(CatalogWrap);
+
+	StatusText = MakeText(WidgetTree, TEXT("ShipSupplyStatus"), TEXT("SELECT A SUPPLY"), 13.0f, FLinearColor(0.64f, 0.78f, 0.92f, 1.0f), ETextJustify::Center);
+	AddCanvas(FrameCanvas, StatusText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -42.0f), FVector2D(720.0f, 22.0f), FVector2D(0.5f, 1.0f));
 
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
 void UJTSShopWidget::RefreshAll()
 {
-	RefreshWallet();
-	RefreshCatalog();
-	RefreshDetail();
-}
-
-bool UJTSShopWidget::IsItemVisible(EJTSItemId ItemId) const
-{
-	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	return IsValid(Definition) && Definition->MatchesShopCategory(ActiveCategory);
+	const bool bResourcesChanged = RefreshWallet();
+	if (bResourcesChanged || (CatalogWrap != nullptr && CatalogWrap->GetChildrenCount() == 0))
+	{
+		RefreshCatalog();
+	}
 }
 
 void UJTSShopWidget::RefreshCatalog()
 {
-	if (CatalogWrap == nullptr) return;
-	CatalogWrap->ClearChildren();
-	CatalogButtons.Reset();
-	bool bHasVisibleCatalogItem = false;
-	for (const EJTSItemId ItemId : UJTSItemDefinitionLibrary::GetDefaultShopCatalog())
+	if (CatalogWrap == nullptr || WidgetTree == nullptr)
 	{
-		if (!IsItemVisible(ItemId)) continue;
-		bHasVisibleCatalogItem = true;
-		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-		const bool bSelected = ItemId == SelectedItemId;
-		UButton* const Card = WidgetTree->ConstructWidget<UButton>(
-			UButton::StaticClass(),
-			*FString::Printf(TEXT("SupplyCard_%d"), static_cast<int32>(ItemId)));
-		Card->SetBackgroundColor(bSelected
-			? Definition->AccentColor.CopyWithNewOpacity(0.72f)
-			: FLinearColor(0.055f, 0.13f, 0.20f, 1.0f));
-		UVerticalBox* const CardContents = WidgetTree->ConstructWidget<UVerticalBox>(
-			UVerticalBox::StaticClass(),
-			*FString::Printf(TEXT("SupplyCardContents_%d"), static_cast<int32>(ItemId)));
-		UBorder* const PlaceholderIcon = MakeBorder(
-			WidgetTree,
-			*FString::Printf(TEXT("SupplyCardIcon_%d"), static_cast<int32>(ItemId)),
-			Definition->AccentColor.CopyWithNewOpacity(0.82f),
-			3.0f);
-		PlaceholderIcon->SetContent(MakeText(
-			WidgetTree,
-			*FString::Printf(TEXT("SupplyCardIconLabel_%d"), static_cast<int32>(ItemId)),
-			GetSupplyCardPlaceholderLabel(Definition),
-			11.0f,
-			FLinearColor(0.015f, 0.035f, 0.065f, 1.0f),
-			ETextJustify::Center));
-		AddVertical(CardContents, PlaceholderIcon, FMargin(5.0f, 5.0f, 5.0f, 4.0f));
-		AddVertical(CardContents, MakeText(WidgetTree, *FString::Printf(TEXT("SupplyCardName_%d"), static_cast<int32>(ItemId)), Definition->DisplayName.ToString(), 17.0f, FLinearColor::White), FMargin(6.0f, 0.0f, 6.0f, 2.0f));
-		AddVertical(CardContents, MakeText(WidgetTree, *FString::Printf(TEXT("SupplyCardTags_%d"), static_cast<int32>(ItemId)), FormatTags(ItemId), 11.0f, FLinearColor(0.70f, 0.84f, 0.97f, 1.0f)), FMargin(6.0f, 0.0f, 6.0f, 2.0f));
-		AddVertical(CardContents, MakeText(WidgetTree, *FString::Printf(TEXT("SupplyCardCost_%d"), static_cast<int32>(ItemId)), FormatCosts(ItemId), 13.0f, FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)), FMargin(6.0f, 0.0f, 6.0f, 2.0f));
-		AddVertical(CardContents, MakeText(WidgetTree, *FString::Printf(TEXT("SupplyCardOwnership_%d"), static_cast<int32>(ItemId)), FormatOwnership(ItemId), 11.0f, FLinearColor(0.78f, 0.84f, 0.91f, 1.0f)), FMargin(6.0f, 0.0f, 6.0f, 4.0f));
-		Card->SetContent(CardContents);
-		Card->SetToolTipText(Definition->Description);
-		CatalogButtons.Add(Card);
-		switch (ItemId)
-		{
-		case EJTSItemId::Pickaxe: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePickaxeSelected); break;
-		case EJTSItemId::Knife: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleKnifeSelected); break;
-		case EJTSItemId::Pistol: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePistolSelected); break;
-		case EJTSItemId::MachineGun: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMachineGunSelected); break;
-		case EJTSItemId::Backpack: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleBackpackSelected); break;
-		default: break;
-		}
-		USizeBox* const CardFrame = WidgetTree->ConstructWidget<USizeBox>(
-			USizeBox::StaticClass(),
-			*FString::Printf(TEXT("SupplyCardFrame_%d"), static_cast<int32>(ItemId)));
-		CardFrame->SetMinDesiredWidth(218.0f);
-		CardFrame->SetMinDesiredHeight(178.0f);
-		CardFrame->SetContent(Card);
-		if (UWrapBoxSlot* const CardSlot = CatalogWrap->AddChildToWrapBox(CardFrame))
-		{
-			CardSlot->SetPadding(FMargin(4.0f));
-			CardSlot->SetFillEmptySpace(false);
-		}
-	}
-	if (!bHasVisibleCatalogItem)
-	{
-		USizeBox* const EmptyCatalogCard = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("EmptyCatalogCard"));
-		EmptyCatalogCard->SetMinDesiredWidth(665.0f);
-		EmptyCatalogCard->SetMinDesiredHeight(180.0f);
-		EmptyCatalogCard->SetContent(MakeText(
-			WidgetTree,
-			TEXT("EmptyCatalogText"),
-			TEXT("MATERIAL CATALOG\nNo raw materials are sold by this terminal yet. This category is reserved for future expedition supply contracts."),
-			18.0f,
-			FLinearColor(0.48f, 0.67f, 0.82f, 1.0f),
-			ETextJustify::Center));
-		CatalogWrap->AddChildToWrapBox(EmptyCatalogCard);
-	}
-	for (int32 Index = 0; Index < CategoryButtons.Num(); ++Index)
-	{
-		const bool bSelected = static_cast<int32>(ActiveCategory) == Index;
-		CategoryButtons[Index]->SetBackgroundColor(bSelected ? FLinearColor(0.12f, 0.55f, 0.78f, 1.0f) : FLinearColor(0.06f, 0.16f, 0.25f, 1.0f));
-	}
-}
-
-void UJTSShopWidget::RefreshWallet()
-{
-	if (WalletText == nullptr) return;
-	if (const AJTSShopTerminalActor* const Terminal = ActiveTerminal.Get())
-	{
-		WalletText->SetText(FText::FromString(FString::Printf(TEXT("SHIP WALLET\nROCK %d   |   ORE %d"), Terminal->GetSharedResourceAmount(EJTSResourceType::Rock), Terminal->GetSharedResourceAmount(EJTSResourceType::Ore))));
-	}
-}
-
-void UJTSShopWidget::RefreshDetail()
-{
-	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, SelectedItemId);
-	if (!IsValid(Definition))
-	{
-		DetailNameText->SetText(FText::FromString(TEXT("CATALOG EXPANSION READY")));
-		DetailNameText->SetColorAndOpacity(FSlateColor(FLinearColor(0.48f, 0.72f, 0.94f, 1.0f)));
-		DetailTagsText->SetText(FText::FromString(TEXT("MATERIALS  /  FUTURE SUPPLY")));
-		DetailDescriptionText->SetText(FText::FromString(TEXT("This terminal reserves room for resource and material contracts. Collect Rock and Ore in the field, deposit them here, and use the current tool, weapon and wearable catalog to equip the expedition.")));
-		DetailStatsText->SetText(FText::FromString(TEXT("TYPE  CATALOG PLACEHOLDER\nNEW DATA-DRIVEN ENTRIES APPEAR HERE AUTOMATICALLY.")));
-		DetailCostText->SetText(FText::FromString(TEXT("NO PURCHASE SELECTED")));
-		PurchaseButton->SetIsEnabled(false);
-		PurchaseButton->SetBackgroundColor(FLinearColor(0.20f, 0.24f, 0.28f, 1.0f));
 		return;
 	}
-	DetailNameText->SetText(Definition->DisplayName);
-	DetailNameText->SetColorAndOpacity(FSlateColor(Definition->AccentColor));
-	DetailTagsText->SetText(FText::FromString(FString::Printf(TEXT("%s\n%s"), *FormatTags(SelectedItemId), *FormatOwnership(SelectedItemId))));
-	DetailDescriptionText->SetText(Definition->Description);
-	DetailStatsText->SetText(FText::FromString(FormatStats(SelectedItemId)));
-	DetailCostText->SetText(FText::FromString(FormatCosts(SelectedItemId)));
-	bool bAffordable = false;
-	if (const AJTSShopTerminalActor* const Terminal = ActiveTerminal.Get())
+
+	CatalogWrap->ClearChildren();
+	for (const EJTSItemId ItemId : UJTSItemDefinitionLibrary::GetDefaultShopCatalog())
 	{
-		bAffordable = true;
-		for (const FJTSItemCost& Cost : Definition->ShopCosts)
+		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+		if (!IsValid(Definition) || !Definition->IsShopPurchasable())
 		{
-			bAffordable &= Terminal->GetSharedResourceAmount(Cost.ResourceType) >= Cost.Amount;
+			continue;
+		}
+
+		const bool bAffordable = CanAfford(ItemId);
+		const FLinearColor CardColor = bAffordable
+			? FLinearColor(0.055f, 0.125f, 0.195f, 1.0f)
+			: FLinearColor(0.175f, 0.060f, 0.070f, 1.0f);
+		UButton* const Card = WidgetTree->ConstructWidget<UButton>(
+			UButton::StaticClass(), *FString::Printf(TEXT("ShipSupplyCard_%d"), static_cast<int32>(ItemId)));
+		Card->SetBackgroundColor(CardColor);
+		Card->SetToolTipText(BuildItemTooltip(ItemId));
+
+		UVerticalBox* const Contents = WidgetTree->ConstructWidget<UVerticalBox>(
+			UVerticalBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyContents_%d"), static_cast<int32>(ItemId)));
+		UBorder* const Accent = MakeBorder(
+			WidgetTree,
+			*FString::Printf(TEXT("ShipSupplyAccent_%d"), static_cast<int32>(ItemId)),
+			Definition->AccentColor.CopyWithNewOpacity(0.86f),
+			3.0f);
+		Accent->SetContent(MakeText(
+			WidgetTree,
+			*FString::Printf(TEXT("ShipSupplyRole_%d"), static_cast<int32>(ItemId)),
+			ItemRoleLabel(Definition),
+			13.0f,
+			FLinearColor(0.015f, 0.030f, 0.055f, 1.0f),
+			ETextJustify::Center));
+		USizeBox* const AccentSize = WidgetTree->ConstructWidget<USizeBox>(
+			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyAccentSize_%d"), static_cast<int32>(ItemId)));
+		AccentSize->SetHeightOverride(65.0f);
+		AccentSize->SetContent(Accent);
+		AddVertical(Contents, AccentSize, FMargin(5.0f, 5.0f, 5.0f, 10.0f));
+		AddVertical(Contents, MakeText(WidgetTree, *FString::Printf(TEXT("ShipSupplyName_%d"), static_cast<int32>(ItemId)), Definition->DisplayName.ToString(), 17.0f, FLinearColor::White, ETextJustify::Center), FMargin(6.0f, 0.0f, 6.0f, 6.0f));
+		AddVertical(Contents, MakeText(WidgetTree, *FString::Printf(TEXT("ShipSupplyCost_%d"), static_cast<int32>(ItemId)), FormatCosts(ItemId), 13.0f, FLinearColor(0.42f, 1.0f, 0.74f, 1.0f), ETextJustify::Center), FMargin(6.0f, 0.0f, 6.0f, 5.0f));
+		AddVertical(Contents, MakeText(WidgetTree, *FString::Printf(TEXT("ShipSupplyAvailability_%d"), static_cast<int32>(ItemId)), bAffordable ? TEXT("BUY") : FString::Printf(TEXT("NEED %s"), *FormatMissingCosts(ItemId)), 12.0f, bAffordable ? FLinearColor(0.75f, 0.88f, 1.0f, 1.0f) : FLinearColor(1.0f, 0.48f, 0.38f, 1.0f), ETextJustify::Center), FMargin(6.0f, 10.0f, 6.0f, 4.0f));
+		Card->SetContent(Contents);
+
+		switch (ItemId)
+		{
+		case EJTSItemId::Pickaxe: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePickaxeBuy); break;
+		case EJTSItemId::Knife: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleKnifeBuy); break;
+		case EJTSItemId::Pistol: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePistolBuy); break;
+		case EJTSItemId::MachineGun: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMachineGunBuy); break;
+		case EJTSItemId::Backpack: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleBackpackBuy); break;
+		default: break;
+		}
+
+		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(
+			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyCell_%d"), static_cast<int32>(ItemId)));
+		Cell->SetWidthOverride(202.0f);
+		Cell->SetHeightOverride(300.0f);
+		Cell->SetContent(Card);
+		if (UWrapBoxSlot* const WrapSlot = CatalogWrap->AddChildToWrapBox(Cell))
+		{
+			WrapSlot->SetPadding(FMargin(4.0f));
 		}
 	}
-	PurchaseButton->SetIsEnabled(bAffordable);
-	PurchaseButton->SetBackgroundColor(bAffordable ? FLinearColor(0.06f, 0.54f, 0.42f, 1.0f) : FLinearColor(0.20f, 0.24f, 0.28f, 1.0f));
+}
+
+bool UJTSShopWidget::RefreshWallet()
+{
+	const AJTSSpacecraftActor* const Spacecraft = ActiveSpacecraft.Get();
+	if (!IsValid(Spacecraft))
+	{
+		return false;
+	}
+
+	TMap<EJTSResourceType, int32> CurrentResourceAmounts;
+	CurrentResourceAmounts.Add(EJTSResourceType::Rock, Spacecraft->GetResourceAmount(EJTSResourceType::Rock));
+	CurrentResourceAmounts.Add(EJTSResourceType::Ore, Spacecraft->GetResourceAmount(EJTSResourceType::Ore));
+	for (const EJTSItemId ItemId : UJTSItemDefinitionLibrary::GetDefaultShopCatalog())
+	{
+		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+		if (!IsValid(Definition))
+		{
+			continue;
+		}
+
+		for (const FJTSItemCost& Cost : Definition->ShopCosts)
+		{
+			if (Cost.Amount > 0)
+			{
+				CurrentResourceAmounts.FindOrAdd(Cost.ResourceType) = Spacecraft->GetResourceAmount(Cost.ResourceType);
+			}
+		}
+	}
+
+	bool bResourcesChanged = CurrentResourceAmounts.Num() != LastDisplayedResourceAmounts.Num();
+	if (!bResourcesChanged)
+	{
+		for (const TPair<EJTSResourceType, int32>& ResourceAmount : CurrentResourceAmounts)
+		{
+			const int32* const PreviousAmount = LastDisplayedResourceAmounts.Find(ResourceAmount.Key);
+			if (PreviousAmount == nullptr || *PreviousAmount != ResourceAmount.Value)
+			{
+				bResourcesChanged = true;
+				break;
+			}
+		}
+	}
+	LastDisplayedResourceAmounts = MoveTemp(CurrentResourceAmounts);
+
+	if (WalletText != nullptr)
+	{
+		WalletText->SetText(FText::FromString(FString::Printf(
+			TEXT("ROCK %d   ORE %d"),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Rock),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Ore))));
+	}
+
+	return bResourcesChanged;
+}
+
+bool UJTSShopWidget::CanAfford(EJTSItemId ItemId) const
+{
+	const AJTSSpacecraftActor* const Spacecraft = ActiveSpacecraft.Get();
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if (!IsValid(Spacecraft) || !IsValid(Definition) || !Definition->IsShopPurchasable())
+	{
+		return false;
+	}
+
+	for (const FJTSItemCost& Cost : Definition->ShopCosts)
+	{
+		if (Cost.Amount > 0 && Spacecraft->GetResourceAmount(Cost.ResourceType) < Cost.Amount)
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 FString UJTSShopWidget::FormatCosts(EJTSItemId ItemId) const
 {
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	if (!IsValid(Definition)) return TEXT("NO PRICE DATA");
-	TArray<FString> Pieces;
+	if (!IsValid(Definition))
+	{
+		return TEXT("NO COST");
+	}
+
+	TArray<FString> Costs;
 	for (const FJTSItemCost& Cost : Definition->ShopCosts)
 	{
-		const TCHAR* Name = Cost.ResourceType == EJTSResourceType::Ore ? TEXT("ORE") : TEXT("ROCK");
-		Pieces.Add(FString::Printf(TEXT("%d %s"), Cost.Amount, Name));
-	}
-	return FString::Printf(TEXT("COST  %s"), *FString::Join(Pieces, TEXT("  +  ")));
-}
-
-FString UJTSShopWidget::FormatTags(EJTSItemId ItemId) const
-{
-	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	if (!IsValid(Definition)) return TEXT("UTILITY");
-	TArray<FString> Tags;
-	for (const FName Tag : Definition->AffinityTags) Tags.Add(Tag.ToString().ToUpper());
-	return FString::Join(Tags, TEXT("  /  "));
-}
-
-FString UJTSShopWidget::FormatOwnership(EJTSItemId ItemId) const
-{
-	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	const AJTSCharacter* const Player = Cast<AJTSCharacter>(GetOwningPlayerPawn());
-	if (!IsValid(Definition) || !IsValid(Player))
-	{
-		return TEXT("STATUS: LINK PENDING");
-	}
-
-	if (Definition->IsWearable())
-	{
-		if (const UJTSPlayerEquipmentComponent* const Wearables = Player->GetEquipmentComponent())
+		if (Cost.Amount > 0)
 		{
-			return Wearables->GetWearable(Definition->WearableSlot).ItemId == ItemId
-				? TEXT("STATUS: EQUIPPED")
-				: TEXT("STATUS: NOT EQUIPPED");
+			Costs.Add(FString::Printf(TEXT("%s %d"), *ResourceLabel(Cost.ResourceType), Cost.Amount));
 		}
 	}
-	else if (const UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent())
-	{
-		const int32 OwnedCount = Inventory->GetItemCount(ItemId);
-		return OwnedCount > 0
-			? FString::Printf(TEXT("STATUS: OWNED x%d"), OwnedCount)
-			: TEXT("STATUS: NOT OWNED");
-	}
-
-	return TEXT("STATUS: NOT OWNED");
+	return FString::Join(Costs, TEXT("  /  "));
 }
 
-FString UJTSShopWidget::FormatStats(EJTSItemId ItemId) const
+FString UJTSShopWidget::FormatMissingCosts(EJTSItemId ItemId) const
 {
+	const AJTSSpacecraftActor* const Spacecraft = ActiveSpacecraft.Get();
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	if (!IsValid(Definition)) return FString();
-	if (Definition->IsWearable())
+	if (!IsValid(Spacecraft) || !IsValid(Definition))
 	{
-		return FString::Printf(TEXT("TYPE  WEARABLE\nCAPACITY  +%d INVENTORY SLOTS\nSLOT  BACKPACK"), Definition->InventoryCapacityBonus);
+		return TEXT("LINK");
 	}
-	if (Definition->IsRangedWeapon())
-	{
-		return FString::Printf(TEXT("TYPE  RANGED WEAPON\nDAMAGE  %.2f\nFIRE INTERVAL  %.2fs\nMINING WORK / SHOT  %.2f\nAMMO  INFINITE PROTOTYPE CELL"), Definition->RangedDamage, Definition->RangedFireInterval, Definition->MiningWork);
-	}
-	return FString::Printf(TEXT("TYPE  %s\nMELEE DAMAGE  %.1f\nSWING INTERVAL  %.2fs\nMINING WORK / HIT  %.2f"), *GetShopCategoryLabel(Definition->PrimaryCategory == EJTSItemCategory::Mining ? EJTSShopCategory::Mining : EJTSShopCategory::Weapons), Definition->CombatDamage, Definition->MeleeAttackInterval, Definition->MiningWork);
-}
 
-void UJTSShopWidget::SelectItem(EJTSItemId ItemId)
-{
-	if (IsItemVisible(ItemId))
+	TArray<FString> Missing;
+	for (const FJTSItemCost& Cost : Definition->ShopCosts)
 	{
-		SelectedItemId = ItemId;
-		RefreshCatalog();
-		RefreshDetail();
-	}
-}
-
-void UJTSShopWidget::SelectCategory(EJTSShopCategory Category)
-{
-	ActiveCategory = Category;
-	if (!IsItemVisible(SelectedItemId))
-	{
-		SelectedItemId = EJTSItemId::None;
-		for (const EJTSItemId ItemId : UJTSItemDefinitionLibrary::GetDefaultShopCatalog())
+		const int32 Shortfall = FMath::Max(0, Cost.Amount - Spacecraft->GetResourceAmount(Cost.ResourceType));
+		if (Shortfall > 0)
 		{
-			if (IsItemVisible(ItemId)) { SelectedItemId = ItemId; break; }
+			Missing.Add(FString::Printf(TEXT("%s +%d"), *ResourceLabel(Cost.ResourceType), Shortfall));
 		}
 	}
-	RefreshCatalog();
-	RefreshDetail();
+	return Missing.IsEmpty() ? TEXT("NONE") : FString::Join(Missing, TEXT("  /  "));
 }
 
-void UJTSShopWidget::RequestPurchase()
+FText UJTSShopWidget::BuildItemTooltip(EJTSItemId ItemId) const
+{
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if (!IsValid(Definition))
+	{
+		return FText::GetEmpty();
+	}
+
+	const FString Availability = CanAfford(ItemId)
+		? TEXT("READY")
+		: FString::Printf(TEXT("MISSING %s"), *FormatMissingCosts(ItemId));
+	return FText::FromString(FString::Printf(
+		TEXT("%s\n\n%s\n\n%s\n%s"),
+		*Definition->DisplayName.ToString(),
+		*Definition->Description.ToString(),
+		*FormatCosts(ItemId),
+		*Availability));
+}
+
+void UJTSShopWidget::RequestPurchase(EJTSItemId ItemId)
 {
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 	{
-		Controller->ServerRequestShopPurchase(ActiveTerminal.Get(), SelectedItemId);
-		StatusText->SetText(FText::FromString(TEXT("Purchase request sent to the expedition authority...")));
+		if (ActiveSpacecraft.IsValid())
+		{
+			LastRequestedItem = ItemId;
+			Controller->ServerRequestShopPurchase(ActiveSpacecraft.Get(), ItemId);
+			if (StatusText != nullptr)
+			{
+				StatusText->SetText(FText::FromString(TEXT("PURCHASING...")));
+				StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.64f, 0.78f, 0.92f, 1.0f)));
+			}
+		}
 	}
 }
 
-void UJTSShopWidget::RequestDeposit()
-{
-	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
-	{
-		Controller->ServerRequestDepositShopMaterials(ActiveTerminal.Get());
-		StatusText->SetText(FText::FromString(TEXT("Depositing carried Rock and Ore into the shared ship wallet...")));
-	}
-}
+void UJTSShopWidget::HandlePickaxeBuy() { RequestPurchase(EJTSItemId::Pickaxe); }
+void UJTSShopWidget::HandleKnifeBuy() { RequestPurchase(EJTSItemId::Knife); }
+void UJTSShopWidget::HandlePistolBuy() { RequestPurchase(EJTSItemId::Pistol); }
+void UJTSShopWidget::HandleMachineGunBuy() { RequestPurchase(EJTSItemId::MachineGun); }
+void UJTSShopWidget::HandleBackpackBuy() { RequestPurchase(EJTSItemId::Backpack); }
 
-void UJTSShopWidget::HandleAllCategory() { SelectCategory(EJTSShopCategory::All); }
-void UJTSShopWidget::HandleWeaponsCategory() { SelectCategory(EJTSShopCategory::Weapons); }
-void UJTSShopWidget::HandleMiningCategory() { SelectCategory(EJTSShopCategory::Mining); }
-void UJTSShopWidget::HandleUtilityCategory() { SelectCategory(EJTSShopCategory::Utility); }
-void UJTSShopWidget::HandleResourcesCategory() { SelectCategory(EJTSShopCategory::Resources); }
-void UJTSShopWidget::HandleWearablesCategory() { SelectCategory(EJTSShopCategory::Wearables); }
-void UJTSShopWidget::HandlePickaxeSelected() { SelectItem(EJTSItemId::Pickaxe); }
-void UJTSShopWidget::HandleKnifeSelected() { SelectItem(EJTSItemId::Knife); }
-void UJTSShopWidget::HandlePistolSelected() { SelectItem(EJTSItemId::Pistol); }
-void UJTSShopWidget::HandleMachineGunSelected() { SelectItem(EJTSItemId::MachineGun); }
-void UJTSShopWidget::HandleBackpackSelected() { SelectItem(EJTSItemId::Backpack); }
-void UJTSShopWidget::HandlePurchaseClicked() { RequestPurchase(); }
-void UJTSShopWidget::HandleDepositClicked() { RequestDeposit(); }
 void UJTSShopWidget::HandleCloseClicked()
 {
-	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer())) Controller->CloseSpaceShop();
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		Controller->CloseSpaceShop();
+	}
 }

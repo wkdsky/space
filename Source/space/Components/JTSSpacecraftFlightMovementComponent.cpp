@@ -133,6 +133,7 @@ bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
 	bAssistedLanding = true;
 	Velocity = FVector::ZeroVector;
 	TargetPlanet = Planet;
+	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Aligning);
 	AssistedLandingClearance = FMath::Max(0.0f, LandingClearance);
 	AssistedLandingDescentSpeed = AssistedLandingMaximumDescentSpeed;
 	if (AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
@@ -166,6 +167,7 @@ void UJTSSpacecraftFlightMovementComponent::CancelAssistedLanding()
 	Velocity = FVector::ZeroVector;
 	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
+	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::None);
 }
 
 bool UJTSSpacecraftFlightMovementComponent::IsBoosting() const
@@ -261,27 +263,33 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 		0.0f,
 		1.0f);
 	const FQuat NewRotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
+	const float NewAlignment = FVector::DotProduct(NewRotation.GetAxisZ().GetSafeNormal(), SurfaceUp);
+	const float AlignmentCosine = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(AssistedLandingAlignmentToleranceDegrees, 0.1f, 45.0f)));
+	if (AssistedLandingPhase == EJTSSpacecraftLandingAssistPhase::Aligning)
+	{
+		// Do not trade attitude for altitude. The craft stabilizes in place first, then begins a
+		// quick controlled descent; this makes the landing readable and prevents side-on touchdown.
+		Velocity = FVector::ZeroVector;
+		FHitResult AlignmentHit;
+		MoveWithCollisionSweep(FVector::ZeroVector, NewRotation, AlignmentHit);
+		if (NewAlignment >= AlignmentCosine)
+		{
+			SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Descending);
+		}
+
+		AssistedLandingElapsed += DeltaTime;
+		if (AssistedLandingElapsed >= FMath::Max(1.0f, AssistedLandingTimeout))
+		{
+			FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked);
+		}
+		return;
+	}
+
 	const FVector TargetLocation = GroundInfo.GroundLocation + SurfaceUp * AssistedLandingClearance;
 	const float HeightError = GroundInfo.DockingHeight - AssistedLandingClearance;
-	const float CurrentAlignment = FMath::Clamp(
-		FVector::DotProduct(Spacecraft->GetActorUpVector().GetSafeNormal(), SurfaceUp),
-		-1.0f,
-		1.0f);
-	const float AlignmentFactor = FMath::Clamp((CurrentAlignment + 1.0f) * 0.5f, 0.15f, 1.0f);
-	const float DesiredNormalSpeed = FMath::Clamp(
-		HeightError * 2.0f,
-		-AssistedLandingMaximumDescentSpeed * 0.5f,
-		AssistedLandingDescentSpeed * AlignmentFactor);
-	const FVector DesiredVelocity = -SurfaceUp * DesiredNormalSpeed;
-	Velocity = FMath::VInterpConstantTo(
-		Velocity,
-		DesiredVelocity,
-		DeltaTime,
-		FMath::Max(1.0f, AssistedLandingVelocityResponse));
-
 	const float CompletionCosine = FMath::Cos(FMath::DegreesToRadians(
 		FMath::Clamp(LandingCompletionAlignmentDegrees, 0.0f, 90.0f)));
-	const float NewAlignment = FVector::DotProduct(NewRotation.GetAxisZ().GetSafeNormal(), SurfaceUp);
 	const bool bAtLandingHeight = FMath::Abs(HeightError) <= LandingContactTolerance;
 	if (bAtLandingHeight && NewAlignment >= CompletionCosine)
 	{
@@ -294,6 +302,27 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 			return;
 		}
 	}
+
+	// Descend briskly while high, then ease into the last part of the approach. The proportional
+	// cap avoids overshooting a moving/uneven mesh surface while the braking band prevents a hard snap.
+	const float HeightAboveTouchdown = FMath::Max(0.0f, HeightError);
+	const float BrakingAlpha = FMath::SmoothStep(
+		0.0f,
+		FMath::Max(1.0f, AssistedLandingBrakingDistance),
+		HeightAboveTouchdown);
+	const float CruiseSpeed = FMath::Clamp(
+		FMath::Max(AssistedLandingDescentSpeed, HeightAboveTouchdown * 1.8f),
+		AssistedLandingMinimumDescentSpeed,
+		AssistedLandingMaximumDescentSpeed);
+	const float DesiredNormalSpeed = FMath::Min(
+		HeightAboveTouchdown * 3.0f,
+		FMath::Lerp(AssistedLandingTouchdownSpeed, CruiseSpeed, BrakingAlpha));
+	const FVector DesiredVelocity = -SurfaceUp * FMath::Max(0.0f, DesiredNormalSpeed);
+	Velocity = FMath::VInterpConstantTo(
+		Velocity,
+		DesiredVelocity,
+		DeltaTime,
+		FMath::Max(1.0f, AssistedLandingVelocityResponse));
 
 	FHitResult Hit;
 	MoveWithCollisionSweep(Velocity * DeltaTime, NewRotation, Hit);
@@ -367,8 +396,14 @@ void UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime)
 	}
 
 	const float TurnMultiplier = bBoosting ? FMath::Max(0.0f, EffectiveStats.BoostTurnMultiplier) : 1.0f;
-	const float YawDelta = PendingYawInput * MouseLookSensitivity * EffectiveStats.YawRate * TurnMultiplier * DeltaTime;
-	const float PitchDelta = PendingPitchInput * MouseLookSensitivity * EffectiveStats.PitchRate * TurnMultiplier * DeltaTime;
+	// Mouse input is a per-frame delta, not a held axis. Multiplying it by DeltaTime made steering
+	// frame-rate dependent and, together with the former [-1, 1] raw-mouse clamp, severely slowed it.
+	// Keep upgrade turn-rate effects by normalizing against the Blueprint-configured base rates while
+	// applying each delta exactly once.
+	const float YawRateScale = FMath::Max(0.0f, EffectiveStats.YawRate) / FMath::Max(1.0f, BaseStats.YawRate);
+	const float PitchRateScale = FMath::Max(0.0f, EffectiveStats.PitchRate) / FMath::Max(1.0f, BaseStats.PitchRate);
+	const float YawDelta = PendingYawInput * MouseLookSensitivity * YawRateScale * TurnMultiplier;
+	const float PitchDelta = PendingPitchInput * MouseLookSensitivity * PitchRateScale * TurnMultiplier;
 	// Roll is an angular velocity about the spacecraft's local forward axis. Do not derive it from
 	// FRotator::Roll or a finite target angle: those turn a held Q/E input into a bounded bank.
 	const float RollDelta = RollInput * EffectiveStats.RollRate * DeltaTime;
@@ -399,6 +434,7 @@ void UJTSSpacecraftFlightMovementComponent::CompleteAssistedLanding()
 	Velocity = FVector::ZeroVector;
 	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
+	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Touchdown);
 	OnAssistedLandingCompleted.Broadcast();
 }
 
@@ -409,7 +445,19 @@ void UJTSSpacecraftFlightMovementComponent::FailAssistedLanding(EJTSLandingValid
 	Velocity = FVector::ZeroVector;
 	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
+	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::None);
 	OnAssistedLandingFailed.Broadcast(Failure);
+}
+
+void UJTSSpacecraftFlightMovementComponent::SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase NewPhase)
+{
+	if (AssistedLandingPhase == NewPhase)
+	{
+		return;
+	}
+
+	AssistedLandingPhase = NewPhase;
+	OnAssistedLandingPhaseChanged.Broadcast(AssistedLandingPhase);
 }
 
 bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit)

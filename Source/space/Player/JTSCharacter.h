@@ -78,7 +78,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Camera")
 	void AdjustThirdPersonCameraDistance(float ScrollAmount);
 
-	/** Binds this character to an explicit real gameplay planet. Earth and Legacy Fake Moon leave this unset. */
+	/** Binds this character to an explicit real gameplay planet. Earth leaves this unset. */
 	UFUNCTION(BlueprintCallable, Category = "Planet")
 	void SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor);
 
@@ -176,9 +176,10 @@ private:
 	void StopSprint(const FInputActionValue& Value);
 	void HandleJumpStarted(const FInputActionValue& Value);
 	void HandleInteractStarted(const FInputActionValue& Value);
-	void HandleInteractTriggered(const FInputActionValue& Value);
-	void HandleInteractCompleted(const FInputActionValue& Value);
-	void HandleInteractCanceled(const FInputActionValue& Value);
+	void HandleBoardStarted(const FInputActionValue& Value);
+	void HandleBoardTriggered(const FInputActionValue& Value);
+	void HandleBoardCompleted(const FInputActionValue& Value);
+	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
@@ -294,7 +295,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;
 
-	/** Seconds E must be held while in a spacecraft boarding trigger before the player boards. */
+	/** Seconds F must be held while in a spacecraft boarding trigger before the player boards. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float BoardingHoldDuration = 2.0f;
 
@@ -420,6 +421,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> InteractAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> BoardAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> AttackAction;
