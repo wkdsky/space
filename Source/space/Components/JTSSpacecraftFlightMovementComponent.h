@@ -142,6 +142,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float InertialDampeningRate = 1.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float RollAutoLevelRate = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling")
+	bool bAutoLevelToPlanet = true;
+
 	/** Degrees added per raw mouse unit at the base turn rates. Mouse values are already frame deltas. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Input", meta = (ClampMin = "0.001", UIMin = "0.001"))
 	float MouseLookSensitivity = 0.18f;

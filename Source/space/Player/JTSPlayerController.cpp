@@ -317,6 +317,10 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 		{
 			CharacterPawn->EnsureGameplayInputMapping();
 		}
+		else if (AJTSSpacecraftActor* const SpacecraftPawn = Cast<AJTSSpacecraftActor>(GetPawn()))
+		{
+			SpacecraftPawn->EnsureFlightInputMapping();
+		}
 		return;
 	}
 
@@ -343,6 +347,11 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 	if (AJTSCharacter* const CharacterPawn = Cast<AJTSCharacter>(GetPawn()))
 	{
 		CharacterPawn->EnsureGameplayInputMapping();
+	}
+	else if (AJTSSpacecraftActor* const SpacecraftPawn = Cast<AJTSSpacecraftActor>(GetPawn()))
+	{
+		SpacecraftPawn->EnsureFlightInputMapping();
+		SetSpacecraftCameraViewTarget(SpacecraftPawn);
 	}
 	bGameplayInputModeActive = true;
 }
@@ -720,6 +729,11 @@ void AJTSPlayerController::RefreshGameplayInputAfterPossess()
 	if (AJTSCharacter* const CharacterPawn = Cast<AJTSCharacter>(GetPawn()))
 	{
 		CharacterPawn->EnsureGameplayInputMapping();
+	}
+	else if (AJTSSpacecraftActor* const SpacecraftPawn = Cast<AJTSSpacecraftActor>(GetPawn()))
+	{
+		SpacecraftPawn->EnsureFlightInputMapping();
+		SetSpacecraftCameraViewTarget(SpacecraftPawn);
 	}
 	BindGameState();
 	ScheduleGameStateBind();

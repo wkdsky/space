@@ -135,6 +135,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ship|Camera")
 	void ActivateFlightCameraThirdPerson();
 
+	void EnsureFlightInputMapping();
+
 	/** Adjusts the driving camera boom length. Positive wheel input zooms in. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Camera")
 	void AdjustFlightCameraDistance(float ScrollAmount);
@@ -324,6 +326,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
+	virtual void OnRep_Controller() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
@@ -347,6 +350,10 @@ protected:
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FJTSBoardingRegression;
+#endif
+
 	void InitializeFlightInput();
 	void RegisterFlightInputMappingContext();
 	void UnregisterFlightInputMappingContext();
@@ -363,6 +370,9 @@ private:
 	void FlightBrakeStopped(const FInputActionValue& Value);
 	void FlightLandingStarted(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
+	void FlightDisembarkReleased(const FInputActionValue& Value);
+	void ProcessDeferredDisembarkRequest();
+	void UpdateDisembarkInputGate();
 	void InitializeFlightCameraDistance();
 	void UpdateFlightCamera(float DeltaSeconds);
 	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
@@ -402,6 +412,7 @@ private:
 	void ReconcileInitialBoardingOverlaps();
 	void SavePersistentStorage() const;
 	void UpdateBoardingTriggerFromSpacecraftMeshBounds();
+	void UpdateFlightCollisionFromSpacecraftMeshBounds();
 	bool GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBounds) const;
 
 	/** Collision root moved by the flight component with Sweep enabled. */
@@ -466,6 +477,10 @@ private:
 	/** Small anti-z-fighting clearance above a real collision surface while this spacecraft is grounded. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float ShipGroundClearance = 2.0f;
+
+	/** Fits the flight proxy to the Blueprint-selected hull, including its offset and scale. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Collision", meta = (AllowPrivateAccess = "true"))
+	bool bAutoSizeFlightCollisionFromSpacecraftMesh = true;
 
 	/** Search extent for a respawn inside the union of nearby legal landing areas. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
@@ -614,6 +629,8 @@ private:
 	FTransform PendingLandingTransform = FTransform::Identity;
 	float PendingLandingClearance = 0.0f;
 	float CurrentFlightCameraArmLength = 0.0f;
+	bool bDisembarkInputArmed = false;
+	bool bDisembarkRequestPending = false;
 
 	bool bPersistedStorageRestoreAttempted = false;
 	bool bFlightCameraDistanceInitialized = false;

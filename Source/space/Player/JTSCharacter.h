@@ -142,7 +142,7 @@ public:
 	bool EnterBoardedState(AJTSSpacecraftActor* Spacecraft);
 
 	/** Restores movement and visibility after a normal disembark. */
-	void ExitBoardedState(AJTSSpacecraftActor* Spacecraft);
+	bool ExitBoardedState(AJTSSpacecraftActor* Spacecraft);
 
 	/** Restores the character if its spacecraft is destroyed during teardown. */
 	void HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft);
@@ -215,7 +215,7 @@ private:
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
-	void RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
+	bool RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
 	void ApplyBoardedPresentation();
 	void ApplyAvatarColor();
 	bool FindSafeCharacterSurfaceLocation(
@@ -235,6 +235,7 @@ private:
 		FVector& OutLocation,
 		FJTSPlanetSurfaceFrame* OutSurfaceFrame) const;
 	bool FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const;
+	bool IsDisembarkLocationClear(const FVector& Location, const FQuat& Rotation) const;
 
 	UFUNCTION()
 	void HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase);
@@ -247,6 +248,9 @@ private:
 
 	UFUNCTION()
 	void OnRep_BoardedSpacecraft();
+
+	UFUNCTION()
+	void OnRep_GameplayPlanet();
 
 	static constexpr float WalkingSpeed = 500.0f;
 	static constexpr float SprintingSpeed = 800.0f;
@@ -304,7 +308,7 @@ private:
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
 
 	/** Explicit real-planet ownership. This prevents a character from selecting the first planet in the world. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(ReplicatedUsing = OnRep_GameplayPlanet, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> GameplayPlanet;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
@@ -465,6 +469,7 @@ private:
 	float PlanetCameraPitch = 0.0f;
 	float CurrentThirdPersonCameraArmLength = 0.0f;
 	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+	bool bBoardedPresentationApplied = false;
 	bool bPreviousDebugVisualVisible = true;
 	bool bPreviousMeshVisible = true;
 };

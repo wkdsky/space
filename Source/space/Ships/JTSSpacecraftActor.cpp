@@ -188,6 +188,21 @@ void AJTSSpacecraftActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	UpdateBoardingTriggerFromSpacecraftMeshBounds();
+	UpdateFlightCollisionFromSpacecraftMeshBounds();
+}
+
+void AJTSSpacecraftActor::UpdateFlightCollisionFromSpacecraftMeshBounds()
+{
+	FBox LocalBounds(ForceInit);
+	if (!bAutoSizeFlightCollisionFromSpacecraftMesh || !IsValid(FlightCollision)
+		|| !GetPhysicalSpacecraftMeshLocalBounds(LocalBounds))
+	{
+		return;
+	}
+	const FTransform MeshRelative = SpacecraftMesh->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+	FlightCollision->SetRelativeTransform(FTransform(
+		MeshRelative.GetRotation(), MeshRelative.TransformPosition(LocalBounds.GetCenter()), MeshRelative.GetScale3D()));
+	FlightCollision->SetBoxExtent(LocalBounds.GetExtent());
 }
 
 bool AJTSSpacecraftActor::GetPhysicalSpacecraftMeshLocalBounds(FBox& OutLocalBounds) const
@@ -262,6 +277,7 @@ void AJTSSpacecraftActor::UpdateBoardingTriggerFromSpacecraftMeshBounds()
 void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateDisembarkInputGate();
 	UpdateFlightCamera(DeltaSeconds);
 }
 
@@ -270,6 +286,7 @@ void AJTSSpacecraftActor::BeginPlay()
 	Super::BeginPlay();
 	// Blueprints select the visual mesh, so size this after their component defaults have been applied.
 	UpdateBoardingTriggerFromSpacecraftMeshBounds();
+	UpdateFlightCollisionFromSpacecraftMeshBounds();
 	InitializeFlightCameraDistance();
 	if (FlightMovementComponent != nullptr
 		&& !FlightMovementComponent->OnBoostStateChanged.IsAlreadyBound(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged))
@@ -336,9 +353,10 @@ void AJTSSpacecraftActor::BeginPlay()
 
 void AJTSSpacecraftActor::PossessedBy(AController* NewController)
 {
+	bDisembarkInputArmed = false;
 	UnregisterFlightInputMappingContext();
 	Super::PossessedBy(NewController);
-	RegisterFlightInputMappingContext();
+	EnsureFlightInputMapping();
 	ActivateFlightCameraThirdPerson();
 	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(NewController))
 	{
@@ -348,7 +366,11 @@ void AJTSSpacecraftActor::PossessedBy(AController* NewController)
 
 void AJTSSpacecraftActor::UnPossessed()
 {
+	bDisembarkInputArmed = false;
+	bDisembarkRequestPending = false;
+	LocalFlightInput = FJTSSpacecraftInputState();
 	UnregisterFlightInputMappingContext();
+	BoundFlightInputComponent.Reset();
 	if (FlightMovementComponent != nullptr)
 	{
 		FlightMovementComponent->ClearInput();
@@ -356,8 +378,22 @@ void AJTSSpacecraftActor::UnPossessed()
 	Super::UnPossessed();
 }
 
+void AJTSSpacecraftActor::OnRep_Controller()
+{
+	bDisembarkInputArmed = false;
+	UnregisterFlightInputMappingContext();
+	Super::OnRep_Controller();
+	EnsureFlightInputMapping();
+	ActivateFlightCameraThirdPerson();
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+	{
+		PlayerController->SetSpacecraftCameraViewTarget(this);
+	}
+}
+
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bDisembarkRequestPending = false;
 	UnregisterFlightInputMappingContext();
 	if (FlightMovementComponent != nullptr)
 	{
@@ -441,8 +477,16 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBrakeStopped);
 	EnhancedInputComponent->BindAction(FlightLandingAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightLandingStarted);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightDisembarkStarted);
+	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
+	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
 
 	BoundFlightInputComponent = PlayerInputComponent;
+	RegisterFlightInputMappingContext();
+}
+
+void AJTSSpacecraftActor::EnsureFlightInputMapping()
+{
+	InitializeFlightInput();
 	RegisterFlightInputMappingContext();
 }
 
@@ -525,7 +569,9 @@ void AJTSSpacecraftActor::RegisterFlightInputMappingContext()
 	}
 
 	UnregisterFlightInputMappingContext();
-	InputSubsystem->AddMappingContext(FlightInputMappingContext, 1);
+	FModifyContextOptions MappingOptions;
+	MappingOptions.bIgnoreAllPressedKeysUntilRelease = true;
+	InputSubsystem->AddMappingContext(FlightInputMappingContext, 1, MappingOptions);
 	RegisteredFlightInputSubsystem = InputSubsystem;
 }
 
@@ -573,6 +619,10 @@ void AJTSSpacecraftActor::FlightLookYaw(const FInputActionValue& Value)
 {
 	const float LookValue = Value.Get<float>();
 	AddControllerYawInput(LookValue * FlightCameraLookSensitivity);
+	if (IsLanded())
+	{
+		return;
+	}
 	LocalFlightInput.Yaw = LookValue;
 	SubmitFlightInput();
 	// Mouse look is a delta, unlike throttle/strafe. Do not resend the last delta with a later key input.
@@ -585,6 +635,10 @@ void AJTSSpacecraftActor::FlightLookPitch(const FInputActionValue& Value)
 	const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
 	const float LookValue = Value.Get<float>() * PitchDirection;
 	AddControllerPitchInput(LookValue * FlightCameraLookSensitivity);
+	if (IsLanded())
+	{
+		return;
+	}
 	LocalFlightInput.Pitch = LookValue;
 	SubmitFlightInput();
 	// Mouse look is a delta, unlike throttle/strafe. Do not resend the last delta with a later key input.
@@ -630,21 +684,57 @@ void AJTSSpacecraftActor::FlightLandingStarted(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
 {
-	if (!Value.Get<bool>())
+	if (!Value.Get<bool>() || !bDisembarkInputArmed || bDisembarkRequestPending)
 	{
 		return;
 	}
+	bDisembarkInputArmed = false;
 
-	// The client can be one replication update behind the authoritative landed state. Always submit
-	// the driver's intent through the possessed ship; ServerRequestDisembark performs the real
-	// occupancy and landed checks on the server.
 	if (HasAuthority())
 	{
-		ServerRequestDisembark_Implementation();
+		if (UWorld* const World = GetWorld())
+		{
+			bDisembarkRequestPending = true;
+			World->GetTimerManager().SetTimerForNextTick(
+				FTimerDelegate::CreateUObject(this, &AJTSSpacecraftActor::ProcessDeferredDisembarkRequest));
+		}
 	}
 	else
 	{
 		ServerRequestDisembark();
+	}
+}
+
+void AJTSSpacecraftActor::FlightDisembarkReleased(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	bDisembarkInputArmed = true;
+}
+
+void AJTSSpacecraftActor::ProcessDeferredDisembarkRequest()
+{
+	if (!bDisembarkRequestPending || !HasAuthority())
+	{
+		return;
+	}
+
+	bDisembarkRequestPending = false;
+	ServerRequestDisembark_Implementation();
+}
+
+void AJTSSpacecraftActor::UpdateDisembarkInputGate()
+{
+	if (bDisembarkInputArmed)
+	{
+		return;
+	}
+
+	const APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+	if (IsValid(PlayerController)
+		&& PlayerController->IsLocalController()
+		&& !PlayerController->IsInputKeyDown(EKeys::F))
+	{
+		bDisembarkInputArmed = true;
 	}
 }
 
@@ -768,6 +858,7 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 	NearbyPlayer = InteractingCharacter;
 	FJTSSpacecraftOccupantState& Occupant = Occupants.AddDefaulted_GetRef();
 	Occupant.PlayerState = OccupantPlayerState;
+	Occupant.Character = InteractingCharacter;
 	Occupant.SeatRole = EJTSSpacecraftSeatRole::Passenger;
 	if (!bSpaceWorldSurfaceActive)
 	{
@@ -794,10 +885,6 @@ bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
 			}
 			return false;
 		}
-		if (PlayerController->IsLocalController())
-		{
-			PlayerController->FlushPressedKeys();
-		}
 		if (AJTSPlayerController* const JTSPlayerController = Cast<AJTSPlayerController>(PlayerController))
 		{
 			JTSPlayerController->SetSpacecraftCameraViewTarget(this);
@@ -819,7 +906,9 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 	{
 		BoardedCharacter = FindBoardedCharacterForPlayerState(PlayerController->GetPlayerState<AJTSPlayerState>());
 	}
-	AJTSPlayerState* const OccupantPlayerState = BoardedCharacter != nullptr ? BoardedCharacter->GetPlayerState<AJTSPlayerState>() : nullptr;
+	const FJTSSpacecraftOccupantState* const Seat = Occupants.FindByPredicate(
+		[BoardedCharacter](const FJTSSpacecraftOccupantState& Occupant) { return Occupant.Character == BoardedCharacter; });
+	AJTSPlayerState* const OccupantPlayerState = Seat != nullptr ? Seat->PlayerState.Get() : nullptr;
 	const bool bPlayerIsDriving = IsValid(PlayerController) && OccupantPlayerState != nullptr && DriverPlayerState == OccupantPlayerState;
 	if (!IsValid(BoardedCharacter)
 		|| !IsValid(OccupantPlayerState)
@@ -829,6 +918,12 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 		return false;
 	}
 
+	// Resolve a clear exit before changing possession or removing the seat.
+	if (!BoardedCharacter->ExitBoardedState(this))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Disembark blocked: no clear exit for %s from %s."), *GetNameSafe(BoardedCharacter), *GetName());
+		return false;
+	}
 	RemoveOccupant(OccupantPlayerState);
 	OccupantPlayerState->SetBoarded(false);
 	if (bPlayerIsDriving)
@@ -840,7 +935,6 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 	{
 		PlayerController->UnPossess();
 	}
-	BoardedCharacter->ExitBoardedState(this);
 	if (bPlayerIsDriving && IsValid(PlayerController))
 	{
 		PlayerController->Possess(BoardedCharacter);
@@ -854,6 +948,9 @@ bool AJTSSpacecraftActor::TryDisembarkPlayer(APawn* InteractingPawn)
 		}
 	}
 	OnRep_Occupants();
+	ForceNetUpdate();
+	UE_LOG(LogTemp, Log, TEXT("Disembark complete: Player=%s Character=%s Ship=%s Location=%s"),
+		*GetNameSafe(OccupantPlayerState), *GetNameSafe(BoardedCharacter), *GetName(), *BoardedCharacter->GetActorLocation().ToCompactString());
 	return true;
 }
 
@@ -864,18 +961,18 @@ bool AJTSSpacecraftActor::TryDisembarkPlayerForController(APlayerController* Pla
 		return false;
 	}
 	AJTSPlayerState* const ControllerPlayerState = PlayerController->GetPlayerState<AJTSPlayerState>();
-	AJTSCharacter* BoardedCharacter = BoardedPlayer.Get();
-	if (!IsValid(BoardedCharacter) || BoardedCharacter->GetPlayerState<AJTSPlayerState>() != ControllerPlayerState)
-	{
-		BoardedCharacter = FindBoardedCharacterForPlayerState(ControllerPlayerState);
-	}
+	AJTSCharacter* const BoardedCharacter = FindBoardedCharacterForPlayerState(ControllerPlayerState);
 	return TryDisembarkPlayer(BoardedCharacter);
 }
 
 bool AJTSSpacecraftActor::IsPlayerBoarded(const APawn* InteractingPawn) const
 {
 	const AJTSCharacter* const InteractingCharacter = Cast<AJTSCharacter>(InteractingPawn);
-	return IsValid(InteractingCharacter) && IsPlayerStateOccupying(InteractingCharacter->GetPlayerState<AJTSPlayerState>());
+	return IsValid(InteractingCharacter) && InteractingCharacter->GetBoardedSpacecraft() == this
+		&& Occupants.ContainsByPredicate([InteractingCharacter](const FJTSSpacecraftOccupantState& Occupant)
+		{
+			return Occupant.Character == InteractingCharacter && IsValid(Occupant.PlayerState);
+		});
 }
 
 bool AJTSSpacecraftActor::CanDisembarkPlayer(const APawn* InteractingPawn) const
@@ -942,8 +1039,7 @@ float AJTSSpacecraftActor::GetExteriorHullSupportDistance(const FVector& WorldDi
 	}
 
 	// The Blueprint mesh is the visual hull the player must clear. Its physical local bounds retain
-	// authored component scale, rotation, and offset, unlike FlightCollision's deliberately compact
-	// movement proxy.
+	// authored component scale, rotation, and offset, even when an authored movement proxy is used.
 	FJTSSurfaceVisualProjectionBounds VisualBounds;
 	if (IsValid(SpacecraftMesh)
 		&& SpacecraftMesh->IsRegistered()
@@ -1027,7 +1123,6 @@ void AJTSSpacecraftActor::ActivateFlightCameraThirdPerson()
 		CurrentFlightCameraArmLength = FMath::Clamp(CurrentFlightCameraArmLength, MinimumArmLength, MaximumArmLength);
 		FlightCameraBoom->TargetArmLength = CurrentFlightCameraArmLength;
 		FlightCameraBoom->SocketOffset = FlightCameraSocketOffset;
-		// A driving camera orbits from controller rotation. It is not welded to the ship's transform.
 		FlightCameraBoom->bUsePawnControlRotation = true;
 		FlightCameraBoom->SetUsingAbsoluteRotation(false);
 		FlightCameraBoom->SetRelativeRotation(FRotator::ZeroRotator);
@@ -1449,8 +1544,9 @@ bool AJTSSpacecraftActor::SnapSpacecraftToSurfaceTransform(
 
 		if (!bFoundClearTransform)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s could not obtain an overlap-free surface placement on %s; using its collision-supported surface transform."),
+			UE_LOG(LogTemp, Warning, TEXT("Grounded spacecraft %s could not obtain an overlap-free surface placement on %s."),
 				*GetName(), *InPlanetAnchor->GetPlanetId().ToString());
+			return false;
 		}
 	}
 	SetActorLocationAndRotation(
@@ -1511,17 +1607,20 @@ float AJTSSpacecraftActor::GetLandingCollisionClearanceForRotation(
 	const FQuat& ShipRotation,
 	const FVector& SurfaceUp) const
 {
-	if (!IsValid(FlightCollision))
-	{
-		return FMath::Max(0.0f, ShipGroundClearance);
-	}
-
 	const FVector SafeSurfaceUp = SurfaceUp.GetSafeNormal();
 	if (SafeSurfaceUp.IsNearlyZero())
 	{
 		return FMath::Max(0.0f, ShipGroundClearance);
 	}
 
+	// Rotate the query into the current actor frame: this preserves authored mesh offsets/scales
+	// while measuring the visual bottom at the requested landing attitude.
+	const FVector CurrentBottomDirection = GetActorQuat().RotateVector(ShipRotation.UnrotateVector(-SafeSurfaceUp));
+	const float VisualSupport = GetExteriorHullSupportDistance(CurrentBottomDirection);
+	if (!IsValid(FlightCollision))
+	{
+		return VisualSupport + FMath::Max(0.0f, ShipGroundClearance);
+	}
 	const FVector HullExtent = FlightCollision->GetScaledBoxExtent();
 	const FQuat CollisionRotation = (ShipRotation * FlightCollision->GetRelativeRotation().Quaternion()).GetNormalized();
 	const float HullSupportDistance = FMath::Abs(FVector::DotProduct(CollisionRotation.GetAxisX(), SafeSurfaceUp)) * HullExtent.X
@@ -1531,7 +1630,7 @@ float AJTSSpacecraftActor::GetLandingCollisionClearanceForRotation(
 		FlightCollision->GetRelativeLocation() * GetActorScale3D().GetAbs());
 	return FMath::Max(
 		0.0f,
-		HullSupportDistance - FVector::DotProduct(CollisionCenterOffset, SafeSurfaceUp)
+		FMath::Max(VisualSupport, HullSupportDistance - FVector::DotProduct(CollisionCenterOffset, SafeSurfaceUp))
 			+ FMath::Max(0.0f, ShipGroundClearance));
 }
 
@@ -1676,6 +1775,7 @@ void AJTSSpacecraftActor::HandleAssistedLandingCompleted()
 		if (SpaceWorldManager->GetCurrentPlanet() == Planet)
 		{
 			SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
+			SpaceWorldManager->SetSurfaceGameplayReady(true);
 		}
 	}
 
@@ -2032,15 +2132,11 @@ bool AJTSSpacecraftActor::IsPlayerStateOccupying(const AJTSPlayerState* InPlayer
 
 AJTSCharacter* AJTSSpacecraftActor::FindBoardedCharacterForPlayerState(const AJTSPlayerState* InPlayerState) const
 {
-	if (InPlayerState == nullptr || GetWorld() == nullptr) return nullptr;
-	for (TActorIterator<AJTSCharacter> It(GetWorld()); It; ++It)
-	{
-		if (IsValid(*It) && It->GetPlayerState<AJTSPlayerState>() == InPlayerState && It->GetBoardedSpacecraft() == this)
-		{
-			return *It;
-		}
-	}
-	return nullptr;
+	if (InPlayerState == nullptr) return nullptr;
+	const FJTSSpacecraftOccupantState* const Seat = Occupants.FindByPredicate(
+		[InPlayerState](const FJTSSpacecraftOccupantState& Occupant) { return Occupant.PlayerState == InPlayerState; });
+	return Seat != nullptr && IsValid(Seat->Character) && Seat->Character->GetBoardedSpacecraft() == this
+		? Seat->Character.Get() : nullptr;
 }
 
 void AJTSSpacecraftActor::RemoveOccupant(const AJTSPlayerState* InPlayerState)
@@ -2067,6 +2163,11 @@ void AJTSSpacecraftActor::SubmitFlightInput()
 void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState)
 {
 	if (!HasAuthority() || FlightMovementComponent == nullptr) return;
+	if (IsLanded())
+	{
+		FlightMovementComponent->ClearInput();
+		return;
+	}
 	FlightMovementComponent->SetForwardInput(FMath::Clamp(InputState.Throttle, -1.0f, 1.0f));
 	FlightMovementComponent->SetStrafeInput(FMath::Clamp(InputState.Strafe, -1.0f, 1.0f));
 	FlightMovementComponent->SetVerticalInput(FMath::Clamp(InputState.Vertical, -1.0f, 1.0f));

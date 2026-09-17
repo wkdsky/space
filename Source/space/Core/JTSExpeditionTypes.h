@@ -10,6 +10,7 @@
 #include "JTSExpeditionTypes.generated.h"
 
 class AJTSPlayerState;
+class AJTSCharacter;
 class AJTSSpacecraftActor;
 
 /** The synchronized high-level phase of one shared expedition. */
@@ -124,6 +125,10 @@ struct SPACE_API FJTSSpacecraftOccupantState
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ship")
 	TObjectPtr<AJTSPlayerState> PlayerState = nullptr;
+
+	/** Survives possession transfer: APawn::UnPossessed clears the character's PlayerState. */
+	UPROPERTY(BlueprintReadOnly, Category = "Ship")
+	TObjectPtr<AJTSCharacter> Character = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Ship")
 	EJTSSpacecraftSeatRole SeatRole = EJTSSpacecraftSeatRole::Passenger;

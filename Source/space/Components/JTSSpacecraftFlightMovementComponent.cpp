@@ -286,8 +286,10 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 		return;
 	}
 
-	const FVector TargetLocation = GroundInfo.GroundLocation + SurfaceUp * AssistedLandingClearance;
 	const float HeightError = GroundInfo.DockingHeight - AssistedLandingClearance;
+	// The probe runs along radial gravity, but terrain normals need not be radial. Moving to
+	// HitPoint + Normal * Clearance also introduces an unwanted sideways step at touchdown.
+	const FVector TargetLocation = UpdatedComponent->GetComponentLocation() - SurfaceUp * HeightError;
 	const float CompletionCosine = FMath::Cos(FMath::DegreesToRadians(
 		FMath::Clamp(LandingCompletionAlignmentDegrees, 0.0f, 90.0f)));
 	const bool bAtLandingHeight = FMath::Abs(HeightError) <= LandingContactTolerance;
@@ -296,7 +298,9 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 		FHitResult FinalMoveHit;
 		MoveWithCollisionSweep(TargetLocation - UpdatedComponent->GetComponentLocation(), DesiredRotation, FinalMoveHit);
 		if (FVector::DistSquared(UpdatedComponent->GetComponentLocation(), TargetLocation)
-			<= FMath::Square(FMath::Max(2.0f, LandingContactTolerance * 1.5f)))
+			<= FMath::Square(FMath::Max(2.0f, LandingContactTolerance))
+			&& Spacecraft->CanOccupyLandingTransform(Spacecraft->GetActorTransform())
+			&& FVector::DotProduct(Spacecraft->GetActorUpVector(), SurfaceUp) >= CompletionCosine)
 		{
 			CompleteAssistedLanding();
 			return;
@@ -404,10 +408,62 @@ void UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime)
 	const float PitchRateScale = FMath::Max(0.0f, EffectiveStats.PitchRate) / FMath::Max(1.0f, BaseStats.PitchRate);
 	const float YawDelta = PendingYawInput * MouseLookSensitivity * YawRateScale * TurnMultiplier;
 	const float PitchDelta = PendingPitchInput * MouseLookSensitivity * PitchRateScale * TurnMultiplier;
-	// Roll is an angular velocity about the spacecraft's local forward axis. Do not derive it from
-	// FRotator::Roll or a finite target angle: those turn a held Q/E input into a bounded bank.
 	const float RollDelta = RollInput * EffectiveStats.RollRate * DeltaTime;
-	OwningPawn->AddActorLocalRotation(FRotator(PitchDelta, YawDelta, RollDelta));
+	FQuat NewRotation = UpdatedComponent->GetComponentQuat();
+	FVector ReferenceUp = NewRotation.GetAxisZ().GetSafeNormal();
+	AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	const bool bHasPlanetReference = bAutoLevelToPlanet
+		&& IsValid(Planet)
+		&& Planet->IsGravityEnabled()
+		&& Planet->IsWithinGravityInfluence(OwningPawn->GetActorLocation());
+	if (bHasPlanetReference)
+	{
+		ReferenceUp = Planet->GetRadialUpVector(OwningPawn->GetActorLocation()).GetSafeNormal();
+	}
+	if (ReferenceUp.IsNearlyZero())
+	{
+		ReferenceUp = FVector::UpVector;
+	}
+
+	if (!FMath::IsNearlyZero(YawDelta))
+	{
+		NewRotation = (FQuat(ReferenceUp, FMath::DegreesToRadians(YawDelta)) * NewRotation).GetNormalized();
+	}
+	if (!FMath::IsNearlyZero(PitchDelta))
+	{
+		const FVector PitchAxis = NewRotation.GetAxisY().GetSafeNormal();
+		if (!PitchAxis.IsNearlyZero())
+		{
+			// Positive mouse Y pitches the nose up, matching the on-foot planet camera.
+			NewRotation = (FQuat(PitchAxis, FMath::DegreesToRadians(-PitchDelta)) * NewRotation).GetNormalized();
+		}
+	}
+	if (!FMath::IsNearlyZero(RollDelta))
+	{
+		const FVector RollAxis = NewRotation.GetAxisX().GetSafeNormal();
+		if (!RollAxis.IsNearlyZero())
+		{
+			NewRotation = (FQuat(RollAxis, FMath::DegreesToRadians(RollDelta)) * NewRotation).GetNormalized();
+		}
+	}
+
+	if (bHasPlanetReference && FMath::IsNearlyZero(RollInput))
+	{
+		const FVector Forward = NewRotation.GetAxisX().GetSafeNormal();
+		const FVector LevelUp = FVector::VectorPlaneProject(ReferenceUp, Forward).GetSafeNormal();
+		if (!Forward.IsNearlyZero() && !LevelUp.IsNearlyZero())
+		{
+			const FQuat LevelRotation = FRotationMatrix::MakeFromXZ(Forward, LevelUp).ToQuat();
+			const float LevelAlpha = FMath::Clamp(
+				1.0f - FMath::Exp(-FMath::Max(0.0f, RollAutoLevelRate) * FMath::Max(0.0f, DeltaTime)),
+				0.0f,
+				1.0f);
+			NewRotation = FQuat::Slerp(NewRotation, LevelRotation, LevelAlpha).GetNormalized();
+		}
+	}
+
+	FHitResult RotationHit;
+	MoveWithCollisionSweep(FVector::ZeroVector, NewRotation, RotationHit);
 	PendingYawInput = 0.0f;
 	PendingPitchInput = 0.0f;
 }
@@ -471,7 +527,7 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 	APawn* const OwningPawn = GetPawnOwner();
 	UWorld* const World = GetWorld();
 	UBoxComponent* const FlightCollision = IsValid(OwningPawn) ? OwningPawn->FindComponentByClass<UBoxComponent>() : nullptr;
-	if (World == nullptr || FlightCollision == nullptr || Delta.IsNearlyZero())
+	if (World == nullptr || FlightCollision == nullptr)
 	{
 		MoveUpdatedComponent(Delta, NewRotation, false, &OutHit, ETeleportType::None);
 		return !OutHit.IsValidBlockingHit();
@@ -479,14 +535,29 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSSpacecraftFlight), false, OwningPawn);
 	QueryParams.AddIgnoredActor(OwningPawn);
-	const FVector Start = UpdatedComponent->GetComponentLocation();
+	// The Blueprint may offset and rotate the hull relative to the root.
+	const FTransform HullRelative = FlightCollision->GetComponentTransform().GetRelativeTransform(OwningPawn->GetActorTransform());
+	const FTransform TargetRoot(NewRotation, UpdatedComponent->GetComponentLocation(), OwningPawn->GetActorScale3D());
+	const FTransform TargetHull = HullRelative * TargetRoot;
+	const FVector Start = TargetHull.GetLocation();
 	const FVector End = Start + Delta;
 	const FCollisionShape HullShape = FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent());
+	if (Delta.IsNearlyZero())
+	{
+		if (World->OverlapBlockingTestByChannel(Start, TargetHull.GetRotation(), ECC_Visibility, HullShape, QueryParams))
+		{
+			OutHit.bBlockingHit = true;
+			OutHit.bStartPenetrating = true;
+			return false;
+		}
+		MoveUpdatedComponent(Delta, NewRotation, false, nullptr, ETeleportType::None);
+		return true;
+	}
 	const bool bHit = World->SweepSingleByChannel(
 		OutHit,
 		Start,
 		End,
-		NewRotation,
+		TargetHull.GetRotation(),
 		ECC_Visibility,
 		HullShape,
 		QueryParams);

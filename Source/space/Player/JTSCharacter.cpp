@@ -478,14 +478,14 @@ bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 	return true;
 }
 
-void AJTSCharacter::ExitBoardedState(AJTSSpacecraftActor* Spacecraft)
+bool AJTSCharacter::ExitBoardedState(AJTSSpacecraftActor* Spacecraft)
 {
 	if (!HasAuthority() || BoardedSpacecraft.Get() != Spacecraft)
 	{
-		return;
+		return false;
 	}
 
-	RestoreAfterBoarding(Spacecraft, true);
+	return RestoreAfterBoarding(Spacecraft, true);
 }
 
 void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
@@ -566,6 +566,7 @@ void AJTSCharacter::PossessedBy(AController* NewController)
 void AJTSCharacter::UnPossessed()
 {
 	UnregisterInputMappingContext();
+	BoundInputComponent.Reset();
 	Super::UnPossessed();
 }
 
@@ -754,7 +755,9 @@ void AJTSCharacter::RegisterInputMappingContext()
 	}
 
 	UnregisterInputMappingContext();
-	InputSubsystem->AddMappingContext(InputMappingContext, 0);
+	FModifyContextOptions MappingOptions;
+	MappingOptions.bIgnoreAllPressedKeysUntilRelease = true;
+	InputSubsystem->AddMappingContext(InputMappingContext, 0, MappingOptions);
 	RegisteredInputSubsystem = InputSubsystem;
 
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space Enhanced Input mapping context registered."));
@@ -1009,14 +1012,9 @@ void AJTSCharacter::HandleBoardStarted(const FInputActionValue& Value)
 		bInteractKeyHeld = false;
 		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
 		{
-			// F is deliberately not an airborne-ejection control. The client-side gate avoids a
-			// misleading prompt/action, while TryDisembarkPlayer repeats the same rule on the server.
-			if (Spacecraft->CanDisembarkPlayer(this))
+			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
 			{
-				if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
-				{
-					PlayerController->ServerRequestDisembarkSpacecraft(Spacecraft);
-				}
+				PlayerController->ServerRequestDisembarkSpacecraft(Spacecraft);
 			}
 		}
 		return;
@@ -1591,45 +1589,40 @@ AJTSSpacecraftActor* AJTSCharacter::GetCurrentBoardingSpacecraft()
 	return nullptr;
 }
 
-void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint)
+bool AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint)
 {
+	FVector DisembarkLocation = GetActorLocation();
+	FJTSPlanetSurfaceFrame DisembarkSurfaceFrame;
+	if (bMoveToExitPoint && !FindSafeDisembarkLocation(Spacecraft, DisembarkLocation, &DisembarkSurfaceFrame))
+	{
+		return false;
+	}
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	GetCapsuleComponent()->SetCollisionEnabled(PreviousCapsuleCollisionEnabled);
 
 	if (bMoveToExitPoint)
 	{
-		FVector DisembarkLocation;
-		FJTSPlanetSurfaceFrame DisembarkSurfaceFrame;
-		if (FindSafeDisembarkLocation(Spacecraft, DisembarkLocation, &DisembarkSurfaceFrame))
+		AJTSPlanetAnchor* const GroundedPlanet = IsValid(Spacecraft) ? Spacecraft->GetGroundedPlanet() : nullptr;
+		const bool bOnRealPlanet = IsValid(GroundedPlanet) && GroundedPlanet->HasGameplaySurface();
+		FQuat DisembarkRotation = GetActorQuat();
+		FVector GravityUp = FVector::UpVector;
+		FVector SurfaceForward = DisembarkSurfaceFrame.Forward;
+		if (bOnRealPlanet)
 		{
-			AJTSPlanetAnchor* const GroundedPlanet = IsValid(Spacecraft) ? Spacecraft->GetGroundedPlanet() : nullptr;
-			const bool bOnRealPlanet = IsValid(GroundedPlanet) && GroundedPlanet->HasGameplaySurface();
-			FQuat DisembarkRotation = GetActorQuat();
-			FVector GravityUp = FVector::UpVector;
-			FVector SurfaceForward = DisembarkSurfaceFrame.Forward;
-			if (bOnRealPlanet)
-			{
-				SetGameplayPlanet(GroundedPlanet);
-				GravityUp = GetDesiredPlanetUp();
-				SurfaceForward = GetStablePlanetTangent(GravityUp, DisembarkSurfaceFrame.Forward);
-				DisembarkRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
-			}
-			SetActorLocationAndRotation(
-				DisembarkLocation,
-				DisembarkRotation,
-				false,
-				nullptr,
-				ETeleportType::TeleportPhysics);
+			GravityUp = GroundedPlanet->GetRadialUpVector(DisembarkLocation).GetSafeNormal();
+			SurfaceForward = GetStablePlanetTangent(GravityUp, DisembarkSurfaceFrame.Forward);
+			DisembarkRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+		}
+		SetActorLocationAndRotation(DisembarkLocation, DisembarkRotation, false, nullptr, ETeleportType::TeleportPhysics);
 
-			if (bOnRealPlanet)
-			{
-				LastPlanetUp = GravityUp;
-				PlanetBodyForward = SurfaceForward;
-				PlanetCameraTangentForward = SurfaceForward;
-				LastPlanetCameraUp = GravityUp;
-				bPlanetFrameInitialized = true;
-				bPlanetCameraFrameInitialized = true;
-			}
+		if (bOnRealPlanet)
+		{
+			SetGameplayPlanet(GroundedPlanet);
+			LastPlanetUp = GravityUp;
+			PlanetBodyForward = SurfaceForward;
+			PlanetCameraTangentForward = SurfaceForward;
+			LastPlanetCameraUp = GravityUp;
+			bPlanetFrameInitialized = true;
+			bPlanetCameraFrameInitialized = true;
 		}
 	}
 
@@ -1639,6 +1632,8 @@ void AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 	{
 		NearbySpacecraft = nullptr;
 	}
+	ForceNetUpdate();
+	return true;
 }
 
 bool AJTSCharacter::FindSafeDisembarkLocation(
@@ -1666,9 +1661,21 @@ void AJTSCharacter::OnRep_BoardedSpacecraft()
 	ApplyBoardedPresentation();
 }
 
+void AJTSCharacter::OnRep_GameplayPlanet()
+{
+	bPlanetFrameInitialized = false;
+	bPlanetCameraFrameInitialized = false;
+	SetGameplayPlanet(GameplayPlanet.Get());
+}
+
 void AJTSCharacter::ApplyBoardedPresentation()
 {
 	const bool bNowBoarded = BoardedSpacecraft != nullptr;
+	if (bNowBoarded == bBoardedPresentationApplied)
+	{
+		return;
+	}
+	bBoardedPresentationApplied = bNowBoarded;
 	if (UCapsuleComponent* const Capsule = GetCapsuleComponent())
 	{
 		if (bNowBoarded)
@@ -1694,7 +1701,7 @@ void AJTSCharacter::ApplyBoardedPresentation()
 	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
 		if (bNowBoarded) { MovementComponent->StopMovementImmediately(); MovementComponent->DisableMovement(); }
-		else { MovementComponent->SetMovementMode(MOVE_Walking); MovementComponent->MaxWalkSpeed = WalkingSpeed; }
+		else { MovementComponent->SetMovementMode(MOVE_Falling); MovementComponent->MaxWalkSpeed = WalkingSpeed; }
 	}
 }
 
@@ -1723,6 +1730,7 @@ void AJTSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSCharacter, BoardedSpacecraft);
+	DOREPLIFETIME(AJTSCharacter, GameplayPlanet);
 }
 
 bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
@@ -1826,17 +1834,21 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 				+ SurfaceUp * SurfaceHeightOffset;
 
 			FJTSPlanetSurfaceFrame CandidateSurfaceFrame;
-			// Disembark is intentionally best-effort. A ship can be parked beside a ridge, prop, or
-			// uneven terrain; those obstacles must not trap the player inside. Use the real surface when
-			// one is available, but do not require a clear capsule overlap before allowing the exit.
 			if (!Planet->GetSurfaceFrameAt(CandidateReferenceLocation, SurfaceForward, CandidateSurfaceFrame)
 				|| CandidateSurfaceFrame.Up.IsNearlyZero())
 			{
 				continue;
 			}
 
-			OutLocation = CandidateSurfaceFrame.Location
-				+ CandidateSurfaceFrame.Up * (CapsuleHalfHeight + PlanetSurfaceSnapClearance);
+			const FVector GravityUp = Planet->GetRadialUpVector(CandidateSurfaceFrame.Location).GetSafeNormal();
+			const float Alignment = FVector::DotProduct(GravityUp, CandidateSurfaceFrame.Up);
+			if (Alignment < GetCharacterMovement()->GetWalkableFloorZ()) continue;
+			const float CapsuleSupport = CapsuleRadius + (CapsuleHalfHeight - CapsuleRadius) * Alignment;
+			const FVector CandidateLocation = CandidateSurfaceFrame.Location
+				+ CandidateSurfaceFrame.Up * (CapsuleSupport + PlanetSurfaceSnapClearance);
+			const FQuat CapsuleRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+			if (!IsDisembarkLocationClear(CandidateLocation, CapsuleRotation)) continue;
+			OutLocation = CandidateLocation;
 			if (OutSurfaceFrame != nullptr)
 			{
 				*OutSurfaceFrame = CandidateSurfaceFrame;
@@ -1845,24 +1857,43 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 		}
 	}
 
-	// A missing or temporarily unloaded terrain collision must never prevent F from leaving the
-	// spacecraft. Put the capsule beside the hull in the landed local frame; gravity will settle it
-	// once a surface becomes available.
+	// Search clear space above each side if every surface candidate is obstructed.
+	// Falling settles the capsule; never materialize it inside an obstacle.
 	const float FallbackHeight = FMath::Max(
 		CapsuleHalfHeight + PlanetSurfaceSnapClearance,
 		Spacecraft->GetExteriorHullSupportDistance(SurfaceUp) + CapsuleHalfHeight + 16.0f);
-	OutLocation = ShipLocation + ExitDirection * StartDistance + SurfaceUp * FallbackHeight;
-	if (OutSurfaceFrame != nullptr)
+	for (int32 HeightStep = 0; HeightStep < 4; ++HeightStep)
 	{
-		OutSurfaceFrame->Location = OutLocation - SurfaceUp * (CapsuleHalfHeight + PlanetSurfaceSnapClearance);
-		OutSurfaceFrame->Up = SurfaceUp;
-		OutSurfaceFrame->Forward = SurfaceForward;
-		OutSurfaceFrame->Right = SurfaceRight;
-		OutSurfaceFrame->Transform = FTransform(
-			FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat(),
-			OutSurfaceFrame->Location);
+		for (const FVector& Direction : CandidateDirections)
+		{
+			const float Distance = FMath::Max(StartDistance, Spacecraft->GetExteriorHullSupportDistance(Direction) + CapsuleRadius + 32.0f);
+			const FVector Candidate = ShipLocation + Direction * Distance + SurfaceUp * (FallbackHeight + HeightStep * CapsuleHalfHeight);
+			const FVector GravityUp = Planet->GetRadialUpVector(Candidate).GetSafeNormal();
+			const FQuat Rotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+			if (!IsDisembarkLocationClear(Candidate, Rotation)) continue;
+			OutLocation = Candidate;
+			if (OutSurfaceFrame != nullptr)
+			{
+				OutSurfaceFrame->Location = Candidate - GravityUp * CapsuleHalfHeight;
+				OutSurfaceFrame->Up = GravityUp;
+				OutSurfaceFrame->Forward = Rotation.GetAxisX();
+				OutSurfaceFrame->Right = Rotation.GetAxisY();
+				OutSurfaceFrame->Transform = FTransform(Rotation, OutSurfaceFrame->Location);
+			}
+			return true;
+		}
 	}
-	return true;
+	return false;
+}
+
+bool AJTSCharacter::IsDisembarkLocationClear(const FVector& Location, const FQuat& Rotation) const
+{
+	const UWorld* const World = GetWorld();
+	const UCapsuleComponent* const Capsule = GetCapsuleComponent();
+	if (World == nullptr || Capsule == nullptr) return false;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSDisembarkPlacement), false, this);
+	return !World->OverlapBlockingTestByChannel(Location, Rotation, Capsule->GetCollisionObjectType(),
+		Capsule->GetCollisionShape(), Params, FCollisionResponseParams(Capsule->GetCollisionResponseToChannels()));
 }
 
 bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecraft, FVector& OutLocation) const
@@ -1937,8 +1968,7 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 			CandidateHorizontal.X,
 			CandidateHorizontal.Y,
 			GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 4.0f);
-		// Earth follows the same best-effort rule as a landed planet: terrain supplies the height,
-		// but an obstacle at the door never vetoes the player's exit.
+		if (!IsDisembarkLocationClear(CandidateLocation, FQuat::Identity)) continue;
 		OutLocation = CandidateLocation;
 		return true;
 	}
@@ -1946,7 +1976,7 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 	// No terrain collision (for example, a streaming gap) is still not a reason to keep the player
 	// inside. Spawn beside the exit at the spacecraft's local height and let normal falling resolve it.
 	OutLocation = FallbackLocation;
-	return true;
+	return IsDisembarkLocationClear(OutLocation, FQuat::Identity);
 }
 
 void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)
