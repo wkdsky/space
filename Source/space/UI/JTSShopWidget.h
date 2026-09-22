@@ -30,6 +30,7 @@ public:
 	void CloseShop();
 	bool IsShopOpen() const;
 	void NotifyPurchaseResult(EJTSShopPurchaseResult Result);
+	void NotifyResourceSupplyResult(bool bSucceeded);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -47,12 +48,15 @@ private:
 	FString FormatMissingCosts(EJTSItemId ItemId) const;
 	FText BuildItemTooltip(EJTSItemId ItemId) const;
 	void RequestPurchase(EJTSItemId ItemId);
+	void RequestResourceSupply();
 
 	UFUNCTION() void HandlePickaxeBuy();
 	UFUNCTION() void HandleKnifeBuy();
 	UFUNCTION() void HandlePistolBuy();
 	UFUNCTION() void HandleMachineGunBuy();
+	UFUNCTION() void HandleSniperBuy();
 	UFUNCTION() void HandleBackpackBuy();
+	UFUNCTION() void HandleResourceSupplyClicked();
 	UFUNCTION() void HandleCloseClicked();
 
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> RootCanvas;
@@ -61,6 +65,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> WalletText;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY(Transient) TObjectPtr<UButton> CloseButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> ResourceSupplyButton;
 
 	TWeakObjectPtr<AJTSSpacecraftActor> ActiveSpacecraft;
 	TMap<EJTSResourceType, int32> LastDisplayedResourceAmounts;

@@ -2,6 +2,9 @@
 
 #include "JTSCharacter.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSequenceBase.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionShape.h"
@@ -34,6 +37,7 @@
 #include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Modes/JTSSpaceWorldGameMode.h"
 #include "space/Player/JTSPlayerController.h"
@@ -57,11 +61,16 @@ AJTSCharacter::AJTSCharacter()
 	MovementComponent->bOrientRotationToMovement = true;
 	MovementComponent->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
 	MovementComponent->JumpZVelocity = 650.0f;
-	MovementComponent->AirControl = 0.35f;
+	MovementComponent->AirControl = 0.55f;
+	MovementComponent->AirControlBoostMultiplier = 1.5f;
+	MovementComponent->AirControlBoostVelocityThreshold = 150.0f;
+	MovementComponent->BrakingDecelerationFalling = 500.0f;
+	JumpMaxHoldTime = 0.12f;
 	MovementComponent->MaxWalkSpeed = WalkingSpeed;
 	MovementComponent->MinAnalogWalkSpeed = 20.0f;
 	MovementComponent->BrakingDecelerationWalking = 2000.0f;
 	MovementComponent->GravityScale = 1.0f;
+	ApplySurfaceMovementSettings();
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	InventoryComponent = CreateDefaultSubobject<UJTSInventoryComponent>(TEXT("InventoryComponent"));
@@ -70,6 +79,7 @@ AJTSCharacter::AJTSCharacter()
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
+	WeaponVisualComponent = CreateDefaultSubobject<UJTSWeaponVisualComponent>(TEXT("WeaponVisualComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
@@ -163,6 +173,14 @@ void AJTSCharacter::SetGameplayPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 	}
 }
 
+void AJTSCharacter::ApplySurfaceMovementSettings()
+{
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->SetWalkableFloorAngle(FMath::Clamp(MaxWalkableSlopeDegrees, 0.0f, 89.0f));
+	}
+}
+
 AJTSPlanetAnchor* AJTSCharacter::GetGameplayPlanet() const
 {
 	return GameplayPlanet.Get();
@@ -229,12 +247,19 @@ bool AJTSCharacter::SnapToPlanetSurface(AJTSPlanetAnchor* InPlanetAnchor, const 
 	}
 
 	const FVector SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
-	if (SurfaceUp.IsNearlyZero())
+	const FVector GravityUp = InPlanetAnchor->GetRadialUpVector(SurfaceFrame.Location).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero() || GravityUp.IsNearlyZero())
 	{
 		return false;
 	}
 
-	const FVector GravityUp = GetDesiredPlanetUp();
+	if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement();
+		MovementComponent != nullptr
+		&& FVector::DotProduct(GravityUp, SurfaceUp) < MovementComponent->GetWalkableFloorZ())
+	{
+		return false;
+	}
+
 	const FVector SurfaceForward = GetStablePlanetTangent(GravityUp, SurfaceFrame.Forward);
 	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
 
@@ -281,8 +306,17 @@ bool AJTSCharacter::FindSafeCharacterSurfaceLocation(
 		return false;
 	}
 
+	const FVector SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
+	const FVector GravityUp = InPlanetAnchor->GetRadialUpVector(SurfaceFrame.Location).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero() || GravityUp.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector SurfaceForward = GetStablePlanetTangent(GravityUp, SurfaceFrame.Forward);
+	const FQuat CapsuleRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
 	const FVector SurfaceLocation = SurfaceFrame.Location
-		+ SurfaceFrame.Up * (GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + PlanetSurfaceSnapClearance);
+		+ SurfaceUp * (GetCapsuleSupportDistanceAlongDirection(SurfaceUp, CapsuleRotation) + PlanetSurfaceSnapClearance);
 	FCollisionQueryParams PlacementParams(SCENE_QUERY_STAT(JTSCharacterPlanetSurfacePlacement), false, this);
 	PlacementParams.AddIgnoredActor(this);
 	if (IsValid(AdditionalIgnoredActor))
@@ -292,7 +326,7 @@ bool AJTSCharacter::FindSafeCharacterSurfaceLocation(
 
 	if (World->OverlapBlockingTestByChannel(
 		SurfaceLocation,
-		SurfaceFrame.Transform.GetRotation(),
+		CapsuleRotation,
 		ECC_Pawn,
 		GetCapsuleComponent()->GetCollisionShape(),
 		PlacementParams))
@@ -306,6 +340,20 @@ bool AJTSCharacter::FindSafeCharacterSurfaceLocation(
 		*OutSurfaceFrame = SurfaceFrame;
 	}
 	return true;
+}
+
+float AJTSCharacter::GetCapsuleSupportDistanceAlongDirection(const FVector& SupportDirection, const FQuat& CapsuleRotation) const
+{
+	const UCapsuleComponent* const Capsule = GetCapsuleComponent();
+	const FVector SafeSupportDirection = SupportDirection.GetSafeNormal();
+	if (!IsValid(Capsule) || SafeSupportDirection.IsNearlyZero())
+	{
+		return 0.0f;
+	}
+
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float CapsuleCylinderHalfHeight = FMath::Max(0.0f, Capsule->GetScaledCapsuleHalfHeight() - CapsuleRadius);
+	return CapsuleRadius + CapsuleCylinderHalfHeight * FMath::Abs(FVector::DotProduct(CapsuleRotation.GetAxisZ(), SafeSupportDirection));
 }
 
 float AJTSCharacter::GetAimPitch() const
@@ -509,6 +557,7 @@ void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
 void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplySurfaceMovementSettings();
 
 	if (IsValid(HealthComponent))
 	{
@@ -517,6 +566,14 @@ void AJTSCharacter::BeginPlay()
 		{
 			HealthComponent->OnDeath.AddDynamic(this, &AJTSCharacter::HandleHealthDeath);
 		}
+	}
+	if (IsValid(MeleeComponent) && !MeleeComponent->OnAttackStarted.IsAlreadyBound(this, &AJTSCharacter::HandleMeleeAttackStarted))
+	{
+		MeleeComponent->OnAttackStarted.AddDynamic(this, &AJTSCharacter::HandleMeleeAttackStarted);
+	}
+	if (IsValid(MeleeComponent) && !MeleeComponent->OnAttackFinished.IsAlreadyBound(this, &AJTSCharacter::HandleMeleeAttackFinished))
+	{
+		MeleeComponent->OnAttackFinished.AddDynamic(this, &AJTSCharacter::HandleMeleeAttackFinished);
 	}
 
 	InitializeThirdPersonCameraDistance();
@@ -544,6 +601,7 @@ void AJTSCharacter::Tick(float DeltaSeconds)
 	const float MinimumAimPitch = FMath::Min(AimPitchMin, AimPitchMax);
 	const float MaximumAimPitch = FMath::Max(AimPitchMin, AimPitchMax);
 	AimPitch = FMath::Clamp(ControllerPitch, MinimumAimPitch, MaximumAimPitch);
+	UpdateAimCamera(DeltaSeconds);
 }
 
 void AJTSCharacter::ApplyThirdPersonCameraOffset()
@@ -591,6 +649,11 @@ void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		HealthComponent->OnDeath.RemoveDynamic(this, &AJTSCharacter::HandleHealthDeath);
 	}
+	if (IsValid(MeleeComponent))
+	{
+		MeleeComponent->OnAttackStarted.RemoveDynamic(this, &AJTSCharacter::HandleMeleeAttackStarted);
+		MeleeComponent->OnAttackFinished.RemoveDynamic(this, &AJTSCharacter::HandleMeleeAttackFinished);
+	}
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -631,6 +694,9 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
+	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAimStarted);
+	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAimReleased);
+	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAimReleased);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
 	EnhancedInputComponent->BindAction(CameraZoomAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleCameraZoom);
 	if (EquipmentSlotActions.Num() == 4)
@@ -670,6 +736,7 @@ void AJTSCharacter::InitializeInput()
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
 	BoardAction = NewObject<UInputAction>(this, TEXT("BoardAction"), RF_Transient);
 	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
+	AimAction = NewObject<UInputAction>(this, TEXT("AimAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
 	CameraZoomAction = NewObject<UInputAction>(this, TEXT("CameraZoomAction"), RF_Transient);
 	EquipmentSlotActions.Reset();
@@ -687,6 +754,7 @@ void AJTSCharacter::InitializeInput()
 	InteractAction->ValueType = EInputActionValueType::Boolean;
 	BoardAction->ValueType = EInputActionValueType::Boolean;
 	AttackAction->ValueType = EInputActionValueType::Boolean;
+	AimAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
 	CameraZoomAction->ValueType = EInputActionValueType::Axis1D;
 	for (UInputAction* const EquipmentSlotAction : EquipmentSlotActions)
@@ -703,6 +771,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
 	InputMappingContext->MapKey(BoardAction, EKeys::F);
 	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
+	InputMappingContext->MapKey(AimAction, EKeys::RightMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
 	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
 	if (EquipmentSlotActions.Num() == 4)
@@ -1089,6 +1158,45 @@ void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
 	if (IsValid(MeleeComponent))
 	{
 		MeleeComponent->AttackReleased();
+	}
+}
+
+void AJTSCharacter::HandleMeleeAttackStarted(EJTSAttackType AttackType)
+{
+	if (AttackType != EJTSAttackType::Punch || !IsValid(MeleeComponent))
+	{
+		return;
+	}
+
+	PlayUnarmedPunchPresentation(
+		MeleeComponent->IsCurrentPunchLeft(),
+		MeleeComponent->IsContinuingUnarmedCombo());
+}
+
+void AJTSCharacter::HandleMeleeAttackFinished(EJTSAttackType AttackType)
+{
+	if (AttackType == EJTSAttackType::Punch)
+	{
+		StopUnarmedPunchPresentation();
+	}
+}
+
+void AJTSCharacter::HandleAimStarted(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (!CanUseNormalGameplayInput() || !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->HasActiveRangedWeapon())
+	{
+		return;
+	}
+	RangedWeaponComponent->StartAim();
+}
+
+void AJTSCharacter::HandleAimReleased(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (IsValid(RangedWeaponComponent))
+	{
+		RangedWeaponComponent->StopAim();
 	}
 }
 
@@ -1593,6 +1701,8 @@ bool AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 {
 	FVector DisembarkLocation = GetActorLocation();
 	FJTSPlanetSurfaceFrame DisembarkSurfaceFrame;
+	AJTSPlanetAnchor* GroundedPlanet = nullptr;
+	bool bOnRealPlanet = false;
 	if (bMoveToExitPoint && !FindSafeDisembarkLocation(Spacecraft, DisembarkLocation, &DisembarkSurfaceFrame))
 	{
 		return false;
@@ -1601,8 +1711,8 @@ bool AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 
 	if (bMoveToExitPoint)
 	{
-		AJTSPlanetAnchor* const GroundedPlanet = IsValid(Spacecraft) ? Spacecraft->GetGroundedPlanet() : nullptr;
-		const bool bOnRealPlanet = IsValid(GroundedPlanet) && GroundedPlanet->HasGameplaySurface();
+		GroundedPlanet = IsValid(Spacecraft) ? Spacecraft->GetGroundedPlanet() : nullptr;
+		bOnRealPlanet = IsValid(GroundedPlanet) && GroundedPlanet->HasGameplaySurface();
 		FQuat DisembarkRotation = GetActorQuat();
 		FVector GravityUp = FVector::UpVector;
 		FVector SurfaceForward = DisembarkSurfaceFrame.Forward;
@@ -1628,6 +1738,15 @@ bool AJTSCharacter::RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool b
 
 	BoardedSpacecraft = nullptr;
 	ApplyBoardedPresentation();
+	if (bOnRealPlanet && !SnapToPlanetSurface(GroundedPlanet, DisembarkLocation))
+	{
+		// The first candidate was already collision-validated. Keep it as a safe fallback, but do not
+		// force walking when a streamed surface changed between validation and collision restoration.
+		if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+		{
+			MovementComponent->SetMovementMode(MOVE_Falling);
+		}
+	}
 	if (NearbySpacecraft.Get() == Spacecraft)
 	{
 		NearbySpacecraft = nullptr;
@@ -1703,6 +1822,78 @@ void AJTSCharacter::ApplyBoardedPresentation()
 		if (bNowBoarded) { MovementComponent->StopMovementImmediately(); MovementComponent->DisableMovement(); }
 		else { MovementComponent->SetMovementMode(MOVE_Falling); MovementComponent->MaxWalkSpeed = WalkingSpeed; }
 	}
+}
+
+void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
+{
+	const bool bWantsAim = IsValid(RangedWeaponComponent)
+		&& RangedWeaponComponent->IsAiming()
+		&& RangedWeaponComponent->HasActiveRangedWeapon();
+	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
+	AimCameraAlpha = FMath::FInterpTo(AimCameraAlpha, TargetAlpha, DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
+
+	if (CameraBoom != nullptr)
+	{
+		const FVector BaseOffset = FVector(ThirdPersonShoulderOffset.X, ThirdPersonShoulderOffset.Y, 0.0f);
+		const FVector AdsOffset = FVector(AimShoulderOffset.X, AimShoulderOffset.Y, 0.0f);
+		CameraBoom->SocketOffset = bFirstPersonView ? FVector::ZeroVector : FMath::Lerp(BaseOffset, AdsOffset, AimCameraAlpha);
+		CameraBoom->TargetArmLength = bFirstPersonView
+			? 0.0f
+			: FMath::Lerp(CurrentThirdPersonCameraArmLength, AimThirdPersonArmLength, AimCameraAlpha);
+	}
+	if (FollowCamera != nullptr)
+	{
+		const float BaseFOV = bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV;
+		const float ActiveAimFOV = IsValid(RangedWeaponComponent) ? RangedWeaponComponent->GetActiveAimFOV() : AimFOV;
+		FollowCamera->SetFieldOfView(FMath::Lerp(BaseFOV, ActiveAimFOV, AimCameraAlpha));
+	}
+	if (IsValid(WeaponVisualComponent))
+	{
+		WeaponVisualComponent->SetAimAlpha(AimCameraAlpha);
+	}
+}
+
+void AJTSCharacter::PlayUnarmedPunchPresentation(bool bUseLeftPunch, bool bIsComboContinuation)
+{
+	UAnimSequenceBase* const SelectedAnimation = bUseLeftPunch
+		? UnarmedPunchLeftAnimation.Get()
+		: UnarmedPunchRightAnimation.Get();
+	if (!IsValid(SelectedAnimation) || GetMesh() == nullptr)
+	{
+		return;
+	}
+
+	UAnimInstance* const AnimInstance = GetMesh()->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return;
+	}
+
+	const float BlendInTime = bIsComboContinuation
+		? FMath::Min(UnarmedPunchBlendInTime, 0.025f)
+		: UnarmedPunchBlendInTime;
+	ActiveUnarmedPunchMontage = AnimInstance->PlaySlotAnimationAsDynamicMontage(
+		SelectedAnimation,
+		TEXT("UpperBody"),
+		BlendInTime,
+		UnarmedPunchBlendOutTime,
+		FMath::Max(0.1f, UnarmedPunchPlayRate));
+}
+
+void AJTSCharacter::StopUnarmedPunchPresentation()
+{
+	UAnimInstance* const AnimInstance = GetMesh() != nullptr ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!IsValid(AnimInstance))
+	{
+		ActiveUnarmedPunchMontage = nullptr;
+		return;
+	}
+
+	if (IsValid(ActiveUnarmedPunchMontage))
+	{
+		AnimInstance->Montage_Stop(UnarmedPunchBlendOutTime, ActiveUnarmedPunchMontage);
+	}
+	ActiveUnarmedPunchMontage = nullptr;
 }
 
 void AJTSCharacter::OnRep_PlayerState()
@@ -1843,10 +2034,10 @@ bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(
 			const FVector GravityUp = Planet->GetRadialUpVector(CandidateSurfaceFrame.Location).GetSafeNormal();
 			const float Alignment = FVector::DotProduct(GravityUp, CandidateSurfaceFrame.Up);
 			if (Alignment < GetCharacterMovement()->GetWalkableFloorZ()) continue;
-			const float CapsuleSupport = CapsuleRadius + (CapsuleHalfHeight - CapsuleRadius) * Alignment;
-			const FVector CandidateLocation = CandidateSurfaceFrame.Location
-				+ CandidateSurfaceFrame.Up * (CapsuleSupport + PlanetSurfaceSnapClearance);
 			const FQuat CapsuleRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, GravityUp).ToQuat();
+			const FVector CandidateLocation = CandidateSurfaceFrame.Location
+				+ CandidateSurfaceFrame.Up * (GetCapsuleSupportDistanceAlongDirection(CandidateSurfaceFrame.Up, CapsuleRotation)
+					+ PlanetSurfaceSnapClearance);
 			if (!IsDisembarkLocationClear(CandidateLocation, CapsuleRotation)) continue;
 			OutLocation = CandidateLocation;
 			if (OutSurfaceFrame != nullptr)

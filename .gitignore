@@ -10,6 +10,9 @@ DerivedDataCache/
 Intermediate/
 Saved/
 
+.agent-harness
+.codex
+
 # Plugins may also generate these
 **/Binaries/
 **/Intermediate/

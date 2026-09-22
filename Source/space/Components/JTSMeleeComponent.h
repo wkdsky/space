@@ -19,6 +19,7 @@ enum class EJTSAttackType : uint8
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAttackStarted, EJTSAttackType, AttackType);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAttackFinished, EJTSAttackType, AttackType);
 
 /**
  * Owns the one camera-driven melee acquisition and attack path shared by first- and third-person views.
@@ -77,9 +78,20 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerReleaseAttack();
 
+	/** Presentation is multicasted after the server accepts each attack segment. */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastBeginAttackPresentation(EJTSAttackType AttackType, bool bUseLeftPunch, bool bIsComboContinuation);
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastEndAttackPresentation(EJTSAttackType AttackType);
+
 	/** Bind a montage, weapon animation, or attack effects here without coupling this component to an Anim Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category = "Melee|Attack")
 	FOnAttackStarted OnAttackStarted;
+
+	/** Broadcast after the server closes one attack segment so presentation can return to the base pose. */
+	UPROPERTY(BlueprintAssignable, Category = "Melee|Attack")
+	FOnAttackFinished OnAttackFinished;
 
 	/** Performs one Punch, Knife, or Axe action against the currently aimed valid target. */
 	UFUNCTION(BlueprintCallable, Category = "Melee")
@@ -94,6 +106,18 @@ public:
 	/** Damage is configured by the attacker/equipped weapon, never by the target receiving it. */
 	UFUNCTION(BlueprintPure, Category = "Melee|Damage")
 	float GetDamageForAttackType(EJTSMeleeAttackType AttackType) const;
+
+	/** True while an empty-handed punch is in progress, including a held or buffered combo link. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsUnarmedComboActive() const;
+
+	/** Selects the alternating punch asset for the current unarmed swing. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsCurrentPunchLeft() const;
+
+	/** True only for the presentation callback of a punch that continues a preceding swing. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsContinuingUnarmedCombo() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -117,6 +141,11 @@ private:
 	void ResetAttackFailSafeTimer();
 	void ClearAttackFailSafeTimer();
 	void HandleAttackFailSafeTimeout();
+	void ScheduleUnarmedPunchEvents();
+	void ClearUnarmedPunchTimers();
+	void HandleUnarmedPunchHit();
+	void HandleUnarmedPunchChainWindow();
+	void HandleUnarmedPunchRecovery();
 	void EndAttackState();
 	void SetCurrentMeleeTarget(AActor* NewTarget);
 
@@ -146,9 +175,29 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float AttackFailSafeTime = 3.0f;
 
+	/** Server-authoritative hit frame for the native empty-hand punch loop. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.01", UIMin = "0.01"))
+	float UnarmedPunchHitDelay = 0.18f;
+
+	/** Held or buffered input starts the next alternating punch before the hands return to rest. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02"))
+	float UnarmedPunchChainDelay = 0.36f;
+
+	/** Without more input, the final punch is allowed to finish and settle back to the lowered idle pose. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.03", UIMin = "0.03"))
+	float UnarmedPunchRecoveryDelay = 0.58f;
+
 	/** Broad category resolved from the currently selected equipment when an attack starts. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
 	EJTSAttackType CurrentAttackType = EJTSAttackType::Punch;
+
+	/** Alternates left/right only while the empty-handed combo advances. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
+	bool bCurrentPunchUsesLeft = false;
+
+	/** Set during the attack-start broadcast so presentation can blend an existing combo instead of restarting from rest. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
+	bool bCurrentPunchIsComboContinuation = false;
 
 	/** Camera distance used only to acquire what lies under the screen-center crosshair. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
@@ -211,6 +260,9 @@ private:
 
 	FTimerHandle TargetRefreshTimerHandle;
 	FTimerHandle AttackFailSafeTimerHandle;
+	FTimerHandle UnarmedPunchHitTimerHandle;
+	FTimerHandle UnarmedPunchChainTimerHandle;
+	FTimerHandle UnarmedPunchRecoveryTimerHandle;
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisSwing;
 	double NextAttackTime = 0.0;
 };

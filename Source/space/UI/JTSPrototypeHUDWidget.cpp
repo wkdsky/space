@@ -27,6 +27,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Interaction/InteractionComponent.h"
@@ -1369,18 +1370,25 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 
 	ApplyLayerVisibility(FlightTelemetryText, true);
 	ApplyLayerVisibility(GameplayHelpText, true);
-	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	const AJTSPlanetAnchor* const Planet = IsValid(Spacecraft->GetFlightPlanet())
-		? Spacecraft->GetFlightPlanet()
-		: (IsValid(Manager) ? Manager->GetCurrentPlanet() : nullptr);
+	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
+	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
+	// altitude reference.
+	const AJTSPlanetAnchor* const Planet = Spacecraft->GetFlightPlanet();
 	if (!IsValid(Planet))
 	{
-		FlightTelemetryText->SetText(FText::FromString(TEXT("SPACECRAFT\nACQUIRING PLANET FRAME")));
+		FlightTelemetryText->SetText(FText::FromString(TEXT("DEEP SPACE\nFREE FLIGHT")));
 		return;
 	}
 
 	const int32 SpeedMetersPerSecond = FMath::Max(0, FMath::RoundToInt(Spacecraft->GetCurrentSpeed() / 100.0f));
-	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(Planet->GetApproximateAltitude(Spacecraft->GetActorLocation()) / 100.0f));
+	float SurfaceAltitude = 0.0f;
+	const UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent();
+	if ((FlightMovement == nullptr || !FlightMovement->GetResolvedSurfaceAltitude(Planet, SurfaceAltitude))
+		&& !Planet->GetAltitudeAboveSurface(Spacecraft->GetActorLocation(), SurfaceAltitude))
+	{
+		SurfaceAltitude = Planet->GetApproximateAltitude(Spacecraft->GetActorLocation());
+	}
+	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(SurfaceAltitude / 100.0f));
 	const EJTSSpacecraftFlightState FlightState = Spacecraft->GetFlightState();
 	const AJTSPlanetLandingManager* const LandingManager = AJTSPlanetLandingManager::FindPlanetLandingManager(this);
 	const bool bLandingAvailable = FlightState == EJTSSpacecraftFlightState::Flying
@@ -1462,7 +1470,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		}
 		else
 		{
-			HelpText = TEXT("W/S SURFACE FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK\nSPACE/CTRL RADIAL UP/DOWN    HOLD CTRL IN LANDING ZONE TO AUTO-LAND");
+			HelpText = TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    W + LOOK UP TO DEPART\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND");
 		}
 		GameplayHelpText->SetText(FText::FromString(HelpText));
 	}

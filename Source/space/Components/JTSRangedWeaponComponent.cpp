@@ -15,6 +15,7 @@
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
 UJTSRangedWeaponComponent::UJTSRangedWeaponComponent()
@@ -27,6 +28,7 @@ void UJTSRangedWeaponComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 {
 	ClearFireTimer();
 	bFireHeld = false;
+	bIsAiming = false;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -46,6 +48,36 @@ const UJTSItemDefinition* UJTSRangedWeaponComponent::GetActiveRangedDefinition()
 bool UJTSRangedWeaponComponent::HasActiveRangedWeapon() const
 {
 	return GetActiveRangedDefinition() != nullptr;
+}
+
+float UJTSRangedWeaponComponent::GetActiveAimFOV() const
+{
+	const UJTSItemDefinition* const Definition = GetActiveRangedDefinition();
+	return IsValid(Definition) ? FMath::Clamp(Definition->RangedAimFOV, 30.0f, 120.0f) : 60.0f;
+}
+
+void UJTSRangedWeaponComponent::StartAim()
+{
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		if (HasActiveRangedWeapon())
+		{
+			bIsAiming = true;
+			ServerStartAim();
+		}
+		return;
+	}
+
+	bIsAiming = HasActiveRangedWeapon();
+}
+
+void UJTSRangedWeaponComponent::StopAim()
+{
+	bIsAiming = false;
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerStopAim();
+	}
 }
 
 void UJTSRangedWeaponComponent::StartFire()
@@ -89,6 +121,16 @@ void UJTSRangedWeaponComponent::ServerStopFire_Implementation()
 	ClearFireTimer();
 }
 
+void UJTSRangedWeaponComponent::ServerStartAim_Implementation()
+{
+	StartAim();
+}
+
+void UJTSRangedWeaponComponent::ServerStopAim_Implementation()
+{
+	bIsAiming = false;
+}
+
 bool UJTSRangedWeaponComponent::GetAim(FVector& OutOrigin, FVector& OutDirection) const
 {
 	APawn* const Pawn = Cast<APawn>(GetOwner());
@@ -125,6 +167,13 @@ bool UJTSRangedWeaponComponent::FireOnce()
 	{
 		return false;
 	}
+
+	const double CurrentTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (CurrentTimeSeconds + KINDA_SMALL_NUMBER < NextFireTimeSeconds)
+	{
+		return false;
+	}
+	NextFireTimeSeconds = CurrentTimeSeconds + FMath::Max(0.05f, Definition->RangedFireInterval);
 
 	const FVector TraceEnd = TraceStart + Direction * FMath::Max(100.0f, Definition->RangedRange);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSRangedShot), false, Pawn);
@@ -197,4 +246,10 @@ void UJTSRangedWeaponComponent::MulticastShotTrace_Implementation(FVector_NetQua
 	{
 		DrawDebugLine(GetWorld(), TraceStart, TraceEnd, FColor(80, 210, 255), false, 0.18f, 0, 1.2f);
 	}
+}
+
+void UJTSRangedWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(UJTSRangedWeaponComponent, bIsAiming);
 }

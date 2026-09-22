@@ -577,12 +577,19 @@ AJTSPlanetAnchor* AJTSPlanetLandingManager::ResolvePlanetForSpacecraft(AJTSSpace
 
 	if (AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
-		if (AJTSPlanetAnchor* const NearestPlanet = SpaceWorldManager->FindNearestGameplayPlanet(Spacecraft->GetActorLocation(), false))
+		// A free-flight craft has no landing reference until it is actually inside a planet's
+		// configured influence range. Do not fall back to the mathematically nearest (often departed)
+		// planet in deep space, or landing UI and surface probes would remain Moon-centred.
+		if (AJTSPlanetAnchor* const NearestPlanet = SpaceWorldManager->FindNearestGameplayPlanet(Spacecraft->GetActorLocation(), true))
 		{
 			return NearestPlanet;
 		}
 
-		return SpaceWorldManager->GetCurrentPlanet();
+		if (AJTSPlanetAnchor* const CurrentPlanet = SpaceWorldManager->GetCurrentPlanet();
+			IsValid(CurrentPlanet) && CurrentPlanet->IsWithinGravityInfluence(Spacecraft->GetActorLocation()))
+		{
+			return CurrentPlanet;
+		}
 	}
 
 	return nullptr;

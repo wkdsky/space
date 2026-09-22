@@ -183,6 +183,25 @@ float AJTSPlanetAnchor::GetApproximateAltitude(const FVector& WorldPosition) con
 	return FVector::Distance(WorldPosition, GetPlanetCenter()) - GetApproximateRadius();
 }
 
+bool AJTSPlanetAnchor::GetAltitudeAboveSurface(const FVector& WorldPosition, float& OutAltitude) const
+{
+	OutAltitude = 0.0f;
+	FJTSPlanetSurfaceHit SurfaceHit;
+	if (!TraceToSurface(WorldPosition, SurfaceHit) || !SurfaceHit.bBlockingHit)
+	{
+		return false;
+	}
+
+	const FVector RadialUp = GetRadialUpVector(WorldPosition).GetSafeNormal();
+	if (RadialUp.IsNearlyZero())
+	{
+		return false;
+	}
+
+	OutAltitude = FVector::DotProduct(WorldPosition - SurfaceHit.ImpactPoint, RadialUp);
+	return FMath::IsFinite(OutAltitude);
+}
+
 bool AJTSPlanetAnchor::TraceToSurface(const FVector& WorldPosition, FJTSPlanetSurfaceHit& OutSurfaceHit) const
 {
 	const FVector PlanetCenter = GetPlanetCenter();

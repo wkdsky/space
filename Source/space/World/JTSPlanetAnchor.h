@@ -123,7 +123,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Gravity")
 	float GetGravityInfluenceRange() const;
 
-	/** Future Takeoff/SpaceFlight state-transition altitude, independent of Surface character gravity. */
+	/** Broad proximity query retained for Blueprint compatibility; it never controls spacecraft orientation. */
 	UFUNCTION(BlueprintPure, Category = "Planet|Travel")
 	float GetSpaceExitRange() const;
 
@@ -141,6 +141,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
 	float GetApproximateAltitude(const FVector& WorldPosition) const;
+
+	/**
+	 * Resolves signed altitude from the real mesh along this position's radial direction. Positive is
+	 * outside the surface. ApproximateRadius is deliberately not involved.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
+	bool GetAltitudeAboveSurface(const FVector& WorldPosition, float& OutAltitude) const;
 
 	/**
 	 * Traces across the configured gameplay mesh and accepts its real collision surface.
@@ -381,9 +388,11 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Approach", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float DefaultApproachEntryDistance = 8000.0f;
 
+	/** Height above the coarse surface where tangent/planet-radial flight releases to free flight. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Travel", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float TakeoffTransitionAltitude = 3000.0f;
 
+	/** Height above the coarse surface where Takeoff hands over to deep-space flight and releases the departure target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Travel", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float SpaceFlightAltitude = 6000.0f;
 

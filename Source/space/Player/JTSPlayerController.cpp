@@ -248,11 +248,28 @@ void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecra
 	ClientReceiveShopPurchaseResult(Result);
 }
 
+void AJTSPlayerController::ServerRequestShopResourceSupply_Implementation(AJTSSpacecraftActor* Spacecraft, int32 AmountPerResource)
+{
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	const bool bSucceeded = IsValid(ControlledCharacter)
+		&& IsValid(Spacecraft)
+		&& Spacecraft->TryGrantShopResourceSupply(ControlledCharacter, AmountPerResource);
+	ClientReceiveShopResourceSupplyResult(bSucceeded);
+}
+
 void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSShopPurchaseResult Result)
 {
 	if (IsValid(SpaceShopWidget))
 	{
 		SpaceShopWidget->NotifyPurchaseResult(Result);
+	}
+}
+
+void AJTSPlayerController::ClientReceiveShopResourceSupplyResult_Implementation(bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget))
+	{
+		SpaceShopWidget->NotifyResourceSupplyResult(bSucceeded);
 	}
 }
 

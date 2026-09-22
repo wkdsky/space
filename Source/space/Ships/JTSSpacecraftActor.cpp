@@ -331,6 +331,15 @@ void AJTSSpacecraftActor::BeginPlay()
 	{
 		FlightMovementComponent->OnAssistedLandingPhaseChanged.AddUObject(this, &AJTSSpacecraftActor::HandleAssistedLandingPhaseChanged);
 	}
+	if (HasAuthority() && FlightMovementComponent != nullptr)
+	{
+		const FVector ActorUp = GetActorUpVector().GetSafeNormal();
+		if (!ActorUp.IsNearlyZero())
+		{
+			FlightInertialReferenceUp = ActorUp;
+			FlightMovementComponent->CaptureInertialReferenceUp(FlightInertialReferenceUp);
+		}
+	}
 
 	if (!IsValid(BoardingTrigger))
 	{
@@ -563,6 +572,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	AddNegatedMapping(FlightForwardAction, EKeys::S);
 	AddNegatedMapping(FlightRightAction, EKeys::A);
 	AddNegatedMapping(FlightVerticalAction, EKeys::LeftControl);
+	AddNegatedMapping(FlightVerticalAction, EKeys::RightControl);
 }
 
 void AJTSSpacecraftActor::RegisterFlightInputMappingContext()
@@ -796,15 +806,23 @@ void AJTSSpacecraftActor::InitializeFlightCameraDistance()
 
 FVector AJTSSpacecraftActor::GetFlightReferenceUp() const
 {
-	const AJTSPlanetAnchor* const ReferencePlanet = IsValid(FlightPlanet)
-		? FlightPlanet.Get()
-		: GroundedPlanet.Get();
-	if (IsValid(ReferencePlanet))
+	// A parked craft is exactly surface-aligned. During flight the movement component owns one
+	// continuously blended inertial/surface frame, so the camera never crosses a binary horizon cut.
+	if (const AJTSPlanetAnchor* const ReferencePlanet = GroundedPlanet.Get(); IsValid(ReferencePlanet))
 	{
 		const FVector PlanetUp = ReferencePlanet->GetRadialUpVector(GetActorLocation()).GetSafeNormal();
 		if (!PlanetUp.IsNearlyZero())
 		{
 			return PlanetUp;
+		}
+	}
+
+	if (FlightMovementComponent != nullptr)
+	{
+		const FVector FlightUp = FlightMovementComponent->GetReferenceUp().GetSafeNormal();
+		if (!FlightUp.IsNearlyZero())
+		{
+			return FlightUp;
 		}
 	}
 
@@ -991,6 +1009,30 @@ EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, E
 	}
 
 	return bDropped ? EJTSShopPurchaseResult::SucceededDropped : EJTSShopPurchaseResult::Succeeded;
+}
+
+bool AJTSSpacecraftActor::TryGrantShopResourceSupply(AJTSCharacter* Player, int32 AmountPerResource)
+{
+	// This is intentionally a fixed development affordance, not a client-controlled economy RPC.
+	// Keep the validation beside the normal shop transaction so it cannot be used outside the active
+	// SpaceWorld shop or from outside the ship's interaction volume.
+	if (!HasAuthority()
+		|| !IsSpaceWorldSurfaceActive()
+		|| !IsValid(Player)
+		|| !IsPawnInBoardingRange(Player)
+		|| AmountPerResource != 100)
+	{
+		return false;
+	}
+
+	TMap<EJTSResourceType, int32> Supply;
+	Supply.Add(EJTSResourceType::Fuel, AmountPerResource);
+	Supply.Add(EJTSResourceType::Water, AmountPerResource);
+	Supply.Add(EJTSResourceType::Food, AmountPerResource);
+	Supply.Add(EJTSResourceType::Rock, AmountPerResource);
+	Supply.Add(EJTSResourceType::Ore, AmountPerResource);
+	Supply.Add(EJTSResourceType::Organic, AmountPerResource);
+	return DepositResourceAmounts(Supply);
 }
 
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
@@ -1644,6 +1686,15 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 		LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 		return;
 	}
+	const FVector SurfaceReferenceUp = InPlanetAnchor->GetRadialUpVector(GetActorLocation()).GetSafeNormal();
+	if (!SurfaceReferenceUp.IsNearlyZero())
+	{
+		FlightInertialReferenceUp = SurfaceReferenceUp;
+		if (FlightMovementComponent != nullptr)
+		{
+			FlightMovementComponent->CaptureInertialReferenceUp(FlightInertialReferenceUp);
+		}
+	}
 	FlightState = EJTSSpacecraftFlightState::Landed;
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::Touchdown;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
@@ -1673,6 +1724,15 @@ bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 		return false;
 	}
 
+	const FVector DepartureReferenceUp = Planet->GetRadialUpVector(GetActorLocation()).GetSafeNormal();
+	if (!DepartureReferenceUp.IsNearlyZero())
+	{
+		FlightInertialReferenceUp = DepartureReferenceUp;
+		if (FlightMovementComponent != nullptr)
+		{
+			FlightMovementComponent->CaptureInertialReferenceUp(FlightInertialReferenceUp);
+		}
+	}
 	SetFlightTargetPlanet(Planet);
 	ClearGroundedPlanet();
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
@@ -2371,6 +2431,7 @@ void AJTSSpacecraftActor::OnRep_FlightState()
 	}
 
 	FlightMovementComponent->SetTargetPlanet(FlightPlanet);
+	FlightMovementComponent->CaptureInertialReferenceUp(FlightInertialReferenceUp);
 	if (FlightState == EJTSSpacecraftFlightState::Landed || bIsGroundedOnPlanet)
 	{
 		FlightMovementComponent->ClearInput();
@@ -2506,6 +2567,7 @@ void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AJTSSpacecraftActor, GroundedPlanet);
 	DOREPLIFETIME(AJTSSpacecraftActor, bIsGroundedOnPlanet);
 	DOREPLIFETIME(AJTSSpacecraftActor, FlightPlanet);
+	DOREPLIFETIME(AJTSSpacecraftActor, FlightInertialReferenceUp);
 	DOREPLIFETIME(AJTSSpacecraftActor, ActiveLandingSite);
 	DOREPLIFETIME(AJTSSpacecraftActor, FlightState);
 	DOREPLIFETIME(AJTSSpacecraftActor, LastLandingFailure);
@@ -2631,6 +2693,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 
 	const int32 RockCount = Inventory->GetItemCount(EJTSItemId::Rock);
 	const int32 OreCount = Inventory->GetItemCount(EJTSItemId::Ore);
+	const int32 MoonAntCorpseCount = Inventory->GetItemCount(EJTSItemId::MoonAntCorpse);
 	TMap<EJTSResourceType, int32> Materials;
 	if (RockCount > 0)
 	{
@@ -2640,6 +2703,11 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 	{
 		Materials.Add(EJTSResourceType::Ore, OreCount);
 	}
+	if (MoonAntCorpseCount > 0)
+	{
+		// A corpse is a carried item, but it becomes processed Organic when submitted to the ship.
+		Materials.Add(EJTSResourceType::Organic, MoonAntCorpseCount);
+	}
 	if (Materials.IsEmpty())
 	{
 		return false;
@@ -2647,7 +2715,8 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 
 	const bool bRemovedRock = RockCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Rock, RockCount);
 	const bool bRemovedOre = bRemovedRock && (OreCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Ore, OreCount));
-	if (!bRemovedRock || !bRemovedOre)
+	const bool bRemovedCorpse = bRemovedOre && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
+	if (!bRemovedRock || !bRemovedOre || !bRemovedCorpse)
 	{
 		if (bRemovedRock && RockCount > 0)
 		{
@@ -2656,6 +2725,10 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 		if (bRemovedOre && OreCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
+		}
+		if (bRemovedCorpse && MoonAntCorpseCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
 		}
 		return false;
 	}
@@ -2669,6 +2742,10 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 		if (OreCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
+		}
+		if (MoonAntCorpseCount > 0)
+		{
+			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
 		}
 		return false;
 	}

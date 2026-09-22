@@ -9,6 +9,7 @@
 #include "JTSSpaceWorldManager.generated.h"
 
 class AActor;
+class AJTSSpacecraftActor;
 class AJTSPlanetAnchor;
 class ULevel;
 class ULevelStreamingDynamic;
@@ -111,8 +112,15 @@ public:
 	/** Fired once when flight reaches an eligible real planet landing range. */
 	FOnJTSSpaceWorldLandingRequested& OnLandingRequested();
 
-	/** Called by future flight code after movement; the value is centre-relative approximate altitude. */
-	void HandleFlightAltitude(float ApproximateAltitude);
+	/** Called by authoritative flight code after movement; the value is resolved from the real surface when loaded. */
+	void HandleFlightAltitude(float SurfaceAltitude);
+
+	/**
+	 * Server-authoritative flight handoff for the shared spacecraft. It releases the departure
+	 * planet at the space-flight threshold, leaves deep space unbound, and acquires a new planet
+	 * only after the craft enters that planet's non-overlapping influence range.
+	 */
+	void UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spacecraft);
 
 protected:
 	virtual void BeginPlay() override;

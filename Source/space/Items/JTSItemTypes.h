@@ -23,7 +23,9 @@ enum class EJTSItemId : uint8
 	Knife UMETA(DisplayName = "Knife"),
 	Pistol UMETA(DisplayName = "Pistol"),
 	MachineGun UMETA(DisplayName = "Machine Gun"),
-	Axe UMETA(DisplayName = "Axe")
+	Axe UMETA(DisplayName = "Axe"),
+	/** Stable append-only identity for the long-range precision weapon. */
+	Sniper UMETA(DisplayName = "Sniper Rifle")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */

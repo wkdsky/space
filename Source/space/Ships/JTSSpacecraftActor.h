@@ -57,6 +57,9 @@ public:
 	/** Server-authoritative purchase backed by this ship's shared material storage. */
 	EJTSShopPurchaseResult TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId);
 
+	/** Grants the fixed development-shop resource bundle after server-side range/phase validation. */
+	bool TryGrantShopResourceSupply(AJTSCharacter* Player, int32 AmountPerResource);
+
 	/** Boards a character that is currently inside the spacecraft trigger. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
 	bool TryBoardPlayer(APawn* InteractingPawn);
@@ -361,7 +364,9 @@ private:
 	friend class FJTSBoardingRegression;
 	friend class FJTSHullCameraRegression;
 	friend class FJTSThirdPersonFlightRegression;
+	friend class FJTSSpaceFlightFrameRegression;
 	friend class FJTSAutomaticLandingRegression;
+	friend class FJTSMarIILandingMapRegression;
 #endif
 
 	void InitializeFlightInput();
@@ -623,9 +628,13 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Surface", meta = (AllowPrivateAccess = "true"))
 	bool bIsGroundedOnPlanet = false;
 
-	/** Planet that supplies the radial Up frame and optional free-flight gravity. */
+	/** Current departure/arrival planet. It supplies a radial frame only inside the shallow surface-flight band. */
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetAnchor> FlightPlanet;
+
+	/** Fixed free-flight horizon captured at takeoff, replicated so every occupant uses the same control frame. */
+	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
+	FVector FlightInertialReferenceUp = FVector::UpVector;
 
 	/** Site whose accepted rule set produced the current landed state. Null for legacy surface snaps. */
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))

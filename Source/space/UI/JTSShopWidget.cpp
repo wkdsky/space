@@ -225,6 +225,18 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 	RefreshAll();
 }
 
+void UJTSShopWidget::NotifyResourceSupplyResult(bool bSucceeded)
+{
+	if (StatusText != nullptr)
+	{
+		StatusText->SetText(FText::FromString(bSucceeded ? TEXT("+100 ALL RESOURCES") : TEXT("SUPPLY UNAVAILABLE")));
+		StatusText->SetColorAndOpacity(FSlateColor(bSucceeded
+			? FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)
+			: FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
+	}
+	RefreshAll();
+}
+
 void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -274,8 +286,15 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("SHIP SUPPLY"), 31.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(24.0f, 28.0f), FVector2D(450.0f, 48.0f));
 	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTransfer"), TEXT("AUTO-TRANSFER"), 12.0f, FLinearColor(0.50f, 0.64f, 0.78f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(27.0f, 76.0f), FVector2D(180.0f, 20.0f));
 
-	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("ROCK 0   ORE 0"), 18.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
-	AddCanvas(FrameCanvas, WalletText, FAnchors(1.0f, 0.0f), FVector2D(-76.0f, 39.0f), FVector2D(310.0f, 40.0f), FVector2D(1.0f, 0.0f));
+	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("FUEL 0  WATER 0  FOOD 0  ROCK 0  ORE 0  ORGANIC 0"), 15.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
+	AddCanvas(FrameCanvas, WalletText, FAnchors(1.0f, 0.0f), FVector2D(-76.0f, 39.0f), FVector2D(650.0f, 38.0f), FVector2D(1.0f, 0.0f));
+
+	ResourceSupplyButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyResourceSupply"));
+	ResourceSupplyButton->SetBackgroundColor(FLinearColor(0.12f, 0.34f, 0.25f, 1.0f));
+	ResourceSupplyButton->SetContent(MakeText(WidgetTree, TEXT("ShipSupplyResourceSupplyLabel"), TEXT("+100 ALL RESOURCES"), 12.0f, FLinearColor::White, ETextJustify::Center));
+	ResourceSupplyButton->SetToolTipText(FText::FromString(TEXT("Development supply: adds 100 Fuel, Water, Food, Rock, Ore and Organic.")));
+	ResourceSupplyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleResourceSupplyClicked);
+	AddCanvas(FrameCanvas, ResourceSupplyButton, FAnchors(1.0f, 0.0f), FVector2D(-350.0f, 76.0f), FVector2D(248.0f, 30.0f), FVector2D(1.0f, 0.0f));
 
 	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
 	CloseButton->SetBackgroundColor(FLinearColor(0.16f, 0.22f, 0.30f, 1.0f));
@@ -345,7 +364,7 @@ void UJTSShopWidget::RefreshCatalog()
 			ETextJustify::Center));
 		USizeBox* const AccentSize = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyAccentSize_%d"), static_cast<int32>(ItemId)));
-		AccentSize->SetHeightOverride(65.0f);
+		AccentSize->SetHeightOverride(50.0f);
 		AccentSize->SetContent(Accent);
 		AddVertical(Contents, AccentSize, FMargin(5.0f, 5.0f, 5.0f, 10.0f));
 		AddVertical(Contents, MakeText(WidgetTree, *FString::Printf(TEXT("ShipSupplyName_%d"), static_cast<int32>(ItemId)), Definition->DisplayName.ToString(), 17.0f, FLinearColor::White, ETextJustify::Center), FMargin(6.0f, 0.0f, 6.0f, 6.0f));
@@ -359,14 +378,15 @@ void UJTSShopWidget::RefreshCatalog()
 		case EJTSItemId::Knife: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleKnifeBuy); break;
 		case EJTSItemId::Pistol: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePistolBuy); break;
 		case EJTSItemId::MachineGun: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMachineGunBuy); break;
+		case EJTSItemId::Sniper: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleSniperBuy); break;
 		case EJTSItemId::Backpack: Card->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleBackpackBuy); break;
 		default: break;
 		}
 
 		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyCell_%d"), static_cast<int32>(ItemId)));
-		Cell->SetWidthOverride(202.0f);
-		Cell->SetHeightOverride(300.0f);
+		Cell->SetWidthOverride(174.0f);
+		Cell->SetHeightOverride(260.0f);
 		Cell->SetContent(Card);
 		if (UWrapBoxSlot* const WrapSlot = CatalogWrap->AddChildToWrapBox(Cell))
 		{
@@ -384,8 +404,12 @@ bool UJTSShopWidget::RefreshWallet()
 	}
 
 	TMap<EJTSResourceType, int32> CurrentResourceAmounts;
+	CurrentResourceAmounts.Add(EJTSResourceType::Fuel, Spacecraft->GetResourceAmount(EJTSResourceType::Fuel));
+	CurrentResourceAmounts.Add(EJTSResourceType::Water, Spacecraft->GetResourceAmount(EJTSResourceType::Water));
+	CurrentResourceAmounts.Add(EJTSResourceType::Food, Spacecraft->GetResourceAmount(EJTSResourceType::Food));
 	CurrentResourceAmounts.Add(EJTSResourceType::Rock, Spacecraft->GetResourceAmount(EJTSResourceType::Rock));
 	CurrentResourceAmounts.Add(EJTSResourceType::Ore, Spacecraft->GetResourceAmount(EJTSResourceType::Ore));
+	CurrentResourceAmounts.Add(EJTSResourceType::Organic, Spacecraft->GetResourceAmount(EJTSResourceType::Organic));
 	for (const EJTSItemId ItemId : UJTSItemDefinitionLibrary::GetDefaultShopCatalog())
 	{
 		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
@@ -421,9 +445,13 @@ bool UJTSShopWidget::RefreshWallet()
 	if (WalletText != nullptr)
 	{
 		WalletText->SetText(FText::FromString(FString::Printf(
-			TEXT("ROCK %d   ORE %d"),
+			TEXT("FUEL %d   WATER %d   FOOD %d   ROCK %d   ORE %d   ORGANIC %d"),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Fuel),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Water),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Food),
 			Spacecraft->GetResourceAmount(EJTSResourceType::Rock),
-			Spacecraft->GetResourceAmount(EJTSResourceType::Ore))));
+			Spacecraft->GetResourceAmount(EJTSResourceType::Ore),
+			Spacecraft->GetResourceAmount(EJTSResourceType::Organic))));
 	}
 
 	return bResourcesChanged;
@@ -524,11 +552,29 @@ void UJTSShopWidget::RequestPurchase(EJTSItemId ItemId)
 	}
 }
 
+void UJTSShopWidget::RequestResourceSupply()
+{
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		if (ActiveSpacecraft.IsValid())
+		{
+			Controller->ServerRequestShopResourceSupply(ActiveSpacecraft.Get(), 100);
+			if (StatusText != nullptr)
+			{
+				StatusText->SetText(FText::FromString(TEXT("SUPPLYING...")));
+				StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.64f, 0.78f, 0.92f, 1.0f)));
+			}
+		}
+	}
+}
+
 void UJTSShopWidget::HandlePickaxeBuy() { RequestPurchase(EJTSItemId::Pickaxe); }
 void UJTSShopWidget::HandleKnifeBuy() { RequestPurchase(EJTSItemId::Knife); }
 void UJTSShopWidget::HandlePistolBuy() { RequestPurchase(EJTSItemId::Pistol); }
 void UJTSShopWidget::HandleMachineGunBuy() { RequestPurchase(EJTSItemId::MachineGun); }
+void UJTSShopWidget::HandleSniperBuy() { RequestPurchase(EJTSItemId::Sniper); }
 void UJTSShopWidget::HandleBackpackBuy() { RequestPurchase(EJTSItemId::Backpack); }
+void UJTSShopWidget::HandleResourceSupplyClicked() { RequestResourceSupply(); }
 
 void UJTSShopWidget::HandleCloseClicked()
 {

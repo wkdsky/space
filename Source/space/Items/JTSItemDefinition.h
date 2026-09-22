@@ -96,6 +96,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged", meta = (ClampMin = "100.0"))
 	float RangedRange = 8000.0f;
 
+	/** Camera field of view while aiming this ranged item. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged", meta = (ClampMin = "30.0", ClampMax = "120.0"))
+	float RangedAimFOV = 60.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged")
 	bool bAutomaticFire = false;
 

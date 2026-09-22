@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "space/Components/JTSMeleeComponent.h"
 #include "space/Core/JTSGameState.h"
 
 #include "JTSCharacter.generated.h"
@@ -15,15 +16,17 @@ class UCameraComponent;
 class UJTSCarryComponent;
 class UJTSHealthComponent;
 class UJTSInventoryComponent;
-class UJTSMeleeComponent;
 class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
 class UJTSRangedWeaponComponent;
+class UJTSWeaponVisualComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
 class UInputAction;
 class UInputComponent;
 class UInputMappingContext;
+class UAnimSequenceBase;
+class UAnimMontage;
 class USceneComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
@@ -182,6 +185,12 @@ private:
 	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
+	UFUNCTION()
+	void HandleMeleeAttackStarted(EJTSAttackType AttackType);
+	UFUNCTION()
+	void HandleMeleeAttackFinished(EJTSAttackType AttackType);
+	void HandleAimStarted(const FInputActionValue& Value);
+	void HandleAimReleased(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
 	void HandleCameraZoom(const FInputActionValue& Value);
 	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
@@ -215,9 +224,14 @@ private:
 	void ApplyThirdPersonCameraOffset();
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
+	void UpdateAimCamera(float DeltaSeconds);
+	void PlayUnarmedPunchPresentation(bool bUseLeftPunch, bool bIsComboContinuation);
+	void StopUnarmedPunchPresentation();
+	void ApplySurfaceMovementSettings();
 	bool RestoreAfterBoarding(AJTSSpacecraftActor* Spacecraft, bool bMoveToExitPoint);
 	void ApplyBoardedPresentation();
 	void ApplyAvatarColor();
+	float GetCapsuleSupportDistanceAlongDirection(const FVector& SupportDirection, const FQuat& CapsuleRotation) const;
 	bool FindSafeCharacterSurfaceLocation(
 		AJTSPlanetAnchor* InPlanetAnchor,
 		const FVector& TraceReferenceLocation,
@@ -296,8 +310,31 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSRangedWeaponComponent> RangedWeaponComponent;
 
+	/** Composed primitive mesh used as a network-safe placeholder for the active firearm. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSWeaponVisualComponent> WeaponVisualComponent;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;
+
+	/** Right and left punches are configured as assets while the shared melee component owns timing and damage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimSequenceBase> UnarmedPunchLeftAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimSequenceBase> UnarmedPunchRightAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float UnarmedPunchBlendInTime = 0.06f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float UnarmedPunchBlendOutTime = 0.14f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float UnarmedPunchPlayRate = 1.42f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> ActiveUnarmedPunchMontage;
 
 	/** Seconds F must be held while in a spacecraft boarding trigger before the player boards. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
@@ -306,6 +343,10 @@ private:
 	/** Applies UE CharacterMovement custom gravity only while a real gameplay planet is active. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
+
+	/** Maximum terrain angle a character can stand on. Individual character Blueprints may tune this per project. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
+	float MaxWalkableSlopeDegrees = 60.0f;
 
 	/** Explicit real-planet ownership. This prevents a character from selecting the first planet in the world. */
 	UPROPERTY(ReplicatedUsing = OnRep_GameplayPlanet, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet", meta = (AllowPrivateAccess = "true"))
@@ -366,6 +407,22 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
 	float ThirdPersonFOV = 90.0f;
+
+	/** FOV used while holding the right mouse aim input. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "30.0", ClampMax = "170.0", UIMin = "30.0", UIMax = "170.0"))
+	float AimFOV = 60.0f;
+
+	/** Additional third-person shoulder offset while aiming. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Aim", meta = (AllowPrivateAccess = "true"))
+	FVector AimShoulderOffset = FVector(30.0f, 48.0f, 0.0f);
+
+	/** Aim camera transition speed in seconds^-1. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float AimCameraInterpSpeed = 12.0f;
+
+	/** Third-person arm length target while aiming. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float AimThirdPersonArmLength = 260.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "-89.0", ClampMax = "0.0", UIMin = "-89.0", UIMax = "0.0"))
 	float ThirdPersonViewPitchMin = -60.0f;
@@ -433,6 +490,9 @@ private:
 	TObjectPtr<UInputAction> AttackAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> AimAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ToggleCameraAction;
 
 	UPROPERTY(Transient)
@@ -468,6 +528,7 @@ private:
 	FVector LastPlanetCameraUp = FVector::UpVector;
 	float PlanetCameraPitch = 0.0f;
 	float CurrentThirdPersonCameraArmLength = 0.0f;
+	float AimCameraAlpha = 0.0f;
 	ECollisionEnabled::Type PreviousCapsuleCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 	bool bBoardedPresentationApplied = false;
 	bool bPreviousDebugVisualVisible = true;

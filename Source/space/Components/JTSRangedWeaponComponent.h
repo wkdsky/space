@@ -25,6 +25,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ranged")
 	bool HasActiveRangedWeapon() const;
 
+	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
+	bool IsAiming() const { return bIsAiming && HasActiveRangedWeapon(); }
+
+	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
+	float GetActiveAimFOV() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Ranged|Aim")
+	void StartAim();
+
+	UFUNCTION(BlueprintCallable, Category = "Ranged|Aim")
+	void StopAim();
+
 	UFUNCTION(BlueprintCallable, Category = "Ranged")
 	void StartFire();
 
@@ -37,8 +49,16 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerStopFire();
 
+	UFUNCTION(Server, Reliable)
+	void ServerStartAim();
+
+	UFUNCTION(Server, Reliable)
+	void ServerStopAim();
+
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastShotTrace(FVector_NetQuantize TraceStart, FVector_NetQuantize TraceEnd);
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
 	const UJTSItemDefinition* GetActiveRangedDefinition() const;
@@ -50,4 +70,8 @@ private:
 	FTimerHandle AutomaticFireTimerHandle;
 	bool bFireHeld = false;
 	bool bDebugShotTraces = false;
+	double NextFireTimeSeconds = 0.0;
+
+	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ranged|Aim", meta = (AllowPrivateAccess = "true"))
+	bool bIsAiming = false;
 };

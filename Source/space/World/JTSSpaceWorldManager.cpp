@@ -2,6 +2,7 @@
 
 #include "space/World/JTSSpaceWorldManager.h"
 
+#include "space/Ships/JTSSpacecraftActor.h"
 #include "Components/SceneComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Level.h"
@@ -10,6 +11,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/World/JTSPlanetAnchor.h"
 
@@ -17,6 +19,31 @@ namespace
 {
 	/** The manager is looked up frequently by character components, so cache the persistent actor after one lookup. */
 	TMap<const UWorld*, TWeakObjectPtr<AJTSSpaceWorldManager>> GSpaceWorldManagers;
+
+	float ResolveSurfaceAltitude(
+		const AJTSSpacecraftActor* Spacecraft,
+		const AJTSPlanetAnchor* Planet,
+		const FVector& SpacecraftLocation)
+	{
+		float SurfaceAltitude = 0.0f;
+		if (IsValid(Spacecraft))
+		{
+			if (const UJTSSpacecraftFlightMovementComponent* const Movement = Spacecraft->GetFlightMovementComponent();
+				Movement != nullptr && Movement->GetResolvedSurfaceAltitude(Planet, SurfaceAltitude))
+			{
+				return SurfaceAltitude;
+			}
+		}
+
+		if (IsValid(Planet) && Planet->GetAltitudeAboveSurface(SpacecraftLocation, SurfaceAltitude))
+		{
+			return SurfaceAltitude;
+		}
+
+		// The authored radius remains a safe fallback for unloaded/invalid collision, never the
+		// primary source for a loaded real planet.
+		return IsValid(Planet) ? Planet->GetApproximateAltitude(SpacecraftLocation) : 0.0f;
+	}
 }
 
 AJTSSpaceWorldManager::AJTSSpaceWorldManager()
@@ -459,7 +486,7 @@ FOnJTSSpaceWorldLandingRequested& AJTSSpaceWorldManager::OnLandingRequested()
 	return LandingRequestedDelegate;
 }
 
-void AJTSSpaceWorldManager::HandleFlightAltitude(float ApproximateAltitude)
+void AJTSSpaceWorldManager::HandleFlightAltitude(float SurfaceAltitude)
 {
 	if (!HasAuthority())
 	{
@@ -471,21 +498,131 @@ void AJTSSpaceWorldManager::HandleFlightAltitude(float ApproximateAltitude)
 		return;
 	}
 
+	if (CurrentTravelState == EJTSSpaceTravelState::Takeoff
+		&& SurfaceAltitude >= Planet->GetSpaceFlightAltitude())
+	{
+		SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+		return;
+	}
+
 	if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight
-		&& ApproximateAltitude <= Planet->GetApproachTransitionAltitude())
+		&& SurfaceAltitude <= Planet->GetApproachTransitionAltitude())
 	{
 		SetTravelState(EJTSSpaceTravelState::Approach);
 		RequestPlanetContentLoad(Planet, true);
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::Approach
-		&& ApproximateAltitude <= Planet->GetLandingAssistAltitude()
+		&& SurfaceAltitude <= Planet->GetLandingAssistAltitude()
 		&& !bLandingEligibilityAnnounced)
 	{
 		// Reaching an altitude only makes landing *eligible*. A concrete LandingSite union query
 		// plus vehicle/surface validation is the only path that may transition to Landing.
 		bLandingEligibilityAnnounced = true;
 		LandingRequestedDelegate.Broadcast(Planet);
+	}
+}
+
+void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spacecraft)
+{
+	if (!HasAuthority()
+		|| !IsValid(Spacecraft)
+		|| Spacecraft->IsLanded()
+		|| Spacecraft->GetFlightState() == EJTSSpacecraftFlightState::LandingAssist)
+	{
+		return;
+	}
+
+	const FVector SpacecraftLocation = Spacecraft->GetActorLocation();
+	AJTSPlanetAnchor* const CurrentPlanetAnchor = CurrentPlanet.Get();
+
+	if (CurrentTravelState == EJTSSpaceTravelState::Takeoff)
+	{
+		// The departure planet remains the low-flight reference only until the configured
+		// space-flight altitude. Above it, the ship deliberately has no planet target at all.
+		AJTSPlanetAnchor* const DeparturePlanet = IsValid(Spacecraft->GetFlightPlanet())
+			? Spacecraft->GetFlightPlanet()
+			: CurrentPlanetAnchor;
+		if (!IsValid(DeparturePlanet))
+		{
+			return;
+		}
+
+		if (Spacecraft->GetFlightPlanet() != DeparturePlanet)
+		{
+			Spacecraft->SetFlightTargetPlanet(DeparturePlanet);
+		}
+
+		HandleFlightAltitude(ResolveSurfaceAltitude(Spacecraft, DeparturePlanet, SpacecraftLocation));
+		if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight)
+		{
+			Spacecraft->SetFlightTargetPlanet(nullptr);
+		}
+		return;
+	}
+
+	if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight)
+	{
+		// Influence ranges are configured per real planet and are guaranteed by level setup not to
+		// overlap. Outside every range there is intentionally no current or flight planet, so old
+		// Moon-centred camera, HUD, and landing queries cannot leak into deep space.
+		AJTSPlanetAnchor* const NearbyPlanet = FindNearestGameplayPlanet(SpacecraftLocation, true);
+		if (!IsValid(NearbyPlanet))
+		{
+			if (IsValid(Spacecraft->GetFlightPlanet()))
+			{
+				Spacecraft->SetFlightTargetPlanet(nullptr);
+			}
+			if (IsValid(CurrentPlanetAnchor))
+			{
+				SetCurrentPlanet(nullptr);
+			}
+			return;
+		}
+
+		const float Altitude = ResolveSurfaceAltitude(Spacecraft, NearbyPlanet, SpacecraftLocation);
+		if (NearbyPlanet != CurrentPlanetAnchor)
+		{
+			SetCurrentPlanet(NearbyPlanet);
+			Spacecraft->SetFlightTargetPlanet(NearbyPlanet);
+		}
+
+		const FVector RadialUp = NearbyPlanet->GetRadialUpVector(SpacecraftLocation).GetSafeNormal();
+		const float RadialVelocity = FVector::DotProduct(Spacecraft->GetFlightVelocity(), RadialUp);
+		const bool bMovingTowardPlanet = RadialVelocity < -KINDA_SMALL_NUMBER;
+		const bool bHasArrivalTarget = Spacecraft->GetFlightPlanet() == NearbyPlanet;
+		if (Altitude <= NearbyPlanet->GetApproachTransitionAltitude()
+			&& bMovingTowardPlanet)
+		{
+			if (!bHasArrivalTarget)
+			{
+				Spacecraft->SetFlightTargetPlanet(NearbyPlanet);
+			}
+			HandleFlightAltitude(Altitude);
+		}
+		return;
+	}
+
+	if (CurrentTravelState == EJTSSpaceTravelState::Approach)
+	{
+		if (!IsValid(CurrentPlanetAnchor))
+		{
+			SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+			return;
+		}
+
+		const float Altitude = ResolveSurfaceAltitude(Spacecraft, CurrentPlanetAnchor, SpacecraftLocation);
+		if (Altitude > CurrentPlanetAnchor->GetApproachTransitionAltitude())
+		{
+			SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+			return;
+		}
+
+		if (Spacecraft->GetFlightPlanet() != CurrentPlanetAnchor)
+		{
+			Spacecraft->SetFlightTargetPlanet(CurrentPlanetAnchor);
+		}
+		HandleFlightAltitude(Altitude);
 	}
 }
 

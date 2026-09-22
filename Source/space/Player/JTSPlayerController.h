@@ -78,8 +78,15 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);
 
+	/** Development shop supply RPC. The server accepts only the fixed +100-per-resource bundle. */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestShopResourceSupply(AJTSSpacecraftActor* Spacecraft, int32 AmountPerResource);
+
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(EJTSShopPurchaseResult Result);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopResourceSupplyResult(bool bSucceeded);
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenSpaceShop(AJTSSpacecraftActor* Spacecraft);

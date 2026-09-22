@@ -36,6 +36,7 @@ namespace
 		case EJTSItemId::Knife: return TEXT("/Game/Space/Data/Items/DA_Item_Knife.DA_Item_Knife");
 		case EJTSItemId::Pistol: return TEXT("/Game/Space/Data/Items/DA_Item_Pistol.DA_Item_Pistol");
 		case EJTSItemId::MachineGun: return TEXT("/Game/Space/Data/Items/DA_Item_MachineGun.DA_Item_MachineGun");
+		case EJTSItemId::Sniper: return TEXT("/Game/Space/Data/Items/DA_Item_Sniper.DA_Item_Sniper");
 		case EJTSItemId::Backpack: return TEXT("/Game/Space/Data/Items/DA_Item_Backpack.DA_Item_Backpack");
 		case EJTSItemId::Rock: return TEXT("/Game/Space/Data/Items/DA_Item_Rock.DA_Item_Rock");
 		case EJTSItemId::Ore: return TEXT("/Game/Space/Data/Items/DA_Item_Ore.DA_Item_Ore");
@@ -66,6 +67,7 @@ namespace
 		Definition->MeleeAttackInterval = 0.45f;
 		Definition->RangedFireInterval = 0.35f;
 		Definition->RangedRange = 8000.0f;
+		Definition->RangedAimFOV = 60.0f;
 		Definition->AccentColor = FLinearColor(0.38f, 0.70f, 0.95f, 1.0f);
 
 		auto SetResource = [Definition](const TCHAR* Name, EJTSItemId Id, EJTSItemCategory Category, const FLinearColor& Color)
@@ -142,6 +144,7 @@ namespace
 			Definition->RangedDamage = 2.5f;
 			Definition->RangedFireInterval = 0.42f;
 			Definition->RangedRange = 9000.0f;
+			Definition->RangedAimFOV = 68.0f;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 2), Cost(EJTSResourceType::Ore, 4) };
 			Definition->AccentColor = FLinearColor(0.42f, 0.72f, 1.0f, 1.0f);
 			break;
@@ -157,9 +160,27 @@ namespace
 			Definition->RangedDamage = 0.85f;
 			Definition->RangedFireInterval = 0.12f;
 			Definition->RangedRange = 8500.0f;
+			Definition->RangedAimFOV = 62.0f;
 			Definition->bAutomaticFire = true;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 6), Cost(EJTSResourceType::Ore, 10) };
 			Definition->AccentColor = FLinearColor(1.0f, 0.34f, 0.18f, 1.0f);
+			break;
+		case EJTSItemId::Sniper:
+			Definition->DisplayName = FText::FromString(TEXT("Sniper Rifle"));
+			Definition->Description = FText::FromString(TEXT("A deliberate long-range rifle. Slow follow-up shots, high precision damage and the strongest aim zoom."));
+			Definition->PrimaryCategory = EJTSItemCategory::Weapons;
+			Definition->ShopCategories = { EJTSShopCategory::Weapons };
+			Definition->AffinityTags = { TEXT("Weapon"), TEXT("Ranged"), TEXT("Precision") };
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::Mining, EJTSItemCapability::RangedWeapon, EJTSItemCapability::ShopPurchasable });
+			Definition->CombatDamage = 1.0f;
+			Definition->MiningWork = 1.0f;
+			Definition->RangedDamage = 8.0f;
+			Definition->RangedFireInterval = 1.15f;
+			Definition->RangedRange = 16000.0f;
+			Definition->RangedAimFOV = 36.0f;
+			Definition->bAutomaticFire = false;
+			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 10), Cost(EJTSResourceType::Ore, 18) };
+			Definition->AccentColor = FLinearColor(0.72f, 0.42f, 1.0f, 1.0f);
 			break;
 		case EJTSItemId::Backpack:
 			Definition->DisplayName = FText::FromString(TEXT("Expedition Backpack"));
@@ -283,6 +304,7 @@ const TArray<EJTSItemId>& UJTSItemDefinitionLibrary::GetDefaultShopCatalog()
 		EJTSItemId::Knife,
 		EJTSItemId::Pistol,
 		EJTSItemId::MachineGun,
+		EJTSItemId::Sniper,
 		EJTSItemId::Backpack
 	};
 	return Catalog;

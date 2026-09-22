@@ -74,6 +74,7 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		World->GetTimerManager().ClearTimer(TargetRefreshTimerHandle);
 	}
 	ClearAttackFailSafeTimer();
+	ClearUnarmedPunchTimers();
 
 	CurrentMeleeTarget = nullptr;
 	CachedMeleeTarget.Reset();
@@ -82,6 +83,8 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	bAttackBuffered = false;
 	bIsAttacking = false;
 	CurrentAttackType = EJTSAttackType::Punch;
+	bCurrentPunchUsesLeft = false;
+	bCurrentPunchIsComboContinuation = false;
 	NextAttackTime = 0.0;
 	Super::EndPlay(EndPlayReason);
 }
@@ -96,7 +99,6 @@ void UJTSMeleeComponent::AttackPressed()
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		bAttackHeld = true;
-		if (!bIsAttacking) StartAttack();
 		ServerStartAttack();
 		return;
 	}
@@ -121,6 +123,11 @@ void UJTSMeleeComponent::AttackReleased()
 
 void UJTSMeleeComponent::StartAttack()
 {
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerStartAttack();
+		return;
+	}
 	if (bIsAttacking || !IsValid(Cast<APawn>(GetOwner())))
 	{
 		return;
@@ -137,6 +144,10 @@ void UJTSMeleeComponent::StopAttack()
 
 void UJTSMeleeComponent::TryChainAttack()
 {
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
 	if (!bIsAttacking || (!bAttackHeld && !bAttackBuffered))
 	{
 		return;
@@ -149,6 +160,10 @@ void UJTSMeleeComponent::TryChainAttack()
 
 void UJTSMeleeComponent::FinishCurrentAttack()
 {
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
 	if (!bIsAttacking)
 	{
 		return;
@@ -172,14 +187,18 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 		return;
 	}
 
-	// Every montage segment is one new swing. Repeated AttackHit notifies can never re-hit this set.
+	const bool bIsComboContinuation = bIsAttacking && AttackType == EJTSAttackType::Punch;
+
+	// Every montage segment is one new swing. Repeated hit requests can never re-hit this set.
 	HitActorsThisSwing.Reset();
 	CachedMeleeTarget.Reset();
 	CurrentAttackType = AttackType;
 	bIsAttacking = true;
+	bCurrentPunchIsComboContinuation = bIsComboContinuation;
 
 	if (CurrentAttackType == EJTSAttackType::Punch)
 	{
+		bCurrentPunchUsesLeft = !bCurrentPunchUsesLeft;
 		APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 		AActor* Candidate = nullptr;
 		FVector CandidateLocation = FVector::ZeroVector;
@@ -224,8 +243,17 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 		}
 	}
 
-	ResetAttackFailSafeTimer();
-	OnAttackStarted.Broadcast(CurrentAttackType);
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		ClearAttackFailSafeTimer();
+		ScheduleUnarmedPunchEvents();
+	}
+	else
+	{
+		ResetAttackFailSafeTimer();
+	}
+
+	MulticastBeginAttackPresentation(CurrentAttackType, bCurrentPunchUsesLeft, bCurrentPunchIsComboContinuation);
 }
 
 void UJTSMeleeComponent::ResetAttackFailSafeTimer()
@@ -259,14 +287,76 @@ void UJTSMeleeComponent::HandleAttackFailSafeTimeout()
 	EndAttackState();
 }
 
+void UJTSMeleeComponent::ScheduleUnarmedPunchEvents()
+{
+	UWorld* const World = GetWorld();
+	if (!IsValid(World) || GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	ClearUnarmedPunchTimers();
+	const float HitDelay = FMath::Max(0.01f, UnarmedPunchHitDelay);
+	const float ChainDelay = FMath::Max(HitDelay, UnarmedPunchChainDelay);
+	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, UnarmedPunchRecoveryDelay);
+	FTimerManager& TimerManager = World->GetTimerManager();
+	TimerManager.SetTimer(UnarmedPunchHitTimerHandle, this, &UJTSMeleeComponent::HandleUnarmedPunchHit, HitDelay, false);
+	TimerManager.SetTimer(UnarmedPunchChainTimerHandle, this, &UJTSMeleeComponent::HandleUnarmedPunchChainWindow, ChainDelay, false);
+	TimerManager.SetTimer(UnarmedPunchRecoveryTimerHandle, this, &UJTSMeleeComponent::HandleUnarmedPunchRecovery, RecoveryDelay, false);
+}
+
+void UJTSMeleeComponent::ClearUnarmedPunchTimers()
+{
+	if (UWorld* const World = GetWorld())
+	{
+		FTimerManager& TimerManager = World->GetTimerManager();
+		TimerManager.ClearTimer(UnarmedPunchHitTimerHandle);
+		TimerManager.ClearTimer(UnarmedPunchChainTimerHandle);
+		TimerManager.ClearTimer(UnarmedPunchRecoveryTimerHandle);
+	}
+}
+
+void UJTSMeleeComponent::HandleUnarmedPunchHit()
+{
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		PerformHitCheck();
+	}
+}
+
+void UJTSMeleeComponent::HandleUnarmedPunchChainWindow()
+{
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		TryChainAttack();
+	}
+}
+
+void UJTSMeleeComponent::HandleUnarmedPunchRecovery()
+{
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		FinishCurrentAttack();
+	}
+}
+
 void UJTSMeleeComponent::EndAttackState()
 {
+	const bool bWasAttacking = bIsAttacking;
+	const EJTSAttackType FinishedAttackType = CurrentAttackType;
 	ClearAttackFailSafeTimer();
+	ClearUnarmedPunchTimers();
 
 	bIsAttacking = false;
 	bAttackBuffered = false;
+	bCurrentPunchUsesLeft = false;
+	bCurrentPunchIsComboContinuation = false;
 	HitActorsThisSwing.Reset();
 	CachedMeleeTarget.Reset();
+	if (bWasAttacking && GetOwner() != nullptr && GetOwner()->HasAuthority())
+	{
+		MulticastEndAttackPresentation(FinishedAttackType);
+	}
 }
 
 void UJTSMeleeComponent::PerformHitCheck()
@@ -464,6 +554,21 @@ bool UJTSMeleeComponent::TryAttack()
 AActor* UJTSMeleeComponent::GetCurrentMeleeTarget() const
 {
 	return CurrentMeleeTarget.Get();
+}
+
+bool UJTSMeleeComponent::IsUnarmedComboActive() const
+{
+	return bIsAttacking && CurrentAttackType == EJTSAttackType::Punch;
+}
+
+bool UJTSMeleeComponent::IsCurrentPunchLeft() const
+{
+	return bCurrentPunchUsesLeft;
+}
+
+bool UJTSMeleeComponent::IsContinuingUnarmedCombo() const
+{
+	return IsUnarmedComboActive() && bCurrentPunchIsComboContinuation;
 }
 
 EJTSMeleeAttackType UJTSMeleeComponent::GetCurrentAttackType() const
@@ -890,10 +995,13 @@ bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPaw
 void UJTSMeleeComponent::ServerStartAttack_Implementation()
 {
 	bAttackHeld = true;
-	if (!bIsAttacking)
+	if (bIsAttacking)
 	{
-		StartAttack();
+		bAttackBuffered = true;
+		return;
 	}
+
+	StartAttack();
 }
 
 void UJTSMeleeComponent::ServerPerformHitCheck_Implementation()
@@ -909,6 +1017,26 @@ void UJTSMeleeComponent::ServerTryAttack_Implementation()
 void UJTSMeleeComponent::ServerReleaseAttack_Implementation()
 {
 	bAttackHeld = false;
+}
+
+void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
+	EJTSAttackType AttackType,
+	bool bUseLeftPunch,
+	bool bIsComboContinuation)
+{
+	CurrentAttackType = AttackType;
+	bCurrentPunchUsesLeft = bUseLeftPunch;
+	bCurrentPunchIsComboContinuation = bIsComboContinuation;
+	bIsAttacking = true;
+	OnAttackStarted.Broadcast(AttackType);
+}
+
+void UJTSMeleeComponent::MulticastEndAttackPresentation_Implementation(EJTSAttackType AttackType)
+{
+	bIsAttacking = false;
+	bAttackBuffered = false;
+	bCurrentPunchIsComboContinuation = false;
+	OnAttackFinished.Broadcast(AttackType);
 }
 
 float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType) const
