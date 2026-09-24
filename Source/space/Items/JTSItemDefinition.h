@@ -8,6 +8,37 @@
 
 #include "JTSItemDefinition.generated.h"
 
+class UMaterialInterface;
+class USoundBase;
+
+/**
+ * Authorable item-local pivots for a held visual.  GripTransform's origin is the point the
+ * character hand closes around; MuzzleTransform's +X axis points out of the barrel.
+ *
+ * The runtime component provides prototype values so existing item assets keep working.  Set
+ * bOverridePrototypeProfile for a real mesh and tune these values in the item Data Asset.
+ */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSHeldItemPresentation
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item")
+	bool bOverridePrototypeProfile = false;
+
+	/** Model-local pivot that is placed directly at the character's hand socket. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FTransform GripTransform = FTransform::Identity;
+
+	/** Model-local muzzle point and direction.  Its +X axis must point out of the barrel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FTransform MuzzleTransform = FTransform::Identity;
+
+	/** Visible prototype grip dimensions, in world centimetres relative to the engine cube. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector GripScale = FVector(0.16f, 0.12f, 0.32f);
+};
+
 /**
  * Authorable definition for one item kind.  Runtime inventory stores FJTSItemInstance, never this
  * asset's mutable state, so one definition can safely serve every player and world pickup.
@@ -26,9 +57,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Item")
 	bool IsHoldable() const;
-
-	UFUNCTION(BlueprintPure, Category = "Item")
-	bool IsWearable() const;
 
 	UFUNCTION(BlueprintPure, Category = "Item")
 	bool IsRangedWeapon() const;
@@ -61,6 +89,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
 	FLinearColor AccentColor = FLinearColor(0.38f, 0.70f, 0.95f, 1.0f);
 
+	/** Per-item grip and muzzle pivots.  Kept in the Data Asset so art can configure real meshes without changing gameplay code. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation|Held")
+	FJTSHeldItemPresentation HeldPresentation;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Capabilities", meta = (Bitmask, BitmaskEnum = "/Script/space.EJTSItemCapability"))
 	int32 CapabilityMask = 0;
 
@@ -69,12 +101,6 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
 	float DefaultDurability = -1.0f;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Wearable")
-	EJTSWearableSlot WearableSlot = EJTSWearableSlot::None;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Wearable", meta = (ClampMin = "0"))
-	int32 InventoryCapacityBonus = 0;
 
 	/** Combat damage is intentionally independent from MiningWork. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0"))
@@ -100,8 +126,25 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged", meta = (ClampMin = "30.0", ClampMax = "120.0"))
 	float RangedAimFOV = 60.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged")
-	bool bAutomaticFire = false;
+	/** Camera-ray spread in degrees. ADS keeps precision without changing server hit authority. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Feel", meta = (ClampMin = "0.0", ClampMax = "12.0"))
+	float RangedHipSpreadDegrees = 1.2f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Feel", meta = (ClampMin = "0.0", ClampMax = "12.0"))
+	float RangedAimSpreadDegrees = 0.15f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Feel", meta = (ClampMin = "0.0", ClampMax = "8.0"))
+	float RangedViewKickDegrees = 0.8f;
+
+	/** Presentation assets are selected per item in the Data Asset, never by gameplay code. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Presentation")
+	TSoftObjectPtr<UMaterialInterface> RangedGlowMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Presentation")
+	TSoftObjectPtr<USoundBase> RangedFireSound;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged|Presentation")
+	TSoftObjectPtr<USoundBase> RangedImpactSound;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shop")
 	TArray<FJTSItemCost> ShopCosts;

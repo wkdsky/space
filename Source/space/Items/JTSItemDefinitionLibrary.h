@@ -30,5 +30,8 @@ public:
 	static EJTSItemId GetItemIdForResource(EJTSResourceType ResourceType);
 
 	static FJTSItemInstance MakeInstance(EJTSItemId ItemId, int32 Count = 1);
+
+	/** Retired serialized values are deliberately not obtainable in current gameplay. */
+	static bool IsGameplayItemAvailable(EJTSItemId ItemId);
 	static const TArray<EJTSItemId>& GetDefaultShopCatalog();
 };

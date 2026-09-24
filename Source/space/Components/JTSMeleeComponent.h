@@ -146,6 +146,11 @@ private:
 	void HandleUnarmedPunchHit();
 	void HandleUnarmedPunchChainWindow();
 	void HandleUnarmedPunchRecovery();
+	void ScheduleHeldWeaponEvents();
+	void ClearHeldWeaponTimers();
+	void HandleHeldWeaponHit();
+	void HandleHeldWeaponChainWindow();
+	void HandleHeldWeaponRecovery();
 	void EndAttackState();
 	void SetCurrentMeleeTarget(AActor* NewTarget);
 
@@ -186,6 +191,16 @@ private:
 	/** Without more input, the final punch is allowed to finish and settle back to the lowered idle pose. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.03", UIMin = "0.03"))
 	float UnarmedPunchRecoveryDelay = 0.58f;
+
+	/** Native timing fallback for held melee weapons and tools, so they do not depend on Blueprint animation notifies. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.01", UIMin = "0.01"))
+	float HeldWeaponHitDelay = 0.18f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02"))
+	float HeldWeaponChainDelay = 0.42f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.03", UIMin = "0.03"))
+	float HeldWeaponRecoveryDelay = 0.64f;
 
 	/** Broad category resolved from the currently selected equipment when an attack starts. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
@@ -263,6 +278,9 @@ private:
 	FTimerHandle UnarmedPunchHitTimerHandle;
 	FTimerHandle UnarmedPunchChainTimerHandle;
 	FTimerHandle UnarmedPunchRecoveryTimerHandle;
+	FTimerHandle HeldWeaponHitTimerHandle;
+	FTimerHandle HeldWeaponChainTimerHandle;
+	FTimerHandle HeldWeaponRecoveryTimerHandle;
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisSwing;
 	double NextAttackTime = 0.0;
 };

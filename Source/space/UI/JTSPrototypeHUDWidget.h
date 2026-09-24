@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSResourceTypes.h"
 
@@ -67,24 +66,11 @@ private:
 	void RefreshEarthCollectionDurationText();
 	void RefreshFuelToMoonHud();
 	void RefreshInventorySlots();
-	void RefreshEquipmentSlots();
 	void RefreshInteractionPrompt();
-	void RefreshMoonShop();
-	void RefreshWorkshopTabs();
-	void RefreshWorkshopLayout();
 	void RefreshSpacecraftNavigation(AJTSSpacecraftActor* Spacecraft);
 	bool ProjectWorldToViewportWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const;
 	FVector2D GetViewportWidgetLocalSize() const;
 	void SetSpacecraftNavigationVisibility(bool bShowWorldMarker, bool bShowEdgeIndicator);
-	void BuildWorkshopPanel();
-	UBorder* BuildWorkshopItemCard(
-		UCanvasPanel* Parent,
-		const FName& CardName,
-		const FString& ItemName,
-		const FString& ItemCategory,
-		const FString& Description,
-		TObjectPtr<UTextBlock>& OutCostText,
-		TObjectPtr<UButton>& OutBuyButton);
 	void ApplyLayerVisibility(UWidget* Layer, bool bVisible);
 	void SetBoardingProgressVisible(bool bVisible);
 
@@ -125,27 +111,6 @@ private:
 	void HandleQuitClicked();
 
 	UFUNCTION()
-	void HandleWorkshopToolsTabClicked();
-
-	UFUNCTION()
-	void HandleWorkshopEquipmentTabClicked();
-
-	UFUNCTION()
-	void HandleBuyPickaxeClicked();
-
-	UFUNCTION()
-	void HandleBuyBackpackClicked();
-
-	UFUNCTION()
-	void HandleBuyKnifeClicked();
-
-	UFUNCTION()
-	void HandleBuyAxeClicked();
-
-	UFUNCTION()
-	void HandleCloseMoonShopClicked();
-
-	UFUNCTION()
 	void HandleResumeGameClicked();
 
 	UFUNCTION()
@@ -163,7 +128,6 @@ private:
 	AJTSSpacecraftActor* FindSpacecraft() const;
 	AJTSCharacter* FindPlayerCharacter() const;
 	static FString ResourceTypeToString(EJTSResourceType ResourceType);
-	static FString EquipmentTypeToString(EJTSEquipmentType EquipmentType);
 	static FString FormatRemainingTime(float RemainingSeconds);
 
 	UPROPERTY(Transient)
@@ -267,6 +231,9 @@ private:
 	TObjectPtr<UCanvasPanelSlot> InventoryPanelSlot;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> InventoryTitleText;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> InteractionPromptText;
 
 	UPROPERTY(Transient)
@@ -313,96 +280,6 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBorder>> InventorySlotBorders;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> EquipmentPanel;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> EquipmentPanelSlot;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UBorder>> EquipmentSlotBorders;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UTextBlock>> EquipmentSlotTexts;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UTextBlock>> EquipmentSlotKeyTexts;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UJTSCircularProgressWidget>> EquipmentHoldProgressWidgets;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> MoonShopPanel;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> MoonShopPanelSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> ShopPickaxeCard;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> ShopBackpackCard;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> ShopKnifeCard;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UBorder> ShopAxeCard;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopPickaxeCardSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopBackpackCardSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopKnifeCardSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopAxeCardSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ShopPickaxeCostText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopPickaxeBuyButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ShopBackpackCostText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopBackpackBuyButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ShopKnifeCostText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopKnifeBuyButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> ShopAxeCostText;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopAxeBuyButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopToolsTabButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopToolsTabSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopEquipmentTabButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopEquipmentTabSlot;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UButton> ShopCloseButton;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UCanvasPanelSlot> ShopCloseButtonSlot;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> SettingsButton;
@@ -458,14 +335,9 @@ private:
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 	TWeakObjectPtr<UJTSHealthComponent> BoundPlayerHealthComponent;
 	TWeakObjectPtr<AJTSSpacecraftActor> BoundSpacecraftResources;
-	TWeakObjectPtr<AJTSCharacter> ShopPlayer;
-	TWeakObjectPtr<AJTSSpacecraftActor> ShopSpacecraft;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;
-	FIntPoint CachedWorkshopViewportSize = FIntPoint::ZeroValue;
 	EJTSGameplayPhase CachedGameplayPhase = EJTSGameplayPhase::WaitingToStart;
 	bool bSettingsVisible = false;
-	bool bMoonShopOpen = false;
 	bool bGameMenuOpen = false;
-	bool bWorkshopEquipmentTab = false;
 	bool bSpacecraftWasOnScreen = false;
 };

@@ -47,7 +47,7 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Aim", meta = (AllowPrivateAccess = "true"))
 	bool bWeaponAiming = false;
 
-	/** Legacy graph flag; the existing bool blend uses false for the occupied-hands pose. */
+	/** The existing bool blend selects its stable gun-pointing upper-body pose when true. */
 	UPROPERTY(BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	bool bHasRangedWeapon = false;
 

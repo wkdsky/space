@@ -27,7 +27,6 @@
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinition.h"
@@ -1011,28 +1010,21 @@ EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, E
 	return bDropped ? EJTSShopPurchaseResult::SucceededDropped : EJTSShopPurchaseResult::Succeeded;
 }
 
-bool AJTSSpacecraftActor::TryGrantShopResourceSupply(AJTSCharacter* Player, int32 AmountPerResource)
+bool AJTSSpacecraftActor::TryGrantDebugResources(AJTSCharacter* Player)
 {
-	// This is intentionally a fixed development affordance, not a client-controlled economy RPC.
-	// Keep the validation beside the normal shop transaction so it cannot be used outside the active
-	// SpaceWorld shop or from outside the ship's interaction volume.
-	if (!HasAuthority()
-		|| !IsSpaceWorldSurfaceActive()
-		|| !IsValid(Player)
-		|| !IsPawnInBoardingRange(Player)
-		|| AmountPerResource != 100)
+	if (!HasAuthority() || !IsValid(Player) || !CanUseShipTerminal(Player))
 	{
 		return false;
 	}
 
-	TMap<EJTSResourceType, int32> Supply;
-	Supply.Add(EJTSResourceType::Fuel, AmountPerResource);
-	Supply.Add(EJTSResourceType::Water, AmountPerResource);
-	Supply.Add(EJTSResourceType::Food, AmountPerResource);
-	Supply.Add(EJTSResourceType::Rock, AmountPerResource);
-	Supply.Add(EJTSResourceType::Ore, AmountPerResource);
-	Supply.Add(EJTSResourceType::Organic, AmountPerResource);
-	return DepositResourceAmounts(Supply);
+	TMap<EJTSResourceType, int32> Resources;
+	for (const EJTSResourceType Resource : {
+		EJTSResourceType::Fuel, EJTSResourceType::Water, EJTSResourceType::Food,
+		EJTSResourceType::Rock, EJTSResourceType::Ore, EJTSResourceType::Organic })
+	{
+		Resources.Add(Resource, 100);
+	}
+	return DepositResourceAmounts(Resources);
 }
 
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
@@ -2213,6 +2205,14 @@ bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) con
 		&& IsPawnInBoardingRange(InteractingPawn);
 }
 
+bool AJTSSpacecraftActor::CanUseShipTerminal(APawn* InteractingPawn) const
+{
+	return HasAuthority()
+		&& IsSpaceWorldSurfaceActive()
+		&& CanInteract_Implementation(InteractingPawn)
+		&& !IsPlayerBoarded(InteractingPawn);
+}
+
 FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
 	if (!CanInteract_Implementation(InteractingPawn))
@@ -2227,7 +2227,7 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 			return FText::FromString(TEXT("HOLD [F] BOARD"));
 		}
 
-		return FText::FromString(TEXT("[E] SUPPLY\nHOLD [F] BOARD"));
+		return FText::FromString(TEXT("[E] SHIP TERMINAL\nHOLD [F] BOARD"));
 	}
 
 	return CanDisembarkPlayer(InteractingPawn)
@@ -2239,10 +2239,7 @@ void AJTSSpacecraftActor::Interact_Implementation(APawn* InteractingPawn)
 {
 	// Earth exposes the ship as an interaction target solely so its hold-F boarding path and prompt
 	// use the shared interaction validation. The supply screen remains a SpaceWorld-only feature.
-	if (!HasAuthority()
-		|| !IsSpaceWorldSurfaceActive()
-		|| !CanInteract_Implementation(InteractingPawn)
-		|| IsPlayerBoarded(InteractingPawn))
+	if (!CanUseShipTerminal(InteractingPawn))
 	{
 		return;
 	}
@@ -2787,14 +2784,7 @@ bool AJTSSpacecraftActor::DeliverShopPurchase(AJTSCharacter* Player, const FJTSI
 	}
 
 	bool bDelivered = false;
-	if (Definition->IsWearable())
-	{
-		if (UJTSPlayerEquipmentComponent* const Equipment = Player->GetEquipmentComponent())
-		{
-			bDelivered = Equipment->TryEquipItem(Item);
-		}
-	}
-	else if (UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent())
+	if (UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent())
 	{
 		if (Inventory->CanAddItem(Item.ItemId, Item.StackCount))
 		{

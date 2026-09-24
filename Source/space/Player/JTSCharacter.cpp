@@ -34,7 +34,6 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
@@ -75,7 +74,6 @@ AJTSCharacter::AJTSCharacter()
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	InventoryComponent = CreateDefaultSubobject<UJTSInventoryComponent>(TEXT("InventoryComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
-	EquipmentComponent = CreateDefaultSubobject<UJTSPlayerEquipmentComponent>(TEXT("EquipmentComponent"));
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
@@ -123,11 +121,6 @@ UJTSCarryComponent* AJTSCharacter::GetCarryComponent() const
 UJTSInventoryComponent* AJTSCharacter::GetInventoryComponent() const
 {
 	return InventoryComponent.Get();
-}
-
-UJTSPlayerEquipmentComponent* AJTSCharacter::GetEquipmentComponent() const
-{
-	return EquipmentComponent.Get();
 }
 
 UJTSHealthComponent* AJTSCharacter::GetHealthComponent() const
@@ -178,6 +171,17 @@ void AJTSCharacter::ApplySurfaceMovementSettings()
 	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
 		MovementComponent->SetWalkableFloorAngle(FMath::Clamp(MaxWalkableSlopeDegrees, 0.0f, 89.0f));
+	}
+}
+
+void AJTSCharacter::ApplyProgressionMovementSpeed()
+{
+	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	{
+		const AJTSPlayerState* const ProgressionPlayerState = GetPlayerState<AJTSPlayerState>();
+		const float ProgressionMultiplier = ProgressionPlayerState != nullptr ? ProgressionPlayerState->GetRunSpeedMultiplier() : 1.0f;
+		const float BaseSpeed = bSprintInputActive && !IsBoarded() ? SprintingSpeed : WalkingSpeed;
+		MovementComponent->MaxWalkSpeed = BaseSpeed * FMath::Max(0.1f, ProgressionMultiplier);
 	}
 }
 
@@ -361,21 +365,64 @@ float AJTSCharacter::GetAimPitch() const
 	return AimPitch;
 }
 
-int32 AJTSCharacter::GetEquipmentHoldSlotIndex() const
+void AJTSCharacter::ShiftLocalViewPitch(float DeltaDegrees)
 {
-	if (bEquipmentHoldCompleted || !IsValid(InventoryComponent)
-		|| HeldEquipmentSlotIndex < 0 || HeldEquipmentSlotIndex >= 4
-		|| InventoryComponent->GetItemAtSlot(HeldEquipmentSlotIndex).IsEmpty())
+	if (!IsLocallyControlled() || FMath::IsNearlyZero(DeltaDegrees))
+	{
+		return;
+	}
+
+	if (IsRealPlanetGameplayActive())
+	{
+		const float PitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
+		const float PitchMax = bFirstPersonView ? FirstPersonViewPitchMax : ThirdPersonViewPitchMax;
+		PlanetCameraPitch = FMath::Clamp(PlanetCameraPitch + DeltaDegrees,
+			FMath::Min(PitchMin, PitchMax), FMath::Max(PitchMin, PitchMax));
+		UpdatePlanetCameraFrame(bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp(), 0.0f);
+	}
+	else if (Controller != nullptr)
+	{
+		FRotator ViewRotation = Controller->GetControlRotation();
+		ViewRotation.Pitch = FMath::Clamp(FRotator::NormalizeAxis(ViewRotation.Pitch) + DeltaDegrees,
+			FMath::Min(AimPitchMin, AimPitchMax), FMath::Max(AimPitchMin, AimPitchMax));
+		Controller->SetControlRotation(ViewRotation);
+	}
+}
+
+void AJTSCharacter::ApplyWeaponViewKick(float PitchDegrees)
+{
+	if (!IsLocallyControlled() || PitchDegrees <= 0.0f)
+	{
+		return;
+	}
+	const float Before = IsRealPlanetGameplayActive() ? PlanetCameraPitch
+		: (Controller != nullptr ? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch) : 0.0f);
+	ShiftLocalViewPitch(FMath::Clamp(PitchDegrees, 0.0f, 8.0f));
+	const float After = IsRealPlanetGameplayActive() ? PlanetCameraPitch
+		: (Controller != nullptr ? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch) : Before);
+	PendingViewRecoilDegrees = FMath::Clamp(PendingViewRecoilDegrees + FMath::Max(0.0f, After - Before), 0.0f, 12.0f);
+}
+
+void AJTSCharacter::ServerUpdateAimPitch_Implementation(float NewPitch)
+{
+	ReplicatedAimPitch = FMath::Clamp(NewPitch, FMath::Min(AimPitchMin, AimPitchMax), FMath::Max(AimPitchMin, AimPitchMax));
+}
+
+int32 AJTSCharacter::GetItemDiscardHoldSlotIndex() const
+{
+	if (bItemDiscardHoldCompleted || !IsValid(InventoryComponent)
+		|| HeldItemDiscardSlotIndex < 0
+		|| InventoryComponent->GetItemAtSlot(HeldItemDiscardSlotIndex).IsEmpty())
 	{
 		return INDEX_NONE;
 	}
 
-	return HeldEquipmentSlotIndex;
+	return HeldItemDiscardSlotIndex;
 }
 
-float AJTSCharacter::GetEquipmentHoldProgress() const
+float AJTSCharacter::GetItemDiscardHoldProgress() const
 {
-	if (GetEquipmentHoldSlotIndex() == INDEX_NONE)
+	if (GetItemDiscardHoldSlotIndex() == INDEX_NONE)
 	{
 		return 0.0f;
 	}
@@ -387,8 +434,8 @@ float AJTSCharacter::GetEquipmentHoldProgress() const
 	}
 
 	return FMath::Clamp(
-		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - EquipmentHoldStartTime)
-			/ static_cast<double>(FMath::Max(0.1f, EquipmentHoldToDropDuration))),
+		static_cast<float>((static_cast<double>(World->GetTimeSeconds()) - ItemDiscardHoldStartTime)
+			/ static_cast<double>(FMath::Max(0.1f, ItemDestroyHoldDuration))),
 		0.0f,
 		1.0f);
 }
@@ -510,7 +557,7 @@ bool AJTSCharacter::EnterBoardedState(AJTSSpacecraftActor* Spacecraft)
 	}
 
 	CancelBoardingHold();
-	CancelEquipmentSlotHold();
+	CancelItemDiscardHold();
 	bInteractKeyHeld = false;
 	NearbySpacecraft = Spacecraft;
 	BoardedSpacecraft = Spacecraft;
@@ -582,6 +629,12 @@ void AJTSCharacter::BeginPlay()
 	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
 
+	if (IsValid(WeaponVisualComponent))
+	{
+		WeaponVisualComponent->Activate(true);
+		WeaponVisualComponent->RefreshWeaponVisual();
+	}
+
 	RegisterInputMappingContext();
 }
 
@@ -594,13 +647,36 @@ void AJTSCharacter::Tick(float DeltaSeconds)
 	{
 		UpdatePlanetGameplayFrame(DeltaSeconds);
 	}
+	if (IsLocallyControlled() && PendingViewRecoilDegrees > KINDA_SMALL_NUMBER)
+	{
+		const float Remaining = FMath::FInterpTo(PendingViewRecoilDegrees, 0.0f, DeltaSeconds, 10.0f);
+		ShiftLocalViewPitch(Remaining - PendingViewRecoilDegrees);
+		PendingViewRecoilDegrees = Remaining;
+	}
 
-	const float ControllerPitch = bUsingRealPlanetFrame
-		? PlanetCameraPitch
-		: (Controller != nullptr ? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch) : 0.0f);
 	const float MinimumAimPitch = FMath::Min(AimPitchMin, AimPitchMax);
 	const float MaximumAimPitch = FMath::Max(AimPitchMin, AimPitchMax);
-	AimPitch = FMath::Clamp(ControllerPitch, MinimumAimPitch, MaximumAimPitch);
+	if (IsLocallyControlled())
+	{
+		const float ControllerPitch = bUsingRealPlanetFrame ? PlanetCameraPitch
+			: (Controller != nullptr ? FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch) : 0.0f);
+		AimPitch = FMath::Clamp(ControllerPitch, MinimumAimPitch, MaximumAimPitch);
+		if (HasAuthority())
+		{
+			ReplicatedAimPitch = AimPitch;
+		}
+		else if (GetWorld() != nullptr && FMath::Abs(AimPitch - LastSentAimPitch) >= 0.75f
+			&& GetWorld()->GetTimeSeconds() - LastAimPitchSendSeconds >= 0.05)
+		{
+			ServerUpdateAimPitch(AimPitch);
+			LastSentAimPitch = AimPitch;
+			LastAimPitchSendSeconds = GetWorld()->GetTimeSeconds();
+		}
+	}
+	else
+	{
+		AimPitch = FMath::FInterpTo(AimPitch, ReplicatedAimPitch, DeltaSeconds, 20.0f);
+	}
 	UpdateAimCamera(DeltaSeconds);
 }
 
@@ -641,7 +717,7 @@ void AJTSCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bInteractKeyHeld = false;
 	CancelBoardingHold();
-	CancelEquipmentSlotHold();
+	CancelItemDiscardHold();
 	UnbindGameState();
 	UnbindPlayerState();
 	UnregisterInputMappingContext();
@@ -699,21 +775,23 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAimReleased);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
 	EnhancedInputComponent->BindAction(CameraZoomAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleCameraZoom);
-	if (EquipmentSlotActions.Num() == 4)
+	if (QuickbarSlotActions.Num() == UJTSInventoryComponent::MaximumQuickbarSlots)
 	{
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotOneStarted);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotTwoStarted);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotThreeStarted);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipmentSlotFourStarted);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotOneReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotTwoReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotThreeReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Completed, this, &AJTSCharacter::HandleEquipmentSlotFourReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[0], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotOneReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[1], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotTwoReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[2], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotThreeReleased);
-		EnhancedInputComponent->BindAction(EquipmentSlotActions[3], ETriggerEvent::Canceled, this, &AJTSCharacter::HandleEquipmentSlotFourReleased);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[0], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotOneStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[1], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotTwoStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[2], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotThreeStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[3], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotFourStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[4], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotFiveStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[5], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotSixStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[6], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotSevenStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[7], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotEightStarted);
+		EnhancedInputComponent->BindAction(QuickbarSlotActions[8], ETriggerEvent::Started, this, &AJTSCharacter::HandleQuickbarSlotNineStarted);
 	}
+	EnhancedInputComponent->BindAction(PreviousQuickbarPageAction, ETriggerEvent::Started, this, &AJTSCharacter::HandlePreviousQuickbarPageStarted);
+	EnhancedInputComponent->BindAction(NextQuickbarPageAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleNextQuickbarPageStarted);
+	EnhancedInputComponent->BindAction(DiscardItemAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleDiscardItemStarted);
+	EnhancedInputComponent->BindAction(DiscardItemAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleDiscardItemReleased);
+	EnhancedInputComponent->BindAction(DiscardItemAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleDiscardItemReleased);
 
 	BoundInputComponent = PlayerInputComponent;
 	RegisterInputMappingContext();
@@ -739,10 +817,13 @@ void AJTSCharacter::InitializeInput()
 	AimAction = NewObject<UInputAction>(this, TEXT("AimAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
 	CameraZoomAction = NewObject<UInputAction>(this, TEXT("CameraZoomAction"), RF_Transient);
-	EquipmentSlotActions.Reset();
-	for (int32 SlotIndex = 0; SlotIndex < 4; ++SlotIndex)
+	PreviousQuickbarPageAction = NewObject<UInputAction>(this, TEXT("PreviousQuickbarPageAction"), RF_Transient);
+	NextQuickbarPageAction = NewObject<UInputAction>(this, TEXT("NextQuickbarPageAction"), RF_Transient);
+	DiscardItemAction = NewObject<UInputAction>(this, TEXT("DiscardItemAction"), RF_Transient);
+	QuickbarSlotActions.Reset();
+	for (int32 SlotIndex = 0; SlotIndex < UJTSInventoryComponent::MaximumQuickbarSlots; ++SlotIndex)
 	{
-		EquipmentSlotActions.Add(NewObject<UInputAction>(this, *FString::Printf(TEXT("EquipmentSlot%dAction"), SlotIndex + 1), RF_Transient));
+		QuickbarSlotActions.Add(NewObject<UInputAction>(this, *FString::Printf(TEXT("QuickbarSlot%dAction"), SlotIndex + 1), RF_Transient));
 	}
 
 	MoveForwardAction->ValueType = EInputActionValueType::Axis1D;
@@ -757,9 +838,12 @@ void AJTSCharacter::InitializeInput()
 	AimAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
 	CameraZoomAction->ValueType = EInputActionValueType::Axis1D;
-	for (UInputAction* const EquipmentSlotAction : EquipmentSlotActions)
+	PreviousQuickbarPageAction->ValueType = EInputActionValueType::Boolean;
+	NextQuickbarPageAction->ValueType = EInputActionValueType::Boolean;
+	DiscardItemAction->ValueType = EInputActionValueType::Boolean;
+	for (UInputAction* const QuickbarSlotAction : QuickbarSlotActions)
 	{
-		EquipmentSlotAction->ValueType = EInputActionValueType::Boolean;
+		QuickbarSlotAction->ValueType = EInputActionValueType::Boolean;
 	}
 
 	InputMappingContext->MapKey(MoveForwardAction, EKeys::W);
@@ -774,12 +858,18 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(AimAction, EKeys::RightMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
 	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
-	if (EquipmentSlotActions.Num() == 4)
+	InputMappingContext->MapKey(PreviousQuickbarPageAction, EKeys::Up);
+	InputMappingContext->MapKey(NextQuickbarPageAction, EKeys::Down);
+	InputMappingContext->MapKey(DiscardItemAction, EKeys::G);
+	if (QuickbarSlotActions.Num() == UJTSInventoryComponent::MaximumQuickbarSlots)
 	{
-		InputMappingContext->MapKey(EquipmentSlotActions[0], EKeys::One);
-		InputMappingContext->MapKey(EquipmentSlotActions[1], EKeys::Two);
-		InputMappingContext->MapKey(EquipmentSlotActions[2], EKeys::Three);
-		InputMappingContext->MapKey(EquipmentSlotActions[3], EKeys::Four);
+		const TArray<FKey, TInlineAllocator<UJTSInventoryComponent::MaximumQuickbarSlots>> QuickbarKeys = {
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five,
+			EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
+		for (int32 SlotIndex = 0; SlotIndex < QuickbarKeys.Num(); ++SlotIndex)
+		{
+			InputMappingContext->MapKey(QuickbarSlotActions[SlotIndex], QuickbarKeys[SlotIndex]);
+		}
 	}
 
 	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
@@ -880,6 +970,11 @@ void AJTSCharacter::BindPlayerState()
 	if (BoundPlayerState.Get() == NewPlayerState)
 	{
 		ApplyAvatarColor();
+		ApplyProgressionMovementSpeed();
+		if (IsValid(InventoryComponent))
+		{
+			InventoryComponent->RefreshCapacityFromProgression();
+		}
 		return;
 	}
 
@@ -894,6 +989,11 @@ void AJTSCharacter::BindPlayerState()
 		NewPlayerState->OnNetworkStateChanged.AddDynamic(this, &AJTSCharacter::HandlePlayerStateNetworkChanged);
 	}
 	ApplyAvatarColor();
+	ApplyProgressionMovementSpeed();
+	if (IsValid(InventoryComponent))
+	{
+		InventoryComponent->RefreshCapacityFromProgression();
+	}
 }
 
 void AJTSCharacter::UnbindPlayerState()
@@ -1016,15 +1116,14 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 
 void AJTSCharacter::StartSprint(const FInputActionValue& Value)
 {
-	if (!IsBoarded())
-	{
-		GetCharacterMovement()->MaxWalkSpeed = SprintingSpeed;
-	}
+	bSprintInputActive = !IsBoarded();
+	ApplyProgressionMovementSpeed();
 }
 
 void AJTSCharacter::StopSprint(const FInputActionValue& Value)
 {
-	GetCharacterMovement()->MaxWalkSpeed = WalkingSpeed;
+	bSprintInputActive = false;
+	ApplyProgressionMovementSpeed();
 }
 
 void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
@@ -1163,8 +1262,16 @@ void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleMeleeAttackStarted(EJTSAttackType AttackType)
 {
-	if (AttackType != EJTSAttackType::Punch || !IsValid(MeleeComponent))
+	if (!IsValid(MeleeComponent))
 	{
+		return;
+	}
+	if (AttackType != EJTSAttackType::Punch)
+	{
+		if (IsValid(WeaponVisualComponent))
+		{
+			WeaponVisualComponent->PlayMeleeSwingPresentation();
+		}
 		return;
 	}
 
@@ -1221,118 +1328,200 @@ void AJTSCharacter::HandleCameraZoom(const FInputActionValue& Value)
 	AdjustThirdPersonCameraDistance(Value.Get<float>());
 }
 
-void AJTSCharacter::HandleEquipmentSlotOneStarted(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotOneStarted(const FInputActionValue& Value)
 {
-	BeginEquipmentSlotHold(0);
+	SelectQuickbarSlotByPage(0);
 }
 
-void AJTSCharacter::HandleEquipmentSlotTwoStarted(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotTwoStarted(const FInputActionValue& Value)
 {
-	BeginEquipmentSlotHold(1);
+	SelectQuickbarSlotByPage(1);
 }
 
-void AJTSCharacter::HandleEquipmentSlotThreeStarted(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotThreeStarted(const FInputActionValue& Value)
 {
-	BeginEquipmentSlotHold(2);
+	SelectQuickbarSlotByPage(2);
 }
 
-void AJTSCharacter::HandleEquipmentSlotFourStarted(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotFourStarted(const FInputActionValue& Value)
 {
-	BeginEquipmentSlotHold(3);
+	SelectQuickbarSlotByPage(3);
 }
 
-void AJTSCharacter::HandleEquipmentSlotOneReleased(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotFiveStarted(const FInputActionValue& Value)
 {
-	EndEquipmentSlotHold(0);
+	SelectQuickbarSlotByPage(4);
 }
 
-void AJTSCharacter::HandleEquipmentSlotTwoReleased(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotSixStarted(const FInputActionValue& Value)
 {
-	EndEquipmentSlotHold(1);
+	SelectQuickbarSlotByPage(5);
 }
 
-void AJTSCharacter::HandleEquipmentSlotThreeReleased(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotSevenStarted(const FInputActionValue& Value)
 {
-	EndEquipmentSlotHold(2);
+	SelectQuickbarSlotByPage(6);
 }
 
-void AJTSCharacter::HandleEquipmentSlotFourReleased(const FInputActionValue& Value)
+void AJTSCharacter::HandleQuickbarSlotEightStarted(const FInputActionValue& Value)
 {
-	EndEquipmentSlotHold(3);
+	SelectQuickbarSlotByPage(7);
 }
 
-void AJTSCharacter::BeginEquipmentSlotHold(int32 SlotIndex)
+void AJTSCharacter::HandleQuickbarSlotNineStarted(const FInputActionValue& Value)
+{
+	SelectQuickbarSlotByPage(8);
+}
+
+void AJTSCharacter::HandlePreviousQuickbarPageStarted(const FInputActionValue& Value)
+{
+	if (CanUseNormalGameplayInput() && IsValid(InventoryComponent))
+	{
+		InventoryComponent->SelectQuickbarPage(InventoryComponent->GetQuickbarPageIndex() - 1);
+	}
+}
+
+void AJTSCharacter::HandleNextQuickbarPageStarted(const FInputActionValue& Value)
+{
+	if (CanUseNormalGameplayInput() && IsValid(InventoryComponent))
+	{
+		InventoryComponent->SelectQuickbarPage(InventoryComponent->GetQuickbarPageIndex() + 1);
+	}
+}
+
+void AJTSCharacter::HandleDiscardItemStarted(const FInputActionValue& Value)
+{
+	BeginItemDiscardHold();
+}
+
+void AJTSCharacter::HandleDiscardItemReleased(const FInputActionValue& Value)
+{
+	EndItemDiscardHold();
+}
+
+void AJTSCharacter::SelectQuickbarSlotByPage(int32 SlotIndexInPage)
 {
 	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent)
-		|| SlotIndex < 0 || SlotIndex >= 4)
+		|| SlotIndexInPage < 0 || SlotIndexInPage >= UJTSInventoryComponent::MaximumQuickbarSlots)
 	{
 		return;
 	}
 
-	CancelEquipmentSlotHold();
+	const int32 SlotIndex = InventoryComponent->GetQuickbarPageStart() + SlotIndexInPage;
+	if (SlotIndex < InventoryComponent->GetInventoryCapacity())
+	{
+		InventoryComponent->SelectQuickbarSlot(SlotIndex);
+	}
+}
+
+void AJTSCharacter::BeginItemDiscardHold()
+{
+	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent))
+	{
+		return;
+	}
+
+	CancelItemDiscardHold();
 	UWorld* const World = GetWorld();
 	if (World == nullptr)
 	{
 		return;
 	}
 
-	HeldEquipmentSlotIndex = SlotIndex;
-	bEquipmentHoldCompleted = false;
-	EquipmentHoldStartTime = static_cast<double>(World->GetTimeSeconds());
-	if (InventoryComponent->GetItemAtSlot(SlotIndex).IsEmpty())
+	HeldItemDiscardSlotIndex = InventoryComponent->GetSelectedQuickbarSlot();
+	if (InventoryComponent->GetItemAtSlot(HeldItemDiscardSlotIndex).IsEmpty())
 	{
+		HeldItemDiscardSlotIndex = INDEX_NONE;
 		return;
 	}
+
+	bItemDiscardHoldCompleted = false;
+	ItemDiscardHoldStartTime = static_cast<double>(World->GetTimeSeconds());
 	World->GetTimerManager().SetTimer(
-		EquipmentHoldTimerHandle,
+		ItemDiscardHoldTimerHandle,
 		this,
-		&AJTSCharacter::CompleteEquipmentSlotHold,
-		FMath::Max(0.1f, EquipmentHoldToDropDuration),
+		&AJTSCharacter::CompleteItemDiscardHold,
+		FMath::Max(0.1f, ItemDestroyHoldDuration),
 		false);
 }
 
-void AJTSCharacter::EndEquipmentSlotHold(int32 SlotIndex)
+void AJTSCharacter::EndItemDiscardHold()
 {
-	if (HeldEquipmentSlotIndex != SlotIndex)
+	if (HeldItemDiscardSlotIndex == INDEX_NONE)
 	{
 		return;
 	}
 
-	const bool bShouldSelectSlot = !bEquipmentHoldCompleted;
-	CancelEquipmentSlotHold();
-	if (bShouldSelectSlot && CanUseNormalGameplayInput() && IsValid(InventoryComponent))
+	const int32 SlotIndex = HeldItemDiscardSlotIndex;
+	const bool bShouldDrop = !bItemDiscardHoldCompleted;
+	CancelItemDiscardHold();
+	if (!bShouldDrop || !CanUseNormalGameplayInput() || !IsValid(InventoryComponent))
 	{
-		InventoryComponent->SelectQuickbarSlot(SlotIndex);
-	}
-}
-
-void AJTSCharacter::CancelEquipmentSlotHold()
-{
-	if (UWorld* const World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(EquipmentHoldTimerHandle);
-	}
-
-	HeldEquipmentSlotIndex = INDEX_NONE;
-	EquipmentHoldStartTime = 0.0;
-	bEquipmentHoldCompleted = false;
-}
-
-void AJTSCharacter::CompleteEquipmentSlotHold()
-{
-	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent) || HeldEquipmentSlotIndex == INDEX_NONE)
-	{
-		CancelEquipmentSlotHold();
 		return;
 	}
 
-	const int32 SlotIndex = HeldEquipmentSlotIndex;
-	bEquipmentHoldCompleted = InventoryComponent->DropItemAtSlot(SlotIndex);
-	HeldEquipmentSlotIndex = INDEX_NONE;
-	EquipmentHoldStartTime = 0.0;
+	const FJTSItemInstance Item = InventoryComponent->GetItemAtSlot(SlotIndex);
+	if (Item.IsEmpty())
+	{
+		return;
+	}
+	if (Item.StackCount > 1)
+	{
+		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+		{
+			PlayerController->OpenInventoryQuantityDialog(SlotIndex, false);
+		}
+		return;
+	}
+	if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+	{
+		PlayerController->ServerRequestInventoryQuantityAction(SlotIndex, 1, false);
+	}
+}
+
+void AJTSCharacter::CancelItemDiscardHold()
+{
 	if (UWorld* const World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(EquipmentHoldTimerHandle);
+		World->GetTimerManager().ClearTimer(ItemDiscardHoldTimerHandle);
+	}
+
+	HeldItemDiscardSlotIndex = INDEX_NONE;
+	ItemDiscardHoldStartTime = 0.0;
+	bItemDiscardHoldCompleted = false;
+}
+
+void AJTSCharacter::CompleteItemDiscardHold()
+{
+	if (!CanUseNormalGameplayInput() || !IsValid(InventoryComponent) || HeldItemDiscardSlotIndex == INDEX_NONE)
+	{
+		CancelItemDiscardHold();
+		return;
+	}
+
+	const int32 SlotIndex = HeldItemDiscardSlotIndex;
+	const FJTSItemInstance Item = InventoryComponent->GetItemAtSlot(SlotIndex);
+	bItemDiscardHoldCompleted = true;
+	if (Item.StackCount > 1)
+	{
+		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+		{
+			PlayerController->OpenInventoryQuantityDialog(SlotIndex, true);
+		}
+	}
+	else if (!Item.IsEmpty())
+	{
+		if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+		{
+			PlayerController->ServerRequestInventoryQuantityAction(SlotIndex, 1, true);
+		}
+	}
+
+	HeldItemDiscardSlotIndex = INDEX_NONE;
+	ItemDiscardHoldStartTime = 0.0;
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(ItemDiscardHoldTimerHandle);
 	}
 }
 
@@ -1400,8 +1589,14 @@ void AJTSCharacter::UpdatePlanetGameplayFrame(float DeltaSeconds)
 
 	// Keep the camera frame current before evaluating FaceCamera body yaw. Both frames still use the
 	// planet-local up vector, so this does not introduce World-Z orientation into SpaceWorld.
-	UpdatePlanetCameraFrame(DesiredUp, DeltaSeconds);
-	UpdatePlanetBodyOrientation(DesiredUp, DeltaSeconds);
+	if (IsLocallyControlled())
+	{
+		UpdatePlanetCameraFrame(DesiredUp, DeltaSeconds);
+	}
+	if (HasAuthority() || IsLocallyControlled())
+	{
+		UpdatePlanetBodyOrientation(DesiredUp, DeltaSeconds);
+	}
 
 	if (bDebugPlanetSurface && IsValid(GameplayPlanet))
 	{
@@ -1438,12 +1633,15 @@ void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float 
 		LastPlanetUp = TargetUp;
 	}
 
-	if (PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
+	if ((IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming())
+		|| PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
 	{
 		// Do not enable bUseControllerRotationYaw here: controller rotation also contains the
 		// gravity-relative pitch/roll used by the absolute camera. Only the local tangent yaw belongs
 		// to the character body.
-		PlanetBodyForward = GetStablePlanetTangent(LastPlanetUp, PlanetCameraTangentForward);
+		const FVector CameraDirection = !IsLocallyControlled() && Controller != nullptr
+			? Controller->GetControlRotation().Vector() : PlanetCameraTangentForward;
+		PlanetBodyForward = GetStablePlanetTangent(LastPlanetUp, CameraDirection);
 	}
 	else if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
@@ -1499,7 +1697,7 @@ void AJTSCharacter::UpdatePlanetCameraFrame(const FVector& CurrentUp, float Delt
 	CameraBoom->SetUsingAbsoluteRotation(true);
 	CameraBoom->SetWorldRotation(CameraRotation);
 
-	if (Controller != nullptr)
+	if (Controller != nullptr && IsLocallyControlled())
 	{
 		// Control rotation is output for camera rays and aim only; it never drives capsule/body orientation here.
 		Controller->SetControlRotation(CameraRotation.Rotator());
@@ -1586,7 +1784,7 @@ void AJTSCharacter::ApplyCameraView()
 	}
 	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
-		MovementComponent->bOrientRotationToMovement = true;
+		MovementComponent->bOrientRotationToMovement = !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->IsAiming();
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
 	if (GetMesh() != nullptr)
@@ -1820,7 +2018,7 @@ void AJTSCharacter::ApplyBoardedPresentation()
 	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
 		if (bNowBoarded) { MovementComponent->StopMovementImmediately(); MovementComponent->DisableMovement(); }
-		else { MovementComponent->SetMovementMode(MOVE_Falling); MovementComponent->MaxWalkSpeed = WalkingSpeed; }
+		else { MovementComponent->SetMovementMode(MOVE_Falling); ApplyProgressionMovementSpeed(); }
 	}
 }
 
@@ -1830,6 +2028,14 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 		&& RangedWeaponComponent->IsAiming()
 		&& RangedWeaponComponent->HasActiveRangedWeapon();
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
+	if (!IsRealPlanetGameplayActive())
+	{
+		bUseControllerRotationYaw = bWantsAim;
+		if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+		{
+			Movement->bOrientRotationToMovement = !bWantsAim;
+		}
+	}
 	AimCameraAlpha = FMath::FInterpTo(AimCameraAlpha, TargetAlpha, DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
 
 	if (CameraBoom != nullptr)
@@ -1905,6 +2111,11 @@ void AJTSCharacter::OnRep_PlayerState()
 void AJTSCharacter::HandlePlayerStateNetworkChanged()
 {
 	ApplyAvatarColor();
+	ApplyProgressionMovementSpeed();
+	if (IsValid(InventoryComponent))
+	{
+		InventoryComponent->RefreshCapacityFromProgression();
+	}
 }
 
 void AJTSCharacter::ApplyAvatarColor()
@@ -1922,6 +2133,7 @@ void AJTSCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSCharacter, BoardedSpacecraft);
 	DOREPLIFETIME(AJTSCharacter, GameplayPlanet);
+	DOREPLIFETIME_CONDITION(AJTSCharacter, ReplicatedAimPitch, COND_SkipOwner);
 }
 
 bool AJTSCharacter::FindGroundedSpacecraftDisembarkLocation(

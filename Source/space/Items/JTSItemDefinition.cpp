@@ -10,22 +10,16 @@ bool UJTSItemDefinition::HasCapability(EJTSItemCapability Capability) const
 
 bool UJTSItemDefinition::IsStackable() const
 {
-	// Raw expedition resources are deliberately physical one-unit pickups in the
-	// current progression loop. This also protects existing data assets created
-	// before the two-slot starting inventory rule was introduced.
-	return PrimaryCategory != EJTSItemCategory::Resources
-		&& HasCapability(EJTSItemCapability::StackableResource)
-		&& MaxStackSize > 1;
+	// A stackable type can still have an effective limit of one at rank zero. The inventory's
+	// PlayerState-driven stack rule owns that limit, so a later ability upgrade immediately applies
+	// to existing resource definitions without requiring asset edits.
+	return PrimaryCategory == EJTSItemCategory::Resources
+		|| HasCapability(EJTSItemCapability::StackableResource);
 }
 
 bool UJTSItemDefinition::IsHoldable() const
 {
 	return HasCapability(EJTSItemCapability::Holdable);
-}
-
-bool UJTSItemDefinition::IsWearable() const
-{
-	return HasCapability(EJTSItemCapability::Wearable) && WearableSlot != EJTSWearableSlot::None;
 }
 
 bool UJTSItemDefinition::IsRangedWeapon() const

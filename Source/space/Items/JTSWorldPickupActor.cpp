@@ -14,7 +14,6 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSInventoryComponent.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSResourceType.h"
@@ -99,31 +98,6 @@ namespace
 
 		case EJTSWorldPickupItemType::MoonAntCorpse:
 			OutResourceType = EJTSResourceType::MoonAntCorpse;
-			return true;
-
-		default:
-			return false;
-		}
-	}
-
-	bool TryGetEquipmentType(EJTSWorldPickupItemType ItemType, EJTSEquipmentType& OutEquipmentType)
-	{
-		switch (ItemType)
-		{
-		case EJTSWorldPickupItemType::Pickaxe:
-			OutEquipmentType = EJTSEquipmentType::Pickaxe;
-			return true;
-
-		case EJTSWorldPickupItemType::Backpack:
-			OutEquipmentType = EJTSEquipmentType::Backpack;
-			return true;
-
-		case EJTSWorldPickupItemType::Knife:
-			OutEquipmentType = EJTSEquipmentType::Knife;
-			return true;
-
-		case EJTSWorldPickupItemType::Axe:
-			OutEquipmentType = EJTSEquipmentType::Axe;
 			return true;
 
 		default:
@@ -558,8 +532,10 @@ AJTSWorldPickupActor::AJTSWorldPickupActor()
 	PickupMesh->SetGenerateOverlapEvents(false);
 	PickupMesh->SetSimulatePhysics(false);
 	PickupMesh->SetCanEverAffectNavigation(false);
-	PickupMesh->SetCastShadow(false);
-	PickupMesh->bCastDynamicShadow = false;
+	PickupMesh->SetCastShadow(true);
+	PickupMesh->bCastDynamicShadow = true;
+	PickupMesh->SetHiddenInGame(false);
+	PickupMesh->SetVisibility(true, true);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
@@ -1133,22 +1109,6 @@ bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailure
 		return false;
 	}
 
-	if (Definition->IsWearable())
-	{
-		UJTSPlayerEquipmentComponent* const Wearables = InteractingPawn->FindComponentByClass<UJTSPlayerEquipmentComponent>();
-		if (!IsValid(Wearables))
-		{
-			OutFailureReason = TEXT("WearablesUnavailable");
-			return false;
-		}
-		if (!Wearables->TryEquipItem(ItemInstance))
-		{
-			OutFailureReason = TEXT("WearableSlotOccupied");
-			return false;
-		}
-		return true;
-	}
-
 	UJTSInventoryComponent* const Inventory = InteractingPawn->FindComponentByClass<UJTSInventoryComponent>();
 	if (!IsValid(Inventory))
 	{
@@ -1192,25 +1152,29 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 	else if (!IsResourceItem())
 	{
 		DesiredMesh = EquipmentMesh.Get();
-		if (ItemType == EJTSWorldPickupItemType::Backpack)
+		if (ItemType == EJTSWorldPickupItemType::Pickaxe)
 		{
-			DesiredScale = FVector(0.33f, 0.24f, 0.38f);
+			DesiredScale = FVector(0.92f, 0.13f, 0.13f);
 		}
 		else if (ItemType == EJTSWorldPickupItemType::Axe)
 		{
-			DesiredScale = FVector(0.44f, 0.18f, 0.28f);
+			DesiredScale = FVector(0.96f, 0.28f, 0.20f);
 		}
 		else if (ItemType == EJTSWorldPickupItemType::MachineGun)
 		{
-			DesiredScale = FVector(0.62f, 0.18f, 0.14f);
+			DesiredScale = FVector(1.02f, 0.24f, 0.18f);
 		}
 		else if (ItemType == EJTSWorldPickupItemType::Pistol)
 		{
-			DesiredScale = FVector(0.32f, 0.12f, 0.13f);
+			DesiredScale = FVector(0.72f, 0.22f, 0.18f);
+		}
+		else if (ItemType == EJTSWorldPickupItemType::Knife)
+		{
+			DesiredScale = FVector(0.78f, 0.14f, 0.09f);
 		}
 		else
 		{
-			DesiredScale = FVector(0.42f, 0.12f, 0.10f);
+			DesiredScale = FVector(0.62f, 0.16f, 0.12f);
 		}
 	}
 
@@ -1219,7 +1183,17 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		PickupMesh->SetStaticMesh(DesiredMesh);
 	}
 	PickupMesh->SetRelativeScale3D(DesiredScale);
+	PickupMesh->SetHiddenInGame(false);
+	PickupMesh->SetVisibility(true, true);
 	PickupMesh->UpdateBounds();
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JTS pickup visual: Item=%s Mesh=%s Scale=%s Visible=%d"),
+		*ItemTypeToString(ItemType),
+		*GetNameSafe(DesiredMesh),
+		*DesiredScale.ToCompactString(),
+		PickupMesh->IsVisible() && !PickupMesh->bHiddenInGame);
 }
 
 void AJTSWorldPickupActor::ApplySurfacePresentationMaterial()
@@ -1249,12 +1223,15 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 
 	ConfigureAppearance();
 	ApplySurfacePresentationMaterial();
+	PickupMesh->SetHiddenInGame(false);
+	PickupMesh->SetVisibility(true, true);
 	if (!IsValid(PickupMaterial))
 	{
 		PickupMaterial = PickupMesh->CreateAndSetMaterialInstanceDynamic(0);
 	}
 	if (!IsValid(PickupMaterial))
 	{
+		PickupMesh->MarkRenderStateDirty();
 		return;
 	}
 	if (!ItemInstance.IsEmpty())
@@ -1275,10 +1252,6 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 
 	case EJTSWorldPickupItemType::Pickaxe:
 		ItemColor = FLinearColor(0.90f, 0.68f, 0.18f, 1.0f);
-		break;
-
-	case EJTSWorldPickupItemType::Backpack:
-		ItemColor = FLinearColor(0.24f, 0.76f, 0.42f, 1.0f);
 		break;
 
 	case EJTSWorldPickupItemType::Knife:
@@ -1305,6 +1278,7 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 	PickupMaterial->SetVectorParameterValue(TEXT("Color"), ItemColor);
 	PickupMaterial->SetVectorParameterValue(TEXT("BaseColor"), ItemColor);
 	PickupMaterial->SetVectorParameterValue(TEXT("Tint"), ItemColor);
+	PickupMesh->MarkRenderStateDirty();
 }
 
 void AJTSWorldPickupActor::ShowFailureFeedback(const FString& FailureReason)
@@ -1380,7 +1354,7 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 		return TEXT("PICKAXE");
 
 	case EJTSWorldPickupItemType::Backpack:
-		return TEXT("BACKPACK");
+		return TEXT("RETIRED ITEM");
 
 	case EJTSWorldPickupItemType::Knife:
 		return TEXT("KNIFE");

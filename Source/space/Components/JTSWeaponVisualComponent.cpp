@@ -1,22 +1,36 @@
 #include "space/Components/JTSWeaponVisualComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Engine/StaticMesh.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "Math/RotationMatrix.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Player/JTSCharacter.h"
 
 UJTSWeaponVisualComponent::UJTSWeaponVisualComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
+	PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
+	SetAutoActivate(true);
 }
 
 void UJTSWeaponVisualComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	Activate(true);
 	EnsureMeshComponents();
 
 	if (UJTSInventoryComponent* const Inventory = GetOwner() != nullptr
@@ -29,25 +43,147 @@ void UJTSWeaponVisualComponent::BeginPlay()
 	RefreshWeaponVisual();
 }
 
+void UJTSWeaponVisualComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AttachmentValidationTimerHandle);
+		World->GetTimerManager().ClearTimer(MuzzleFlashTimerHandle);
+	}
+	bMeleeSwingPresentationActive = false;
+	Super::EndPlay(EndPlayReason);
+}
+
+void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickType,
+	FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	ShotKickAlpha = FMath::FInterpTo(ShotKickAlpha, 0.0f, DeltaTime, FMath::Max(1.0f, ShotKickRecoverySpeed));
+	if (bMeleeSwingPresentationActive)
+	{
+		MeleeSwingElapsed += DeltaTime;
+		if (MeleeSwingElapsed >= MeleeSwingPresentationSeconds)
+		{
+			bMeleeSwingPresentationActive = false;
+		}
+	}
+	if (ShotKickAlpha < 0.01f)
+	{
+		ShotKickAlpha = 0.0f;
+	}
+	ApplyPresentationTransform();
+	if (!bRangedVisible && !bMeleeSwingPresentationActive && ShotKickAlpha == 0.0f)
+	{
+		SetComponentTickEnabled(false);
+	}
+}
+
 void UJTSWeaponVisualComponent::EnsureMeshComponents()
 {
-	if (GetOwner() == nullptr)
+	if (GetOwner() == nullptr || bMeshComponentsInitialized)
 	{
 		return;
 	}
 
 	CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	CylinderMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (!IsValid(CubeMesh) || !IsValid(CylinderMesh))
+	if (!IsValid(CubeMesh))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("JTS weapon visual: Cube mesh failed to load for %s."), *GetNameSafe(GetOwner()));
 		return;
 	}
+	BasicShapeMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 
 	USkeletalMeshComponent* const CharacterMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+	if (IsValid(CharacterMesh)) AddTickPrerequisiteComponent(CharacterMesh);
 	USceneComponent* const AttachParent = IsValid(CharacterMesh) ? CharacterMesh : GetOwner()->GetRootComponent();
 	if (!IsValid(AttachParent))
 	{
 		return;
+	}
+
+	// The imported skeleton applies a large animated scale at the hand.  A zero-offset scene
+	// component can still inherit the hand's position and rotation while ignoring that scale.
+	// The visible pieces attach to this anchor, so their authored centimetre offsets never get
+	// multiplied by the skeletal socket's scale during an animation update.
+	HandAttachmentAnchor = NewObject<USceneComponent>(GetOwner(), TEXT("WeaponHandAttachmentAnchor"));
+	if (!IsValid(HandAttachmentAnchor))
+	{
+		return;
+	}
+	GetOwner()->AddInstanceComponent(HandAttachmentAnchor);
+	HandAttachmentAnchor->SetMobility(EComponentMobility::Movable);
+	HandAttachmentAnchor->AttachToComponent(AttachParent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	HandAttachmentAnchor->SetAbsolute(false, false, true);
+	if (UWorld* const World = GetOwner()->GetWorld())
+	{
+		HandAttachmentAnchor->RegisterComponentWithWorld(World);
+	}
+
+	auto CreateScene = [this](const FName Name, USceneComponent* Parent) -> USceneComponent*
+	{
+		if (!IsValid(Parent))
+		{
+			return nullptr;
+		}
+
+		USceneComponent* Component = NewObject<USceneComponent>(GetOwner(), Name);
+		if (!IsValid(Component))
+		{
+			return nullptr;
+		}
+
+		GetOwner()->AddInstanceComponent(Component);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->AttachToComponent(Parent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		// Each root follows the hand's pose but keeps prototype measurements in centimetres.
+		Component->SetAbsolute(false, false, true);
+		if (UWorld* const World = GetOwner()->GetWorld())
+		{
+			Component->RegisterComponentWithWorld(World);
+		}
+		return Component;
+	};
+
+	// Keep presentation offsets, the item-local coordinate system, and the hand socket separate.
+	// This lets the model's authored grip point, not its arbitrary mesh origin, land at the hand.
+	WeaponPresentationRoot = CreateScene(TEXT("WeaponPresentationRoot"), HandAttachmentAnchor);
+	WeaponModelRoot = CreateScene(TEXT("WeaponModelRoot"), WeaponPresentationRoot);
+	WeaponMuzzle = CreateScene(TEXT("WeaponMuzzle"), WeaponModelRoot);
+	MuzzleFlash = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("WeaponMuzzleFlash"));
+	if (IsValid(MuzzleFlash) && IsValid(WeaponMuzzle))
+	{
+		GetOwner()->AddInstanceComponent(MuzzleFlash);
+		MuzzleFlash->SetMobility(EComponentMobility::Movable);
+		MuzzleFlash->AttachToComponent(WeaponMuzzle, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		MuzzleFlash->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MuzzleFlash->SetGenerateOverlapEvents(false);
+		MuzzleFlash->SetCanEverAffectNavigation(false);
+		MuzzleFlash->SetCastShadow(false);
+		MuzzleFlash->SetAbsolute(false, false, true);
+		MuzzleFlash->SetRelativeLocation(FVector(4.0f, 0.0f, 0.0f));
+		MuzzleFlash->SetWorldScale3D(FVector(0.15f, 0.07f, 0.07f));
+		MuzzleFlash->SetVisibility(false);
+		if (UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")))
+		{
+			MuzzleFlash->SetStaticMesh(Sphere);
+		}
+		if (UWorld* World = GetWorld())
+		{
+			MuzzleFlash->RegisterComponentWithWorld(World);
+		}
+	}
+	MuzzleLight = NewObject<UPointLightComponent>(GetOwner(), TEXT("WeaponMuzzleLight"));
+	if (IsValid(MuzzleLight) && IsValid(WeaponMuzzle))
+	{
+		GetOwner()->AddInstanceComponent(MuzzleLight);
+		MuzzleLight->AttachToComponent(WeaponMuzzle, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		MuzzleLight->SetIntensity(3500.0f);
+		MuzzleLight->SetAttenuationRadius(220.0f);
+		MuzzleLight->SetVisibility(false);
+		if (UWorld* World = GetWorld())
+		{
+			MuzzleLight->RegisterComponentWithWorld(World);
+		}
 	}
 
 	auto CreateMesh = [this, AttachParent](const FName Name) -> UStaticMeshComponent*
@@ -57,50 +193,192 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 		{
 			return nullptr;
 		}
+		GetOwner()->AddInstanceComponent(Component);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->SetStaticMesh(CubeMesh);
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Component->SetGenerateOverlapEvents(false);
 		Component->SetCanEverAffectNavigation(false);
-		Component->SetCastShadow(false);
-		Component->AttachToComponent(AttachParent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		Component->RegisterComponent();
+		Component->SetCastShadow(true);
+		Component->SetHiddenInGame(false);
+		Component->SetVisibility(false, true);
+		if (IsValid(BasicShapeMaterial))
+		{
+			Component->SetMaterial(0, BasicShapeMaterial);
+		}
+		USceneComponent* const PieceParent = IsValid(WeaponModelRoot)
+			? WeaponModelRoot.Get()
+			: (IsValid(HandAttachmentAnchor) ? HandAttachmentAnchor.Get() : AttachParent);
+		Component->AttachToComponent(PieceParent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		// Imported character skeletons can carry a non-unit bone scale. The primitive is sized in
+		// world centimetres, so it must never inherit that scale from the mesh or a hand socket.
+		Component->SetAbsolute(false, false, true);
+		if (UWorld* const World = GetOwner()->GetWorld())
+		{
+			Component->RegisterComponentWithWorld(World);
+		}
 		return Component;
 	};
 
+	WeaponGrip = CreateMesh(TEXT("WeaponVisualGrip"));
 	WeaponBody = CreateMesh(TEXT("WeaponVisualBody"));
 	WeaponBarrel = CreateMesh(TEXT("WeaponVisualBarrel"));
 	WeaponSight = CreateMesh(TEXT("WeaponVisualSight"));
+	WeaponGripMaterial = IsValid(WeaponGrip) ? WeaponGrip->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+	WeaponBodyMaterial = IsValid(WeaponBody) ? WeaponBody->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+	WeaponBarrelMaterial = IsValid(WeaponBarrel) ? WeaponBarrel->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+	WeaponSightMaterial = IsValid(WeaponSight) ? WeaponSight->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
 	ConfigureAttachment();
+	bMeshComponentsInitialized = IsValid(HandAttachmentAnchor)
+		&& IsValid(WeaponPresentationRoot)
+		&& IsValid(WeaponModelRoot)
+		&& IsValid(WeaponMuzzle)
+		&& IsValid(MuzzleFlash)
+		&& IsValid(MuzzleLight)
+		&& IsValid(WeaponGrip)
+		&& IsValid(WeaponBody)
+		&& IsValid(WeaponBarrel)
+		&& IsValid(WeaponSight);
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JTS weapon visual: created for %s Grip=%s Body=%s Barrel=%s Sight=%s"),
+		*GetNameSafe(GetOwner()),
+		*GetNameSafe(WeaponGrip),
+		*GetNameSafe(WeaponBody),
+		*GetNameSafe(WeaponBarrel),
+		*GetNameSafe(WeaponSight));
 }
 
 void UJTSWeaponVisualComponent::ConfigureAttachment()
 {
-	USkeletalMeshComponent* const CharacterMesh = GetOwner() != nullptr
-		? GetOwner()->FindComponentByClass<USkeletalMeshComponent>()
-		: nullptr;
-	if (!IsValid(CharacterMesh))
+	bUsingFallbackAttachment = false;
+	if (GetOwner() == nullptr || !IsValid(HandAttachmentAnchor))
 	{
 		return;
 	}
 
-	static const FName SocketCandidates[] = {
-		TEXT("hand_r"), TEXT("hand_rSocket"), TEXT("RightHand"), TEXT("Hand_R"), TEXT("RightHandSocket")
-	};
-	for (const FName SocketName : SocketCandidates)
+	USkeletalMeshComponent* const CharacterMesh = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<USkeletalMeshComponent>()
+		: nullptr;
+	auto AttachAnchor = [this](USceneComponent* Parent, const FName SocketName)
 	{
-		if (CharacterMesh->DoesSocketExist(SocketName))
+		if (!IsValid(HandAttachmentAnchor) || !IsValid(Parent))
 		{
-			if (IsValid(WeaponBody)) WeaponBody->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
-			if (IsValid(WeaponBarrel)) WeaponBarrel->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
-			if (IsValid(WeaponSight)) WeaponSight->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
-			break;
+			return;
+		}
+		HandAttachmentAnchor->AttachToComponent(Parent, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
+		HandAttachmentAnchor->SetRelativeLocation(HandSocketRelativeLocation);
+		HandAttachmentAnchor->SetRelativeRotation(HandSocketRelativeRotation);
+		// The anchor must follow the socket's location/rotation exactly but never its animated scale.
+		HandAttachmentAnchor->SetAbsolute(false, false, true);
+	};
+
+	if (IsValid(CharacterMesh))
+	{
+		static const FName SocketCandidates[] = {
+			TEXT("hand_r"), TEXT("hand_rSocket"), TEXT("RightHand"), TEXT("Hand_R"), TEXT("RightHandSocket")
+		};
+		for (const FName SocketName : SocketCandidates)
+		{
+			if (!CharacterMesh->DoesSocketExist(SocketName))
+			{
+				continue;
+			}
+
+			AttachAnchor(CharacterMesh, SocketName);
+			const float SocketDistance = IsValid(HandAttachmentAnchor)
+				? FVector::Distance(HandAttachmentAnchor->GetComponentLocation(), GetOwner()->GetActorLocation())
+				: TNumericLimits<float>::Max();
+			if (SocketDistance > FMath::Max(1.0f, MaximumTrustedSocketDistance))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("JTS weapon visual: socket %s on %s resolved %.1f cm from character; retaining direct hand attachment."), *SocketName.ToString(), *GetNameSafe(GetOwner()), SocketDistance);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: attached %s to hand socket %s (%.1f cm from character)."), *GetNameSafe(GetOwner()), *SocketName.ToString(), SocketDistance);
+			}
+			return;
 		}
 	}
+
+	AttachToRootFallback();
+}
+
+void UJTSWeaponVisualComponent::AttachToRootFallback()
+{
+	if (GetOwner() == nullptr)
+	{
+		return;
+	}
+
+	USceneComponent* const RootComponent = GetOwner()->GetRootComponent();
+	if (!IsValid(RootComponent))
+	{
+		return;
+	}
+
+	if (!IsValid(HandAttachmentAnchor))
+	{
+		return;
+	}
+
+	HandAttachmentAnchor->AttachToComponent(RootComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	HandAttachmentAnchor->SetAbsolute(false, false, true);
+	HandAttachmentAnchor->SetRelativeRotation(FRotator::ZeroRotator);
+	HandAttachmentAnchor->SetRelativeLocation(FallbackHandRelativeLocation);
+	bUsingFallbackAttachment = true;
+	UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: attached %s to root fallback at %s."), *GetNameSafe(GetOwner()), *FallbackHandRelativeLocation.ToCompactString());
+
+	ApplyPresentationTransform();
+}
+
+bool UJTSWeaponVisualComponent::IsCurrentAttachmentPlausible() const
+{
+	if (GetOwner() == nullptr || !IsValid(HandAttachmentAnchor))
+	{
+		return false;
+	}
+
+	const float DistanceFromCharacter = FVector::Distance(HandAttachmentAnchor->GetComponentLocation(), GetOwner()->GetActorLocation());
+	return DistanceFromCharacter <= FMath::Max(1.0f, MaximumTrustedSocketDistance);
+}
+
+void UJTSWeaponVisualComponent::ValidateAttachmentAfterPose()
+{
+	if (bUsingFallbackAttachment || !IsValid(HandAttachmentAnchor) || !IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	{
+		return;
+	}
+
+	if (IsCurrentAttachmentPlausible())
+	{
+		return;
+	}
+
+	const float DistanceFromCharacter = GetOwner() != nullptr
+		? FVector::Distance(HandAttachmentAnchor->GetComponentLocation(), GetOwner()->GetActorLocation())
+		: TNumericLimits<float>::Max();
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("JTS weapon visual: animated hand anchor on %s resolved %.1f cm from character; retaining direct hand attachment."),
+		*GetNameSafe(GetOwner()),
+		DistanceFromCharacter);
 }
 
 void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 {
-	if (!IsValid(WeaponBody) || !IsValid(WeaponBarrel) || !IsValid(WeaponSight))
+	EnsureMeshComponents();
+	if (!IsValid(WeaponPresentationRoot)
+		|| !IsValid(WeaponModelRoot)
+		|| !IsValid(WeaponMuzzle)
+		|| !IsValid(WeaponGrip)
+		|| !IsValid(WeaponBody)
+		|| !IsValid(WeaponBarrel)
+		|| !IsValid(WeaponSight))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("JTS weapon visual: missing mesh components for %s."), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -109,78 +387,344 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		: nullptr;
 	const EJTSItemId ItemId = IsValid(Inventory) ? Inventory->GetActiveItemId() : EJTSItemId::None;
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
-	if (!IsValid(Definition) || !Definition->IsRangedWeapon())
+	if (!IsValid(Definition) || !Definition->IsHoldable())
 	{
 		SetVisible(false);
+		UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: hidden for %s ActiveItem=%d."), *GetNameSafe(GetOwner()), static_cast<int32>(ItemId));
 		return;
 	}
+	bRangedVisible = Definition->IsRangedWeapon();
+	SetComponentTickEnabled(bRangedVisible || ShotKickAlpha > 0.0f);
 
-	WeaponBody->SetStaticMesh(CubeMesh);
-	WeaponBarrel->SetStaticMesh(CylinderMesh);
-	WeaponSight->SetStaticMesh(CylinderMesh);
-	WeaponBody->SetRelativeRotation(FRotator::ZeroRotator);
-	WeaponBarrel->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
-	WeaponSight->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
-
-	FVector BodyScale(0.55f, 0.14f, 0.14f);
-	FVector BarrelScale(0.16f, 0.16f, 0.42f);
-	FVector SightScale(0.0f, 0.0f, 0.0f);
-	DefaultBodyLocation = FVector(9.0f, 0.0f, 0.0f);
-	DefaultBarrelLocation = FVector(32.0f, 0.0f, 0.0f);
-	DefaultSightLocation = FVector(13.0f, 0.0f, 9.0f);
+	FVector BodyScale(0.48f, 0.18f, 0.14f);
+	FVector BarrelScale(0.26f, 0.08f, 0.08f);
+	FVector SightScale(0.08f, 0.06f, 0.10f);
+	DefaultBodyLocation = FVector(13.0f, 0.0f, 0.0f);
+	DefaultBarrelLocation = FVector(48.0f, 0.0f, 0.0f);
+	DefaultSightLocation = FVector(19.0f, 0.0f, 12.0f);
+	DefaultGripTransform = FTransform(FQuat::Identity, FVector(-3.0f, 0.0f, -17.0f), FVector::OneVector);
+	DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(61.0f, 0.0f, 0.0f), FVector::OneVector);
+	DefaultGripScale = FVector(0.16f, 0.12f, 0.32f);
 
 	switch (ItemId)
 	{
 	case EJTSItemId::MachineGun:
-		BodyScale = FVector(0.95f, 0.18f, 0.16f);
-		BarrelScale = FVector(0.24f, 0.24f, 0.72f);
-		DefaultBodyLocation = FVector(16.0f, 0.0f, 0.0f);
-		DefaultBarrelLocation = FVector(54.0f, 0.0f, 0.0f);
+		BodyScale = FVector(0.88f, 0.22f, 0.18f);
+		BarrelScale = FVector(0.38f, 0.10f, 0.10f);
+		SightScale = FVector(0.12f, 0.08f, 0.12f);
+		DefaultBodyLocation = FVector(18.0f, 0.0f, 0.0f);
+		DefaultBarrelLocation = FVector(76.0f, 0.0f, 0.0f);
+		DefaultSightLocation = FVector(28.0f, 0.0f, 16.0f);
+		DefaultGripTransform = FTransform(FQuat::Identity, FVector(1.0f, 0.0f, -21.0f), FVector::OneVector);
+		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(95.0f, 0.0f, 0.0f), FVector::OneVector);
+		DefaultGripScale = FVector(0.22f, 0.16f, 0.40f);
 		break;
 	case EJTSItemId::Sniper:
-		BodyScale = FVector(1.25f, 0.16f, 0.12f);
-		BarrelScale = FVector(0.18f, 0.18f, 1.10f);
-		SightScale = FVector(0.10f, 0.10f, 0.42f);
-		DefaultBodyLocation = FVector(22.0f, 0.0f, 0.0f);
-		DefaultBarrelLocation = FVector(82.0f, 0.0f, 0.0f);
-		DefaultSightLocation = FVector(18.0f, 0.0f, 11.0f);
+		BodyScale = FVector(1.10f, 0.20f, 0.14f);
+		BarrelScale = FVector(0.62f, 0.08f, 0.08f);
+		SightScale = FVector(0.12f, 0.09f, 0.18f);
+		DefaultBodyLocation = FVector(23.0f, 0.0f, 0.0f);
+		DefaultBarrelLocation = FVector(96.0f, 0.0f, 0.0f);
+		DefaultSightLocation = FVector(30.0f, 0.0f, 17.0f);
+		DefaultGripTransform = FTransform(FQuat::Identity, FVector(3.0f, 0.0f, -21.0f), FVector::OneVector);
+		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(127.0f, 0.0f, 0.0f), FVector::OneVector);
+		DefaultGripScale = FVector(0.22f, 0.15f, 0.42f);
 		break;
 	case EJTSItemId::Pistol:
 	default:
 		break;
 	}
 
+	if (!Definition->IsRangedWeapon())
+	{
+		SightScale = FVector::ZeroVector;
+		switch (ItemId)
+		{
+		case EJTSItemId::Knife:
+			BodyScale = FVector(0.30f, 0.09f, 0.10f);
+			BarrelScale = FVector(0.46f, 0.06f, 0.05f);
+			DefaultBodyLocation = FVector(4.0f, 0.0f, 0.0f);
+			DefaultBarrelLocation = FVector(42.0f, 0.0f, 0.0f);
+			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-5.0f, 0.0f, 0.0f), FVector::OneVector);
+			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(65.0f, 0.0f, 0.0f), FVector::OneVector);
+			DefaultGripScale = FVector(0.22f, 0.12f, 0.12f);
+			break;
+		case EJTSItemId::Pickaxe:
+		case EJTSItemId::Axe:
+			BodyScale = FVector(0.76f, 0.07f, 0.07f);
+			BarrelScale = FVector(0.30f, 0.26f, 0.18f);
+			DefaultBodyLocation = FVector(5.0f, 0.0f, 0.0f);
+			DefaultBarrelLocation = FVector(53.0f, 0.0f, 5.0f);
+			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-22.0f, 0.0f, 0.0f), FVector::OneVector);
+			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(68.0f, 0.0f, 5.0f), FVector::OneVector);
+			DefaultGripScale = FVector(0.26f, 0.12f, 0.14f);
+			break;
+		default:
+			break;
+		}
+	}
+
+	// A real weapon mesh can keep its own arbitrary import origin.  Artists author the grip and
+	// muzzle pivots on the item Data Asset; gameplay never needs to know which mesh is selected.
+	if (Definition->HeldPresentation.bOverridePrototypeProfile)
+	{
+		DefaultGripTransform = Definition->HeldPresentation.GripTransform;
+		DefaultMuzzleTransform = Definition->HeldPresentation.MuzzleTransform;
+		DefaultGripScale = Definition->HeldPresentation.GripScale;
+	}
+
+	WeaponGrip->SetVisibility(true);
 	WeaponBody->SetVisibility(true);
 	WeaponBarrel->SetVisibility(true);
 	WeaponSight->SetVisibility(SightScale.X > 0.0f);
-	WeaponBody->SetRelativeScale3D(BodyScale);
-	WeaponBarrel->SetRelativeScale3D(BarrelScale);
-	WeaponSight->SetRelativeScale3D(SightScale);
+	WeaponGrip->SetHiddenInGame(false);
+	WeaponBody->SetHiddenInGame(false);
+	WeaponBarrel->SetHiddenInGame(false);
+	WeaponSight->SetHiddenInGame(false);
+	// These profile values are world-space dimensions relative to the 100 cm engine cube.
+	// SetWorldScale3D together with absolute scale above prevents skeletal socket import scale
+	// from silently multiplying every held item by 100.
+	WeaponGrip->SetWorldScale3D(DefaultGripScale);
+	WeaponBody->SetWorldScale3D(BodyScale);
+	WeaponBarrel->SetWorldScale3D(BarrelScale);
+	WeaponSight->SetWorldScale3D(SightScale);
+
+	FLinearColor ItemColor = Definition->AccentColor;
+	if (ItemId == EJTSItemId::Knife)
+	{
+		ItemColor = FLinearColor(0.78f, 0.88f, 1.0f, 1.0f);
+	}
+	else if (ItemId == EJTSItemId::Axe || ItemId == EJTSItemId::Pickaxe)
+	{
+		ItemColor = FLinearColor(1.0f, 0.42f, 0.08f, 1.0f);
+	}
+
+	auto ApplyMaterialColor = [](UMaterialInstanceDynamic* Material, const FLinearColor& Color)
+	{
+		if (!IsValid(Material))
+		{
+			return;
+		}
+		Material->SetVectorParameterValue(TEXT("Color"), Color);
+		Material->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		Material->SetVectorParameterValue(TEXT("Tint"), Color);
+		Material->SetVectorParameterValue(TEXT("EmissiveColor"), Color * 0.15f);
+	};
+	ApplyMaterialColor(WeaponGripMaterial, FLinearColor(0.035f, 0.05f, 0.07f, 1.0f));
+	ApplyMaterialColor(WeaponBodyMaterial, ItemColor);
+	ApplyMaterialColor(WeaponBarrelMaterial, ItemColor);
+	ApplyMaterialColor(WeaponSightMaterial, ItemColor);
 	SetAimAlpha(AimAlpha);
+	ValidateAttachmentAfterPose();
+	if (!bUsingFallbackAttachment)
+	{
+		if (UWorld* const World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(AttachmentValidationTimerHandle);
+			// Some imported animation graphs update socket transforms after BeginPlay. Recheck once
+			// after that pose evaluation instead of trusting only the initial socket transform.
+			World->GetTimerManager().SetTimer(
+				AttachmentValidationTimerHandle,
+				this,
+				&UJTSWeaponVisualComponent::ValidateAttachmentAfterPose,
+				0.15f,
+				false);
+		}
+	}
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("JTS weapon visual: shown for %s ActiveItem=%d Grip=%s Muzzle=%s BodyScale=%s WorldLocation=%s WorldRotation=%s WorldScale=%s"),
+		*GetNameSafe(GetOwner()),
+		static_cast<int32>(ItemId),
+		*WeaponGrip->GetComponentLocation().ToCompactString(),
+		*WeaponMuzzle->GetComponentLocation().ToCompactString(),
+		*BodyScale.ToCompactString(),
+		*WeaponBody->GetComponentLocation().ToCompactString(),
+		*WeaponBody->GetComponentRotation().ToCompactString(),
+		*WeaponBody->GetComponentScale().ToCompactString());
+}
+
+bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation) const
+{
+	OutLocation = FVector::ZeroVector;
+	if (!IsValid(WeaponMuzzle) || !IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	{
+		return false;
+	}
+
+	OutLocation = WeaponMuzzle->GetComponentLocation();
+	return true;
 }
 
 void UJTSWeaponVisualComponent::SetAimAlpha(float NewAimAlpha)
 {
 	AimAlpha = FMath::Clamp(NewAimAlpha, 0.0f, 1.0f);
+	ApplyPresentationTransform();
+}
+
+void UJTSWeaponVisualComponent::PlayShotPresentation(UMaterialInterface* GlowMaterial,
+	const FLinearColor& Color)
+{
+	if (!IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	{
+		return;
+	}
+	ShotKickAlpha = 1.0f;
+	SetComponentTickEnabled(true);
+	ApplyPresentationTransform();
+	if (IsValid(MuzzleFlash))
+	{
+		if (IsValid(GlowMaterial))
+		{
+			MuzzleFlash->SetMaterial(0, GlowMaterial);
+		}
+		if (UMaterialInstanceDynamic* FlashMaterial = MuzzleFlash->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			FlashMaterial->SetVectorParameterValue(TEXT("GlowColor"), Color * 12.0f);
+			FlashMaterial->SetVectorParameterValue(TEXT("Color"), Color * 12.0f);
+		}
+		MuzzleFlash->SetVisibility(true);
+	}
+	if (IsValid(MuzzleLight))
+	{
+		MuzzleLight->SetLightColor(Color);
+		MuzzleLight->SetVisibility(true);
+	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MuzzleFlashTimerHandle);
+		World->GetTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
+			&UJTSWeaponVisualComponent::HideShotFlash, FMath::Max(0.01f, MuzzleFlashSeconds), false);
+	}
+}
+
+void UJTSWeaponVisualComponent::HideShotFlash()
+{
+	if (IsValid(MuzzleFlash)) MuzzleFlash->SetVisibility(false);
+	if (IsValid(MuzzleLight)) MuzzleLight->SetVisibility(false);
+}
+
+void UJTSWeaponVisualComponent::PlayMeleeSwingPresentation()
+{
+	if (!IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	{
+		return;
+	}
+
+	bMeleeSwingPresentationActive = true;
+	bMeleeSwingReverse = !bMeleeSwingReverse;
+	MeleeSwingElapsed = 0.0f;
+	SetComponentTickEnabled(true);
+	ApplyPresentationTransform();
+}
+
+void UJTSWeaponVisualComponent::ApplyPresentationTransform()
+{
+	const FVector AimOffset(-5.0f * ShotKickAlpha, 1.5f * AimAlpha, 2.0f * AimAlpha + 1.5f * ShotKickAlpha);
+	FVector SwingOffset = FVector::ZeroVector;
+	FRotator SwingRotation = FRotator::ZeroRotator;
+	if (bMeleeSwingPresentationActive)
+	{
+		const float Phase = FMath::Clamp(MeleeSwingElapsed / FMath::Max(0.15f, MeleeSwingPresentationSeconds), 0.0f, 1.0f);
+		// The blade reaches the target near the server's contact frame, then settles before the next swing.
+		const float Slash = Phase < 0.45f
+			? FMath::InterpEaseInOut(-1.0f, 1.0f, Phase / 0.45f, 2.0f)
+			: FMath::InterpEaseInOut(1.0f, 0.0f, (Phase - 0.45f) / 0.55f, 2.0f);
+		const float Direction = bMeleeSwingReverse ? -1.0f : 1.0f;
+		SwingOffset = FVector(-6.0f * (1.0f - Phase), 7.0f * Direction * Slash, -4.0f * (1.0f - Phase));
+		SwingRotation = FRotator(-18.0f * (1.0f - Phase), 16.0f * Direction * Slash, 52.0f * Direction * Slash);
+	}
+	if (IsValid(WeaponPresentationRoot))
+	{
+		// Aim and melee animation rotate the whole held item around its actual grip, not around
+		// the origin of each primitive piece.
+		WeaponPresentationRoot->SetRelativeLocation(AimOffset + SwingOffset);
+		WeaponPresentationRoot->SetAbsolute(false, false, true);
+		if (bRangedVisible && IsValid(GetOwner()))
+		{
+			const FVector BodyForward = GetOwner()->GetActorForwardVector();
+			FVector ViewForward = BodyForward;
+			if (const AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner()))
+			{
+				ViewForward = FQuat(GetOwner()->GetActorRightVector(),
+					FMath::DegreesToRadians(-Character->GetAimPitch())).RotateVector(BodyForward);
+				if (Character->IsLocallyControlled() && Character->GetController() != nullptr)
+				{
+					ViewForward = Character->GetController()->GetControlRotation().Vector();
+				}
+			}
+			const FVector GunForward = FMath::Lerp(BodyForward, ViewForward, AimAlpha).GetSafeNormal();
+			const FRotator GunRotation = FRotationMatrix::MakeFromXZ(GunForward,
+				GetOwner()->GetActorUpVector()).Rotator();
+			WeaponPresentationRoot->SetWorldRotation(GunRotation + FRotator(4.0f * ShotKickAlpha, 0.0f, 0.0f));
+		}
+		else
+		{
+			WeaponPresentationRoot->SetRelativeRotation(SwingRotation + FRotator(4.0f * ShotKickAlpha, 0.0f, 0.0f));
+		}
+	}
+	if (IsValid(WeaponModelRoot))
+	{
+		FTransform GripInverse = DefaultGripTransform;
+		GripInverse.SetScale3D(FVector::OneVector);
+		WeaponModelRoot->SetRelativeTransform(GripInverse.Inverse());
+		WeaponModelRoot->SetAbsolute(false, false, true);
+	}
+	if (IsValid(WeaponGrip))
+	{
+		FTransform VisibleGripTransform = DefaultGripTransform;
+		VisibleGripTransform.SetScale3D(FVector::OneVector);
+		WeaponGrip->SetRelativeTransform(VisibleGripTransform);
+		WeaponGrip->SetWorldScale3D(DefaultGripScale);
+	}
+	if (IsValid(WeaponMuzzle))
+	{
+		FTransform MuzzleTransform = DefaultMuzzleTransform;
+		MuzzleTransform.SetScale3D(FVector::OneVector);
+		WeaponMuzzle->SetRelativeTransform(MuzzleTransform);
+		WeaponMuzzle->SetAbsolute(false, false, true);
+	}
 	if (IsValid(WeaponBody))
 	{
-		WeaponBody->SetRelativeLocation(DefaultBodyLocation + FVector(0.0f, 1.5f * AimAlpha, 2.0f * AimAlpha));
+		WeaponBody->SetRelativeRotation(FRotator::ZeroRotator);
+		WeaponBody->SetRelativeLocation(DefaultBodyLocation);
 	}
 	if (IsValid(WeaponBarrel))
 	{
-		WeaponBarrel->SetRelativeLocation(DefaultBarrelLocation + FVector(0.0f, 1.5f * AimAlpha, 2.0f * AimAlpha));
+		WeaponBarrel->SetRelativeRotation(FRotator::ZeroRotator);
+		WeaponBarrel->SetRelativeLocation(DefaultBarrelLocation);
 	}
 	if (IsValid(WeaponSight))
 	{
-		WeaponSight->SetRelativeLocation(DefaultSightLocation + FVector(0.0f, 1.5f * AimAlpha, 2.0f * AimAlpha));
+		WeaponSight->SetRelativeRotation(FRotator::ZeroRotator);
+		WeaponSight->SetRelativeLocation(DefaultSightLocation);
 	}
 }
 
 void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 {
+	if (!bVisible)
+	{
+		bRangedVisible = false;
+		bMeleeSwingPresentationActive = false;
+		ShotKickAlpha = 0.0f;
+		SetComponentTickEnabled(false);
+		HideShotFlash();
+		if (UWorld* const World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(AttachmentValidationTimerHandle);
+			World->GetTimerManager().ClearTimer(MuzzleFlashTimerHandle);
+		}
+	}
+	if (IsValid(WeaponGrip)) WeaponGrip->SetVisibility(bVisible);
 	if (IsValid(WeaponBody)) WeaponBody->SetVisibility(bVisible);
 	if (IsValid(WeaponBarrel)) WeaponBarrel->SetVisibility(bVisible);
 	if (IsValid(WeaponSight)) WeaponSight->SetVisibility(bVisible && WeaponSight->GetStaticMesh() != nullptr);
+	if (IsValid(WeaponGrip)) WeaponGrip->SetHiddenInGame(!bVisible);
+	if (IsValid(WeaponBody)) WeaponBody->SetHiddenInGame(!bVisible);
+	if (IsValid(WeaponBarrel)) WeaponBarrel->SetHiddenInGame(!bVisible);
+	if (IsValid(WeaponSight)) WeaponSight->SetHiddenInGame(!bVisible);
 }
 
 void UJTSWeaponVisualComponent::HandleInventoryChanged(int32 UsedSlots, int32 Capacity)

@@ -71,6 +71,10 @@
 		{
 			"Name": "AllToolsets",
 			"Enabled": true
+		},
+		{
+			"Name": "AnimGen",
+			"Enabled": true
 		}
 	]
 }

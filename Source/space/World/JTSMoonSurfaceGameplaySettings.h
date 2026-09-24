@@ -35,14 +35,6 @@ public:
 	virtual float GetConsumptionTickInterval() const = 0;
 	virtual float GetMinimumConsumptionUnit() const = 0;
 
-	virtual int32 GetPickaxeRockCost() const = 0;
-	virtual int32 GetBackpackRockCost() const = 0;
-	virtual int32 GetBackpackOreCost() const = 0;
-	virtual int32 GetKnifeRockCost() const = 0;
-	virtual int32 GetKnifeOreCost() const = 0;
-	virtual int32 GetAxeRockCost() const = 0;
-	virtual int32 GetAxeOreCost() const = 0;
-
 	virtual int32 GetLargeRockTotalYieldUnits() const = 0;
 	virtual int32 GetOreDepositTotalYieldUnits() const = 0;
 	virtual float GetPickupMaxDistance() const = 0;

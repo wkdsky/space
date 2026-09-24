@@ -56,9 +56,8 @@ public:
 
 	/** Server-authoritative purchase backed by this ship's shared material storage. */
 	EJTSShopPurchaseResult TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId);
-
-	/** Grants the fixed development-shop resource bundle after server-side range/phase validation. */
-	bool TryGrantShopResourceSupply(AJTSCharacter* Player, int32 AmountPerResource);
+	/** Prototype terminal control: grant 100 of each ship resource after the normal server interaction check. */
+	bool TryGrantDebugResources(AJTSCharacter* Player);
 
 	/** Boards a character that is currently inside the spacecraft trigger. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")
@@ -259,6 +258,8 @@ public:
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
+	/** Shared server-side gate for actions exposed by the SpaceWorld ship terminal. */
+	bool CanUseShipTerminal(APawn* InteractingPawn) const;
 
 	/** Returns the amount of one resource type currently stored in the spacecraft. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")

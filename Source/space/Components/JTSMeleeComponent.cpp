@@ -75,6 +75,7 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	ClearAttackFailSafeTimer();
 	ClearUnarmedPunchTimers();
+	ClearHeldWeaponTimers();
 
 	CurrentMeleeTarget = nullptr;
 	CachedMeleeTarget.Reset();
@@ -250,7 +251,10 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 	}
 	else
 	{
-		ResetAttackFailSafeTimer();
+		// Weapon/tool montages are optional project presentation. Gameplay must still swing,
+		// hit, and chain while held when no Blueprint notify graph has been configured.
+		ClearAttackFailSafeTimer();
+		ScheduleHeldWeaponEvents();
 	}
 
 	MulticastBeginAttackPresentation(CurrentAttackType, bCurrentPunchUsesLeft, bCurrentPunchIsComboContinuation);
@@ -340,12 +344,66 @@ void UJTSMeleeComponent::HandleUnarmedPunchRecovery()
 	}
 }
 
+void UJTSMeleeComponent::ScheduleHeldWeaponEvents()
+{
+	UWorld* const World = GetWorld();
+	if (!IsValid(World) || GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	ClearHeldWeaponTimers();
+	const float HitDelay = FMath::Max(0.01f, HeldWeaponHitDelay);
+	const float ChainDelay = FMath::Max(HitDelay, HeldWeaponChainDelay);
+	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, HeldWeaponRecoveryDelay);
+	FTimerManager& TimerManager = World->GetTimerManager();
+	TimerManager.SetTimer(HeldWeaponHitTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponHit, HitDelay, false);
+	TimerManager.SetTimer(HeldWeaponChainTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponChainWindow, ChainDelay, false);
+	TimerManager.SetTimer(HeldWeaponRecoveryTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponRecovery, RecoveryDelay, false);
+}
+
+void UJTSMeleeComponent::ClearHeldWeaponTimers()
+{
+	if (UWorld* const World = GetWorld())
+	{
+		FTimerManager& TimerManager = World->GetTimerManager();
+		TimerManager.ClearTimer(HeldWeaponHitTimerHandle);
+		TimerManager.ClearTimer(HeldWeaponChainTimerHandle);
+		TimerManager.ClearTimer(HeldWeaponRecoveryTimerHandle);
+	}
+}
+
+void UJTSMeleeComponent::HandleHeldWeaponHit()
+{
+	if (CurrentAttackType != EJTSAttackType::Punch)
+	{
+		PerformHitCheck();
+	}
+}
+
+void UJTSMeleeComponent::HandleHeldWeaponChainWindow()
+{
+	if (CurrentAttackType != EJTSAttackType::Punch)
+	{
+		TryChainAttack();
+	}
+}
+
+void UJTSMeleeComponent::HandleHeldWeaponRecovery()
+{
+	if (CurrentAttackType != EJTSAttackType::Punch)
+	{
+		FinishCurrentAttack();
+	}
+}
+
 void UJTSMeleeComponent::EndAttackState()
 {
 	const bool bWasAttacking = bIsAttacking;
 	const EJTSAttackType FinishedAttackType = CurrentAttackType;
 	ClearAttackFailSafeTimer();
 	ClearUnarmedPunchTimers();
+	ClearHeldWeaponTimers();
 
 	bIsAttacking = false;
 	bAttackBuffered = false;

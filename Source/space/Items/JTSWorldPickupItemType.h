@@ -15,7 +15,7 @@ enum class EJTSWorldPickupItemType : uint8
 	Ore UMETA(DisplayName = "Ore"),
 	MoonAntCorpse UMETA(DisplayName = "MoonAnt Corpse"),
 	Pickaxe UMETA(DisplayName = "Pickaxe"),
-	Backpack UMETA(DisplayName = "Backpack"),
+	Backpack UMETA(Hidden),
 	Knife UMETA(DisplayName = "Knife"),
 	Pistol UMETA(DisplayName = "Pistol"),
 	MachineGun UMETA(DisplayName = "Machine Gun"),

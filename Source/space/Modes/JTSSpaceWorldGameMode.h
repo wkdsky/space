@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "space/Modes/JTSGameplayGameModeBase.h"
 #include "space/World/JTSPlanetSurfaceGameplay.h"
+#include "space/Items/JTSItemTypes.h"
 
 #include "JTSSpaceWorldGameMode.generated.h"
 
@@ -48,6 +49,7 @@ private:
 		AJTSPlanetAnchor* Planet,
 		AJTSCharacter* Character,
 		AJTSSpacecraftActor* Spacecraft);
+	void ApplyConfiguredStartingItems(AJTSCharacter* Character);
 	const FJTSSurfaceGameplayControllerDefinition* FindSurfaceGameplayDefinition(const AJTSPlanetAnchor* Planet) const;
 	AActor* FindOrSpawnSurfaceGameplayController(
 		const FJTSSurfaceGameplayControllerDefinition& Definition,
@@ -63,6 +65,10 @@ private:
 	/** Default vehicle only; the server-owned expedition snapshot can restore the chosen class at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Arrival", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSSpacecraftActor> SpacecraftClass;
+
+	/** Optional server-side starter loadout. Project-specific item selection belongs in this Blueprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Loadout", meta = (AllowPrivateAccess = "true"))
+	TArray<EJTSItemId> StartingItemIds;
 
 	/** Per-planet gameplay classes and Data Assets. Blueprint owns all project-specific selection. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Space World|Surface Gameplay", meta = (AllowPrivateAccess = "true"))

@@ -29,14 +29,6 @@ public:
 	virtual float GetConsumptionTickInterval() const override;
 	virtual float GetMinimumConsumptionUnit() const override;
 
-	virtual int32 GetPickaxeRockCost() const override;
-	virtual int32 GetBackpackRockCost() const override;
-	virtual int32 GetBackpackOreCost() const override;
-	virtual int32 GetKnifeRockCost() const override;
-	virtual int32 GetKnifeOreCost() const override;
-	virtual int32 GetAxeRockCost() const override;
-	virtual int32 GetAxeOreCost() const override;
-
 	virtual int32 GetLargeRockTotalYieldUnits() const override;
 	virtual int32 GetOreDepositTotalYieldUnits() const override;
 	virtual float GetPickupMaxDistance() const override;
@@ -118,27 +110,6 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ShowOnlyInnerProperties))
 	FJTSMoonResourceSpawnSettings MoonResourceSpawnSettings;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
-	int32 PickaxeRockCost = 4;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
-	int32 BackpackRockCost = 4;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
-	int32 BackpackOreCost = 2;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 KnifeRockCost = 2;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 KnifeOreCost = 1;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 AxeRockCost = 4;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Crafting", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 AxeOreCost = 2;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "1", UIMin = "1"))
 	int32 LargeRockTotalYieldUnits = 6;

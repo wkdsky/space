@@ -39,7 +39,6 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
 	const AJTSCharacter* const Character = Cast<AJTSCharacter>(TryGetPawnOwner());
-	AimPitch = IsValid(Character) ? Character->GetAimPitch() : 0.0f;
 	AimYaw = 0.0f;
 	bWeaponAiming = false;
 	bHasRangedWeapon = false;
@@ -56,6 +55,10 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		{
 			bWeaponAiming = Ranged->IsAiming();
 			bActiveRangedWeapon = Ranged->HasActiveRangedWeapon();
+			// Only the head follows camera pitch while aiming. Ease it back to forward on release.
+			const float HeadPitchTarget = bWeaponAiming && bActiveRangedWeapon
+				? FMath::Clamp(Character->GetAimPitch(), -55.0f, 55.0f) : 0.0f;
+			AimPitch = FMath::FInterpTo(AimPitch, HeadPitchTarget, DeltaSeconds, 14.0f);
 		}
 		if (const AController* const CharacterController = Character->GetController())
 		{
@@ -63,5 +66,5 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			AimYaw = FRotator::NormalizeAxis(RelativeAim.Yaw);
 		}
 	}
-	bHasRangedWeapon = !bHasHeldItem;
+	bHasRangedWeapon = bActiveRangedWeapon;
 }

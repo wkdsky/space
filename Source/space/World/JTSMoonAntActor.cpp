@@ -17,6 +17,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSExperienceRewardComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/UI/JTSHealthBarWidget.h"
@@ -63,6 +64,7 @@ AJTSMoonAntActor::AJTSMoonAntActor()
 	SetRootComponent(SceneRoot);
 
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
+	ExperienceRewardComponent = CreateDefaultSubobject<UJTSExperienceRewardComponent>(TEXT("ExperienceRewardComponent"));
 
 	MoonAntMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MoonAntMesh"));
 	MoonAntMesh->SetupAttachment(SceneRoot);

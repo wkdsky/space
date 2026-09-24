@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "space/Items/JTSItemTypes.h"
 
 #include "JTSRangedWeaponComponent.generated.h"
 
@@ -26,7 +27,7 @@ public:
 	bool HasActiveRangedWeapon() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
-	bool IsAiming() const { return bIsAiming && HasActiveRangedWeapon(); }
+	bool IsAiming() const { return bIsAiming && HasActiveRangedWeapon() && CanUseWeapon(); }
 
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
 	float GetActiveAimFOV() const;
@@ -56,21 +57,37 @@ public:
 	void ServerStopAim();
 
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastShotTrace(FVector_NetQuantize TraceStart, FVector_NetQuantize TraceEnd);
+	void MulticastShotTrace(FVector_NetQuantize MuzzleStart, FVector_NetQuantize TraceEnd,
+		FVector_NetQuantizeNormal ImpactNormal, EJTSItemId ShotItem, bool bHitSomething, bool bDamageableHit);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientConfirmRangedHit();
+
+	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
+	float GetReticleKickAlpha() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
+	bool HasRecentConfirmedHit() const;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
 	const UJTSItemDefinition* GetActiveRangedDefinition() const;
+	bool CanUseWeapon() const;
 	bool FireOnce();
 	bool GetAim(FVector& OutOrigin, FVector& OutDirection) const;
-	void ScheduleAutomaticFire(const UJTSItemDefinition* Definition);
+	void PlayLocalShotFeedback(const UJTSItemDefinition* Definition);
+	/** Repeats a held trigger at the active item's configured fire interval. */
+	void ScheduleHeldFire(const UJTSItemDefinition* Definition);
 	void ClearFireTimer();
 
 	FTimerHandle AutomaticFireTimerHandle;
 	bool bFireHeld = false;
 	bool bDebugShotTraces = false;
 	double NextFireTimeSeconds = 0.0;
+	double NextLocalFeedbackTimeSeconds = 0.0;
+	double LastLocalShotSeconds = -100.0;
+	double LastConfirmedHitSeconds = -100.0;
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ranged|Aim", meta = (AllowPrivateAccess = "true"))
 	bool bIsAiming = false;

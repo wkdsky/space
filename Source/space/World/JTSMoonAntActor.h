@@ -18,6 +18,7 @@ class USphereComponent;
 class UStaticMeshComponent;
 class UWidgetComponent;
 class UJTSHealthComponent;
+class UJTSExperienceRewardComponent;
 class IJTSMoonSurfaceGameplaySettings;
 class AJTSPlanetAnchor;
 
@@ -109,6 +110,10 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Health", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSHealthComponent> HealthComponent;
+
+	/** Standard enemy kill experience. Future bosses can use the same component with bBossReward enabled. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Progression", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSExperienceRewardComponent> ExperienceRewardComponent;
 
 	/** Assign Skeletal Mesh, MoonAnt animation, and materials on this component in BP_MoonAnt. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Visual", meta = (AllowPrivateAccess = "true"))

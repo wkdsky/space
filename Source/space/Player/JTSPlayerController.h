@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Player/JTSPlayerProgressionTypes.h"
 
 #include "JTSPlayerController.generated.h"
 
@@ -14,9 +15,9 @@ class AJTSCharacter;
 class AJTSPlayerState;
 class AJTSSpacecraftActor;
 class UJTSPreLaunchLobbyWidget;
+class UJTSInventoryQuantityDialogWidget;
 class UJTSShopWidget;
 class UUserWidget;
-enum class EJTSEquipmentType : uint8;
 struct FInputKeyEventArgs;
 
 /**
@@ -71,25 +72,32 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDisembarkSpacecraft(AJTSSpacecraftActor* Spacecraft);
 
-	UFUNCTION(Server, Reliable)
-	void ServerRequestCraft(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft);
-
 	/** Ship-owned shop RPC. The server validates ship range, shared materials, and delivery. */
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);
 
-	/** Development shop supply RPC. The server accepts only the fixed +100-per-resource bundle. */
 	UFUNCTION(Server, Reliable)
-	void ServerRequestShopResourceSupply(AJTSSpacecraftActor* Spacecraft, int32 AmountPerResource);
+	void ServerRequestShopDebugResources(AJTSSpacecraftActor* Spacecraft);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDebugAbilityLevels(AJTSSpacecraftActor* Spacecraft);
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(EJTSShopPurchaseResult Result);
 
 	UFUNCTION(Client, Reliable)
-	void ClientReceiveShopResourceSupplyResult(bool bSucceeded);
+	void ClientOpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
+
+	/** Server-authoritative execution for a quantity selected in the local drop/destroy dialog. */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestInventoryQuantityAction(int32 SlotIndex, int32 Quantity, bool bDestroy);
+
+	/** Commits all pending ability ranks in one irreversible, server-validated transaction. */
+	UFUNCTION(Server, Reliable)
+	void ServerCommitAbilityAllocation(FJTSAbilityAllocation Allocation);
 
 	UFUNCTION(Client, Reliable)
-	void ClientOpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
+	void ClientReceiveAbilityAllocationResult(bool bSucceeded);
 
 	UFUNCTION(BlueprintCallable, Category = "Menu")
 	void RestartCurrentLevel();
@@ -128,6 +136,11 @@ public:
 	void CloseSpaceShop();
 	bool IsSpaceShopOpen() const;
 
+	/** Opens a keyboard-and-wheel quantity selector for the currently owned item stack. */
+	void OpenInventoryQuantityDialog(int32 SlotIndex, bool bDestroy);
+	void CloseInventoryQuantityDialog();
+	bool IsInventoryQuantityDialogOpen() const;
+
 	/** Opens the gameplay pause menu and applies paused UI-only input. */
 	void OpenGameMenu();
 	void CloseGameMenu();
@@ -150,6 +163,7 @@ private:
 	/** Gives a modal widget mouse/keyboard ownership and prevents camera input leaking through it. */
 	void ApplyModalUIInputMode(UUserWidget* FocusWidget);
 	void ApplyPreLaunchLobbyInputMode();
+	void RestoreGameplayInputAfterModal();
 	bool IsNormalGameplayPhase() const;
 	bool IsPreLaunchLobbyWorld() const;
 	void ShowLobby();
@@ -165,6 +179,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSShopWidget> SpaceShopWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UJTSInventoryQuantityDialogWidget> InventoryQuantityDialog;
 
 	/** Blueprint-owned lobby composition. Native widget remains a recoverable fallback. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))

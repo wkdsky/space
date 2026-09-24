@@ -7,7 +7,6 @@
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "Math/RandomStream.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSWorldPickupItemType.h"
@@ -741,41 +740,6 @@ void AJTSMoonSurfaceController::ConsumeExpeditionSupplies()
 
 	FoodConsumptionAccumulator = FMath::Max(0.0, FoodConsumptionAccumulator - static_cast<double>(FoodResourcesDue) * ConsumptionUnit);
 	WaterConsumptionAccumulator = FMath::Max(0.0, WaterConsumptionAccumulator - static_cast<double>(WaterResourcesDue) * ConsumptionUnit);
-}
-
-bool AJTSMoonSurfaceController::TryCraftPickaxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
-{
-	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Pickaxe);
-}
-
-bool AJTSMoonSurfaceController::TryCraftBackpack(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
-{
-	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Backpack);
-}
-
-bool AJTSMoonSurfaceController::TryCraftKnife(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
-{
-	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Knife);
-}
-
-bool AJTSMoonSurfaceController::TryCraftAxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft)
-{
-	return TryBuyWorkshopEquipment(Player, Spacecraft, EJTSEquipmentType::Axe);
-}
-
-bool AJTSMoonSurfaceController::TryBuyWorkshopEquipment(
-	AJTSCharacter* Player,
-	AJTSSpacecraftActor* Spacecraft,
-	EJTSEquipmentType EquipmentType)
-{
-	// Kept for save/Blueprint ABI compatibility only.  The design no longer
-	// permits a second, Moon-local price list or a bypass around the SpaceWorld
-	// shared-wallet terminal.
-	static_cast<void>(Player);
-	static_cast<void>(Spacecraft);
-	static_cast<void>(EquipmentType);
-	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: ignored retired Moon workshop transaction."));
-	return false;
 }
 
 int32 AJTSMoonSurfaceController::GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit)

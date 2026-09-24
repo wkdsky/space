@@ -11,9 +11,8 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnJTSInventoryChanged, int32, UsedSlots, int32, Capacity);
 
 /**
- * Replicated item-slot inventory. Up to the first four physical slots form the player's quickbar;
- * a new character exposes two, while wearable capacity can unlock the remaining quickbar slots.
- * Other slots are ordinary carried inventory. Item definitions decide stacking and capabilities.
+ * Replicated item-slot inventory. The current quickbar page presents up to nine physical slots in
+ * one horizontal HUD row; every carried item, including former equipment, belongs here.
  */
 UCLASS(ClassGroup = (Items), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSInventoryComponent : public UActorComponent
@@ -21,6 +20,8 @@ class SPACE_API UJTSInventoryComponent : public UActorComponent
 	GENERATED_BODY()
 
 public:
+	static constexpr int32 MaximumQuickbarSlots = 9;
+
 	UJTSInventoryComponent();
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -45,9 +46,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
 	int32 GetSelectedQuickbarSlot() const;
 
-	/** Number of currently exposed quickbar slots. A backpack can extend this up to four. */
+	/** Number of positions visible on the current quickbar page (never more than keys 1-9). */
 	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
 	int32 GetQuickbarSlotCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
+	int32 GetQuickbarPageCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
+	int32 GetQuickbarPageIndex() const;
+
+	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
+	int32 GetQuickbarPageStart() const;
 
 	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
 	FJTSItemInstance GetActiveItem() const;
@@ -61,6 +71,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSelectQuickbarSlot(int32 SlotIndex);
 
+	UFUNCTION(BlueprintCallable, Category = "Inventory|Quickbar")
+	bool SelectQuickbarPage(int32 PageIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSelectQuickbarPage(int32 PageIndex);
+
 	/** Adds as much of an item payload as the inventory can contain. OutRemaining is zero on full success. */
 	bool TryAddItem(const FJTSItemInstance& Item, int32& OutRemaining);
 
@@ -72,6 +88,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	int32 GetItemCount(EJTSItemId ItemId) const;
+
+	/** The current progression cap for a stackable item; non-stackable items always return one. */
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	int32 GetEffectiveStackLimit(EJTSItemId ItemId) const;
 
 	bool TryRemoveItem(EJTSItemId ItemId, int32 Count);
 	bool TryTakeAllResources(TMap<EJTSResourceType, int32>& OutResources);
@@ -86,14 +106,25 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerDropItemAtSlot(int32 SlotIndex);
 
-	/** Used by the wearable layer before reducing capacity. */
-	bool GetOverflowItemsForCapacity(int32 NewCapacity, TArray<FJTSItemInstance>& OutOverflowItems) const;
-	bool CommitOverflowRemovalForCapacity(int32 NewCapacity, const TArray<FJTSItemInstance>& ExpectedOverflowItems);
+	/** Drops only Count units. The server validates the selected slot and preserves the remainder. */
+	bool DropItemQuantityAtSlot(int32 SlotIndex, int32 Count);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDropItemQuantityAtSlot(int32 SlotIndex, int32 Count);
+
+	/** Permanently destroys only Count units. There is deliberately no refund path. */
+	bool DestroyItemQuantityAtSlot(int32 SlotIndex, int32 Count);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDestroyItemQuantityAtSlot(int32 SlotIndex, int32 Count);
+
+	/** Called after a server-authoritative progression update that may have increased capacity. */
+	void RefreshCapacityFromProgression();
 
 	/**
 	 * Server-side seamless-travel/save restore. Old oversized stacks are split to the current item
-	 * rules. Items beyond the active capacity remain serialized in protected overflow slots until a
-	 * wearable expands capacity, never silently discarded.
+	 * rules. Items beyond the active capacity remain serialized as migration overflow until a
+	 * progression capacity upgrade exposes them, never silently discarded.
 	 */
 	void RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot);
 	void RestoreLegacyResources(const TArray<EJTSResourceType>& Resources);
@@ -112,7 +143,7 @@ private:
 	UFUNCTION()
 	void OnRep_SelectedQuickbarSlot();
 
-	/** New characters start with exactly two physical inventory slots. Wearables can add capacity. */
+	/** New characters start with exactly two physical inventory slots; progression adds capacity. */
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "2", UIMin = "2"))
 	int32 BaseInventoryCapacity = 2;
 
@@ -121,4 +152,11 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_SelectedQuickbarSlot, VisibleAnywhere, Category = "Inventory|Quickbar")
 	int32 SelectedQuickbarSlot = 0;
+
+	/** Current page is owner-only presentation state; the selected absolute slot remains replicated for held-item visuals. */
+	UPROPERTY(ReplicatedUsing = OnRep_QuickbarPageIndex, VisibleAnywhere, Category = "Inventory|Quickbar")
+	int32 QuickbarPageIndex = 0;
+
+	UFUNCTION()
+	void OnRep_QuickbarPageIndex();
 };

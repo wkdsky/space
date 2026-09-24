@@ -14,11 +14,12 @@
 #include "space/Modes/JTSGameplayGameModeBase.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
-#include "space/Components/JTSPlayerEquipmentComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/Core/JTSMapPaths.h"
 #include "space/UI/JTSPreLaunchLobbyWidget.h"
+#include "space/UI/JTSInventoryQuantityDialogWidget.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/UI/JTSPrototypeHUD.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
@@ -71,6 +72,7 @@ void AJTSPlayerController::BeginPlay()
 void AJTSPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bGameplayInputModeActive = false;
+	CloseInventoryQuantityDialog();
 	CloseSpaceShop();
 	CloseMoonShop();
 	HideLobby();
@@ -230,15 +232,6 @@ void AJTSPlayerController::ServerRequestDisembarkSpacecraft_Implementation(AJTSS
 	}
 }
 
-void AJTSPlayerController::ServerRequestCraft_Implementation(EJTSEquipmentType EquipmentType, AJTSSpacecraftActor* Spacecraft)
-{
-	// Retained as a harmless RPC symbol for old Blueprint/UI assets. New purchases
-	// are validated through the nearby shared spacecraft.
-	static_cast<void>(EquipmentType);
-	static_cast<void>(Spacecraft);
-	UE_LOG(LogTemp, Verbose, TEXT("JumpToSpace: ignored retired Moon workshop request from %s."), *GetNameSafe(this));
-}
-
 void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId)
 {
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
@@ -248,13 +241,26 @@ void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecra
 	ClientReceiveShopPurchaseResult(Result);
 }
 
-void AJTSPlayerController::ServerRequestShopResourceSupply_Implementation(AJTSSpacecraftActor* Spacecraft, int32 AmountPerResource)
+void AJTSPlayerController::ServerRequestShopDebugResources_Implementation(AJTSSpacecraftActor* Spacecraft)
 {
+	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
-	const bool bSucceeded = IsValid(ControlledCharacter)
-		&& IsValid(Spacecraft)
-		&& Spacecraft->TryGrantShopResourceSupply(ControlledCharacter, AmountPerResource);
-	ClientReceiveShopResourceSupplyResult(bSucceeded);
+	if (IsValid(GameState) && GameState->GetActiveSpacecraft() == Spacecraft
+		&& IsValid(Spacecraft) && IsValid(ControlledCharacter))
+	{
+		Spacecraft->TryGrantDebugResources(ControlledCharacter);
+	}
+}
+
+void AJTSPlayerController::ServerRequestDebugAbilityLevels_Implementation(AJTSSpacecraftActor* Spacecraft)
+{
+	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	if (IsValid(GameState) && GameState->GetActiveSpacecraft() == Spacecraft
+		&& IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn()) && IsValid(State))
+	{
+		State->GrantDebugLevels();
+	}
 }
 
 void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSShopPurchaseResult Result)
@@ -265,17 +271,49 @@ void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSSh
 	}
 }
 
-void AJTSPlayerController::ClientReceiveShopResourceSupplyResult_Implementation(bool bSucceeded)
-{
-	if (IsValid(SpaceShopWidget))
-	{
-		SpaceShopWidget->NotifyResourceSupplyResult(bSucceeded);
-	}
-}
-
 void AJTSPlayerController::ClientOpenSpaceShop_Implementation(AJTSSpacecraftActor* Spacecraft)
 {
 	OpenSpaceShop(Spacecraft);
+}
+
+void AJTSPlayerController::ServerRequestInventoryQuantityAction_Implementation(int32 SlotIndex, int32 Quantity, bool bDestroy)
+{
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
+	if (!IsValid(Inventory) || SlotIndex < 0 || Quantity <= 0
+		|| SlotIndex != Inventory->GetSelectedQuickbarSlot())
+	{
+		return;
+	}
+
+	if (bDestroy)
+	{
+		Inventory->DestroyItemQuantityAtSlot(SlotIndex, Quantity);
+	}
+	else
+	{
+		Inventory->DropItemQuantityAtSlot(SlotIndex, Quantity);
+	}
+}
+
+void AJTSPlayerController::ServerCommitAbilityAllocation_Implementation(FJTSAbilityAllocation Allocation)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	const AJTSSpacecraftActor* const Spacecraft = IsValid(GameState) ? GameState->GetActiveSpacecraft() : nullptr;
+	const bool bSucceeded = IsValid(State)
+		&& IsValid(Spacecraft)
+		&& Spacecraft->CanUseShipTerminal(GetPawn())
+		&& State->CommitAbilityAllocation(Allocation);
+	ClientReceiveAbilityAllocationResult(bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveAbilityAllocationResult_Implementation(bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget))
+	{
+		SpaceShopWidget->NotifyAbilityAllocationResult(bSucceeded);
+	}
 }
 
 void AJTSPlayerController::RestartCurrentLevel()
@@ -326,6 +364,11 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 {
 	if (!IsLocalController())
 	{
+		return;
+	}
+	if (IsInventoryQuantityDialogOpen())
+	{
+		ApplyModalUIInputMode(InventoryQuantityDialog);
 		return;
 	}
 	if (bGameplayInputModeActive)
@@ -553,6 +596,64 @@ bool AJTSPlayerController::IsSpaceShopOpen() const
 	return IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen();
 }
 
+void AJTSPlayerController::OpenInventoryQuantityDialog(int32 SlotIndex, bool bDestroy)
+{
+	if (!IsLocalController() || !IsNormalGameplayPhase() || IsGameMenuOpen() || IsSpaceShopOpen())
+	{
+		return;
+	}
+
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
+	if (!IsValid(Inventory))
+	{
+		return;
+	}
+
+	const FJTSItemInstance Item = Inventory->GetItemAtSlot(SlotIndex);
+	if (Item.IsEmpty() || Item.StackCount <= 1)
+	{
+		return;
+	}
+
+	if (!IsValid(InventoryQuantityDialog))
+	{
+		InventoryQuantityDialog = CreateWidget<UJTSInventoryQuantityDialogWidget>(this, UJTSInventoryQuantityDialogWidget::StaticClass());
+		if (IsValid(InventoryQuantityDialog))
+		{
+			InventoryQuantityDialog->AddToViewport(400);
+		}
+	}
+
+	if (!IsValid(InventoryQuantityDialog) || !InventoryQuantityDialog->OpenForItem(SlotIndex, Item, bDestroy))
+	{
+		CloseInventoryQuantityDialog();
+		return;
+	}
+
+	ApplyModalUIInputMode(InventoryQuantityDialog);
+}
+
+void AJTSPlayerController::CloseInventoryQuantityDialog()
+{
+	if (IsValid(InventoryQuantityDialog))
+	{
+		InventoryQuantityDialog->CloseDialog();
+		InventoryQuantityDialog->RemoveFromParent();
+		InventoryQuantityDialog = nullptr;
+	}
+
+	if (IsLocalController())
+	{
+		RestoreGameplayInputAfterModal();
+	}
+}
+
+bool AJTSPlayerController::IsInventoryQuantityDialogOpen() const
+{
+	return IsValid(InventoryQuantityDialog) && InventoryQuantityDialog->IsDialogOpen();
+}
+
 void AJTSPlayerController::OpenGameMenu()
 {
 	if (!IsLocalController() || !IsNormalGameplayPhase())
@@ -568,6 +669,11 @@ void AJTSPlayerController::OpenGameMenu()
 	if (IsSpaceShopOpen())
 	{
 		CloseSpaceShop();
+		return;
+	}
+	if (IsInventoryQuantityDialogOpen())
+	{
+		CloseInventoryQuantityDialog();
 		return;
 	}
 
@@ -616,10 +722,28 @@ bool AJTSPlayerController::IsGameMenuOpen() const
 	return IsValid(PrototypeWidget) && PrototypeWidget->IsGameMenuOpen();
 }
 
+void AJTSPlayerController::RestoreGameplayInputAfterModal()
+{
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
+	{
+		ApplySpaceWorldInputMode();
+	}
+	else if (const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr)
+	{
+		ApplyInputModeForPhase(GameState->GetGameplayPhase());
+	}
+}
+
 bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
 	if (Params.Event == IE_Pressed && Params.Key == EKeys::Escape)
 	{
+		if (IsInventoryQuantityDialogOpen())
+		{
+			CloseInventoryQuantityDialog();
+			return true;
+		}
 		if (IsSpaceShopOpen())
 		{
 			CloseSpaceShop();
@@ -764,6 +888,11 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 {
 	if (!IsLocalController())
 	{
+		return;
+	}
+	if (IsInventoryQuantityDialogOpen())
+	{
+		ApplyModalUIInputMode(InventoryQuantityDialog);
 		return;
 	}
 

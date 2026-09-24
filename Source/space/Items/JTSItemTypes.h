@@ -19,7 +19,8 @@ enum class EJTSItemId : uint8
 	Ore UMETA(DisplayName = "Ore"),
 	MoonAntCorpse UMETA(DisplayName = "Moon Ant Corpse"),
 	Pickaxe UMETA(DisplayName = "Pickaxe"),
-	Backpack UMETA(DisplayName = "Backpack"),
+	/** Retired serialized value kept only so old saves/world assets can be safely ignored. */
+	Backpack UMETA(Hidden),
 	Knife UMETA(DisplayName = "Knife"),
 	Pistol UMETA(DisplayName = "Pistol"),
 	MachineGun UMETA(DisplayName = "Machine Gun"),
@@ -34,7 +35,8 @@ enum class EJTSItemCapability : uint8
 {
 	None = 0 UMETA(Hidden),
 	Holdable = 1 << 0 UMETA(DisplayName = "Holdable"),
-	Wearable = 1 << 1 UMETA(DisplayName = "Wearable"),
+	/** Retained as a serialized bit only; wearable equipment no longer exists. */
+	Wearable = 1 << 1 UMETA(Hidden),
 	Mining = 1 << 2 UMETA(DisplayName = "Mining"),
 	MeleeOverride = 1 << 3 UMETA(DisplayName = "Melee Override"),
 	RangedWeapon = 1 << 4 UMETA(DisplayName = "Ranged Weapon"),
@@ -51,7 +53,8 @@ enum class EJTSItemCategory : uint8
 	Weapons UMETA(DisplayName = "Weapons"),
 	Mining UMETA(DisplayName = "Mining"),
 	Utility UMETA(DisplayName = "Utility"),
-	Wearables UMETA(DisplayName = "Wearables")
+	/** Retained for old data assets; new items are regular inventory items. */
+	Wearables UMETA(Hidden)
 };
 
 /** Shop navigation category. All is deliberately a UI filter, not an item type. */
@@ -63,7 +66,8 @@ enum class EJTSShopCategory : uint8
 	Mining UMETA(DisplayName = "Mining"),
 	Utility UMETA(DisplayName = "Utility"),
 	Resources UMETA(DisplayName = "Resources / Materials"),
-	Wearables UMETA(DisplayName = "Wearables")
+	/** Retained for old data assets; this shop filter is no longer exposed. */
+	Wearables UMETA(Hidden)
 };
 
 /** Authoritative outcome returned to the requesting client after a shop transaction. */
@@ -77,15 +81,15 @@ enum class EJTSShopPurchaseResult : uint8
 	DeliveryFailed UMETA(DisplayName = "Delivery Failed")
 };
 
-/** A wearable's one valid body location. Weapons and tools never use this container. */
+/** Legacy serialized values from the retired wearable system. */
 UENUM(BlueprintType)
 enum class EJTSWearableSlot : uint8
 {
 	None UMETA(DisplayName = "None"),
-	Backpack UMETA(DisplayName = "Backpack"),
-	Body UMETA(DisplayName = "Suit / Body"),
-	Head UMETA(DisplayName = "Helmet / Head"),
-	Accessory UMETA(DisplayName = "Accessory")
+	Backpack UMETA(Hidden),
+	Body UMETA(Hidden),
+	Head UMETA(Hidden),
+	Accessory UMETA(Hidden)
 };
 
 /** Runtime payload: definition identity stays data driven, while count/durability remain per-instance state. */

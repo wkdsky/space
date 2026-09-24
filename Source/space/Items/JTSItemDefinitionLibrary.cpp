@@ -37,7 +37,6 @@ namespace
 		case EJTSItemId::Pistol: return TEXT("/Game/Space/Data/Items/DA_Item_Pistol.DA_Item_Pistol");
 		case EJTSItemId::MachineGun: return TEXT("/Game/Space/Data/Items/DA_Item_MachineGun.DA_Item_MachineGun");
 		case EJTSItemId::Sniper: return TEXT("/Game/Space/Data/Items/DA_Item_Sniper.DA_Item_Sniper");
-		case EJTSItemId::Backpack: return TEXT("/Game/Space/Data/Items/DA_Item_Backpack.DA_Item_Backpack");
 		case EJTSItemId::Rock: return TEXT("/Game/Space/Data/Items/DA_Item_Rock.DA_Item_Rock");
 		case EJTSItemId::Ore: return TEXT("/Game/Space/Data/Items/DA_Item_Ore.DA_Item_Ore");
 		case EJTSItemId::Fuel: return TEXT("/Game/Space/Data/Items/DA_Item_Fuel.DA_Item_Fuel");
@@ -78,7 +77,7 @@ namespace
 			Definition->PrimaryCategory = Category;
 			Definition->ShopCategories = { EJTSShopCategory::Resources };
 			Definition->AffinityTags = { TEXT("Material"), TEXT("Improvised") };
-			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable });
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::StackableResource });
 			Definition->MaxStackSize = 1;
 			Definition->CombatDamage = 1.0f;
 			Definition->AccentColor = Color;
@@ -145,6 +144,9 @@ namespace
 			Definition->RangedFireInterval = 0.42f;
 			Definition->RangedRange = 9000.0f;
 			Definition->RangedAimFOV = 68.0f;
+			Definition->RangedHipSpreadDegrees = 1.1f;
+			Definition->RangedAimSpreadDegrees = 0.12f;
+			Definition->RangedViewKickDegrees = 0.9f;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 2), Cost(EJTSResourceType::Ore, 4) };
 			Definition->AccentColor = FLinearColor(0.42f, 0.72f, 1.0f, 1.0f);
 			break;
@@ -161,7 +163,9 @@ namespace
 			Definition->RangedFireInterval = 0.12f;
 			Definition->RangedRange = 8500.0f;
 			Definition->RangedAimFOV = 62.0f;
-			Definition->bAutomaticFire = true;
+			Definition->RangedHipSpreadDegrees = 2.2f;
+			Definition->RangedAimSpreadDegrees = 0.45f;
+			Definition->RangedViewKickDegrees = 0.42f;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 6), Cost(EJTSResourceType::Ore, 10) };
 			Definition->AccentColor = FLinearColor(1.0f, 0.34f, 0.18f, 1.0f);
 			break;
@@ -178,22 +182,11 @@ namespace
 			Definition->RangedFireInterval = 1.15f;
 			Definition->RangedRange = 16000.0f;
 			Definition->RangedAimFOV = 36.0f;
-			Definition->bAutomaticFire = false;
+			Definition->RangedHipSpreadDegrees = 2.5f;
+			Definition->RangedAimSpreadDegrees = 0.04f;
+			Definition->RangedViewKickDegrees = 2.1f;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 10), Cost(EJTSResourceType::Ore, 18) };
 			Definition->AccentColor = FLinearColor(0.72f, 0.42f, 1.0f, 1.0f);
-			break;
-		case EJTSItemId::Backpack:
-			Definition->DisplayName = FText::FromString(TEXT("Expedition Backpack"));
-			Definition->Description = FText::FromString(TEXT("Wearable expedition pack. Adds eight inventory slots; only one can occupy the backpack slot."));
-			Definition->PrimaryCategory = EJTSItemCategory::Wearables;
-			Definition->ShopCategories = { EJTSShopCategory::Wearables, EJTSShopCategory::Utility };
-			Definition->AffinityTags = { TEXT("Wearable"), TEXT("Capacity"), TEXT("Utility") };
-			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Wearable, EJTSItemCapability::ShopPurchasable });
-			Definition->WearableSlot = EJTSWearableSlot::Backpack;
-			Definition->InventoryCapacityBonus = 8;
-			Definition->CombatDamage = 0.0f;
-			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 5), Cost(EJTSResourceType::Ore, 2) };
-			Definition->AccentColor = FLinearColor(0.22f, 0.94f, 0.55f, 1.0f);
 			break;
 		case EJTSItemId::Axe:
 			Definition->DisplayName = FText::FromString(TEXT("Legacy Axe"));
@@ -217,7 +210,7 @@ namespace
 
 UJTSItemDefinition* UJTSItemDefinitionLibrary::GetItemDefinition(const UObject* /*WorldContextObject*/, EJTSItemId ItemId)
 {
-	if (ItemId == EJTSItemId::None)
+	if (!IsGameplayItemAvailable(ItemId))
 	{
 		return nullptr;
 	}
@@ -248,7 +241,7 @@ FText UJTSItemDefinitionLibrary::GetItemDisplayName(EJTSItemId ItemId)
 	{
 		return Definition->DisplayName;
 	}
-	return FText::FromString(TEXT("Empty"));
+	return FText::FromString(ItemId == EJTSItemId::Backpack ? TEXT("Retired Item") : TEXT("Empty"));
 }
 
 bool UJTSItemDefinitionLibrary::TryGetResourceType(EJTSItemId ItemId, EJTSResourceType& OutResourceType)
@@ -282,7 +275,7 @@ EJTSItemId UJTSItemDefinitionLibrary::GetItemIdForResource(EJTSResourceType Reso
 FJTSItemInstance UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId ItemId, int32 Count)
 {
 	FJTSItemInstance Result;
-	if (ItemId == EJTSItemId::None || Count <= 0)
+	if (!IsGameplayItemAvailable(ItemId) || Count <= 0)
 	{
 		return Result;
 	}
@@ -297,6 +290,11 @@ FJTSItemInstance UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId ItemId, int3
 	return Result;
 }
 
+bool UJTSItemDefinitionLibrary::IsGameplayItemAvailable(const EJTSItemId ItemId)
+{
+	return ItemId != EJTSItemId::None && ItemId != EJTSItemId::Backpack;
+}
+
 const TArray<EJTSItemId>& UJTSItemDefinitionLibrary::GetDefaultShopCatalog()
 {
 	static const TArray<EJTSItemId> Catalog = {
@@ -304,8 +302,7 @@ const TArray<EJTSItemId>& UJTSItemDefinitionLibrary::GetDefaultShopCatalog()
 		EJTSItemId::Knife,
 		EJTSItemId::Pistol,
 		EJTSItemId::MachineGun,
-		EJTSItemId::Sniper,
-		EJTSItemId::Backpack
+		EJTSItemId::Sniper
 	};
 	return Catalog;
 }

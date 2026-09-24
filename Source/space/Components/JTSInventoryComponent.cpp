@@ -5,10 +5,10 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
-#include "space/Components/JTSWearableEquipmentComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWorldPickupActor.h"
+#include "space/Player/JTSPlayerState.h"
 
 UJTSInventoryComponent::UJTSInventoryComponent()
 {
@@ -32,10 +32,9 @@ int32 UJTSInventoryComponent::GetBaseInventoryCapacity() const
 
 int32 UJTSInventoryComponent::GetInventoryCapacity() const
 {
-	const UJTSWearableEquipmentComponent* const Wearables = GetOwner() != nullptr
-		? GetOwner()->FindComponentByClass<UJTSWearableEquipmentComponent>()
-		: nullptr;
-	return GetBaseInventoryCapacity() + (IsValid(Wearables) ? Wearables->GetInventoryCapacityBonus() : 0);
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	const AJTSPlayerState* const PlayerState = IsValid(OwnerPawn) ? OwnerPawn->GetPlayerState<AJTSPlayerState>() : nullptr;
+	return GetBaseInventoryCapacity() + (IsValid(PlayerState) ? PlayerState->GetInventorySlotCapacityBonus() : 0);
 }
 
 int32 UJTSInventoryComponent::GetUsedSlotCount() const
@@ -68,12 +67,27 @@ FJTSItemInstance UJTSInventoryComponent::GetItemAtSlot(int32 SlotIndex) const
 
 int32 UJTSInventoryComponent::GetSelectedQuickbarSlot() const
 {
-	return FMath::Clamp(SelectedQuickbarSlot, 0, FMath::Max(0, GetQuickbarSlotCount() - 1));
+	return FMath::Clamp(SelectedQuickbarSlot, 0, FMath::Max(0, GetInventoryCapacity() - 1));
 }
 
 int32 UJTSInventoryComponent::GetQuickbarSlotCount() const
 {
-	return FMath::Clamp(GetInventoryCapacity(), 0, 4);
+	return FMath::Clamp(GetInventoryCapacity() - GetQuickbarPageStart(), 0, MaximumQuickbarSlots);
+}
+
+int32 UJTSInventoryComponent::GetQuickbarPageCount() const
+{
+	return FMath::Max(1, (GetInventoryCapacity() + MaximumQuickbarSlots - 1) / MaximumQuickbarSlots);
+}
+
+int32 UJTSInventoryComponent::GetQuickbarPageIndex() const
+{
+	return FMath::Clamp(QuickbarPageIndex, 0, GetQuickbarPageCount() - 1);
+}
+
+int32 UJTSInventoryComponent::GetQuickbarPageStart() const
+{
+	return GetQuickbarPageIndex() * MaximumQuickbarSlots;
 }
 
 FJTSItemInstance UJTSInventoryComponent::GetActiveItem() const
@@ -88,7 +102,7 @@ EJTSItemId UJTSInventoryComponent::GetActiveItemId() const
 
 bool UJTSInventoryComponent::SelectQuickbarSlot(int32 SlotIndex)
 {
-	if (SlotIndex < 0 || SlotIndex >= GetQuickbarSlotCount())
+	if (SlotIndex < 0 || SlotIndex >= GetInventoryCapacity())
 	{
 		return false;
 	}
@@ -98,9 +112,11 @@ bool UJTSInventoryComponent::SelectQuickbarSlot(int32 SlotIndex)
 		return true;
 	}
 
-	if (SelectedQuickbarSlot != SlotIndex)
+	const int32 NewPageIndex = SlotIndex / MaximumQuickbarSlots;
+	if (SelectedQuickbarSlot != SlotIndex || QuickbarPageIndex != NewPageIndex)
 	{
 		SelectedQuickbarSlot = SlotIndex;
+		QuickbarPageIndex = NewPageIndex;
 		NotifyInventoryChanged();
 	}
 	return true;
@@ -111,10 +127,42 @@ void UJTSInventoryComponent::ServerSelectQuickbarSlot_Implementation(int32 SlotI
 	SelectQuickbarSlot(SlotIndex);
 }
 
+bool UJTSInventoryComponent::SelectQuickbarPage(int32 PageIndex)
+{
+	if (PageIndex < 0 || PageIndex >= GetQuickbarPageCount())
+	{
+		return false;
+	}
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerSelectQuickbarPage(PageIndex);
+		return true;
+	}
+	if (QuickbarPageIndex != PageIndex)
+	{
+		// Never leave selection on a hidden page: preserve the physical 1-9 position where
+		// possible, then clamp the last short page to its final visible slot.
+		const int32 SlotOffset = GetSelectedQuickbarSlot() % MaximumQuickbarSlots;
+		const int32 NewPageStart = PageIndex * MaximumQuickbarSlots;
+		SelectedQuickbarSlot = FMath::Min(
+			NewPageStart + SlotOffset,
+			FMath::Max(0, GetInventoryCapacity() - 1));
+		QuickbarPageIndex = PageIndex;
+		NotifyInventoryChanged();
+	}
+	return true;
+}
+
+void UJTSInventoryComponent::ServerSelectQuickbarPage_Implementation(int32 PageIndex)
+{
+	SelectQuickbarPage(PageIndex);
+}
+
 bool UJTSInventoryComponent::TryAddItem(const FJTSItemInstance& Item, int32& OutRemaining)
 {
 	OutRemaining = FMath::Max(0, Item.StackCount);
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || Item.IsEmpty())
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || Item.IsEmpty()
+		|| !UJTSItemDefinitionLibrary::IsGameplayItemAvailable(Item.ItemId))
 	{
 		return false;
 	}
@@ -140,7 +188,7 @@ bool UJTSInventoryComponent::TryAddItemById(EJTSItemId ItemId, int32 Count)
 
 bool UJTSInventoryComponent::CanAddItem(EJTSItemId ItemId, int32 Count) const
 {
-	if (ItemId == EJTSItemId::None || Count <= 0)
+	if (!UJTSItemDefinitionLibrary::IsGameplayItemAvailable(ItemId) || Count <= 0)
 	{
 		return false;
 	}
@@ -166,6 +214,19 @@ int32 UJTSInventoryComponent::GetItemCount(EJTSItemId ItemId) const
 		}
 	}
 	return Result;
+}
+
+int32 UJTSInventoryComponent::GetEffectiveStackLimit(const EJTSItemId ItemId) const
+{
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if (!IsValid(Definition) || !Definition->IsStackable())
+	{
+		return 1;
+	}
+
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	const AJTSPlayerState* const PlayerState = IsValid(OwnerPawn) ? OwnerPawn->GetPlayerState<AJTSPlayerState>() : nullptr;
+	return IsValid(PlayerState) ? FMath::Max(1, PlayerState->GetItemStackLimit()) : 1;
 }
 
 bool UJTSInventoryComponent::TryRemoveItem(EJTSItemId ItemId, int32 Count)
@@ -279,69 +340,105 @@ bool UJTSInventoryComponent::DropItemAtSlot(int32 SlotIndex)
 	{
 		return false;
 	}
+	return DropItemQuantityAtSlot(SlotIndex, ItemSlots[SlotIndex].StackCount);
+}
+
+bool UJTSInventoryComponent::DropItemQuantityAtSlot(int32 SlotIndex, int32 Count)
+{
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerDropItemQuantityAtSlot(SlotIndex, Count);
+		return Count > 0;
+	}
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !ItemSlots.IsValidIndex(SlotIndex)
+		|| ItemSlots[SlotIndex].IsEmpty() || Count <= 0 || Count > ItemSlots[SlotIndex].StackCount)
+	{
+		return false;
+	}
 
 	APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	FJTSItemInstance DroppedItem = ItemSlots[SlotIndex];
+	DroppedItem.StackCount = Count;
+	if (Count != ItemSlots[SlotIndex].StackCount)
+	{
+		DroppedItem.InstanceId = FGuid::NewGuid();
+	}
 	AJTSWorldPickupActor* const Pickup = IsValid(OwnerPawn)
-		? AJTSWorldPickupActor::SpawnGameplayDrop(GetWorld(), ItemSlots[SlotIndex], OwnerPawn->GetActorLocation(), OwnerPawn, OwnerPawn, OwnerPawn->GetActorForwardVector())
+		? AJTSWorldPickupActor::SpawnGameplayDrop(GetWorld(), DroppedItem, OwnerPawn->GetActorLocation(), OwnerPawn, OwnerPawn, OwnerPawn->GetActorForwardVector())
 		: nullptr;
 	if (!IsValid(Pickup))
 	{
 		return false;
 	}
-	ItemSlots[SlotIndex].Clear();
+	ItemSlots[SlotIndex].StackCount -= Count;
+	if (ItemSlots[SlotIndex].StackCount <= 0)
+	{
+		ItemSlots[SlotIndex].Clear();
+	}
 	NotifyInventoryChanged();
 	return true;
 }
 
 void UJTSInventoryComponent::ServerDropItemAtSlot_Implementation(int32 SlotIndex)
 {
-	DropItemAtSlot(SlotIndex);
+	if (SlotIndex == GetSelectedQuickbarSlot())
+	{
+		DropItemAtSlot(SlotIndex);
+	}
 }
 
-bool UJTSInventoryComponent::GetOverflowItemsForCapacity(int32 NewCapacity, TArray<FJTSItemInstance>& OutOverflowItems) const
+void UJTSInventoryComponent::ServerDropItemQuantityAtSlot_Implementation(int32 SlotIndex, int32 Count)
 {
-	OutOverflowItems.Reset();
-	if (NewCapacity < 0 || NewCapacity > ItemSlots.Num())
+	if (SlotIndex == GetSelectedQuickbarSlot())
 	{
-		return NewCapacity >= 0;
+		DropItemQuantityAtSlot(SlotIndex, Count);
 	}
-	for (int32 SlotIndex = NewCapacity; SlotIndex < ItemSlots.Num(); ++SlotIndex)
-	{
-		if (!ItemSlots[SlotIndex].IsEmpty())
-		{
-			OutOverflowItems.Add(ItemSlots[SlotIndex]);
-		}
-	}
-	return true;
 }
 
-bool UJTSInventoryComponent::CommitOverflowRemovalForCapacity(int32 NewCapacity, const TArray<FJTSItemInstance>& ExpectedOverflowItems)
+bool UJTSInventoryComponent::DestroyItemQuantityAtSlot(int32 SlotIndex, int32 Count)
 {
-	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		ServerDestroyItemQuantityAtSlot(SlotIndex, Count);
+		return Count > 0;
+	}
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !ItemSlots.IsValidIndex(SlotIndex)
+		|| ItemSlots[SlotIndex].IsEmpty() || Count <= 0 || Count > ItemSlots[SlotIndex].StackCount)
 	{
 		return false;
 	}
-	TArray<FJTSItemInstance> CurrentOverflow;
-	if (!GetOverflowItemsForCapacity(NewCapacity, CurrentOverflow) || CurrentOverflow.Num() != ExpectedOverflowItems.Num())
-	{
-		return false;
-	}
-	for (int32 Index = 0; Index < CurrentOverflow.Num(); ++Index)
-	{
-		if (CurrentOverflow[Index].ItemId != ExpectedOverflowItems[Index].ItemId
-			|| CurrentOverflow[Index].StackCount != ExpectedOverflowItems[Index].StackCount
-			|| CurrentOverflow[Index].InstanceId != ExpectedOverflowItems[Index].InstanceId)
-		{
-			return false;
-		}
-	}
-	for (int32 SlotIndex = FMath::Max(0, NewCapacity); SlotIndex < ItemSlots.Num(); ++SlotIndex)
+
+	ItemSlots[SlotIndex].StackCount -= Count;
+	if (ItemSlots[SlotIndex].StackCount <= 0)
 	{
 		ItemSlots[SlotIndex].Clear();
 	}
-	ItemSlots.SetNum(FMath::Max(0, NewCapacity), EAllowShrinking::No);
 	NotifyInventoryChanged();
 	return true;
+}
+
+void UJTSInventoryComponent::ServerDestroyItemQuantityAtSlot_Implementation(int32 SlotIndex, int32 Count)
+{
+	if (SlotIndex == GetSelectedQuickbarSlot())
+	{
+		DestroyItemQuantityAtSlot(SlotIndex, Count);
+	}
+}
+
+void UJTSInventoryComponent::RefreshCapacityFromProgression()
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		NotifyInventoryChanged();
+		return;
+	}
+
+	const int32 PreviousSlotCount = ItemSlots.Num();
+	EnsureSlotCount();
+	if (ItemSlots.Num() != PreviousSlotCount)
+	{
+		NotifyInventoryChanged();
+	}
 }
 
 void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot)
@@ -360,14 +457,15 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 				Item.Clear();
 			}
 		}
-		SelectedQuickbarSlot = FMath::Clamp(NewSelectedQuickbarSlot, 0, FMath::Max(0, GetQuickbarSlotCount() - 1));
+		SelectedQuickbarSlot = FMath::Clamp(NewSelectedQuickbarSlot, 0, FMath::Max(0, GetInventoryCapacity() - 1));
+		QuickbarPageIndex = SelectedQuickbarSlot / MaximumQuickbarSlots;
 		NotifyInventoryChanged();
 	};
 
 	// Save files written before the two-slot, one-resource-per-slot rules can contain both
 	// oversized inventories and resource stacks. Normalize them without throwing away any saved
-	// payload: only active-capacity slots are exposed now, while the compatibility overflow stays
-	// serialized and becomes visible again if a wearable later expands the inventory.
+	// payload: only active-capacity slots are exposed now, while migration overflow stays
+	// serialized and becomes visible again after a progression capacity upgrade.
 	const int32 Capacity = GetInventoryCapacity();
 	TArray<FJTSItemInstance> RestoredSlots;
 	RestoredSlots.SetNum(Capacity);
@@ -380,10 +478,11 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 			continue;
 		}
 
-		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, SavedItem.ItemId);
-		const int32 StackLimit = IsValid(Definition) && Definition->IsStackable()
-			? FMath::Max(1, Definition->MaxStackSize)
-			: 1;
+		if (!UJTSItemDefinitionLibrary::IsGameplayItemAvailable(SavedItem.ItemId))
+		{
+			continue;
+		}
+		const int32 StackLimit = GetEffectiveStackLimit(SavedItem.ItemId);
 		const bool bSplitSavedStack = SavedItem.StackCount > StackLimit;
 		int32 Remaining = SavedItem.StackCount;
 		bool bPlacedFirstChunk = false;
@@ -439,7 +538,7 @@ bool UJTSInventoryComponent::InsertIntoSlots(TArray<FJTSItemInstance>& InOutSlot
 		return false;
 	}
 	InOutSlots.SetNum(FMath::Max(InOutSlots.Num(), Capacity));
-	const int32 StackLimit = Definition->IsStackable() ? FMath::Max(1, Definition->MaxStackSize) : 1;
+	const int32 StackLimit = GetEffectiveStackLimit(Item.ItemId);
 
 	if (Definition->IsStackable())
 	{
@@ -456,7 +555,7 @@ bool UJTSInventoryComponent::InsertIntoSlots(TArray<FJTSItemInstance>& InOutSlot
 		}
 	}
 
-	const int32 QuickbarCapacity = FMath::Min(4, Capacity);
+	const int32 QuickbarCapacity = FMath::Min(MaximumQuickbarSlots, Capacity);
 	const bool bPreferQuickbar = Definition->IsHoldable() && !Definition->IsStackable();
 	auto FillEmptySlotRange = [&InOutSlots, &Item, &OutRemaining, StackLimit](const int32 StartIndex, const int32 EndIndex)
 	{
@@ -479,9 +578,13 @@ bool UJTSInventoryComponent::InsertIntoSlots(TArray<FJTSItemInstance>& InOutSlot
 
 	// Combat/tools become immediately usable through the exposed quickbar. Stackable materials stay
 	// out of those slots while normal inventory space exists, so a manual pickup never silently
-	// hides a new tool.
+	// hides a new tool. An empty selected slot is explicit player intent, so fill it first: the
+	// inventory notification then refreshes the held-item visual without changing the player's
+	// selected slot on their behalf.
 	if (bPreferQuickbar)
 	{
+		const int32 PreferredQuickbarSlot = FMath::Clamp(GetSelectedQuickbarSlot(), 0, QuickbarCapacity - 1);
+		FillEmptySlotRange(PreferredQuickbarSlot, PreferredQuickbarSlot + 1);
 		FillEmptySlotRange(0, QuickbarCapacity);
 		FillEmptySlotRange(QuickbarCapacity, Capacity);
 	}
@@ -510,7 +613,7 @@ void UJTSInventoryComponent::EnsureSlotCount()
 		{
 			// Compatibility overflow is intentionally retained until it is either made
 			// visible by an expanded capacity or removed through the explicit safe
-			// overflow path used by wearable equipment.
+			// migration overflow path, preserved until progression grows capacity.
 			if (!ItemSlots[SlotIndex].IsEmpty())
 			{
 				return;
@@ -535,9 +638,15 @@ void UJTSInventoryComponent::OnRep_SelectedQuickbarSlot()
 	NotifyInventoryChanged();
 }
 
+void UJTSInventoryComponent::OnRep_QuickbarPageIndex()
+{
+	NotifyInventoryChanged();
+}
+
 void UJTSInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UJTSInventoryComponent, ItemSlots);
 	DOREPLIFETIME(UJTSInventoryComponent, SelectedQuickbarSlot);
+	DOREPLIFETIME_CONDITION(UJTSInventoryComponent, QuickbarPageIndex, COND_OwnerOnly);
 }

@@ -9,6 +9,9 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
@@ -284,6 +287,7 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	{
 		Expedition->RestorePlayerState(Character->GetPlayerState<AJTSPlayerState>(), Character);
 	}
+	ApplyConfiguredStartingItems(Character);
 	Context.Spacecraft = Spacecraft;
 	Context.GameplayData = Definition->GameplayData.IsNull() ? nullptr : Definition->GameplayData.LoadSynchronous();
 	if (!Definition->GameplayData.IsNull() && !IsValid(Context.GameplayData))
@@ -321,6 +325,58 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	}
 	UE_LOG(LogTemp, Log, TEXT("SpaceWorld surface gameplay ready: PlanetId=%s Controller=%s."),
 		*Planet->GetPlanetId().ToString(), *GetNameSafe(ControllerActor));
+}
+
+void AJTSSpaceWorldGameMode::ApplyConfiguredStartingItems(AJTSCharacter* Character)
+{
+	if (!IsValid(Character) || StartingItemIds.IsEmpty() || GetWorld() == nullptr || GetWorld()->GetNetMode() == NM_Client)
+	{
+		return;
+	}
+
+	UJTSInventoryComponent* const Inventory = Character->FindComponentByClass<UJTSInventoryComponent>();
+	if (!IsValid(Inventory))
+	{
+		return;
+	}
+
+	TSet<EJTSItemId> GrantedIds;
+	for (const EJTSItemId ItemId : StartingItemIds)
+	{
+		if (ItemId == EJTSItemId::None || GrantedIds.Contains(ItemId))
+		{
+			continue;
+		}
+		GrantedIds.Add(ItemId);
+		if (Inventory->GetItemCount(ItemId) > 0)
+		{
+			continue;
+		}
+		const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+		if (IsValid(Definition) && Definition->IsHoldable())
+		{
+			const bool bAdded = Inventory->TryAddItemById(ItemId);
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("SpaceWorld starter item: Character=%s ItemId=%d Added=%d ActiveItem=%d"),
+				*GetNameSafe(Character),
+				static_cast<int32>(ItemId),
+				bAdded,
+				static_cast<int32>(Inventory->GetActiveItemId()));
+		}
+		else
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("SpaceWorld starter item rejected: Character=%s ItemId=%d Definition=%s Holdable=%d"),
+				*GetNameSafe(Character),
+				static_cast<int32>(ItemId),
+				*GetNameSafe(Definition),
+				IsValid(Definition) && Definition->IsHoldable());
+		}
+	}
 }
 
 const FJTSSurfaceGameplayControllerDefinition* AJTSSpaceWorldGameMode::FindSurfaceGameplayDefinition(

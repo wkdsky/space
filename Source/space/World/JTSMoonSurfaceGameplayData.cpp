@@ -11,14 +11,6 @@ float UJTSMoonSurfaceGameplayData::GetWaterConsumptionPerPersonPerMinute() const
 float UJTSMoonSurfaceGameplayData::GetConsumptionTickInterval() const { return FMath::Max(0.0f, ConsumptionTickInterval); }
 float UJTSMoonSurfaceGameplayData::GetMinimumConsumptionUnit() const { return FMath::Max(0.0f, MinimumConsumptionUnit); }
 
-int32 UJTSMoonSurfaceGameplayData::GetPickaxeRockCost() const { return FMath::Max(1, PickaxeRockCost); }
-int32 UJTSMoonSurfaceGameplayData::GetBackpackRockCost() const { return FMath::Max(1, BackpackRockCost); }
-int32 UJTSMoonSurfaceGameplayData::GetBackpackOreCost() const { return FMath::Max(1, BackpackOreCost); }
-int32 UJTSMoonSurfaceGameplayData::GetKnifeRockCost() const { return FMath::Max(0, KnifeRockCost); }
-int32 UJTSMoonSurfaceGameplayData::GetKnifeOreCost() const { return FMath::Max(0, KnifeOreCost); }
-int32 UJTSMoonSurfaceGameplayData::GetAxeRockCost() const { return FMath::Max(0, AxeRockCost); }
-int32 UJTSMoonSurfaceGameplayData::GetAxeOreCost() const { return FMath::Max(0, AxeOreCost); }
-
 int32 UJTSMoonSurfaceGameplayData::GetLargeRockTotalYieldUnits() const { return FMath::Max(1, LargeRockTotalYieldUnits); }
 int32 UJTSMoonSurfaceGameplayData::GetOreDepositTotalYieldUnits() const { return FMath::Max(1, OreDepositTotalYieldUnits); }
 float UJTSMoonSurfaceGameplayData::GetPickupMaxDistance() const { return FMath::Max(50.0f, PickupMaxDistance); }

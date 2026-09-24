@@ -21,7 +21,6 @@ class AJTSSpacecraftActor;
 class IJTSMoonSurfaceGameplaySettings;
 class UJTSMoonSurfaceGameplayData;
 class ULevel;
-enum class EJTSEquipmentType : uint8;
 
 /**
  * Moon-specific gameplay controller for the active PlanetAnchor surface.
@@ -93,12 +92,6 @@ public:
 		const FVector& CandidateLocation,
 		FVector& OutGroundLocation) const;
 
-	/** Shared Moon workshop transactions. */
-	bool TryCraftPickaxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft);
-	bool TryCraftBackpack(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft);
-	bool TryCraftKnife(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft);
-	bool TryCraftAxe(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft);
-
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -111,7 +104,6 @@ private:
 	AJTSMoonCorpseActor* FindLevelCorpseLandmark();
 	void ClearGeneratedMoonAntNests();
 	void ConsumeExpeditionSupplies();
-	bool TryBuyWorkshopEquipment(AJTSCharacter* Player, AJTSSpacecraftActor* Spacecraft, EJTSEquipmentType EquipmentType);
 	static int32 GetWholeConsumptionUnits(double Accumulator, double MinimumConsumptionUnit);
 
 	/** Project-configured Moon balance and asset selection for real SpaceWorld gameplay. */

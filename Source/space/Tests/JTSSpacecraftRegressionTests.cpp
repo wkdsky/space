@@ -19,8 +19,10 @@
 #include "InputActionValue.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "UObject/UnrealType.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -128,6 +130,30 @@ namespace
 			return Controller;
 		}
 	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSInventorySelectedQuickbarRegression, "JTS.Inventory.SelectedQuickbarReceivesHoldable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSInventorySelectedQuickbarRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	AJTSCharacter* Character = nullptr;
+	Fixture.AddPlayer(Character);
+	UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+	if (!TestNotNull(TEXT("Character owns an inventory"), Inventory))
+	{
+		return false;
+	}
+
+	Inventory->RestoreItems({}, 1);
+	TestEqual(TEXT("Selected quickbar slot remains the player's choice"), Inventory->GetSelectedQuickbarSlot(), 1);
+	TestTrue(TEXT("Selected quickbar slot starts empty"), Inventory->GetItemAtSlot(1).IsEmpty());
+	TestTrue(TEXT("Holdable can enter the inventory"), Inventory->TryAddItemById(EJTSItemId::Pistol));
+	TestTrue(TEXT("Holdable is placed in the selected empty quickbar slot"), Inventory->GetItemAtSlot(1).ItemId == EJTSItemId::Pistol);
+	TestTrue(TEXT("Placed holdable becomes the active item"), Inventory->GetActiveItemId() == EJTSItemId::Pistol);
+	TestTrue(TEXT("Unselected empty quickbar slot remains untouched"), Inventory->GetItemAtSlot(0).IsEmpty());
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSBoardingRegression, "JTS.Spacecraft.PossessionAndDisembark",

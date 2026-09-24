@@ -16,7 +16,6 @@ class UCameraComponent;
 class UJTSCarryComponent;
 class UJTSHealthComponent;
 class UJTSInventoryComponent;
-class UJTSPlayerEquipmentComponent;
 class UJTSPlanetGravityComponent;
 class UJTSRangedWeaponComponent;
 class UJTSWeaponVisualComponent;
@@ -59,13 +58,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Carry")
 	UJTSCarryComponent* GetCarryComponent() const;
 
-	/** Replicated general item inventory. The first four slots are the quickbar. */
+	/** Replicated general item inventory. It owns tools, weapons, resources, and worn-item data alike. */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	UJTSInventoryComponent* GetInventoryComponent() const;
-
-	/** Returns this character's four-slot equipment loadout. */
-	UFUNCTION(BlueprintPure, Category = "Equipment")
-	UJTSPlayerEquipmentComponent* GetEquipmentComponent() const;
 
 	/** Returns the reusable player health pool used by UE's standard damage path. */
 	UFUNCTION(BlueprintPure, Category = "Health")
@@ -107,12 +102,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
 	float GetAimPitch() const;
 
-	/** The HUD queries this state to draw an equipment-slot hold ring. */
-	UFUNCTION(BlueprintPure, Category = "Equipment")
-	int32 GetEquipmentHoldSlotIndex() const;
+	/** Local camera response to a shot; gameplay hit traces remain server-owned. */
+	void ApplyWeaponViewKick(float PitchDegrees);
 
-	UFUNCTION(BlueprintPure, Category = "Equipment")
-	float GetEquipmentHoldProgress() const;
+	/** The HUD queries this state to draw the selected-item destroy hold ring. */
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	int32 GetItemDiscardHoldSlotIndex() const;
+
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	float GetItemDiscardHoldProgress() const;
 
 	UFUNCTION(BlueprintPure, Category = "Boarding")
 	bool IsBoardingHoldActive() const;
@@ -193,23 +191,30 @@ private:
 	void HandleAimReleased(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
 	void HandleCameraZoom(const FInputActionValue& Value);
-	void HandleEquipmentSlotOneStarted(const FInputActionValue& Value);
-	void HandleEquipmentSlotTwoStarted(const FInputActionValue& Value);
-	void HandleEquipmentSlotThreeStarted(const FInputActionValue& Value);
-	void HandleEquipmentSlotFourStarted(const FInputActionValue& Value);
-	void HandleEquipmentSlotOneReleased(const FInputActionValue& Value);
-	void HandleEquipmentSlotTwoReleased(const FInputActionValue& Value);
-	void HandleEquipmentSlotThreeReleased(const FInputActionValue& Value);
-	void HandleEquipmentSlotFourReleased(const FInputActionValue& Value);
+	void HandleQuickbarSlotOneStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotTwoStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotThreeStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotFourStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotFiveStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotSixStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotSevenStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotEightStarted(const FInputActionValue& Value);
+	void HandleQuickbarSlotNineStarted(const FInputActionValue& Value);
+	void HandlePreviousQuickbarPageStarted(const FInputActionValue& Value);
+	void HandleNextQuickbarPageStarted(const FInputActionValue& Value);
+	void HandleDiscardItemStarted(const FInputActionValue& Value);
+	void HandleDiscardItemReleased(const FInputActionValue& Value);
 
 	bool BeginBoardingHold();
 	void CancelBoardingHold();
 	void CompleteBoardingHold();
 	AJTSSpacecraftActor* GetCurrentBoardingSpacecraft();
-	void BeginEquipmentSlotHold(int32 SlotIndex);
-	void EndEquipmentSlotHold(int32 SlotIndex);
-	void CancelEquipmentSlotHold();
-	void CompleteEquipmentSlotHold();
+	void SelectQuickbarSlotByPage(int32 SlotIndexInPage);
+	void BeginItemDiscardHold();
+	void EndItemDiscardHold();
+	void CancelItemDiscardHold();
+	void CompleteItemDiscardHold();
+	void ApplyProgressionMovementSpeed();
 	bool CanUseNormalGameplayInput() const;
 	bool IsGameplayInputBlocked() const;
 	bool IsSpaceWorldSurfaceGameplayActive() const;
@@ -225,6 +230,10 @@ private:
 	void ApplyCameraView();
 	void ApplyCameraPitchLimits();
 	void UpdateAimCamera(float DeltaSeconds);
+	void ShiftLocalViewPitch(float DeltaDegrees);
+
+	UFUNCTION(Server, Unreliable)
+	void ServerUpdateAimPitch(float NewPitch);
 	void PlayUnarmedPunchPresentation(bool bUseLeftPunch, bool bIsComboContinuation);
 	void StopUnarmedPunchPresentation();
 	void ApplySurfaceMovementSettings();
@@ -294,10 +303,6 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSInventoryComponent> InventoryComponent;
 
-	/** Body-worn slots only; the compatibility class preserves old Blueprint references. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UJTSPlayerEquipmentComponent> EquipmentComponent;
-
 	/** Shared player health state. Future weapons, monsters, and hazards use this component. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSHealthComponent> HealthComponent;
@@ -362,11 +367,11 @@ private:
 	float PlanetBodyTurnInterpolationSpeed = 12.0f;
 
 	/**
-	 * Blueprint-selectable third-person body behavior for real spherical planets only. Earth and the
-	 * legacy flat Moon retain CharacterMovement's normal bOrientRotationToMovement behavior.
+	 * Blueprint-selectable third-person body behavior for real spherical planets only. Camera yaw is
+	 * intentionally independent from body yaw; OrientToMovement is the normal third-person default.
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true"))
-	EJTSPlanetBodyFacingMode PlanetBodyFacingMode = EJTSPlanetBodyFacingMode::FaceCamera;
+	EJTSPlanetBodyFacingMode PlanetBodyFacingMode = EJTSPlanetBodyFacingMode::OrientToMovement;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDebugPlanetSurface = false;
@@ -456,8 +461,16 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Player|Aim", meta = (AllowPrivateAccess = "true"))
 	float AimPitch = 0.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
-	float EquipmentHoldToDropDuration = 0.8f;
+	UPROPERTY(Replicated, Transient)
+	float ReplicatedAimPitch = 0.0f;
+
+	float PendingViewRecoilDegrees = 0.0f;
+	double LastAimPitchSendSeconds = -100.0;
+	float LastSentAimPitch = 0.0f;
+
+	/** Seconds G must be held before the selected item is permanently destroyed. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
+	float ItemDestroyHoldDuration = 0.8f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;
@@ -499,7 +512,16 @@ private:
 	TObjectPtr<UInputAction> CameraZoomAction;
 
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UInputAction>> EquipmentSlotActions;
+	TArray<TObjectPtr<UInputAction>> QuickbarSlotActions;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PreviousQuickbarPageAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> NextQuickbarPageAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> DiscardItemAction;
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundInputComponent;
@@ -511,13 +533,14 @@ private:
 	TWeakObjectPtr<AJTSSpacecraftActor> BoardingSpacecraft;
 
 	FTimerHandle BoardingHoldTimerHandle;
-	FTimerHandle EquipmentHoldTimerHandle;
+	FTimerHandle ItemDiscardHoldTimerHandle;
 	double BoardingHoldStartTime = 0.0;
-	double EquipmentHoldStartTime = 0.0;
-	int32 HeldEquipmentSlotIndex = INDEX_NONE;
+	double ItemDiscardHoldStartTime = 0.0;
+	int32 HeldItemDiscardSlotIndex = INDEX_NONE;
 	bool bBoardingHoldActive = false;
 	bool bInteractKeyHeld = false;
-	bool bEquipmentHoldCompleted = false;
+	bool bItemDiscardHoldCompleted = false;
+	bool bSprintInputActive = false;
 	bool bFirstPersonView = false;
 	bool bThirdPersonCameraDistanceInitialized = false;
 	bool bPlanetFrameInitialized = false;
