@@ -80,6 +80,12 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 		return;
 	}
 
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bHoldCruisePosition = SpaceWorldManager != nullptr && SpaceWorldManager->IsInterplanetaryCruiseActive();
+	const FVector CruiseAnchor = bHoldCruisePosition && IsValid(UpdatedComponent)
+		? UpdatedComponent->GetComponentLocation()
+		: FVector::ZeroVector;
+
 	if (bAssistedLanding)
 	{
 		TickAssistedLanding(DeltaTime);
@@ -89,7 +95,12 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 		TickFlight(DeltaTime);
 	}
 
-	SubmitExteriorAltitude();
+	if (bHoldCruisePosition && IsValid(UpdatedComponent))
+	{
+		UpdatedComponent->SetWorldLocation(CruiseAnchor);
+	}
+
+	SubmitExteriorAltitude(DeltaTime);
 }
 
 void UJTSSpacecraftFlightMovementComponent::SetMoveInput(const FVector2D& Value)
@@ -851,7 +862,7 @@ bool UJTSSpacecraftFlightMovementComponent::HasForwardFlightIntent() const
 	return MoveInput.Y > FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
 }
 
-void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude()
+void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude(float DeltaTime)
 {
 	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner());
 	if (!IsValid(Spacecraft))
@@ -865,6 +876,7 @@ void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude()
 		// target handoff. This runs after the authoritative movement step so all players receive the
 		// same departure/arrival decision.
 		Manager->UpdateSpacecraftFlightState(Spacecraft);
+		Manager->UpdateInterplanetaryCruise(Spacecraft, DeltaTime);
 	}
 }
 

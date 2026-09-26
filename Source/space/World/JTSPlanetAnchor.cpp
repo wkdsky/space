@@ -151,6 +151,16 @@ float AJTSPlanetAnchor::GetSpaceExitRange() const
 	return FMath::IsFinite(SpaceExitRange) ? FMath::Max(0.0f, SpaceExitRange) : 0.0f;
 }
 
+float AJTSPlanetAnchor::GetHeliocentricDistanceKilometers() const
+{
+	return FMath::IsFinite(HeliocentricDistanceKilometers) ? FMath::Max(0.0f, HeliocentricDistanceKilometers) : 0.0f;
+}
+
+FName AJTSPlanetAnchor::GetParentPlanetId() const
+{
+	return ParentPlanetId;
+}
+
 bool AJTSPlanetAnchor::IsWithinSpaceExitRange(const FVector& WorldPosition) const
 {
 	return GetApproximateAltitude(WorldPosition) <= GetSpaceExitRange();

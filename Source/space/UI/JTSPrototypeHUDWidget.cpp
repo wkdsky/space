@@ -1140,6 +1140,36 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
 	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
 	// altitude reference.
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	if (IsValid(SpaceWorldManager) && SpaceWorldManager->IsInterplanetaryCruiseActive())
+	{
+		const AJTSPlanetAnchor* const Destination = SpaceWorldManager->GetCruiseDestinationPlanet();
+		const AJTSPlanetAnchor* const Origin = SpaceWorldManager->GetCruiseOriginPlanet();
+		const double RemainingKilometers = FMath::Max(0.0, static_cast<double>(SpaceWorldManager->GetCruiseRemainingKilometers()));
+		const double SpeedKilometersPerSecond = FMath::Abs(static_cast<double>(SpaceWorldManager->GetCruiseSpeedKilometersPerSecond()));
+		const int32 RemainingDisplay = RemainingKilometers >= 1000000.0
+			? FMath::RoundToInt(RemainingKilometers / 1000000.0)
+			: FMath::Max(1, FMath::RoundToInt(RemainingKilometers));
+		const TCHAR* const RemainingUnit = RemainingKilometers >= 1000000.0 ? TEXT("M km") : TEXT("km");
+		const int32 SpeedDisplay = FMath::Max(0, FMath::RoundToInt(SpeedKilometersPerSecond));
+		const int32 EtaSeconds = SpeedKilometersPerSecond > 0.05
+			? FMath::CeilToInt(RemainingKilometers / SpeedKilometersPerSecond)
+			: 0;
+		const FString DestinationName = IsValid(Destination) ? Destination->GetPlanetId().ToString() : TEXT("TARGET");
+		const FString OriginName = IsValid(Origin) ? Origin->GetPlanetId().ToString() : TEXT("ORIGIN");
+		FlightTelemetryText->SetText(FText::FromString(FString::Printf(
+			TEXT("%s  →  %s\n%s %d %s\nSPD %d km/s    ETA %s"),
+			*OriginName.ToUpper(),
+			*DestinationName.ToUpper(),
+			SpeedKilometersPerSecond > 0.05 ? TEXT("RANGE") : TEXT("HOLD"),
+			RemainingDisplay,
+			RemainingUnit,
+			SpeedDisplay,
+			EtaSeconds > 0 ? *FormatRemainingTime(static_cast<float>(EtaSeconds)) : TEXT("--"))));
+		FlightTelemetryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.70f, 0.92f, 1.0f, 1.0f)));
+		return;
+	}
+
 	const AJTSPlanetAnchor* const Planet = Spacecraft->GetFlightPlanet();
 	if (!IsValid(Planet))
 	{

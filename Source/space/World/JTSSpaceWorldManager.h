@@ -122,6 +122,32 @@ public:
 	 */
 	void UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spacecraft);
 
+	/**
+	 * Integrates the shared expedition's felt interplanetary distance. The spacecraft keeps its
+	 * existing local flight; this scalar is what makes Moon↔Mars take minutes and stay reversible.
+	 */
+	void UpdateInterplanetaryCruise(AJTSSpacecraftActor* Spacecraft, float DeltaTime);
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	bool IsInterplanetaryCruiseActive() const;
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	AJTSPlanetAnchor* GetCruiseOriginPlanet() const;
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	AJTSPlanetAnchor* GetCruiseDestinationPlanet() const;
+
+	/** Kilometres still to cover toward the current destination. Zero while cruise is inactive. */
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	float GetCruiseRemainingKilometers() const;
+
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	float GetCruiseRouteKilometers() const;
+
+	/** Signed felt speed in kilometres per second. Positive closes on the destination. */
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	float GetCruiseSpeedKilometersPerSecond() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -131,6 +157,18 @@ private:
 	FName GetPlanetKey(const AJTSPlanetAnchor* Planet) const;
 	ULevelStreamingDynamic* FindPlanetContentStreamingLevel(const AJTSPlanetAnchor* Planet) const;
 	void LogDebugState() const;
+	void RefreshCruisePresentation();
+	void RefreshLocalSky() const;
+	void SetCruiseBodyHidden(AJTSPlanetAnchor* Planet, bool bHideBody) const;
+	void RestoreDisplacedCruiseSurface();
+	void PresentCruiseDestination(const AJTSSpacecraftActor* Spacecraft);
+	void RebaseSkyWithSpacecraft(const FVector& WorldDelta) const;
+	float ResolveRouteKilometers(const AJTSPlanetAnchor* Origin, const AJTSPlanetAnchor* Destination) const;
+	bool SharesLocalTransfer(const AJTSPlanetAnchor* First, const AJTSPlanetAnchor* Second) const;
+	bool IsLocalFamily(const AJTSPlanetAnchor* Focus, const AJTSPlanetAnchor* Candidate) const;
+	AJTSPlanetAnchor* ResolveAimedCruisePlanet(const AJTSSpacecraftActor* Spacecraft) const;
+	void HandoffCruiseToLocalFlight(AJTSSpacecraftActor* Spacecraft, AJTSPlanetAnchor* ArrivalPlanet);
+	void ClearInterplanetaryCruise();
 
 	UFUNCTION()
 	void OnRep_SpaceWorldState();
@@ -173,4 +211,35 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState)
 	bool bSurfaceGameplayReady = false;
 	bool bLandingEligibilityAnnounced = false;
+
+	/** Body the ship last released. Cruise can start from it after the influence bubble is left behind. */
+	TWeakObjectPtr<AJTSPlanetAnchor> LastDepartedPlanet;
+
+	FTransform SavedCruiseSurfaceTransform = FTransform::Identity;
+	TWeakObjectPtr<AActor> DisplacedCruiseSurfaceActor;
+	bool bCruiseSurfaceDisplaced = false;
+
+	/** Reference body the current cruise leg left. Stays set while the leg can still be reversed. */
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> CruiseOriginPlanet;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> CruiseDestinationPlanet;
+
+	/** Kilometres travelled away from CruiseOriginPlanet along the current route. */
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
+	float CruiseDistanceFromOriginKilometers = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
+	float CruiseRemainingKilometers = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
+	float CruiseSpeedKilometersPerSecond = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
+	float CruiseReferenceDurationSeconds = 150.0f;
+
+	/** Below this remaining distance the destination is already a local body and cruise ends. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float CruiseArrivalKilometers = 500.0f;
 };

@@ -276,6 +276,14 @@ public:
 	bool HasSurfaceLevel() const;
 	const TSoftObjectPtr<UWorld>& GetSurfaceLevel() const;
 
+	/** This body's distance from the Sun, in kilometres. Any two bodies derive their route from these. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Cruise")
+	float GetHeliocentricDistanceKilometers() const;
+
+	/** Parent body for a short local transfer, such as Deimos orbiting Mars. None for an independent body. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Cruise")
+	FName GetParentPlanetId() const;
+
 	UFUNCTION(BlueprintPure, Category = "Planet|Travel")
 	float GetTakeoffTransitionAltitude() const;
 
@@ -357,6 +365,18 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Travel", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float SpaceExitRange = 15000.0f;
+
+	/**
+	 * Distance from the Sun in kilometres. The felt route between two bodies is the difference of
+	 * these values, so a newly placed body can be flown to every existing body without a route table.
+	 * Zero keeps the body local-only, which is how an unconfigured test planet stays inert.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float HeliocentricDistanceKilometers = 0.0f;
+
+	/** Set on a moon so Mars↔Deimos stays a local transfer instead of another interplanetary cruise. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Cruise", meta = (AllowPrivateAccess = "true"))
+	FName ParentPlanetId = NAME_None;
 
 	/** Optional future per-planet content level. It is not a flat gameplay-surface authority. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Content", meta = (AllowPrivateAccess = "true"))

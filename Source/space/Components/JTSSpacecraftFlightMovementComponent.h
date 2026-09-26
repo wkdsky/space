@@ -246,7 +246,7 @@ private:
 		const FVector& SurfaceUp,
 		float AssistAlpha) const;
 	bool HasForwardFlightIntent() const;
-	void SubmitExteriorAltitude();
+	void SubmitExteriorAltitude(float DeltaTime);
 	void CompleteAssistedLanding();
 	void FailAssistedLanding(EJTSLandingValidationFailure Failure);
 	void SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase NewPhase);

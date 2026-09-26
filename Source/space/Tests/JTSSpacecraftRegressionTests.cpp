@@ -731,6 +731,101 @@ bool FJTSSpaceFlightFrameRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSInterplanetaryCruiseRegression, "JTS.Spacecraft.InterplanetaryCruise",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	if (!TestTrue(TEXT("Cruise test parks on the source planet"), Fixture.Park(FVector::RightVector)))
+	{
+		return false;
+	}
+
+	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
+	if (!TestTrue(TEXT("Cruise test has movement"), IsValid(Movement))
+		|| !TestTrue(TEXT("Cruise test begins takeoff"), Fixture.Ship->BeginSurfaceTakeoff()))
+	{
+		return false;
+	}
+
+	AJTSPlanetAnchor* const Mars = Fixture.AddFlightPlanet(TEXT("Mars"), FVector(180000.0f, 0.0f, 0.0f));
+	AJTSPlanetAnchor* const Deimos = Fixture.AddFlightPlanet(TEXT("Deimos"), FVector(210000.0f, 0.0f, 0.0f));
+	FindFProperty<FFloatProperty>(Fixture.Planet->GetClass(), TEXT("HeliocentricDistanceKilometers"))
+		->SetPropertyValue_InContainer(Fixture.Planet, 384400.0f);
+	FindFProperty<FFloatProperty>(Mars->GetClass(), TEXT("HeliocentricDistanceKilometers"))
+		->SetPropertyValue_InContainer(Mars, 227900000.0f);
+	FindFProperty<FFloatProperty>(Deimos->GetClass(), TEXT("HeliocentricDistanceKilometers"))
+		->SetPropertyValue_InContainer(Deimos, 227920000.0f);
+	FindFProperty<FNameProperty>(Deimos->GetClass(), TEXT("ParentPlanetId"))
+		->SetPropertyValue_InContainer(Deimos, FName(TEXT("Mars")));
+
+	const FVector SourceUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation()).GetSafeNormal();
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + Fixture.Planet->GetSpaceFlightAltitude() + 100.0f));
+	Movement->StopMovementImmediately();
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Leaving the surface does not start cruise inside the planet"),
+		Fixture.Manager->IsInterplanetaryCruiseActive());
+
+	// The handoff records the planet being left only on the transition out of its influence.
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + Fixture.Planet->GetGravityInfluenceRange() - 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + Fixture.Planet->GetGravityInfluenceRange() + 100.0f));
+	Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromX((Mars->GetPlanetCenter() - Fixture.Ship->GetActorLocation()).GetSafeNormal()).ToQuat());
+	Movement->SetMoveInput(FVector2D(0.0f, 1.0f));
+	Movement->SetViewForward(Fixture.Ship->GetActorForwardVector());
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestNull(TEXT("An unconfigured departure still leaves deep space unbound"), Fixture.Manager->GetCurrentPlanet());
+	TestTrue(TEXT("Aiming at a configured route starts cruise only after leaving the planet"),
+		Fixture.Manager->IsInterplanetaryCruiseActive());
+	TestEqual(TEXT("Cruise keeps the departed planet as its origin"), Fixture.Manager->GetCruiseOriginPlanet(), Fixture.Planet);
+	TestEqual(TEXT("Cruise selects the aimed planet"), Fixture.Manager->GetCruiseDestinationPlanet(), Mars);
+	const FVector FrozenLocation = Fixture.Ship->GetActorLocation();
+
+	const float RouteKilometers = Fixture.Manager->GetCruiseRouteKilometers();
+	Movement->TickComponent(30.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Forward throttle reduces the remaining felt distance"),
+		Fixture.Manager->GetCruiseRemainingKilometers() < RouteKilometers - 1000.0f);
+	TestTrue(TEXT("Cruise does not fly the spacecraft across the compact level"),
+		FVector::DistSquared(Fixture.Ship->GetActorLocation(), FrozenLocation) < FMath::Square(5000.0f));
+
+	const float HalfwayRemaining = Fixture.Manager->GetCruiseRemainingKilometers();
+	Movement->SetMoveInput(FVector2D(0.0f, -1.0f));
+	Movement->TickComponent(30.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Reverse throttle increases the remaining distance without a mode change"),
+		Fixture.Manager->IsInterplanetaryCruiseActive()
+		&& Fixture.Manager->GetCruiseRemainingKilometers() > HalfwayRemaining + 1000.0f);
+	TestEqual(TEXT("Reversing keeps the same origin and destination"),
+		Fixture.Manager->GetCruiseDestinationPlanet(), Mars);
+
+	Movement->SetMoveInput(FVector2D::ZeroVector);
+	const float HeldRemaining = Fixture.Manager->GetCruiseRemainingKilometers();
+	Movement->TickComponent(5.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Releasing the throttle holds the felt position"),
+		FMath::IsNearlyEqual(Fixture.Manager->GetCruiseRemainingKilometers(), HeldRemaining, 1.0f));
+
+	Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromX((Deimos->GetPlanetCenter() - Fixture.Ship->GetActorLocation()).GetSafeNormal()).ToQuat());
+	Movement->SetViewForward(Fixture.Ship->GetActorForwardVector());
+	Movement->SetMoveInput(FVector2D(0.0f, 1.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("A parent-child body is rejected as an interplanetary retarget"),
+		Fixture.Manager->GetCruiseDestinationPlanet(), Mars);
+
+	Movement->SetMoveInput(FVector2D(0.0f, -1.0f));
+	for (int32 Step = 0; Step < 40 && Fixture.Manager->IsInterplanetaryCruiseActive(); ++Step)
+	{
+		Movement->TickComponent(30.0f, LEVELTICK_All, nullptr);
+	}
+	TestFalse(TEXT("Reversing all the way returns to ordinary local flight"),
+		Fixture.Manager->IsInterplanetaryCruiseActive());
+	TestEqual(TEXT("The return arrives at the planet the cruise left"),
+		Fixture.Manager->GetCurrentPlanet(), Fixture.Planet);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSAutomaticLandingRegression, "JTS.Spacecraft.AutomaticLandingControls",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
