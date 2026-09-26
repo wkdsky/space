@@ -102,6 +102,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
 	float GetAimPitch() const;
 
+	/**
+	 * Horizontal view offset used by the idle upper body. Tracks the camera while the
+	 * camera stays behind the chest, then returns to the body once that turn is past
+	 * the comfortable range.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Player|Aim")
+	float GetPresentationAimYaw() const;
+
+	/** 0 while the feet stay planted, 1 while a large turn plays the shuffle. */
+	UFUNCTION(BlueprintPure, Category = "Player|Aim")
+	float GetTurnShuffleAlpha() const { return TurnShuffleAlpha; }
+
 	/** Local camera response to a shot; gameplay hit traces remain server-owned. */
 	void ApplyWeaponViewKick(float PitchDegrees);
 
@@ -183,6 +195,21 @@ private:
 	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
+	/** A ranged click turns the body onto the camera only when the gun arm cannot reach it. */
+	void AlignBodyToViewOnAttack();
+	float GetRawViewYawDelta() const;
+	/**
+	 * First person, third-person aim, and any jump keep the whole body on the camera.
+	 * Grounded ordinary third person does not: the legs stay put and only the upper body yaws.
+	 */
+	bool WantsContinuousViewFacing() const;
+	bool GetViewTangentForward(FVector& OutForward) const;
+	float GetViewBodyYawDeltaDegrees(const FVector& ViewForward) const;
+	bool IsMovingOnFoot() const;
+	/** Horizontal direction the feet should catch: the view while attacking, otherwise the walk direction. */
+	bool GetDesiredFeetForward(FVector& OutForward) const;
+	void UpdateFacingPresentation(float DeltaSeconds);
+	void StepBodyTowardView(const FVector& ViewForward, float DeltaSeconds, bool bUsePlanetFrame);
 	UFUNCTION()
 	void HandleMeleeAttackStarted(EJTSAttackType AttackType);
 	UFUNCTION()
@@ -234,6 +261,10 @@ private:
 
 	UFUNCTION(Server, Unreliable)
 	void ServerUpdateAimPitch(float NewPitch);
+
+	/** Owner asks the server to catch up to the current view. The server eases the feet; it does not snap. */
+	UFUNCTION(Server, Unreliable)
+	void ServerRequestViewFacing(FVector_NetQuantizeNormal ViewForward);
 	void PlayUnarmedPunchPresentation(bool bUseLeftPunch, bool bIsComboContinuation);
 	void StopUnarmedPunchPresentation();
 	void ApplySurfaceMovementSettings();
@@ -366,6 +397,19 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlanetBodyTurnInterpolationSpeed = 12.0f;
 
+	/** Comfortable upper-body follow. Past this the chest returns forward instead of wringing toward the camera. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "10.0", ClampMax = "80.0"))
+	float UpperBodyYawLimitDegrees = 48.0f;
+
+	/** How fast the feet catch a large click or a running turn, in degrees per second. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "60.0"))
+	float FootShuffleDegreesPerSecond = 260.0f;
+
+	float TurnShuffleAlpha = 0.0f;
+	/** One click in grounded ordinary third person. Cleared the same frame the swing starts. */
+	bool bWantsViewFacing = false;
+	FVector PendingViewFacingForward = FVector::ForwardVector;
+
 	/**
 	 * Blueprint-selectable third-person body behavior for real spherical planets only. Camera yaw is
 	 * intentionally independent from body yaw; OrientToMovement is the normal third-person default.
@@ -378,6 +422,8 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Debug", meta = (AllowPrivateAccess = "true"))
 	bool bDebugPlanetCamera = false;
+
+private:
 
 	/** Local height of the shared eye-level pivot above the capsule origin. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "200.0", UIMin = "0.0", UIMax = "150.0"))

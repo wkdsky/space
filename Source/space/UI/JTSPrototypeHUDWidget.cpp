@@ -1071,7 +1071,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	}
 	ApplyLayerVisibility(ShipResourcesPanel, bGameplaySurface);
 	ApplyLayerVisibility(InteractionPromptText, bGameplaySurface && !bGameMenuOpen);
-	ApplyLayerVisibility(CrosshairText, bGameplaySurface && !bGameMenuOpen);
+	ApplyLayerVisibility(CrosshairText, false);
 	ApplyLayerVisibility(GameplayHelpText, bSpaceFlight && !bGameMenuOpen);
 	if (!bGameplaySurface)
 	{
@@ -1265,10 +1265,14 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 	RefreshInventorySlots();
 	RefreshInteractionPrompt();
+	const UJTSRangedWeaponComponent* const CrosshairRanged = PlayerCharacter != nullptr
+		? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
 	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
 		&& !bGameMenuOpen
 		&& PlayerCharacter != nullptr
-		&& !PlayerCharacter->IsBoarded();
+		&& !PlayerCharacter->IsBoarded()
+		&& IsValid(CrosshairRanged)
+		&& CrosshairRanged->IsAiming();
 	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming);
 	if (CrosshairText != nullptr)
 	{

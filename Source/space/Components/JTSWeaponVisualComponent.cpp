@@ -6,18 +6,17 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
+#include "Math/RotationMatrix.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "Math/RotationMatrix.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSItemTypes.h"
-#include "space/Player/JTSCharacter.h"
 
 UJTSWeaponVisualComponent::UJTSWeaponVisualComponent()
 {
@@ -71,8 +70,10 @@ void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	{
 		ShotKickAlpha = 0.0f;
 	}
+	UpdatePalmAnchor();
 	ApplyPresentationTransform();
-	if (!bRangedVisible && !bMeleeSwingPresentationActive && ShotKickAlpha == 0.0f)
+	const bool bHeldItemVisible = IsValid(WeaponBody) && WeaponBody->IsVisible();
+	if (!bHeldItemVisible && ShotKickAlpha <= 0.0f && !bMeleeSwingPresentationActive)
 	{
 		SetComponentTickEnabled(false);
 	}
@@ -276,6 +277,9 @@ void UJTSWeaponVisualComponent::ConfigureAttachment()
 
 	if (IsValid(CharacterMesh))
 	{
+		// The palm is computed each pose from Wrist_R toward Index1_R. Attaching to
+		// weapon_r instead multiplied its few-centimetre offset by the skeleton's
+		// bone scale and threw the item far from the body.
 		static const FName SocketCandidates[] = {
 			TEXT("hand_r"), TEXT("hand_rSocket"), TEXT("RightHand"), TEXT("Hand_R"), TEXT("RightHandSocket")
 		};
@@ -287,22 +291,88 @@ void UJTSWeaponVisualComponent::ConfigureAttachment()
 			}
 
 			AttachAnchor(CharacterMesh, SocketName);
-			const float SocketDistance = IsValid(HandAttachmentAnchor)
-				? FVector::Distance(HandAttachmentAnchor->GetComponentLocation(), GetOwner()->GetActorLocation())
-				: TNumericLimits<float>::Max();
-			if (SocketDistance > FMath::Max(1.0f, MaximumTrustedSocketDistance))
-			{
-				UE_LOG(LogTemp, Warning, TEXT("JTS weapon visual: socket %s on %s resolved %.1f cm from character; retaining direct hand attachment."), *SocketName.ToString(), *GetNameSafe(GetOwner()), SocketDistance);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: attached %s to hand socket %s (%.1f cm from character)."), *GetNameSafe(GetOwner()), *SocketName.ToString(), SocketDistance);
-			}
+			UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: attached %s to hand socket %s."), *GetNameSafe(GetOwner()), *SocketName.ToString());
 			return;
 		}
 	}
 
 	AttachToRootFallback();
+}
+
+void UJTSWeaponVisualComponent::UpdatePalmAnchor()
+{
+	if (bUsingFallbackAttachment || !IsValid(HandAttachmentAnchor) || GetOwner() == nullptr)
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* const CharacterMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+	if (!IsValid(CharacterMesh))
+	{
+		return;
+	}
+
+	const FName WristBone(TEXT("Wrist_R"));
+	const FName IndexBone(TEXT("Index1_R"));
+	if (CharacterMesh->GetBoneIndex(WristBone) == INDEX_NONE
+		|| CharacterMesh->GetBoneIndex(IndexBone) == INDEX_NONE)
+	{
+		return;
+	}
+
+	const FVector Wrist = CharacterMesh->GetBoneLocation(WristBone, EBoneSpaces::WorldSpace);
+	const FVector Index = CharacterMesh->GetBoneLocation(IndexBone, EBoneSpaces::WorldSpace);
+	const FVector AlongFingers = Index - Wrist;
+	if (AlongFingers.SizeSquared() < 1.0f)
+	{
+		return;
+	}
+
+	// Index1_R is the knuckle. A short step past it lands in the palm instead of the wrist.
+	// Location is absolute so the skeleton's bone scale cannot multiply this centimetre
+	// offset and throw the item away from the hand.
+	const FVector Palm = Wrist + AlongFingers * 1.35f;
+	const FVector AlongHand = AlongFingers.GetSafeNormal();
+	const FName ForearmBone(TEXT("LowerArm_R"));
+	FVector AlongForearm = AlongHand;
+	if (CharacterMesh->GetBoneIndex(ForearmBone) != INDEX_NONE)
+	{
+		const FVector Elbow = CharacterMesh->GetBoneLocation(ForearmBone, EBoneSpaces::WorldSpace);
+		const FVector Forearm = (Wrist - Elbow).GetSafeNormal();
+		if (!Forearm.IsNearlyZero())
+		{
+			AlongForearm = Forearm;
+		}
+	}
+
+	const AActor* const Owner = GetOwner();
+	const FVector Up = Owner->GetActorUpVector().GetSafeNormal();
+	FQuat PalmRotation = Owner->GetActorQuat();
+	if (bRangedVisible)
+	{
+		// The barrel is the forearm. Wherever the arm points, the muzzle points.
+		const FVector Side = FVector::CrossProduct(Up, AlongForearm).GetSafeNormal();
+		const FVector PalmUp = Side.IsNearlyZero()
+			? Up
+			: FVector::CrossProduct(AlongForearm, Side).GetSafeNormal();
+		PalmRotation = FRotationMatrix::MakeFromXZ(AlongForearm, PalmUp).ToQuat();
+	}
+	else
+	{
+		// At rest the shaft stands on the actor up. A chop swings that same axis
+		// with the forearm, so the whole tool travels the arc the hand travels.
+		const float Swing = FVector::DotProduct(AlongForearm, Up);
+		const FVector Shaft = (Up + AlongForearm * FMath::Max(0.0f, -Swing)).GetSafeNormal();
+		const FVector Forward = FVector::VectorPlaneProject(Owner->GetActorForwardVector(), Shaft).GetSafeNormal();
+		if (!Shaft.IsNearlyZero() && !Forward.IsNearlyZero())
+		{
+			PalmRotation = FRotationMatrix::MakeFromXZ(Shaft, Forward).ToQuat();
+		}
+	}
+
+	HandAttachmentAnchor->SetAbsolute(true, true, true);
+	HandAttachmentAnchor->SetWorldLocation(Palm);
+	HandAttachmentAnchor->SetWorldRotation(PalmRotation);
 }
 
 void UJTSWeaponVisualComponent::AttachToRootFallback()
@@ -394,7 +464,10 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		return;
 	}
 	bRangedVisible = Definition->IsRangedWeapon();
-	SetComponentTickEnabled(bRangedVisible || ShotKickAlpha > 0.0f);
+	// Mesh +X is the barrel or the shaft. The palm anchor already aims that axis:
+	// a gun along the forearm, a tool along the chop. No extra local pitch here.
+	DefaultCarryRotation = FRotator::ZeroRotator;
+	SetComponentTickEnabled(true);
 
 	FVector BodyScale(0.48f, 0.18f, 0.14f);
 	FVector BarrelScale(0.26f, 0.08f, 0.08f);
@@ -402,7 +475,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	DefaultBodyLocation = FVector(13.0f, 0.0f, 0.0f);
 	DefaultBarrelLocation = FVector(48.0f, 0.0f, 0.0f);
 	DefaultSightLocation = FVector(19.0f, 0.0f, 12.0f);
-	DefaultGripTransform = FTransform(FQuat::Identity, FVector(-3.0f, 0.0f, -17.0f), FVector::OneVector);
+	DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -8.0f), FVector::OneVector);
 	DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(61.0f, 0.0f, 0.0f), FVector::OneVector);
 	DefaultGripScale = FVector(0.16f, 0.12f, 0.32f);
 
@@ -415,7 +488,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		DefaultBodyLocation = FVector(18.0f, 0.0f, 0.0f);
 		DefaultBarrelLocation = FVector(76.0f, 0.0f, 0.0f);
 		DefaultSightLocation = FVector(28.0f, 0.0f, 16.0f);
-		DefaultGripTransform = FTransform(FQuat::Identity, FVector(1.0f, 0.0f, -21.0f), FVector::OneVector);
+		DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -10.0f), FVector::OneVector);
 		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(95.0f, 0.0f, 0.0f), FVector::OneVector);
 		DefaultGripScale = FVector(0.22f, 0.16f, 0.40f);
 		break;
@@ -426,7 +499,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		DefaultBodyLocation = FVector(23.0f, 0.0f, 0.0f);
 		DefaultBarrelLocation = FVector(96.0f, 0.0f, 0.0f);
 		DefaultSightLocation = FVector(30.0f, 0.0f, 17.0f);
-		DefaultGripTransform = FTransform(FQuat::Identity, FVector(3.0f, 0.0f, -21.0f), FVector::OneVector);
+		DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -10.0f), FVector::OneVector);
 		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(127.0f, 0.0f, 0.0f), FVector::OneVector);
 		DefaultGripScale = FVector(0.22f, 0.15f, 0.42f);
 		break;
@@ -445,7 +518,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 			BarrelScale = FVector(0.46f, 0.06f, 0.05f);
 			DefaultBodyLocation = FVector(4.0f, 0.0f, 0.0f);
 			DefaultBarrelLocation = FVector(42.0f, 0.0f, 0.0f);
-			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-5.0f, 0.0f, 0.0f), FVector::OneVector);
+			DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, 0.0f), FVector::OneVector);
 			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(65.0f, 0.0f, 0.0f), FVector::OneVector);
 			DefaultGripScale = FVector(0.22f, 0.12f, 0.12f);
 			break;
@@ -455,7 +528,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 			BarrelScale = FVector(0.30f, 0.26f, 0.18f);
 			DefaultBodyLocation = FVector(5.0f, 0.0f, 0.0f);
 			DefaultBarrelLocation = FVector(53.0f, 0.0f, 5.0f);
-			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-22.0f, 0.0f, 0.0f), FVector::OneVector);
+			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-6.0f, 0.0f, 0.0f), FVector::OneVector);
 			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(68.0f, 0.0f, 5.0f), FVector::OneVector);
 			DefaultGripScale = FVector(0.26f, 0.12f, 0.14f);
 			break;
@@ -515,6 +588,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	ApplyMaterialColor(WeaponBarrelMaterial, ItemColor);
 	ApplyMaterialColor(WeaponSightMaterial, ItemColor);
 	SetAimAlpha(AimAlpha);
+	UpdatePalmAnchor();
 	ValidateAttachmentAfterPose();
 	if (!bUsingFallbackAttachment)
 	{
@@ -622,47 +696,17 @@ void UJTSWeaponVisualComponent::PlayMeleeSwingPresentation()
 void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 {
 	const FVector AimOffset(-5.0f * ShotKickAlpha, 1.5f * AimAlpha, 2.0f * AimAlpha + 1.5f * ShotKickAlpha);
-	FVector SwingOffset = FVector::ZeroVector;
-	FRotator SwingRotation = FRotator::ZeroRotator;
-	if (bMeleeSwingPresentationActive)
-	{
-		const float Phase = FMath::Clamp(MeleeSwingElapsed / FMath::Max(0.15f, MeleeSwingPresentationSeconds), 0.0f, 1.0f);
-		// The blade reaches the target near the server's contact frame, then settles before the next swing.
-		const float Slash = Phase < 0.45f
-			? FMath::InterpEaseInOut(-1.0f, 1.0f, Phase / 0.45f, 2.0f)
-			: FMath::InterpEaseInOut(1.0f, 0.0f, (Phase - 0.45f) / 0.55f, 2.0f);
-		const float Direction = bMeleeSwingReverse ? -1.0f : 1.0f;
-		SwingOffset = FVector(-6.0f * (1.0f - Phase), 7.0f * Direction * Slash, -4.0f * (1.0f - Phase));
-		SwingRotation = FRotator(-18.0f * (1.0f - Phase), 16.0f * Direction * Slash, 52.0f * Direction * Slash);
-	}
 	if (IsValid(WeaponPresentationRoot))
 	{
 		// Aim and melee animation rotate the whole held item around its actual grip, not around
 		// the origin of each primitive piece.
-		WeaponPresentationRoot->SetRelativeLocation(AimOffset + SwingOffset);
+		WeaponPresentationRoot->SetRelativeLocation(AimOffset);
 		WeaponPresentationRoot->SetAbsolute(false, false, true);
-		if (bRangedVisible && IsValid(GetOwner()))
-		{
-			const FVector BodyForward = GetOwner()->GetActorForwardVector();
-			FVector ViewForward = BodyForward;
-			if (const AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner()))
-			{
-				ViewForward = FQuat(GetOwner()->GetActorRightVector(),
-					FMath::DegreesToRadians(-Character->GetAimPitch())).RotateVector(BodyForward);
-				if (Character->IsLocallyControlled() && Character->GetController() != nullptr)
-				{
-					ViewForward = Character->GetController()->GetControlRotation().Vector();
-				}
-			}
-			const FVector GunForward = FMath::Lerp(BodyForward, ViewForward, AimAlpha).GetSafeNormal();
-			const FRotator GunRotation = FRotationMatrix::MakeFromXZ(GunForward,
-				GetOwner()->GetActorUpVector()).Rotator();
-			WeaponPresentationRoot->SetWorldRotation(GunRotation + FRotator(4.0f * ShotKickAlpha, 0.0f, 0.0f));
-		}
-		else
-		{
-			WeaponPresentationRoot->SetRelativeRotation(SwingRotation + FRotator(4.0f * ShotKickAlpha, 0.0f, 0.0f));
-		}
+		// Relative to the palm frame: ranged stays forward, melee pitch stands the shaft up.
+		// The grip inverse still pins the handle on the palm, so this rotation cannot
+		// throw the item off the hand the way a world rotation on this root did.
+		const FRotator Kick(4.0f * ShotKickAlpha, 0.0f, 0.0f);
+		WeaponPresentationRoot->SetRelativeRotation(DefaultCarryRotation + Kick);
 	}
 	if (IsValid(WeaponModelRoot))
 	{

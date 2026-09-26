@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "space/Items/JTSItemTypes.h"
 
 #include "JTSWeaponVisualComponent.generated.h"
 
@@ -53,6 +54,8 @@ private:
 	void EnsureMeshComponents();
 	void ConfigureAttachment();
 	void AttachToRootFallback();
+	/** Places the grip in the palm from the posed wrist and finger bones, in world centimetres. */
+	void UpdatePalmAnchor();
 	void ValidateAttachmentAfterPose();
 	bool IsCurrentAttachmentPlausible() const;
 	void SetVisible(bool bVisible);
@@ -137,6 +140,8 @@ private:
 	FTransform DefaultGripTransform = FTransform::Identity;
 	FTransform DefaultMuzzleTransform = FTransform::Identity;
 	FVector DefaultGripScale = FVector(0.16f, 0.12f, 0.32f);
+	/** Ranged leaves mesh +X on the palm forward. Melee pitches that axis onto palm up. */
+	FRotator DefaultCarryRotation = FRotator::ZeroRotator;
 	float AimAlpha = 0.0f;
 	float ShotKickAlpha = 0.0f;
 	bool bRangedVisible = false;

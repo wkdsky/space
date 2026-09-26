@@ -41,6 +41,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void AttackPressed();
 
+	/** True while the attack button is held, including the locally predicted hold on a client. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsAttackInputHeld() const { return bAttackHeld; }
+
 	/** Records that the attack input was released without interrupting the active animation. */
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void AttackReleased();
@@ -111,6 +115,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
 	bool IsUnarmedComboActive() const;
 
+	/**
+	 * 0 at rest, rising through the wind-up and peaking near the contact frame of a held-weapon swing.
+	 * Presentation reads this so the arm chop stays on the same clock as the hit.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	float GetMeleeSwingPhase() const;
+
 	/** Selects the alternating punch asset for the current unarmed swing. */
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
 	bool IsCurrentPunchLeft() const;
@@ -122,6 +133,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
 	AActor* FindBestMeleeTarget(APawn* AttackingPawn) const;
@@ -131,6 +143,8 @@ private:
 	bool IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const;
 	bool IsValidDamageTarget(AActor* Candidate, APawn* AttackingPawn) const;
 	bool GetPlayerAimView(APawn* AttackingPawn, FVector& OutCameraLocation, FVector& OutAimDirection) const;
+	/** Held tools trace along the pawn's own facing. Punches keep the camera view. */
+	bool GetHeldItemAimView(APawn* AttackingPawn, FVector& OutOrigin, FVector& OutAimDirection) const;
 	bool IsWithinPunchRange(APawn* AttackingPawn, const FVector& TargetLocation) const;
 	bool IsWithinMeleeRange(APawn* AttackingPawn, const FVector& TargetLocation, float MaximumRange) const;
 	bool HasMeleeLineOfSight(APawn* AttackingPawn, AActor* Candidate, const FVector& TargetLocation) const;
@@ -193,14 +207,16 @@ private:
 	float UnarmedPunchRecoveryDelay = 0.58f;
 
 	/** Native timing fallback for held melee weapons and tools, so they do not depend on Blueprint animation notifies. */
+	/** Lands with the visual strike: the raise into the first cut is about 0.22s and the cut itself is 0.15s. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.01", UIMin = "0.01"))
-	float HeldWeaponHitDelay = 0.18f;
+	float HeldWeaponHitDelay = 0.36f;
 
+	/** One visual chop cycle later, so the next hit lines up with the next time the tool reaches the bottom. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02"))
-	float HeldWeaponChainDelay = 0.42f;
+	float HeldWeaponChainDelay = 0.52f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Weapon", meta = (AllowPrivateAccess = "true", ClampMin = "0.03", UIMin = "0.03"))
-	float HeldWeaponRecoveryDelay = 0.64f;
+	float HeldWeaponRecoveryDelay = 0.68f;
 
 	/** Broad category resolved from the currently selected equipment when an attack starts. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
@@ -213,6 +229,10 @@ private:
 	/** Set during the attack-start broadcast so presentation can blend an existing combo instead of restarting from rest. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
 	bool bCurrentPunchIsComboContinuation = false;
+
+	/** Local presentation clock for a held-weapon chop. Starts when the multicast presentation begins. */
+	bool bMeleeSwingClockActive = false;
+	float MeleeSwingClockElapsed = 0.0f;
 
 	/** Camera distance used only to acquire what lies under the screen-center crosshair. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))

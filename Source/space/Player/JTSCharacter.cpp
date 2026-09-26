@@ -360,6 +360,33 @@ float AJTSCharacter::GetCapsuleSupportDistanceAlongDirection(const FVector& Supp
 	return CapsuleRadius + CapsuleCylinderHalfHeight * FMath::Abs(FVector::DotProduct(CapsuleRotation.GetAxisZ(), SafeSupportDirection));
 }
 
+float AJTSCharacter::GetRawViewYawDelta() const
+{
+	if (Controller == nullptr)
+	{
+		return 0.0f;
+	}
+
+	const FRotator RelativeAim = (Controller->GetControlRotation() - GetActorRotation()).GetNormalized();
+	return FRotator::NormalizeAxis(RelativeAim.Yaw);
+}
+
+float AJTSCharacter::GetPresentationAimYaw() const
+{
+	// The chest follows the camera only while the camera is still behind it.
+	// Past the comfortable cone the chest returns forward. It does not keep
+	// twisting to meet a camera that has already swung around to the front.
+	const float Limit = FMath::Max(10.0f, UpperBodyYawLimitDegrees);
+	const float AbsYaw = FMath::Abs(GetRawViewYawDelta());
+	if (AbsYaw <= Limit)
+	{
+		return GetRawViewYawDelta();
+	}
+
+	const float Release = FMath::Clamp((AbsYaw - Limit) / Limit, 0.0f, 1.0f);
+	return GetRawViewYawDelta() * (1.0f - Release);
+}
+
 float AJTSCharacter::GetAimPitch() const
 {
 	return AimPitch;
@@ -646,6 +673,10 @@ void AJTSCharacter::Tick(float DeltaSeconds)
 	if (bUsingRealPlanetFrame)
 	{
 		UpdatePlanetGameplayFrame(DeltaSeconds);
+	}
+	else
+	{
+		UpdateFacingPresentation(DeltaSeconds);
 	}
 	if (IsLocallyControlled() && PendingViewRecoilDegrees > KINDA_SMALL_NUMBER)
 	{
@@ -1236,6 +1267,13 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 	{
 		return;
 	}
+
+	// A ranged click asks the body to catch the screen center. A tool, a melee weapon,
+	// and empty hands keep the body on its own facing and swing that way.
+	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
+	{
+		AlignBodyToViewOnAttack();
+	}
 	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
 	{
 		RangedWeaponComponent->StartFire();
@@ -1245,6 +1283,240 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 	{
 		MeleeComponent->AttackPressed();
 	}
+}
+
+bool AJTSCharacter::GetViewTangentForward(FVector& OutForward) const
+{
+	if (IsRealPlanetGameplayActive())
+	{
+		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
+		OutForward = GetStablePlanetTangent(LocalUp, GetPlanetCameraForward(LocalUp));
+		return !OutForward.IsNearlyZero();
+	}
+	if (Controller == nullptr)
+	{
+		return false;
+	}
+
+	const FRotator YawRotation(0.0f, Controller->GetControlRotation().Yaw, 0.0f);
+	OutForward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	return !OutForward.IsNearlyZero();
+}
+
+float AJTSCharacter::GetViewBodyYawDeltaDegrees(const FVector& ViewForward) const
+{
+	const FVector BodyForward = GetActorForwardVector().GetSafeNormal();
+	const FVector Desired = ViewForward.GetSafeNormal();
+	if (BodyForward.IsNearlyZero() || Desired.IsNearlyZero())
+	{
+		return 0.0f;
+	}
+
+	const FVector Up = IsRealPlanetGameplayActive()
+		? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
+		: FVector::UpVector;
+	const float Signed = FMath::RadiansToDegrees(FMath::Atan2(
+		FVector::DotProduct(FVector::CrossProduct(BodyForward, Desired), Up),
+		FVector::DotProduct(BodyForward, Desired)));
+	return FRotator::NormalizeAxis(Signed);
+}
+
+bool AJTSCharacter::IsMovingOnFoot() const
+{
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	return IsValid(Movement) && Movement->Velocity.SizeSquared() > FMath::Square(40.0f)
+		&& Movement->IsMovingOnGround();
+}
+
+bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
+{
+	// First person, aim, a jump, and the single frame of a grounded click face the camera.
+	// After that click, grounded ordinary third person falls through to the walk
+	// direction, so orbiting the camera never starts another foot shuffle.
+	if (bWantsViewFacing || WantsContinuousViewFacing())
+	{
+		if (IsLocallyControlled() && GetViewTangentForward(OutForward))
+		{
+			return true;
+		}
+		if (bWantsViewFacing && !PendingViewFacingForward.IsNearlyZero())
+		{
+			OutForward = PendingViewFacingForward.GetSafeNormal();
+			return true;
+		}
+		if (WantsContinuousViewFacing() && Controller != nullptr)
+		{
+			const FVector Up = IsRealPlanetGameplayActive()
+				? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
+				: FVector::UpVector;
+			const FVector View = FVector::VectorPlaneProject(Controller->GetControlRotation().Vector(), Up);
+			if (!View.IsNearlyZero())
+			{
+				OutForward = View.GetSafeNormal();
+				return true;
+			}
+		}
+	}
+
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	if (!IsValid(Movement))
+	{
+		return false;
+	}
+
+	const FVector Up = IsRealPlanetGameplayActive()
+		? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
+		: FVector::UpVector;
+	const FVector TangentVelocity = FVector::VectorPlaneProject(Movement->Velocity, Up);
+	if (TangentVelocity.SizeSquared() <= FMath::Square(40.0f))
+	{
+		return false;
+	}
+
+	OutForward = TangentVelocity.GetSafeNormal();
+	return !OutForward.IsNearlyZero();
+}
+
+bool AJTSCharacter::WantsContinuousViewFacing() const
+{
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || bPressedJump;
+	// Aim and first person always match the camera, on the ground and in the air.
+	// A jump does the same from the press, so the body is already on the view when the feet leave.
+	return bFirstPersonView
+		|| bAirborne
+		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
+}
+
+void AJTSCharacter::AlignBodyToViewOnAttack()
+{
+	// Aim, first person, and a jump already keep the whole body on the camera.
+	// A click there must not leave a follow that survives after the player lets go.
+	if (WantsContinuousViewFacing())
+	{
+		bWantsViewFacing = false;
+		return;
+	}
+
+	FVector ViewForward = FVector::ZeroVector;
+	if (!GetViewTangentForward(ViewForward))
+	{
+		return;
+	}
+
+	// The gun arm already covers this much yaw on its own. Inside that cone the
+	// barrel meets the camera without turning the feet. Past it, the body catches up.
+	const float ArmReachDegrees = FMath::Max(10.0f, UpperBodyYawLimitDegrees);
+	if (FMath::Abs(GetViewBodyYawDeltaDegrees(ViewForward)) <= ArmReachDegrees)
+	{
+		bWantsViewFacing = false;
+		return;
+	}
+
+	// One press, one catch. Holding the button does not keep the legs on the camera.
+	bWantsViewFacing = true;
+	PendingViewFacingForward = ViewForward;
+	if (!HasAuthority())
+	{
+		ServerRequestViewFacing(ViewForward);
+	}
+}
+
+void AJTSCharacter::ServerRequestViewFacing_Implementation(FVector_NetQuantizeNormal ViewForward)
+{
+	if (ViewForward.IsNearlyZero() || bFirstPersonView)
+	{
+		return;
+	}
+
+	bWantsViewFacing = true;
+	PendingViewFacingForward = ViewForward.GetSafeNormal();
+}
+
+void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSeconds, bool bUsePlanetFrame)
+{
+	const float YawDelta = GetViewBodyYawDeltaDegrees(ViewForward);
+	const float AbsYaw = FMath::Abs(YawDelta);
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || bPressedJump;
+	const bool bLockedToView = WantsContinuousViewFacing();
+	// The click flag is consumed here. Later ticks must not treat it as a held follow.
+	const bool bClickAlign = bWantsViewFacing;
+	bWantsViewFacing = false;
+	// Grounded ordinary third person only shuffles for a walk or that one click.
+	// Aim, first person, and a jump rotate the body with the camera and never
+	// play the shuffle, so the jump tuck stays one continuous pose.
+	const bool bPlayShuffle = !bAirborne && !bLockedToView && (IsMovingOnFoot() || bClickAlign);
+	const bool bTurnBody = bPlayShuffle || bLockedToView;
+	const float TargetShuffle = bPlayShuffle && AbsYaw > 4.0f ? 1.0f : 0.0f;
+	TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, TargetShuffle, DeltaSeconds, bPlayShuffle ? 10.0f : 6.0f);
+	if (!bTurnBody)
+	{
+		return;
+	}
+
+	// A grounded click catches the whole remaining yaw on that press.
+	// Aim, first person, and a jump snap the whole body onto the camera this frame.
+	// The upper body is not left twisted behind a slower capsule turn.
+	const float DegreesPerSecond = FMath::Max(60.0f, FootShuffleDegreesPerSecond);
+	const float StepDegrees = (bClickAlign || bLockedToView)
+		? AbsYaw
+		: FMath::Min(AbsYaw, DegreesPerSecond * DeltaSeconds);
+	if (StepDegrees <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector Up = bUsePlanetFrame
+		? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
+		: FVector::UpVector;
+	const FQuat Turn(Up, FMath::DegreesToRadians(FMath::Sign(YawDelta) * StepDegrees));
+	if (bUsePlanetFrame)
+	{
+		PlanetBodyForward = GetStablePlanetTangent(Up, Turn.RotateVector(PlanetBodyForward));
+		SetActorRotation(FRotationMatrix::MakeFromXZ(PlanetBodyForward, Up).ToQuat());
+	}
+	else
+	{
+		SetActorRotation(Turn * GetActorQuat());
+	}
+}
+
+void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
+{
+	if (IsBoarded())
+	{
+		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
+		return;
+	}
+
+	// A click is consumed inside StepBodyTowardView on this same frame.
+	// Nothing here may keep the body following the camera after that swing.
+	if (WantsContinuousViewFacing())
+	{
+		bWantsViewFacing = false;
+	}
+
+	FVector FeetForward = FVector::ZeroVector;
+	if (!GetDesiredFeetForward(FeetForward))
+	{
+		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
+		return;
+	}
+
+	// Grounded ordinary third person leaves the legs where they are.
+	// Aim, first person, a jump, and that one click own the facing instead.
+	const bool bUsePlanetFrame = IsRealPlanetGameplayActive();
+	if (!bUsePlanetFrame)
+	{
+		bUseControllerRotationYaw = false;
+		if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
+		{
+			const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing();
+			Movement->bOrientRotationToMovement = !bFeetCatching;
+		}
+	}
+	StepBodyTowardView(FeetForward, DeltaSeconds, bUsePlanetFrame);
 }
 
 void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
@@ -1325,6 +1597,7 @@ void AJTSCharacter::HandleCameraZoom(const FInputActionValue& Value)
 		return;
 	}
 
+	// Scroll changes the third-person camera distance for every held item.
 	AdjustThirdPersonCameraDistance(Value.Get<float>());
 }
 
@@ -1633,8 +1906,7 @@ void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float 
 		LastPlanetUp = TargetUp;
 	}
 
-	if ((IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming())
-		|| PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
+	if (PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
 	{
 		// Do not enable bUseControllerRotationYaw here: controller rotation also contains the
 		// gravity-relative pitch/roll used by the absolute camera. Only the local tangent yaw belongs
@@ -1643,17 +1915,16 @@ void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float 
 			? Controller->GetControlRotation().Vector() : PlanetCameraTangentForward;
 		PlanetBodyForward = GetStablePlanetTangent(LastPlanetUp, CameraDirection);
 	}
-	else if (const UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
+	else
 	{
-		const FVector TangentVelocity = FVector::VectorPlaneProject(MovementComponent->Velocity, LastPlanetUp);
-		if (TangentVelocity.SizeSquared() > FMath::Square(5.0f))
+		FVector FeetForward = FVector::ZeroVector;
+		if (GetDesiredFeetForward(FeetForward))
 		{
-			const FVector DesiredForward = TangentVelocity.GetSafeNormal();
-			const FQuat BodyTurn = FQuat::FindBetweenNormals(PlanetBodyForward, DesiredForward);
-			const float TurnAlpha = FMath::Clamp(DeltaSeconds * PlanetBodyTurnInterpolationSpeed, 0.0f, 1.0f);
-			PlanetBodyForward = GetStablePlanetTangent(
-				LastPlanetUp,
-				FQuat::Slerp(FQuat::Identity, BodyTurn, TurnAlpha).RotateVector(PlanetBodyForward));
+			StepBodyTowardView(GetStablePlanetTangent(LastPlanetUp, FeetForward), DeltaSeconds, true);
+		}
+		else
+		{
+			TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
 		}
 	}
 
@@ -1784,7 +2055,9 @@ void AJTSCharacter::ApplyCameraView()
 	}
 	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
-		MovementComponent->bOrientRotationToMovement = !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->IsAiming();
+		// A click is one frame. It must not flip movement orientation onto the camera.
+		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing();
+		bUseControllerRotationYaw = false;
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
 	if (GetMesh() != nullptr)
@@ -2028,12 +2301,13 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 		&& RangedWeaponComponent->IsAiming()
 		&& RangedWeaponComponent->HasActiveRangedWeapon();
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
-	if (!IsRealPlanetGameplayActive())
+	if (!IsRealPlanetGameplayActive() && !WantsContinuousViewFacing())
 	{
-		bUseControllerRotationYaw = bWantsAim;
+		// Free look leaves the capsule where the last step put it.
+		bUseControllerRotationYaw = false;
 		if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 		{
-			Movement->bOrientRotationToMovement = !bWantsAim;
+			Movement->bOrientRotationToMovement = true;
 		}
 	}
 	AimCameraAlpha = FMath::FInterpTo(AimCameraAlpha, TargetAlpha, DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));

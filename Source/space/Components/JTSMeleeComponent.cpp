@@ -41,8 +41,26 @@ namespace
 
 UJTSMeleeComponent::UJTSMeleeComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
+}
+
+void UJTSMeleeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (!bMeleeSwingClockActive)
+	{
+		SetComponentTickEnabled(false);
+		return;
+	}
+	MeleeSwingClockElapsed += DeltaTime;
+	if (MeleeSwingClockElapsed >= FMath::Max(0.15f, HeldWeaponRecoveryDelay))
+	{
+		bMeleeSwingClockActive = false;
+		MeleeSwingClockElapsed = 0.0f;
+		SetComponentTickEnabled(false);
+	}
 }
 
 void UJTSMeleeComponent::BeginPlay()
@@ -86,6 +104,8 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	CurrentAttackType = EJTSAttackType::Punch;
 	bCurrentPunchUsesLeft = false;
 	bCurrentPunchIsComboContinuation = false;
+	bMeleeSwingClockActive = false;
+	MeleeSwingClockElapsed = 0.0f;
 	NextAttackTime = 0.0;
 	Super::EndPlay(EndPlayReason);
 }
@@ -116,6 +136,12 @@ void UJTSMeleeComponent::AttackPressed()
 void UJTSMeleeComponent::AttackReleased()
 {
 	bAttackHeld = false;
+	// A click already counted as this swing, or as the one swing buffered inside it.
+	// Clearing the buffer here is what lets go of the button stop the next chop.
+	if (CurrentAttackType != EJTSAttackType::Punch)
+	{
+		bAttackBuffered = false;
+	}
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		ServerReleaseAttack();
@@ -154,8 +180,16 @@ void UJTSMeleeComponent::TryChainAttack()
 		return;
 	}
 
-	// A hold or any number of rapid presses still produces only one following punch.
-	bAttackBuffered = false;
+	// Empty-hand punches stay one follow-up. A held tool keeps chopping for as long
+	// as the button is down, and a click that lands during a swing is the next chop.
+	if (CurrentAttackType == EJTSAttackType::Punch)
+	{
+		bAttackBuffered = false;
+	}
+	else if (!bAttackHeld)
+	{
+		bAttackBuffered = false;
+	}
 	BeginAttack(CurrentAttackType);
 }
 
@@ -171,6 +205,8 @@ void UJTSMeleeComponent::FinishCurrentAttack()
 	}
 
 	// This also covers a press that lands after the attack-chain notify but before montage end.
+	// A tool that is still held, or that received another click during this swing, starts
+	// the next chop here. Releasing the button leaves this recovery as the last swing.
 	if (bAttackHeld || bAttackBuffered)
 	{
 		TryChainAttack();
@@ -358,7 +394,12 @@ void UJTSMeleeComponent::ScheduleHeldWeaponEvents()
 	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, HeldWeaponRecoveryDelay);
 	FTimerManager& TimerManager = World->GetTimerManager();
 	TimerManager.SetTimer(HeldWeaponHitTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponHit, HitDelay, false);
-	TimerManager.SetTimer(HeldWeaponChainTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponChainWindow, ChainDelay, false);
+	// A held button, or a click that landed during this chop, starts the next one as
+	// this arc finishes. Waiting for the longer recovery left a pause between swings.
+	if (bAttackHeld || bAttackBuffered)
+	{
+		TimerManager.SetTimer(HeldWeaponChainTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponChainWindow, ChainDelay, false);
+	}
 	TimerManager.SetTimer(HeldWeaponRecoveryTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponRecovery, RecoveryDelay, false);
 }
 
@@ -495,7 +536,7 @@ void UJTSMeleeComponent::PerformHitCheck()
 
 	FVector CameraLocation;
 	FVector AimDirection;
-	if (!GetPlayerAimView(AttackingPawn, CameraLocation, AimDirection))
+	if (!GetHeldItemAimView(AttackingPawn, CameraLocation, AimDirection))
 	{
 		return;
 	}
@@ -619,6 +660,16 @@ bool UJTSMeleeComponent::IsUnarmedComboActive() const
 	return bIsAttacking && CurrentAttackType == EJTSAttackType::Punch;
 }
 
+float UJTSMeleeComponent::GetMeleeSwingPhase() const
+{
+	if (!bMeleeSwingClockActive)
+	{
+		return 0.0f;
+	}
+	const float Duration = FMath::Max(0.15f, HeldWeaponRecoveryDelay);
+	return FMath::Clamp(MeleeSwingClockElapsed / Duration, 0.0f, 1.0f);
+}
+
 bool UJTSMeleeComponent::IsCurrentPunchLeft() const
 {
 	return bCurrentPunchUsesLeft;
@@ -734,7 +785,7 @@ bool UJTSMeleeComponent::FindBestAimCandidate(
 	FVector AimDirection;
 	if (!IsValid(AttackingPawn)
 		|| !IsValid(World)
-		|| !GetPlayerAimView(AttackingPawn, CameraLocation, AimDirection)
+		|| !GetHeldItemAimView(AttackingPawn, CameraLocation, AimDirection)
 		|| MeleeAimTraceDistance <= KINDA_SMALL_NUMBER
 		|| MeleeAimAssistRadius < 0.0f)
 	{
@@ -992,6 +1043,27 @@ bool UJTSMeleeComponent::GetPlayerAimView(APawn* AttackingPawn, FVector& OutCame
 	return !OutAimDirection.IsNearlyZero();
 }
 
+bool UJTSMeleeComponent::GetHeldItemAimView(APawn* AttackingPawn, FVector& OutOrigin, FVector& OutAimDirection) const
+{
+	OutOrigin = FVector::ZeroVector;
+	OutAimDirection = FVector::ZeroVector;
+	if (!IsValid(AttackingPawn))
+	{
+		return false;
+	}
+
+	// A held tool swings along the body. Third person keeps the camera free of that facing,
+	// so the trace starts at the pawn and runs out of the actor forward, not the camera.
+	const FVector Up = AttackingPawn->GetActorUpVector();
+	OutAimDirection = FVector::VectorPlaneProject(AttackingPawn->GetActorForwardVector(), Up).GetSafeNormal();
+	if (OutAimDirection.IsNearlyZero())
+	{
+		OutAimDirection = AttackingPawn->GetActorForwardVector().GetSafeNormal();
+	}
+	OutOrigin = AttackingPawn->GetActorLocation();
+	return !OutAimDirection.IsNearlyZero();
+}
+
 bool UJTSMeleeComponent::IsWithinPunchRange(APawn* AttackingPawn, const FVector& TargetLocation) const
 {
 	return IsWithinMeleeRange(AttackingPawn, TargetLocation, PunchRange);
@@ -1075,6 +1147,10 @@ void UJTSMeleeComponent::ServerTryAttack_Implementation()
 void UJTSMeleeComponent::ServerReleaseAttack_Implementation()
 {
 	bAttackHeld = false;
+	if (CurrentAttackType != EJTSAttackType::Punch)
+	{
+		bAttackBuffered = false;
+	}
 }
 
 void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
@@ -1086,6 +1162,12 @@ void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 	bCurrentPunchUsesLeft = bUseLeftPunch;
 	bCurrentPunchIsComboContinuation = bIsComboContinuation;
 	bIsAttacking = true;
+	if (AttackType != EJTSAttackType::Punch)
+	{
+		bMeleeSwingClockActive = true;
+		MeleeSwingClockElapsed = 0.0f;
+		SetComponentTickEnabled(true);
+	}
 	OnAttackStarted.Broadcast(AttackType);
 }
 
@@ -1094,6 +1176,9 @@ void UJTSMeleeComponent::MulticastEndAttackPresentation_Implementation(EJTSAttac
 	bIsAttacking = false;
 	bAttackBuffered = false;
 	bCurrentPunchIsComboContinuation = false;
+	bMeleeSwingClockActive = false;
+	MeleeSwingClockElapsed = 0.0f;
+	SetComponentTickEnabled(false);
 	OnAttackFinished.Broadcast(AttackType);
 }
 

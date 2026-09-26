@@ -29,6 +29,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
 	bool IsAiming() const { return bIsAiming && HasActiveRangedWeapon() && CanUseWeapon(); }
 
+	/** True while the owner is holding the fire button, including the local predicted hold. */
+	UFUNCTION(BlueprintPure, Category = "Ranged")
+	bool IsFireHeld() const { return bFireHeld; }
+
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
 	float GetActiveAimFOV() const;
 
