@@ -675,6 +675,76 @@ float AJTSSpaceWorldManager::GetApparentRangeCentimeters(
 	return ResolveApparentRangeCentimeters(Spacecraft, Planet);
 }
 
+float AJTSSpaceWorldManager::GetCruiseRangeCentimeters(
+	const AJTSSpacecraftActor* Spacecraft,
+	const AJTSPlanetAnchor* Planet) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(Planet))
+	{
+		return 0.0f;
+	}
+
+	const AJTSPlanetAnchor* const Reference = ResolveReferencePlanet(Spacecraft);
+	if (!IsValid(Reference))
+	{
+		return 0.0f;
+	}
+
+	const AJTSPlanetAnchor* const Foreign = Planet == Reference || SharesLocalTransfer(Reference, Planet)
+		? FindNearestForeignPlanet(Reference)
+		: Planet;
+	if (!IsValid(Foreign) || Foreign == Reference)
+	{
+		return 0.0f;
+	}
+
+	const float RouteKilometers = ResolveRouteKilometers(Reference, Foreign);
+	const FVector CorridorStart = Reference->GetPlanetCenter();
+	const FVector Corridor = Foreign->GetPlanetCenter() - CorridorStart;
+	const float CorridorLength = Corridor.Size();
+	if (RouteKilometers <= KINDA_SMALL_NUMBER || CorridorLength <= KINDA_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	// The dial reads the ship along the straight corridor between the two bodies.
+	// Flying toward a body shortens its reading. Flying away lengthens it. The previous
+	// progress was distance from the reference only, so leaving that body made both
+	// labels move, and swapping the reference swapped the two numbers.
+	const float AlongCorridor = FVector::DotProduct(Spacecraft->GetActorLocation() - CorridorStart, Corridor)
+		/ (CorridorLength * CorridorLength);
+	const float TargetShare = Planet == Foreign ? 1.0f : 0.0f;
+	return FMath::Max(0.0f, FMath::Abs(TargetShare - AlongCorridor) * RouteKilometers * 100000.0f);
+}
+
+float AJTSSpaceWorldManager::GetNavigationSurfaceRangeCentimeters(
+	const AJTSSpacecraftActor* Spacecraft,
+	const AJTSPlanetAnchor* Planet) const
+{
+	if (!IsValid(Spacecraft) || !IsValid(Planet))
+	{
+		return 0.0f;
+	}
+
+	const float LevelAltitude = FMath::Max(0.0f, ResolvePresentationAltitude(Planet, Spacecraft));
+	if (LevelAltitude <= KINDA_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	// Navigation metres are a log of the level climb, not the climb itself.
+	// Two metres off the ground read about 24 m. The authored-scale ceiling (500 m), where the
+	// planet starts shrinking, reads about 7.2 km. The top of this staff is a low orbit: 120 km,
+	// the band where KSP and Outer Wilds still treat you as flying over one world. Past it the
+	// dial hands off to astronomical cruise and floors at <0.01 AU.
+	constexpr float ScaleLengthCentimeters = 8000.0f;
+	constexpr float LogGainCentimeters = 1200000.0f;
+	constexpr float LowOrbitCentimeters = 12000000.0f;
+	return FMath::Min(
+		LowOrbitCentimeters,
+		LogGainCentimeters * FMath::Loge(1.0f + LevelAltitude / ScaleLengthCentimeters));
+}
+
 void AJTSSpaceWorldManager::GetRegisteredPlanets(TArray<AJTSPlanetAnchor*>& OutPlanets) const
 {
 	OutPlanets.Reset();
@@ -765,7 +835,40 @@ AJTSPlanetAnchor* AJTSSpaceWorldManager::ResolveReferencePlanet(const AJTSSpacec
 	{
 		return ActivePlanet;
 	}
-	return LastDepartedPlanet.Get();
+	if (AJTSPlanetAnchor* const DepartedPlanet = LastDepartedPlanet.Get(); IsValid(DepartedPlanet))
+	{
+		return DepartedPlanet;
+	}
+	return FindNearestRoutedPlanet(Spacecraft);
+}
+
+AJTSPlanetAnchor* AJTSSpaceWorldManager::FindNearestRoutedPlanet(const AJTSSpacecraftActor* Spacecraft) const
+{
+	if (!IsValid(Spacecraft))
+	{
+		return nullptr;
+	}
+
+	const FVector ShipLocation = Spacecraft->GetActorLocation();
+	AJTSPlanetAnchor* NearestPlanet = nullptr;
+	float NearestDistanceSquared = TNumericLimits<float>::Max();
+	for (const TPair<FName, TWeakObjectPtr<AJTSPlanetAnchor>>& Entry : PlanetRegistry)
+	{
+		AJTSPlanetAnchor* const Planet = Entry.Value.Get();
+		if (!IsValid(Planet) || Planet->GetHeliocentricDistanceKilometers() <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(ShipLocation, Planet->GetPlanetCenter());
+		if (DistanceSquared < NearestDistanceSquared)
+		{
+			NearestDistanceSquared = DistanceSquared;
+			NearestPlanet = Planet;
+		}
+	}
+
+	return NearestPlanet;
 }
 
 const AJTSPlanetAnchor* AJTSSpaceWorldManager::FindNearestForeignPlanet(const AJTSPlanetAnchor* Reference) const

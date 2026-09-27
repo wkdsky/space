@@ -18,6 +18,7 @@ class UCanvasPanel;
 class UCanvasPanelSlot;
 class UHorizontalBox;
 class UJTSCircularProgressWidget;
+class UJTSCruiseNavigationWidget;
 class UProgressBar;
 class UTextBlock;
 class UWidget;
@@ -164,6 +165,13 @@ private:
 	/** Compact SpaceWorld telemetry shown only while the spacecraft Pawn is possessed. */
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> FlightTelemetryText;
+
+	/** Ship speed, centered on the top edge for the whole flight. */
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightSpeedText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UJTSCruiseNavigationWidget> CruiseNavigationWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanel> FlightNavPanel;

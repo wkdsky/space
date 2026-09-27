@@ -145,6 +145,16 @@ public:
 	/** Distance the navigation and sky should treat as separating the ship from this body, in centimetres. */
 	float GetApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 
+	/** Heliocentric cruise distance for the navigation dial, in centimetres. Grows and shrinks with travel progress along the route. */
+	float GetCruiseRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
+
+	/**
+	 * Navigation-only height above a body's ground, in centimetres. Touched down reads zero.
+	 * A short level climb already reads several times farther, and the top of the staff is a
+	 * 120 km low orbit. Separate from both the level distance and the astronomical cruise range.
+	 */
+	float GetNavigationSurfaceRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
+
 	/**
 	 * True while this body is being drawn at its authored size for the ship. Surface interactables
 	 * may exist only inside this band; outside it the mesh is already an impostor.
@@ -173,6 +183,8 @@ private:
 	const AJTSPlanetAnchor* FindNearestForeignPlanet(const AJTSPlanetAnchor* Reference) const;
 	float ResolveTravelProgress(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Reference, const AJTSPlanetAnchor* Foreign) const;
 	AJTSPlanetAnchor* ResolveReferencePlanet(const AJTSSpacecraftActor* Spacecraft) const;
+	/** Nearest registered body to the ship that still has a heliocentric route. Used once deep space has cleared the current planet. */
+	AJTSPlanetAnchor* FindNearestRoutedPlanet(const AJTSSpacecraftActor* Spacecraft) const;
 	float ResolveApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 	float ResolveCelestialScaleRatio(const AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft) const;
 	float ResolveCelestialShrinkSpanCentimeters(const AJTSPlanetAnchor* Planet) const;
