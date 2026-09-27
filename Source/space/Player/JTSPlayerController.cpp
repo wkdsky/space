@@ -232,6 +232,14 @@ void AJTSPlayerController::ServerRequestDisembarkSpacecraft_Implementation(AJTSS
 	}
 }
 
+void AJTSPlayerController::ServerRequestClaimDriverSeat_Implementation(AJTSSpacecraftActor* Spacecraft)
+{
+	if (IsValid(Spacecraft))
+	{
+		Spacecraft->TryClaimDriverSeat(this);
+	}
+}
+
 void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId)
 {
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());

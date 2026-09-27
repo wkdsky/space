@@ -69,6 +69,23 @@ float AJTSPlanetAnchor::GetPlanetRadius() const
 	return GetApproximateRadius();
 }
 
+float AJTSPlanetAnchor::GetVisualRadius() const
+{
+	if (const AActor* const SurfaceActor = GetGameplaySurfaceActor(); IsValid(SurfaceActor))
+	{
+		FVector Origin = FVector::ZeroVector;
+		FVector Extent = FVector::ZeroVector;
+		SurfaceActor->GetActorBounds(false, Origin, Extent);
+		const float BoundsRadius = Extent.GetAbsMax();
+		if (BoundsRadius > 1.0f)
+		{
+			return BoundsRadius;
+		}
+	}
+
+	return GetApproximateRadius();
+}
+
 AActor* AJTSPlanetAnchor::GetGameplaySurfaceActor() const
 {
 	if (IsValid(GameplaySurfaceActor))
@@ -611,6 +628,15 @@ bool AJTSPlanetAnchor::HasSurfaceLevel() const
 const TSoftObjectPtr<UWorld>& AJTSPlanetAnchor::GetSurfaceLevel() const
 {
 	return SurfaceLevel;
+}
+
+float AJTSPlanetAnchor::GetNavigationHandoffAltitude() const
+{
+	const float SurfaceBand = FMath::Max(0.0f, TakeoffTransitionAltitude);
+	const float SpaceBand = GetSpaceFlightAltitude();
+	// Keep the altitude tape through the hover band, then hand the dial to a planet bearing
+	// before the craft is far enough that "metres above the mesh" stops being useful.
+	return FMath::Clamp(SurfaceBand * 1.35f, SurfaceBand, SpaceBand);
 }
 
 float AJTSPlanetAnchor::GetTakeoffTransitionAltitude() const

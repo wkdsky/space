@@ -319,9 +319,11 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 		}
 	}
 
-	const bool bDrivingSpacecraft = IsValid(Cast<AJTSSpacecraftActor>(
-		GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr));
-	if (bSpaceFlightActive || bDrivingSpacecraft)
+	const AJTSSpacecraftActor* const LocalFlightCraft = ResolveFlightSpacecraft();
+	const bool bAirborneNavigation = IsValid(LocalFlightCraft) && !LocalFlightCraft->IsLanded()
+		&& IsValid(SpaceWorldManager) && SpaceWorldManager->IsAirborneTravel();
+	const bool bDrivingSpacecraft = IsLocalFlightDriver(LocalFlightCraft);
+	if (bSpaceFlightActive || bDrivingSpacecraft || bAirborneNavigation)
 	{
 		// Run after character HUD refresh so the active vehicle owns its own instructions and state.
 		SetBoardingProgressVisible(false);
@@ -505,7 +507,87 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			18.0f,
 			FLinearColor(0.70f, 0.92f, 1.0f, 1.0f),
 			ETextJustify::Right);
-		AddCanvasChild(GameplayLayer, FlightTelemetryText, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 28.0f), FVector2D(300.0f, 120.0f), FVector2D(1.0f, 0.0f));
+		AddCanvasChild(GameplayLayer, FlightTelemetryText, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 388.0f), FVector2D(300.0f, 120.0f), FVector2D(1.0f, 0.0f));
+
+		FlightNavPanel = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("FlightNavPanel"));
+		AddCanvasChild(GameplayLayer, FlightNavPanel, FAnchors(1.0f, 0.0f), FVector2D(-22.0f, 18.0f), FVector2D(268.0f, 268.0f), FVector2D(1.0f, 0.0f));
+		if (FlightNavPanel != nullptr)
+		{
+			FlightNavFrame = MakeBorder(WidgetTree, TEXT("FlightNavFrame"), FLinearColor(0.012f, 0.028f, 0.055f, 0.88f), 10.0f);
+			AddCanvasChild(FlightNavPanel, FlightNavFrame, FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(268.0f, 248.0f));
+
+			UBorder* const Dial = MakeBorder(WidgetTree, TEXT("FlightNavDial"), FLinearColor(0.03f, 0.07f, 0.11f, 0.96f), 0.0f);
+			AddCanvasChild(FlightNavPanel, Dial, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 78.0f), FVector2D(148.0f, 148.0f), FVector2D(0.5f, 0.0f));
+
+			UBorder* const TapeTrack = MakeBorder(WidgetTree, TEXT("FlightNavTapeTrack"), FLinearColor(0.05f, 0.09f, 0.13f, 0.95f), 0.0f);
+			AddCanvasChild(FlightNavPanel, TapeTrack, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 132.0f), FVector2D(8.0f, 92.0f), FVector2D(0.5f, 0.0f));
+			FlightNavTapeFill = MakeBorder(WidgetTree, TEXT("FlightNavTapeFill"), FLinearColor(0.18f, 0.78f, 1.0f, 1.0f), 0.0f);
+			FlightNavTapeFillSlot = AddCanvasChild(FlightNavPanel, FlightNavTapeFill, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 210.0f), FVector2D(8.0f, 14.0f), FVector2D(0.5f, 1.0f));
+
+			FlightNavModeText = MakeTextBlock(WidgetTree, TEXT("FlightNavMode"), TEXT("SURFACE"), 12.0f, FLinearColor(0.55f, 0.78f, 0.92f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavModeText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 14.0f), FVector2D(230.0f, 18.0f), FVector2D(0.5f, 0.0f));
+			FlightNavPrimaryText = MakeTextBlock(WidgetTree, TEXT("FlightNavPrimary"), TEXT("0 m"), 28.0f, FLinearColor(0.82f, 0.96f, 1.0f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavPrimaryText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 34.0f), FVector2D(240.0f, 36.0f), FVector2D(0.5f, 0.0f));
+			FlightNavSecondaryText = MakeTextBlock(WidgetTree, TEXT("FlightNavSecondary"), TEXT(""), 13.0f, FLinearColor(0.70f, 0.84f, 0.94f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavSecondaryText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 68.0f), FVector2D(240.0f, 20.0f), FVector2D(0.5f, 0.0f));
+
+			FlightNavForwardText = MakeTextBlock(WidgetTree, TEXT("FlightNavForward"), TEXT("▲"), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavForwardText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 86.0f), FVector2D(28.0f, 20.0f), FVector2D(0.5f, 0.0f));
+			FlightNavNeedleText = MakeTextBlock(WidgetTree, TEXT("FlightNavNeedle"), TEXT("●"), 14.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
+			if (FlightNavNeedleText != nullptr)
+			{
+				FlightNavNeedleText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+			}
+			AddCanvasChild(FlightNavPanel, FlightNavNeedleText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 152.0f), FVector2D(24.0f, 18.0f), FVector2D(0.5f, 0.5f));
+
+			FlightNavRadarLayer = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("FlightNavRadarLayer"));
+			AddCanvasChild(FlightNavPanel, FlightNavRadarLayer, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 78.0f), FVector2D(148.0f, 148.0f), FVector2D(0.5f, 0.0f));
+			const FLinearColor ContactColors[4] = {
+				FLinearColor(1.0f, 0.78f, 0.28f, 1.0f),
+				FLinearColor(0.45f, 0.92f, 1.0f, 1.0f),
+				FLinearColor(0.72f, 1.0f, 0.62f, 1.0f),
+				FLinearColor(1.0f, 0.62f, 0.48f, 1.0f)
+			};
+			for (int32 ContactIndex = 0; ContactIndex < 4; ++ContactIndex)
+			{
+				UTextBlock* const Marker = MakeTextBlock(
+					WidgetTree,
+					*FString::Printf(TEXT("FlightNavContact%d"), ContactIndex),
+					TEXT("●"),
+					16.0f,
+					ContactColors[ContactIndex],
+					ETextJustify::Center);
+				if (Marker != nullptr)
+				{
+					Marker->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+					Marker->SetVisibility(ESlateVisibility::Collapsed);
+				}
+				UCanvasPanelSlot* const MarkerSlot = AddCanvasChild(
+					FlightNavRadarLayer,
+					Marker,
+					FAnchors(0.5f, 0.5f),
+					FVector2D::ZeroVector,
+					FVector2D(28.0f, 22.0f),
+					FVector2D(0.5f, 0.5f));
+				FlightNavContactMarkers.Add(Marker);
+				FlightNavContactSlots.Add(MarkerSlot);
+			}
+			FlightNavBodyText = MakeTextBlock(WidgetTree, TEXT("FlightNavBody"), TEXT(""), 13.0f, FLinearColor(0.78f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavBodyText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 188.0f), FVector2D(240.0f, 22.0f), FVector2D(0.5f, 0.0f));
+			FlightNavPlanetText = MakeTextBlock(WidgetTree, TEXT("FlightNavPlanet"), TEXT(""), 12.0f, FLinearColor(0.55f, 0.74f, 0.86f, 1.0f), ETextJustify::Center);
+			AddCanvasChild(FlightNavPanel, FlightNavPlanetText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 210.0f), FVector2D(240.0f, 20.0f), FVector2D(0.5f, 0.0f));
+
+			FlightNavControlsText = MakeTextBlock(
+				WidgetTree,
+				TEXT("FlightNavControls"),
+				TEXT(""),
+				12.0f,
+				FLinearColor(0.78f, 0.90f, 1.0f, 1.0f),
+				ETextJustify::Left);
+			AddCanvasChild(GameplayLayer, FlightNavControlsText, FAnchors(1.0f, 0.0f), FVector2D(-22.0f, 272.0f), FVector2D(268.0f, 108.0f), FVector2D(1.0f, 0.0f));
+			ApplyLayerVisibility(FlightNavPanel, false);
+			ApplyLayerVisibility(FlightNavControlsText, false);
+		}
 
 		PlayerCardPanel = MakeBorder(WidgetTree, TEXT("PlayerCardPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
 		AddCanvasChild(GameplayLayer, PlayerCardPanel, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 28.0f), FVector2D(276.0f, 106.0f));
@@ -1073,6 +1155,10 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	ApplyLayerVisibility(InteractionPromptText, bGameplaySurface && !bGameMenuOpen);
 	ApplyLayerVisibility(CrosshairText, false);
 	ApplyLayerVisibility(GameplayHelpText, bSpaceFlight && !bGameMenuOpen);
+	if (!bSpaceFlight)
+	{
+		SetFlightNavigationVisible(false);
+	}
 	if (!bGameplaySurface)
 	{
 		SetBoardingProgressVisible(false);
@@ -1108,6 +1194,249 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	}
 }
 
+void UJTSPrototypeHUDWidget::SetFlightNavigationVisible(bool bVisible)
+{
+	ApplyLayerVisibility(FlightNavPanel, bVisible);
+	if (!bVisible)
+	{
+		ApplyLayerVisibility(FlightNavControlsText, false);
+	}
+}
+
+AJTSSpacecraftActor* UJTSPrototypeHUDWidget::ResolveFlightSpacecraft() const
+{
+	if (AJTSSpacecraftActor* const PossessedCraft = Cast<AJTSSpacecraftActor>(
+		GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr))
+	{
+		return PossessedCraft;
+	}
+
+	const AJTSCharacter* const Character = FindPlayerCharacter();
+	return IsValid(Character) ? Character->GetBoardedSpacecraft() : nullptr;
+}
+
+bool UJTSPrototypeHUDWidget::IsLocalFlightDriver(const AJTSSpacecraftActor* Spacecraft) const
+{
+	const APlayerController* const PlayerController = GetOwningPlayer();
+	const AJTSPlayerState* const PlayerState = PlayerController != nullptr
+		? PlayerController->GetPlayerState<AJTSPlayerState>()
+		: nullptr;
+	return IsValid(Spacecraft)
+		&& IsValid(PlayerState)
+		&& Spacecraft->GetDriverPlayerState() == PlayerState
+		&& Cast<AJTSSpacecraftActor>(PlayerController->GetPawn()) == Spacecraft;
+}
+
+void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
+{
+	AJTSSpacecraftActor* const Spacecraft = ResolveFlightSpacecraft();
+	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bShowNavigation = IsValid(Spacecraft)
+		&& !Spacecraft->IsLanded()
+		&& IsValid(SpaceWorldManager)
+		&& SpaceWorldManager->IsAirborneTravel();
+	SetFlightNavigationVisible(bShowNavigation);
+	if (!bShowNavigation || FlightNavPrimaryText == nullptr)
+	{
+		return;
+	}
+
+	const bool bLocalDriver = IsLocalFlightDriver(Spacecraft);
+	ApplyLayerVisibility(FlightNavControlsText, bLocalDriver);
+	if (bLocalDriver && FlightNavControlsText != nullptr)
+	{
+		const float HoldProgress = Spacecraft->GetDriverRelinquishHoldProgress();
+		const FString RelinquishLine = HoldProgress > 0.01f
+			? FString::Printf(TEXT("HOLD Q  LEAVE SEAT  %d%%"), FMath::RoundToInt(HoldProgress * 100.0f))
+			: FString(TEXT("HOLD Q  LEAVE SEAT"));
+		FlightNavControlsText->SetText(FText::FromString(FString::Printf(
+			TEXT("W/S  THRUST    A/D  STRAFE\nARROWS  STEER HULL\nMOUSE  FREE CAMERA    WHEEL  ZOOM\nSPACE / CTRL  CLIMB / DESCEND\nSHIFT  BOOST     C  BRAKE\n%s"),
+			*RelinquishLine)));
+	}
+
+	auto FormatDistance = [](float DistanceCentimeters) -> FString
+	{
+		const float Meters = FMath::Max(0.0f, DistanceCentimeters) / 100.0f;
+		if (Meters >= 1000000.0f)
+		{
+			return FString::Printf(TEXT("%.2f M km"), Meters / 1000000.0f);
+		}
+		if (Meters >= 1000.0f)
+		{
+			return FString::Printf(TEXT("%.1f km"), Meters / 1000.0f);
+		}
+		return FString::Printf(TEXT("%d m"), FMath::RoundToInt(Meters));
+	};
+
+	const AJTSPlanetAnchor* SurfacePlanet = Spacecraft->GetFlightPlanet();
+	if (!IsValid(SurfacePlanet))
+	{
+		SurfacePlanet = SpaceWorldManager->GetCurrentPlanet();
+	}
+
+	float SurfaceAltitude = 0.0f;
+	const UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent();
+	const bool bHasSurfaceAltitude = IsValid(SurfacePlanet)
+		&& ((FlightMovement != nullptr && FlightMovement->GetResolvedSurfaceAltitude(SurfacePlanet, SurfaceAltitude))
+			|| SurfacePlanet->GetAltitudeAboveSurface(Spacecraft->GetActorLocation(), SurfaceAltitude));
+	if (!bHasSurfaceAltitude && IsValid(SurfacePlanet))
+	{
+		SurfaceAltitude = SurfacePlanet->GetApproximateAltitude(Spacecraft->GetActorLocation());
+	}
+
+	// Free-flight radar begins 200 m above the real surface. Below that the tape stays a climb gauge.
+	constexpr float FreeFlightRadarAltitude = 20000.0f;
+	const bool bNearSurface = bHasSurfaceAltitude && SurfaceAltitude < FreeFlightRadarAltitude;
+
+	const FVector ShipLocation = Spacecraft->GetActorLocation();
+	const FVector RadialUp = IsValid(SurfacePlanet)
+		? SurfacePlanet->GetRadialUpVector(ShipLocation).GetSafeNormal()
+		: Spacecraft->GetActorUpVector().GetSafeNormal();
+	const FVector ReferenceUp = RadialUp.IsNearlyZero() ? FVector::UpVector : RadialUp;
+	FVector ShipForward = FVector::VectorPlaneProject(Spacecraft->GetActorForwardVector(), ReferenceUp).GetSafeNormal();
+	if (ShipForward.IsNearlyZero())
+	{
+		ShipForward = Spacecraft->GetActorForwardVector().GetSafeNormal();
+	}
+	const FVector ShipRight = FVector::CrossProduct(ReferenceUp, ShipForward).GetSafeNormal();
+
+	if (FlightNavModeText != nullptr)
+	{
+		FlightNavModeText->SetText(FText::FromString(bNearSurface
+			? TEXT("NEAR SURFACE")
+			: TEXT("SPACE RADAR")));
+	}
+	if (FlightNavNeedleText != nullptr)
+	{
+		FlightNavNeedleText->SetVisibility(bNearSurface ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+		FlightNavNeedleText->SetRenderTransformAngle(0.0f);
+	}
+	ApplyLayerVisibility(FlightNavRadarLayer, !bNearSurface);
+	if (FlightNavTapeFill != nullptr)
+	{
+		FlightNavTapeFill->SetVisibility(bNearSurface ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (bNearSurface && FlightNavTapeFillSlot != nullptr)
+	{
+		const float TapeHeight = FMath::Lerp(8.0f, 92.0f, FMath::Clamp(SurfaceAltitude / FreeFlightRadarAltitude, 0.0f, 1.0f));
+		FlightNavTapeFillSlot->SetSize(FVector2D(8.0f, TapeHeight));
+		FlightNavTapeFillSlot->SetPosition(FVector2D(0.0f, 224.0f));
+	}
+	for (UTextBlock* const Marker : FlightNavContactMarkers)
+	{
+		if (Marker != nullptr)
+		{
+			Marker->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+
+	const FString PlanetName = IsValid(SurfacePlanet) ? SurfacePlanet->GetPlanetId().ToString().ToUpper() : FString(TEXT("NO BODY"));
+	if (bNearSurface)
+	{
+		FlightNavPrimaryText->SetText(FText::FromString(FormatDistance(FMath::Max(0.0f, SurfaceAltitude))));
+		if (FlightNavSecondaryText != nullptr)
+		{
+			FlightNavSecondaryText->SetText(FText::FromString(TEXT("ABOVE SURFACE")));
+		}
+		if (FlightNavBodyText != nullptr)
+		{
+			FlightNavBodyText->SetText(FText::FromString(FString::Printf(TEXT("CLIMB  %s"), *PlanetName)));
+		}
+		if (FlightNavPlanetText != nullptr)
+		{
+			FlightNavPlanetText->SetText(FText::FromString(TEXT("HOLD SPACE TO LEAVE THE SURFACE")));
+		}
+		return;
+	}
+
+	struct FRadarContact
+	{
+		const AJTSPlanetAnchor* Body = nullptr;
+		float Range = 0.0f;
+		float Bearing = 0.0f;
+	};
+
+	TArray<FRadarContact> Contacts;
+	TArray<AJTSPlanetAnchor*> RegisteredPlanets;
+	SpaceWorldManager->GetRegisteredPlanets(RegisteredPlanets);
+	float NearestRange = TNumericLimits<float>::Max();
+	for (const AJTSPlanetAnchor* const Candidate : RegisteredPlanets)
+	{
+		if (!IsValid(Candidate))
+		{
+			continue;
+		}
+
+		const FVector ToPlanet = Candidate->GetPlanetCenter() - ShipLocation;
+		const FVector PlanarToPlanet = FVector::VectorPlaneProject(ToPlanet, ReferenceUp);
+		if (PlanarToPlanet.IsNearlyZero() || ShipRight.IsNearlyZero())
+		{
+			continue;
+		}
+
+		FRadarContact& Contact = Contacts.AddDefaulted_GetRef();
+		Contact.Body = Candidate;
+		Contact.Range = SpaceWorldManager->GetApparentRangeCentimeters(Spacecraft, Candidate);
+		const float ForwardComponent = FVector::DotProduct(PlanarToPlanet, ShipForward);
+		const float RightComponent = FVector::DotProduct(PlanarToPlanet, ShipRight);
+		Contact.Bearing = FMath::RadiansToDegrees(FMath::Atan2(RightComponent, ForwardComponent));
+		NearestRange = FMath::Min(NearestRange, Contact.Range);
+	}
+
+	Contacts.Sort([](const FRadarContact& Left, const FRadarContact& Right)
+	{
+		return Left.Range < Right.Range;
+	});
+
+	const float RadarRadius = 58.0f;
+	const float ScopeRange = FMath::Max(NearestRange * 2.2f, 100.0f);
+	const int32 MarkerCount = FMath::Min(Contacts.Num(), FlightNavContactMarkers.Num());
+	FString ContactSummary;
+	for (int32 ContactIndex = 0; ContactIndex < MarkerCount; ++ContactIndex)
+	{
+		const FRadarContact& Contact = Contacts[ContactIndex];
+		UTextBlock* const Marker = FlightNavContactMarkers[ContactIndex];
+		UCanvasPanelSlot* const MarkerSlot = FlightNavContactSlots.IsValidIndex(ContactIndex)
+			? FlightNavContactSlots[ContactIndex].Get()
+			: nullptr;
+		if (Marker == nullptr || MarkerSlot == nullptr || !IsValid(Contact.Body))
+		{
+			continue;
+		}
+
+		const float BearingRadians = FMath::DegreesToRadians(Contact.Bearing);
+		const float ScopeFraction = FMath::Clamp(Contact.Range / ScopeRange, 0.0f, 1.0f);
+		const bool bPinnedToRim = ScopeFraction >= 0.98f || FMath::Abs(Contact.Bearing) > 18.0f;
+		const float DrawRadius = bPinnedToRim ? RadarRadius : RadarRadius * FMath::Max(ScopeFraction, 0.18f);
+		const FVector2D Blip(
+			FMath::Sin(BearingRadians) * DrawRadius,
+			-FMath::Cos(BearingRadians) * DrawRadius);
+		MarkerSlot->SetPosition(Blip);
+		Marker->SetText(FText::FromString(bPinnedToRim ? TEXT("▲") : TEXT("●")));
+		Marker->SetRenderTransformAngle(Contact.Bearing);
+		Marker->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+		const FString BodyName = Contact.Body->GetPlanetId().ToString().ToUpper();
+		const FString Line = FString::Printf(TEXT("%s  %s"), *BodyName, *FormatDistance(Contact.Range));
+		ContactSummary += ContactSummary.IsEmpty() ? Line : FString(TEXT("\n")) + Line;
+	}
+
+	const int32 SpeedMetersPerSecond = FMath::Max(0, FMath::RoundToInt(Spacecraft->GetCurrentSpeed() / 100.0f));
+	FlightNavPrimaryText->SetText(FText::FromString(FString::Printf(TEXT("SPD %d m/s"), SpeedMetersPerSecond)));
+	if (FlightNavSecondaryText != nullptr)
+	{
+		FlightNavSecondaryText->SetText(FText::FromString(TEXT("HEADING UP")));
+	}
+	if (FlightNavBodyText != nullptr)
+	{
+		FlightNavBodyText->SetText(FText::FromString(ContactSummary.IsEmpty() ? TEXT("NO CONTACTS") : ContactSummary));
+	}
+	if (FlightNavPlanetText != nullptr)
+	{
+		FlightNavPlanetText->SetText(FText::FromString(TEXT("EDGE MARKER  OFF HEADING")));
+	}
+}
+
 void UJTSPrototypeHUDWidget::RefreshFlightHud()
 {
 	// A driver possesses the spacecraft rather than their character, so the normal gameplay HUD
@@ -1124,6 +1453,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	const bool bLegacySpaceFlight = BoundGameState.IsValid() && BoundGameState->IsSpaceFlight();
 	if (!IsValid(Spacecraft))
 	{
+		SetFlightNavigationVisible(false);
 		if (!bLegacySpaceFlight)
 		{
 			ApplyLayerVisibility(FlightTelemetryText, false);
@@ -1136,40 +1466,12 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	}
 
 	ApplyLayerVisibility(FlightTelemetryText, true);
-	ApplyLayerVisibility(GameplayHelpText, true);
+	RefreshFlightNavigation();
+	const bool bAirborneNavigation = IsValid(Spacecraft) && !Spacecraft->IsLanded();
+	ApplyLayerVisibility(GameplayHelpText, !bAirborneNavigation);
 	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
 	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
 	// altitude reference.
-	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	if (IsValid(SpaceWorldManager) && SpaceWorldManager->IsInterplanetaryCruiseActive())
-	{
-		const AJTSPlanetAnchor* const Destination = SpaceWorldManager->GetCruiseDestinationPlanet();
-		const AJTSPlanetAnchor* const Origin = SpaceWorldManager->GetCruiseOriginPlanet();
-		const double RemainingKilometers = FMath::Max(0.0, static_cast<double>(SpaceWorldManager->GetCruiseRemainingKilometers()));
-		const double SpeedKilometersPerSecond = FMath::Abs(static_cast<double>(SpaceWorldManager->GetCruiseSpeedKilometersPerSecond()));
-		const int32 RemainingDisplay = RemainingKilometers >= 1000000.0
-			? FMath::RoundToInt(RemainingKilometers / 1000000.0)
-			: FMath::Max(1, FMath::RoundToInt(RemainingKilometers));
-		const TCHAR* const RemainingUnit = RemainingKilometers >= 1000000.0 ? TEXT("M km") : TEXT("km");
-		const int32 SpeedDisplay = FMath::Max(0, FMath::RoundToInt(SpeedKilometersPerSecond));
-		const int32 EtaSeconds = SpeedKilometersPerSecond > 0.05
-			? FMath::CeilToInt(RemainingKilometers / SpeedKilometersPerSecond)
-			: 0;
-		const FString DestinationName = IsValid(Destination) ? Destination->GetPlanetId().ToString() : TEXT("TARGET");
-		const FString OriginName = IsValid(Origin) ? Origin->GetPlanetId().ToString() : TEXT("ORIGIN");
-		FlightTelemetryText->SetText(FText::FromString(FString::Printf(
-			TEXT("%s  →  %s\n%s %d %s\nSPD %d km/s    ETA %s"),
-			*OriginName.ToUpper(),
-			*DestinationName.ToUpper(),
-			SpeedKilometersPerSecond > 0.05 ? TEXT("RANGE") : TEXT("HOLD"),
-			RemainingDisplay,
-			RemainingUnit,
-			SpeedDisplay,
-			EtaSeconds > 0 ? *FormatRemainingTime(static_cast<float>(EtaSeconds)) : TEXT("--"))));
-		FlightTelemetryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.70f, 0.92f, 1.0f, 1.0f)));
-		return;
-	}
-
 	const AJTSPlanetAnchor* const Planet = Spacecraft->GetFlightPlanet();
 	if (!IsValid(Planet))
 	{
@@ -1459,7 +1761,7 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 	if (InventoryTitleText != nullptr)
 	{
 		InventoryTitleText->SetText(FText::FromString(FString::Printf(
-			TEXT("QUICKBAR %d/%d  ·  UP/DOWN PAGE  ·  G DROP  ·  HOLD G DESTROY"),
+			TEXT("QUICKBAR %d/%d  ·  UP/DOWN PAGE  ·  Q DROP  ·  HOLD Q DESTROY"),
 			PageIndex + 1,
 			PageCount)));
 	}

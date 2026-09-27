@@ -72,6 +72,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDisembarkSpacecraft(AJTSSpacecraftActor* Spacecraft);
 
+	/** Boarded passenger claims an empty driver seat. The server accepts the first valid request. */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestClaimDriverSeat(AJTSSpacecraftActor* Spacecraft);
+
 	/** Ship-owned shop RPC. The server validates ship range, shared materials, and delivery. */
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);

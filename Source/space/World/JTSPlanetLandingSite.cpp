@@ -66,6 +66,12 @@ void AJTSPlanetLandingSite::BeginPlay()
 	BuildRuntimeLandingMarker();
 }
 
+void AJTSPlanetLandingSite::RefreshRuntimeLandingMarker()
+{
+	RuntimeMarkerBuildAttempts = 0;
+	BuildRuntimeLandingMarker();
+}
+
 void AJTSPlanetLandingSite::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (AJTSPlanetLandingManager* const LandingManager = AJTSPlanetLandingManager::FindPlanetLandingManager(this))

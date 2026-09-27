@@ -69,6 +69,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	EJTSSpaceTravelState GetCurrentTravelState() const;
 
+	/** True from the moment Space is pressed to leave the surface until the ship is parked again. */
+	UFUNCTION(BlueprintPure, Category = "Space World|State")
+	bool IsAirborneTravel() const;
+
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	bool IsSurfaceState() const;
 
@@ -123,30 +127,33 @@ public:
 	void UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spacecraft);
 
 	/**
-	 * Integrates the shared expedition's felt interplanetary distance. The spacecraft keeps its
-	 * existing local flight; this scalar is what makes Moon↔Mars take minutes and stay reversible.
+	 * Keeps authored positions. Past the near-surface band each body scales down continuously
+	 * across the open gap to the next body. A body is hidden only once its scaled disk covers
+	 * less than MinimumNoticeableAngularDiameterDegrees on screen.
 	 */
-	void UpdateInterplanetaryCruise(AJTSSpacecraftActor* Spacecraft, float DeltaTime);
+	void UpdateCelestialPresentation(const AJTSSpacecraftActor* Spacecraft);
 
+	/** Kilometres of real separation between two bodies. Zero when either body is unconfigured. */
 	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	bool IsInterplanetaryCruiseActive() const;
+	float GetRouteKilometers(const AJTSPlanetAnchor* Origin, const AJTSPlanetAnchor* Destination) const;
 
-	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	AJTSPlanetAnchor* GetCruiseOriginPlanet() const;
+	/** True while a body's disk would cover at least MinimumNoticeableAngularDiameterDegrees. */
+	bool IsPlanetNoticeableFrom(
+		const AJTSPlanetAnchor* Planet,
+		const AJTSSpacecraftActor* Viewer) const;
 
-	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	AJTSPlanetAnchor* GetCruiseDestinationPlanet() const;
+	/** Distance the navigation and sky should treat as separating the ship from this body, in centimetres. */
+	float GetApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 
-	/** Kilometres still to cover toward the current destination. Zero while cruise is inactive. */
-	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	float GetCruiseRemainingKilometers() const;
+	/**
+	 * True while this body is being drawn at its authored size for the ship. Surface interactables
+	 * may exist only inside this band; outside it the mesh is already an impostor.
+	 */
+	bool IsPlanetPresentedAtAuthoredScale(const AJTSPlanetAnchor* Planet) const;
 
-	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	float GetCruiseRouteKilometers() const;
+	void GetRegisteredPlanets(TArray<AJTSPlanetAnchor*>& OutPlanets) const;
 
-	/** Signed felt speed in kilometres per second. Positive closes on the destination. */
-	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
-	float GetCruiseSpeedKilometersPerSecond() const;
+	bool SharesLocalSky(const AJTSPlanetAnchor* First, const AJTSPlanetAnchor* Second) const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -157,18 +164,26 @@ private:
 	FName GetPlanetKey(const AJTSPlanetAnchor* Planet) const;
 	ULevelStreamingDynamic* FindPlanetContentStreamingLevel(const AJTSPlanetAnchor* Planet) const;
 	void LogDebugState() const;
-	void RefreshCruisePresentation();
-	void RefreshLocalSky() const;
-	void SetCruiseBodyHidden(AJTSPlanetAnchor* Planet, bool bHideBody) const;
+	void RefreshCelestialVisibility(const FVector& ViewLocation, float HorizontalFieldOfViewDegrees);
+	void SetCelestialBodyHidden(AJTSPlanetAnchor* Planet, bool bHideBody) const;
 	void RestoreDisplacedCruiseSurface();
-	void PresentCruiseDestination(const AJTSSpacecraftActor* Spacecraft);
-	void RebaseSkyWithSpacecraft(const FVector& WorldDelta) const;
 	float ResolveRouteKilometers(const AJTSPlanetAnchor* Origin, const AJTSPlanetAnchor* Destination) const;
 	bool SharesLocalTransfer(const AJTSPlanetAnchor* First, const AJTSPlanetAnchor* Second) const;
-	bool IsLocalFamily(const AJTSPlanetAnchor* Focus, const AJTSPlanetAnchor* Candidate) const;
-	AJTSPlanetAnchor* ResolveAimedCruisePlanet(const AJTSSpacecraftActor* Spacecraft) const;
-	void HandoffCruiseToLocalFlight(AJTSSpacecraftActor* Spacecraft, AJTSPlanetAnchor* ArrivalPlanet);
-	void ClearInterplanetaryCruise();
+	float ResolveLocalSeparationCentimeters(const AJTSPlanetAnchor* First, const AJTSPlanetAnchor* Second) const;
+	const AJTSPlanetAnchor* FindNearestForeignPlanet(const AJTSPlanetAnchor* Reference) const;
+	float ResolveTravelProgress(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Reference, const AJTSPlanetAnchor* Foreign) const;
+	AJTSPlanetAnchor* ResolveReferencePlanet(const AJTSSpacecraftActor* Spacecraft) const;
+	float ResolveApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
+	float ResolveCelestialScaleRatio(const AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft) const;
+	float ResolveCelestialShrinkSpanCentimeters(const AJTSPlanetAnchor* Planet) const;
+	float ResolvePresentationAltitude(const AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft) const;
+	float ResolveAuthoredSurfaceRadius(const AJTSPlanetAnchor* Planet) const;
+	void ApplyCelestialScale(AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft);
+	void UpdateSurfaceContentPresentation(AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft);
+	void SetSurfaceContentPresented(AJTSPlanetAnchor* Planet, bool bPresent);
+	void CollectSurfaceContentActors(const AJTSPlanetAnchor* Planet, TArray<AActor*>& OutActors) const;
+	static bool IsPersistentOccupant(const AActor* Actor);
+	bool ActorBelongsToPlanet(const AActor* Actor, const AJTSPlanetAnchor* Planet) const;
 
 	UFUNCTION()
 	void OnRep_SpaceWorldState();
@@ -212,34 +227,60 @@ private:
 	bool bSurfaceGameplayReady = false;
 	bool bLandingEligibilityAnnounced = false;
 
-	/** Body the ship last released. Cruise can start from it after the influence bubble is left behind. */
+	/** Body the ship last released. Retained so a return can still name the departure body. */
 	TWeakObjectPtr<AJTSPlanetAnchor> LastDepartedPlanet;
 
-	FTransform SavedCruiseSurfaceTransform = FTransform::Identity;
-	TWeakObjectPtr<AActor> DisplacedCruiseSurfaceActor;
-	bool bCruiseSurfaceDisplaced = false;
+	struct FSavedCelestialSurface
+	{
+		FVector Scale = FVector::OneVector;
+		bool bCaptured = false;
+	};
 
-	/** Reference body the current cruise leg left. Stays set while the leg can still be reversed. */
-	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<AJTSPlanetAnchor> CruiseOriginPlanet;
+	TMap<TWeakObjectPtr<AActor>, FSavedCelestialSurface> SavedCelestialSurfaces;
 
-	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<AJTSPlanetAnchor> CruiseDestinationPlanet;
+	/** Planets whose surface actors are currently shown at their authored locations. */
+	TSet<TWeakObjectPtr<AJTSPlanetAnchor>> PresentedSurfaceContentPlanets;
 
-	/** Kilometres travelled away from CruiseOriginPlanet along the current route. */
-	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
-	float CruiseDistanceFromOriginKilometers = 0.0f;
+	/** A disk smaller than this is treated as invisible. About two vertical pixels at 90° FOV on 1080p. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", UIMin = "0.01", UIMax = "1.0"))
+	float MinimumNoticeableAngularDiameterDegrees = 0.1f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
-	float CruiseRemainingKilometers = 0.0f;
+	/**
+	 * Scale reached at the far end of the shrink span. The fade is geometric, so the first
+	 * metres past the release line only nudge the size and the disk dwindles after that.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0001", ClampMax = "1.0", UIMin = "0.001", UIMax = "0.2"))
+	float MinimumCelestialScaleRatio = 0.004f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_SpaceWorldState, VisibleInstanceOnly, Transient, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true"))
-	float CruiseSpeedKilometersPerSecond = 0.0f;
+	/**
+	 * Distance past the release shell over which a body eases from authored size down to
+	 * MinimumCelestialScaleRatio. Zero uses the open gap to the nearest other body.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float CelestialShrinkSpanCentimeters = 0.0f;
 
+	/** Real separation at which a distant body is presented at its authored local size. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
-	float CruiseReferenceDurationSeconds = 150.0f;
+	float CruiseLocalHorizonKilometers = 500.0f;
 
-	/** Below this remaining distance the destination is already a local body and cruise ends. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float CruiseArrivalKilometers = 500.0f;
+	/**
+	 * Altitude above the gameplay surface that stays at authored scale. Ship combat and surface
+	 * interaction inside this band see the planet at the size it was placed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float AuthoredScaleAltitudeCentimeters = 50000.0f;
+
+	/**
+	 * Extra altitude the ship must climb before a full-scale body may start shrinking. The gap
+	 * stops a ship skimming the 500 m line from scaling the planet every frame.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float AuthoredScaleReleaseMarginCentimeters = 8000.0f;
+
+	/**
+	 * Extra distance past the release line before surface actors are hidden. Content is already
+	 * gone while the mesh is still essentially full size, so the pop is a distant speck.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float SurfaceContentHideMarginCentimeters = 4000.0f;
 };

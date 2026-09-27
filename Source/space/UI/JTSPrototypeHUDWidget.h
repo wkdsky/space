@@ -58,6 +58,10 @@ private:
 	void RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshGameplayHud();
 	void RefreshFlightHud();
+	void RefreshFlightNavigation();
+	AJTSSpacecraftActor* ResolveFlightSpacecraft() const;
+	bool IsLocalFlightDriver(const AJTSSpacecraftActor* Spacecraft) const;
+	void SetFlightNavigationVisible(bool bVisible);
 	void RefreshPlayerHealth(float CurrentHealth, float MaxHealth);
 	void RefreshShipResourcesSidebar();
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
@@ -160,6 +164,51 @@ private:
 	/** Compact SpaceWorld telemetry shown only while the spacecraft Pawn is possessed. */
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> FlightTelemetryText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanel> FlightNavPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> FlightNavFrame;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavModeText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavPrimaryText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavSecondaryText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavNeedleText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavForwardText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavBodyText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavPlanetText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanel> FlightNavRadarLayer;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> FlightNavContactMarkers;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UCanvasPanelSlot>> FlightNavContactSlots;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> FlightNavTapeFill;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanelSlot> FlightNavTapeFillSlot;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> FlightNavControlsText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> StartRulesText;

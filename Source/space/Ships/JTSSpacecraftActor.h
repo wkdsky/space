@@ -323,6 +323,17 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDisembark();
 
+	/** The current driver gives up the seat without leaving the ship. The first later claim wins. */
+	UFUNCTION(Server, Reliable)
+	void ServerRelinquishDriverSeat();
+
+	/** Server-side seat claim. Passengers call this through their own player controller. */
+	bool TryClaimDriverSeat(APlayerController* RequestingController);
+
+	/** Local driver hold progress for the HUD. Zero unless this machine is holding Q as the driver. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Boarding")
+	float GetDriverRelinquishHoldProgress() const;
+
 	/** Broadcast after a successful resource deposit. */
 	UPROPERTY(BlueprintAssignable, Category = "Ship|Resources")
 	FOnShipResourcesChanged OnShipResourcesChanged;
@@ -377,6 +388,8 @@ private:
 	void FlightMoveRight(const FInputActionValue& Value);
 	void FlightAscendStarted(const FInputActionValue& Value);
 	void FlightMoveVertical(const FInputActionValue& Value);
+	void FlightSteerYaw(const FInputActionValue& Value);
+	void FlightSteerPitch(const FInputActionValue& Value);
 	void FlightLookYaw(const FInputActionValue& Value);
 	void FlightLookPitch(const FInputActionValue& Value);
 	void FlightCameraZoom(const FInputActionValue& Value);
@@ -386,6 +399,10 @@ private:
 	void FlightBrakeStopped(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
 	void FlightDisembarkReleased(const FInputActionValue& Value);
+	void FlightRelinquishDriverStarted(const FInputActionValue& Value);
+	void FlightRelinquishDriverReleased(const FInputActionValue& Value);
+	void CompleteDriverRelinquishHold();
+	void CancelDriverRelinquishHold();
 	void ProcessDeferredDisembarkRequest();
 	void UpdateDisembarkInputGate();
 	void InitializeFlightCameraDistance();
@@ -395,7 +412,6 @@ private:
 	FVector GetFlightReferenceUp() const;
 	FVector GetStableFlightTangent(const FVector& UpVector, const FVector& PreferredDirection) const;
 	FVector GetFlightCameraForward(const FVector& ReferenceUp) const;
-	void RefreshLocalFlightViewIntent();
 	bool RequestLandingInternal(bool bAllowControlledDescentCapture);
 	void UpdateAutomaticLanding(float DeltaSeconds);
 	void AbortLandingAssist();
@@ -539,10 +555,10 @@ private:
 
 	/** Dedicated exterior-camera pitch limits; player-character limits are never reused while driving. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "-89.0", ClampMax = "0.0", UIMin = "-89.0", UIMax = "0.0"))
-	float FlightCameraPitchMin = -70.0f;
+	float FlightCameraPitchMin = -89.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
-	float FlightCameraPitchMax = 55.0f;
+	float FlightCameraPitchMax = 89.0f;
 
 	/** Multiplies raw mouse look for the exterior camera only. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
@@ -607,6 +623,12 @@ private:
 	TObjectPtr<UInputAction> FlightLookPitchAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightSteerYawAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightSteerPitchAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightCameraZoomAction;
 
 	UPROPERTY(Transient)
@@ -618,6 +640,10 @@ private:
 	/** Available only while a player is driving a grounded SpaceWorld spacecraft. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightDisembarkAction;
+
+	/** Long-press while flying gives up the driver seat. The same key drops or destroys items on foot. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightRelinquishDriverAction;
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;
@@ -668,6 +694,13 @@ private:
 	float AutomaticLandingCheckElapsed = 0.0f;
 	bool bDisembarkInputArmed = false;
 	bool bDisembarkRequestPending = false;
+	bool bDriverRelinquishHoldActive = false;
+	double DriverRelinquishHoldStartTime = 0.0;
+	FTimerHandle DriverRelinquishHoldTimerHandle;
+
+	/** Seconds Q must be held before the current driver gives up the seat. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "0.2", UIMin = "0.2"))
+	float DriverRelinquishHoldDuration = 0.65f;
 	bool bAutomaticLandingDescentHeld = false;
 	bool bAutomaticLandingBlockedUntilDescentReleased = false;
 

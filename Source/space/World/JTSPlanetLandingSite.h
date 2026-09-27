@@ -79,6 +79,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Landing Site|Debug")
 	void DrawDebugLandingSite(float Duration = 5.0f) const;
 
+	/** Rebuilds the terrain ribbon after the body returns to its authored scale. */
+	void RefreshRuntimeLandingMarker();
+
 private:
 	void BuildRuntimeLandingMarker();
 	bool ProjectMarkerPointToSurface(const FVector& SourcePoint, FVector& OutPoint, FVector& OutNormal) const;

@@ -514,7 +514,7 @@ private:
 	double LastAimPitchSendSeconds = -100.0;
 	float LastSentAimPitch = 0.0f;
 
-	/** Seconds G must be held before the selected item is permanently destroyed. */
+	/** Seconds Q must be held before the selected item is permanently destroyed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float ItemDestroyHoldDuration = 0.8f;
 

@@ -80,12 +80,6 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 		return;
 	}
 
-	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	const bool bHoldCruisePosition = SpaceWorldManager != nullptr && SpaceWorldManager->IsInterplanetaryCruiseActive();
-	const FVector CruiseAnchor = bHoldCruisePosition && IsValid(UpdatedComponent)
-		? UpdatedComponent->GetComponentLocation()
-		: FVector::ZeroVector;
-
 	if (bAssistedLanding)
 	{
 		TickAssistedLanding(DeltaTime);
@@ -93,11 +87,6 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 	else
 	{
 		TickFlight(DeltaTime);
-	}
-
-	if (bHoldCruisePosition && IsValid(UpdatedComponent))
-	{
-		UpdatedComponent->SetWorldLocation(CruiseAnchor);
 	}
 
 	SubmitExteriorAltitude(DeltaTime);
@@ -121,17 +110,15 @@ void UJTSSpacecraftFlightMovementComponent::SetVerticalInput(float Value)
 	VerticalInput = FMath::Clamp(Value, -1.0f, 1.0f);
 }
 
-void UJTSSpacecraftFlightMovementComponent::SetViewForward(const FVector& Value)
+void UJTSSpacecraftFlightMovementComponent::SetSteeringInput(const FVector2D& Value)
 {
-	if (Value.ContainsNaN())
+	if (bAssistedLanding)
 	{
 		return;
 	}
-	const FVector SafeForward = Value.GetSafeNormal();
-	if (!SafeForward.IsNearlyZero())
-	{
-		ViewForward = SafeForward;
-	}
+	SteeringInput = FVector2D(
+		FMath::Clamp(Value.X, -1.0f, 1.0f),
+		FMath::Clamp(Value.Y, -1.0f, 1.0f));
 }
 
 void UJTSSpacecraftFlightMovementComponent::SetBoosting(bool bNewBoosting)
@@ -148,6 +135,7 @@ void UJTSSpacecraftFlightMovementComponent::ClearInput()
 {
 	MoveInput = FVector2D::ZeroVector;
 	VerticalInput = 0.0f;
+	SteeringInput = FVector2D::ZeroVector;
 	CurrentFacingTurnSpeedRadians = 0.0f;
 	bBraking = false;
 	SetBoostState(false);
@@ -649,32 +637,23 @@ FVector UJTSSpacecraftFlightMovementComponent::GetReferenceUp() const
 	return SafeReferenceUp.IsNearlyZero() ? FVector::UpVector : SafeReferenceUp;
 }
 
-void UJTSSpacecraftFlightMovementComponent::GetViewBasis(
+void UJTSSpacecraftFlightMovementComponent::GetHullBasis(
 	const FVector& ReferenceUp,
 	FVector& OutForward,
 	FVector& OutRight) const
 {
 	const APawn* const OwningPawn = GetPawnOwner();
-	OutForward = ViewForward.GetSafeNormal();
-	if (OutForward.IsNearlyZero() && IsValid(OwningPawn))
+	OutForward = IsValid(OwningPawn) ? OwningPawn->GetActorForwardVector().GetSafeNormal() : FVector::ForwardVector;
+	if (OutForward.IsNearlyZero())
 	{
-		OutForward = OwningPawn->GetActorForwardVector().GetSafeNormal();
+		OutForward = FVector::ForwardVector;
 	}
 
 	FVector PlanarForward = FVector::VectorPlaneProject(OutForward, ReferenceUp).GetSafeNormal();
-	if (PlanarForward.IsNearlyZero() && IsValid(OwningPawn))
-	{
-		PlanarForward = FVector::VectorPlaneProject(OwningPawn->GetActorForwardVector(), ReferenceUp).GetSafeNormal();
-	}
 	if (PlanarForward.IsNearlyZero())
 	{
 		FVector FallbackRight;
 		ReferenceUp.FindBestAxisVectors(PlanarForward, FallbackRight);
-	}
-	if (OutForward.IsNearlyZero()
-		|| FVector::VectorPlaneProject(OutForward, ReferenceUp).IsNearlyZero())
-	{
-		OutForward = PlanarForward;
 	}
 
 	OutRight = FVector::CrossProduct(ReferenceUp, PlanarForward).GetSafeNormal();
@@ -693,7 +672,7 @@ FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime, con
 	}
 
 	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
-	const FQuat FreeFlightRotation = BuildFreeFlightDesiredRotation(CurrentRotation);
+	const FQuat FreeFlightRotation = BuildFreeFlightDesiredRotation(CurrentRotation, ReferenceUp);
 	const float AssistAlpha = GetSurfaceFlightAssistAlpha();
 	if (AssistAlpha <= KINDA_SMALL_NUMBER)
 	{
@@ -717,16 +696,18 @@ FQuat UJTSSpacecraftFlightMovementComponent::BuildSurfaceFlightDesiredRotation(
 	float AssistAlpha) const
 {
 	check(IsValid(UpdatedComponent));
-	// Without forward intent, the low-altitude controller gently returns the hull to the local
-	// surface attitude. The camera itself stays independent and may continue looking down.
-	FVector DesiredForward = FVector::VectorPlaneProject(UpdatedComponent->GetForwardVector(), SurfaceUp).GetSafeNormal();
-	if (HasForwardFlightIntent())
+	// The hull holds its own heading. Near terrain, a nose-down command is limited to the dive
+	// envelope; releasing the pitch key levels the nose back onto the local horizon.
+	const FVector HullForward = UpdatedComponent->GetForwardVector().GetSafeNormal();
+	FVector DesiredForward = FVector::VectorPlaneProject(HullForward, SurfaceUp).GetSafeNormal();
+	const float PitchDeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
+	if (SteeringInput.Y > PitchDeadZone)
 	{
-		DesiredForward = ConstrainForwardToSurfaceEnvelope(ViewForward, SurfaceUp, AssistAlpha);
+		DesiredForward = ConstrainForwardToSurfaceEnvelope(HullForward, SurfaceUp, 0.0f);
 	}
-	if (DesiredForward.IsNearlyZero())
+	else if (SteeringInput.Y < -PitchDeadZone)
 	{
-		DesiredForward = FVector::VectorPlaneProject(ViewForward, SurfaceUp).GetSafeNormal();
+		DesiredForward = ConstrainForwardToSurfaceEnvelope(HullForward, SurfaceUp, AssistAlpha);
 	}
 	if (DesiredForward.IsNearlyZero())
 	{
@@ -745,28 +726,50 @@ FQuat UJTSSpacecraftFlightMovementComponent::BuildSurfaceFlightDesiredRotation(
 	return FRotationMatrix::MakeFromXY(DesiredForward.GetSafeNormal(), SurfaceRight).ToQuat();
 }
 
-FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation) const
+FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(
+	const FQuat& CurrentRotation,
+	const FVector& ReferenceUp) const
 {
 	check(IsValid(UpdatedComponent));
-	if (!HasForwardFlightIntent())
+	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
+	if (SteeringInput.SizeSquared() <= FMath::Square(DeadZone))
 	{
 		return CurrentRotation;
 	}
 
-	FVector DesiredForward = ViewForward.GetSafeNormal();
-	if (DesiredForward.IsNearlyZero())
-	{
-		DesiredForward = UpdatedComponent->GetForwardVector().GetSafeNormal();
-	}
+	const FVector SafeUp = ReferenceUp.GetSafeNormal();
 	const FVector CurrentForward = UpdatedComponent->GetForwardVector().GetSafeNormal();
-	if (DesiredForward.IsNearlyZero() || CurrentForward.IsNearlyZero())
+	if (SafeUp.IsNearlyZero() || CurrentForward.IsNearlyZero())
 	{
 		return CurrentRotation;
 	}
 
-	// The shortest arc aligns only the nose to the pilot's 3D aim. Unlike MakeFromXZ with a
-	// changing actor-Up, this neither injects roll nor creates a self-referential pitch loop.
-	const FQuat Alignment = FQuat::FindBetweenNormals(CurrentForward, DesiredForward);
+	FVector PlanarForward = FVector::VectorPlaneProject(CurrentForward, SafeUp).GetSafeNormal();
+	if (PlanarForward.IsNearlyZero())
+	{
+		FVector FallbackRight;
+		SafeUp.FindBestAxisVectors(PlanarForward, FallbackRight);
+	}
+	const FVector PlanarRight = FVector::CrossProduct(SafeUp, PlanarForward).GetSafeNormal();
+	if (PlanarRight.IsNearlyZero())
+	{
+		return CurrentRotation;
+	}
+
+	const float VerticalComponent = FVector::DotProduct(CurrentForward, SafeUp);
+	const float TangentComponent = FVector::VectorPlaneProject(CurrentForward, SafeUp).Size();
+	const float CurrentPitch = FMath::Atan2(VerticalComponent, TangentComponent);
+	const float Step = FMath::DegreesToRadians(12.0f);
+	const float TargetPitch = FMath::Clamp(CurrentPitch + SteeringInput.Y * Step, -1.5f, 1.5f);
+	const FVector PitchedForward = (
+		PlanarForward * FMath::Cos(TargetPitch) + SafeUp * FMath::Sin(TargetPitch)).GetSafeNormal();
+	const FVector YawedForward = FQuat(SafeUp, SteeringInput.X * Step).RotateVector(PitchedForward).GetSafeNormal();
+	if (YawedForward.IsNearlyZero())
+	{
+		return CurrentRotation;
+	}
+
+	const FQuat Alignment = FQuat::FindBetweenNormals(CurrentForward, YawedForward);
 	return (Alignment * CurrentRotation).GetNormalized();
 }
 
@@ -857,11 +860,6 @@ FQuat UJTSSpacecraftFlightMovementComponent::InterpolateTowardRotation(
 	return FQuat::Slerp(CurrentRotation, DesiredRotation, TurnStep / AngularDistance).GetNormalized();
 }
 
-bool UJTSSpacecraftFlightMovementComponent::HasForwardFlightIntent() const
-{
-	return MoveInput.Y > FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
-}
-
 void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude(float DeltaTime)
 {
 	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner());
@@ -876,7 +874,7 @@ void UJTSSpacecraftFlightMovementComponent::SubmitExteriorAltitude(float DeltaTi
 		// target handoff. This runs after the authoritative movement step so all players receive the
 		// same departure/arrival decision.
 		Manager->UpdateSpacecraftFlightState(Spacecraft);
-		Manager->UpdateInterplanetaryCruise(Spacecraft, DeltaTime);
+		Manager->UpdateCelestialPresentation(Spacecraft);
 	}
 }
 
@@ -1006,44 +1004,44 @@ FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity(const FVector
 		return FVector::ZeroVector;
 	}
 
-	FVector ViewBasisForward;
-	FVector ViewBasisRight;
-	GetViewBasis(ReferenceUp, ViewBasisForward, ViewBasisRight);
+	FVector HullForward;
+	FVector HullRight;
+	GetHullBasis(ReferenceUp, HullForward, HullRight);
 	const FVector2D ClampedMoveInput = MoveInput.GetClampedToMaxSize(1.0f);
 	const float MoveMagnitude = ClampedMoveInput.Size();
 	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
 	const APawn* const OwningPawn = GetPawnOwner();
-	FVector ForwardDirection = ViewBasisForward;
+	FVector ForwardDirection = HullForward;
 	const float AssistAlpha = GetSurfaceFlightAssistAlpha();
 	if (ClampedMoveInput.Y > DeadZone)
 	{
-		ForwardDirection = ConstrainForwardToSurfaceEnvelope(ViewBasisForward, ReferenceUp, AssistAlpha);
+		ForwardDirection = ConstrainForwardToSurfaceEnvelope(HullForward, ReferenceUp, AssistAlpha);
 	}
 	else if (ClampedMoveInput.Y < -DeadZone && IsValid(OwningPawn))
 	{
 		// Deep-space S remains a true hull-relative reverse thruster. Near terrain it blends to a
 		// tangent reverse command, preventing a pitched hull from turning S into a ground dive.
-		const FVector HullForward = OwningPawn->GetActorForwardVector().GetSafeNormal();
-		FVector SurfaceForward = FVector::VectorPlaneProject(ViewBasisForward, ReferenceUp).GetSafeNormal();
+		const FVector ActorForward = OwningPawn->GetActorForwardVector().GetSafeNormal();
+		FVector SurfaceForward = FVector::VectorPlaneProject(HullForward, ReferenceUp).GetSafeNormal();
 		if (SurfaceForward.IsNearlyZero())
 		{
-			SurfaceForward = FVector::VectorPlaneProject(HullForward, ReferenceUp).GetSafeNormal();
+			SurfaceForward = FVector::VectorPlaneProject(ActorForward, ReferenceUp).GetSafeNormal();
 		}
-		ForwardDirection = BlendUnitDirections(HullForward, SurfaceForward, AssistAlpha);
+		ForwardDirection = BlendUnitDirections(ActorForward, SurfaceForward, AssistAlpha);
 	}
-	FVector CameraRelativeDirection = ForwardDirection * ClampedMoveInput.Y + ViewBasisRight * ClampedMoveInput.X;
+	FVector HullRelativeDirection = ForwardDirection * ClampedMoveInput.Y + HullRight * ClampedMoveInput.X;
 	if (MoveMagnitude <= DeadZone)
 	{
-		CameraRelativeDirection = FVector::ZeroVector;
+		HullRelativeDirection = FVector::ZeroVector;
 	}
 	else
 	{
-		CameraRelativeDirection.Normalize();
+		HullRelativeDirection.Normalize();
 	}
 
 	const float MoveSpeed = EffectiveStats.MaxMoveSpeed
 		* (bBoosting ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
-	return CameraRelativeDirection * MoveSpeed * MoveMagnitude
+	return HullRelativeDirection * MoveSpeed * MoveMagnitude
 		+ ReferenceUp * VerticalInput * EffectiveStats.LiftSpeed;
 }
 

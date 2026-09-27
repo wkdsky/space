@@ -82,6 +82,9 @@ public:
 	/** Enables real spherical surface sampling when this spawner belongs to a PlanetAnchor. */
 	void SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet);
 
+	/** Planet this spawner was bound to. Empty until surface gameplay initializes it. */
+	AJTSPlanetAnchor* GetOwningPlanet() const;
+
 	/** Registers generated resources and pickups with the active real-surface controller. */
 	void SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController);
 

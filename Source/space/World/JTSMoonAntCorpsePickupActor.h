@@ -49,6 +49,8 @@ public:
 	virtual FVector GetVisualBoundsExtent() const override;
 	virtual void AdjustToGround(const FVector& GroundHitLocation) override;
 
+	AJTSPlanetAnchor* GetRealSurfacePlanet() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -70,7 +72,6 @@ private:
 	void UpdateCorpseVisualTransform(float PopAlpha);
 	void UpdateInteractionCollider();
 	void SetCorpseInteractionEnabled(bool bEnabled);
-	AJTSPlanetAnchor* GetRealSurfacePlanet() const;
 	FVector GetCorpseSurfaceUp(const FVector& SurfaceLocation) const;
 
 	/** Dedicated visual only; it never provides interaction collision. */

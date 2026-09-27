@@ -891,7 +891,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
 	InputMappingContext->MapKey(PreviousQuickbarPageAction, EKeys::Up);
 	InputMappingContext->MapKey(NextQuickbarPageAction, EKeys::Down);
-	InputMappingContext->MapKey(DiscardItemAction, EKeys::G);
+	InputMappingContext->MapKey(DiscardItemAction, EKeys::Q);
 	if (QuickbarSlotActions.Num() == UJTSInventoryComponent::MaximumQuickbarSlots)
 	{
 		const TArray<FKey, TInlineAllocator<UJTSInventoryComponent::MaximumQuickbarSlots>> QuickbarKeys = {
@@ -1188,6 +1188,18 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 
 	if (IsGameplayInputBlocked())
 	{
+		return;
+	}
+
+	if (IsBoarded())
+	{
+		if (AJTSSpacecraftActor* const Spacecraft = BoardedSpacecraft.Get())
+		{
+			if (AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController()))
+			{
+				PlayerController->ServerRequestClaimDriverSeat(Spacecraft);
+			}
+		}
 		return;
 	}
 

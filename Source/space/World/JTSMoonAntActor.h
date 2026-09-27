@@ -59,6 +59,8 @@ public:
 	virtual FText GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const override;
 	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
 
+	AJTSPlanetAnchor* GetSurfacePlanet() const;
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -78,7 +80,6 @@ private:
 	void ChooseRoamTarget(bool bForceNearNest = false);
 	bool GetOriginNestLocation(FVector& OutNestLocation) const;
 	float GetDistanceToOriginNest() const;
-	AJTSPlanetAnchor* GetSurfacePlanet() const;
 	bool IsUsingRealPlanetSurface() const;
 	FVector GetSurfaceTangentTo(const FVector& TargetLocation) const;
 	bool MoveAlongGround(const FVector& Direction, float Speed, float DeltaSeconds);

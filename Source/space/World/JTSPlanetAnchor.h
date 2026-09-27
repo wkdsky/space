@@ -97,6 +97,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	float GetApproximateRadius() const;
 
+	/** Radius used for angular size. Prefers the authored surface mesh bounds, then ApproximateRadius. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Presentation")
+	float GetVisualRadius() const;
+
 	/** Compatibility name retained for existing flight/Blueprint references. */
 	UFUNCTION(BlueprintPure, Category = "Planet", meta = (DeprecatedFunction, DeprecationMessage = "Use GetApproximateRadius."))
 	float GetPlanetRadius() const;
@@ -283,6 +287,13 @@ public:
 	/** Parent body for a short local transfer, such as Deimos orbiting Mars. None for an independent body. */
 	UFUNCTION(BlueprintPure, Category = "Planet|Cruise")
 	FName GetParentPlanetId() const;
+
+	/**
+	 * Altitude at which the flight HUD leaves the near-surface tape and shows a planet bearing.
+	 * The value sits inside the existing takeoff-to-space-flight band.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Planet|Travel")
+	float GetNavigationHandoffAltitude() const;
 
 	UFUNCTION(BlueprintPure, Category = "Planet|Travel")
 	float GetTakeoffTransitionAltitude() const;

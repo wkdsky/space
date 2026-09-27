@@ -39,6 +39,8 @@ public:
 	virtual FText GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const override;
 	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
 
+	AJTSPlanetAnchor* GetSurfacePlanet() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -53,7 +55,6 @@ private:
 	float ChooseMoonAntSpawnDistance(const IJTSMoonSurfaceGameplaySettings& MoonGameMode) const;
 	void ScheduleNextMoonAntSpawn();
 	void TrySpawnMoonAnt();
-	AJTSPlanetAnchor* GetSurfacePlanet() const;
 	bool IsUsingRealPlanetSurface() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "Moon|MoonAnt|Nest")

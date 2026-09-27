@@ -101,9 +101,13 @@ struct SPACE_API FJTSSpacecraftInputState
 	UPROPERTY()
 	float Lift = 0.0f;
 
-	/** Full camera forward vector; surface flight projects it tangentially while deep space keeps 3D pitch. */
+	/** Hull yaw rate from the steering keys. Positive yaws to the pilot's right. The camera never writes this. */
 	UPROPERTY()
-	FVector_NetQuantizeNormal ViewForward = FVector::ForwardVector;
+	float Yaw = 0.0f;
+
+	/** Hull pitch rate from the steering keys. Positive pitches the nose away from the reference horizon. */
+	UPROPERTY()
+	float Pitch = 0.0f;
 
 	UPROPERTY()
 	bool bBoosting = false;

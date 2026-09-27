@@ -70,6 +70,11 @@ void AJTSMoonResourceSpawner::SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet)
 	OwningPlanet = InOwningPlanet;
 }
 
+AJTSPlanetAnchor* AJTSMoonResourceSpawner::GetOwningPlanet() const
+{
+	return OwningPlanet.Get();
+}
+
 void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController)
 {
 	SurfaceGameplayController = InSurfaceGameplayController;

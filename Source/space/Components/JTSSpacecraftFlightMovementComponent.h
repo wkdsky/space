@@ -17,27 +17,27 @@ struct SPACE_API FJTSSpacecraftFlightStats
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float MaxMoveSpeed = 3500.0f;
+	float MaxMoveSpeed = 4200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float LiftSpeed = 2600.0f;
+	float LiftSpeed = 2800.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float Acceleration = 4500.0f;
+	float Acceleration = 5200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float Deceleration = 5500.0f;
+	float Deceleration = 6200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float BrakeStrength = 9000.0f;
+	float BrakeStrength = 11000.0f;
 
-	/** Maximum automatic facing change in degrees per second. */
+	/** Maximum key-driven hull turn in degrees per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float FacingTurnRate = 180.0f;
+	float FacingTurnRate = 110.0f;
 
-	/** Angular acceleration used to remove fixed-step, staircase-looking spacecraft turns. */
+	/** Angular acceleration of the key-driven hull turn, so a held key eases in and releases without a snap. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float FacingTurnAcceleration = 1080.0f;
+	float FacingTurnAcceleration = 280.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float BoostMultiplier = 1.8f;
@@ -54,7 +54,7 @@ DECLARE_MULTICAST_DELEGATE(FOnJTSSpacecraftAssistedLandingCompleted);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingFailed, EJTSLandingValidationFailure);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftAssistedLandingPhaseChanged, EJTSSpacecraftLandingAssistPhase);
 
-/** Camera-relative target-velocity movement for the persistent spacecraft Pawn. */
+/** Hull-relative target-velocity movement for the persistent spacecraft Pawn. The camera never steers it. */
 UCLASS(ClassGroup = (Movement), meta = (BlueprintSpawnableComponent))
 class SPACE_API UJTSSpacecraftFlightMovementComponent : public UPawnMovementComponent
 {
@@ -68,7 +68,7 @@ public:
 
 	void SetMoveInput(const FVector2D& Value);
 	void SetVerticalInput(float Value);
-	void SetViewForward(const FVector& Value);
+	void SetSteeringInput(const FVector2D& Value);
 	void SetBoosting(bool bNewBoosting);
 	void SetBraking(bool bNewBraking);
 	void ClearInput();
@@ -146,7 +146,7 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Flight|Stats")
 	FJTSSpacecraftFlightStats EffectiveStats;
 
-	/** Small input values are discarded before building a camera-relative movement direction. */
+	/** Small input values are discarded before building a hull-relative movement direction. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Handling", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.25"))
 	float MovementDeadZone = 0.05f;
 
@@ -239,27 +239,27 @@ private:
 		const FQuat& CurrentRotation,
 		const FVector& SurfaceUp,
 		float AssistAlpha) const;
-	FQuat BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation) const;
+	FQuat BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation, const FVector& ReferenceUp) const;
 	FQuat InterpolateTowardRotation(float DeltaTime, const FQuat& CurrentRotation, const FQuat& DesiredRotation);
 	FVector ConstrainForwardToSurfaceEnvelope(
 		const FVector& DesiredForward,
 		const FVector& SurfaceUp,
 		float AssistAlpha) const;
-	bool HasForwardFlightIntent() const;
 	void SubmitExteriorAltitude(float DeltaTime);
 	void CompleteAssistedLanding();
 	void FailAssistedLanding(EJTSLandingValidationFailure Failure);
 	void SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase NewPhase);
 	bool MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit);
 
-	void GetViewBasis(const FVector& ReferenceUp, FVector& OutForward, FVector& OutRight) const;
+	void GetHullBasis(const FVector& ReferenceUp, FVector& OutForward, FVector& OutRight) const;
 	FVector BuildTargetVelocity(const FVector& ReferenceUp) const;
 	float GetAccelerationRate() const;
 	void SetBoostState(bool bNewBoosting);
 
 	FVector2D MoveInput = FVector2D::ZeroVector;
 	float VerticalInput = 0.0f;
-	FVector ViewForward = FVector::ForwardVector;
+	/** X is yaw, Y is pitch. Both are rates in [-1, 1] from the steering keys. */
+	FVector2D SteeringInput = FVector2D::ZeroVector;
 	FVector CurrentReferenceUp = FVector::UpVector;
 	FVector InertialReferenceUp = FVector::UpVector;
 	FVector CachedSurfaceNormal = FVector::UpVector;
