@@ -409,51 +409,55 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Orbiting the camera does not steer the spacecraft"),
 		Fixture.Ship->GetActorQuat().Equals(RotationBeforeMouseLook, 0.0001f));
 
-	auto TestPlanarDirection = [this, &Fixture, Movement](
-		const TCHAR* Description,
-		float ForwardInput,
-		float RightInput,
-		bool bExpectRightAxis)
-	{
-		Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
-		Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
-		Fixture.Ship->FlightSteerYaw(FInputActionValue(0.0f));
-		Fixture.Ship->FlightSteerPitch(FInputActionValue(0.0f));
-		Movement->StopMovementImmediately();
-		Fixture.Ship->FlightMoveForward(FInputActionValue(ForwardInput));
-		Fixture.Ship->FlightMoveRight(FInputActionValue(RightInput));
+	const bool bYawKeysTurnTheHull = Fixture.Ship->FlightInputMappingContext->GetMappings().ContainsByPredicate(
+		[&Fixture](const FEnhancedActionKeyMapping& Mapping)
+		{
+			return Mapping.Action == Fixture.Ship->FlightSteerYawAction && Mapping.Key == EKeys::D;
+		})
+		&& Fixture.Ship->FlightInputMappingContext->GetMappings().ContainsByPredicate(
+			[&Fixture](const FEnhancedActionKeyMapping& Mapping)
+			{
+				return Mapping.Action == Fixture.Ship->FlightSteerYawAction && Mapping.Key == EKeys::A;
+			})
+		&& Fixture.Ship->FlightInputMappingContext->GetMappings().ContainsByPredicate(
+			[&Fixture](const FEnhancedActionKeyMapping& Mapping)
+			{
+				return Mapping.Action == Fixture.Ship->FlightTurnAroundAction && Mapping.Key == EKeys::S;
+			});
+	TestTrue(TEXT("A and D yaw the hull and S starts an in-place turnaround"), bYawKeysTurnTheHull);
 
+	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+	Fixture.Ship->FlightSteerYaw(FInputActionValue(0.0f));
+	Fixture.Ship->FlightSteerPitch(FInputActionValue(0.0f));
+	Fixture.Ship->FlightTurnAround(FInputActionValue(false));
+	Movement->StopMovementImmediately();
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+	{
 		const FVector ReferenceUp = Fixture.Ship->GetFlightReferenceUp();
 		const FVector HullForward = FVector::VectorPlaneProject(
 			Fixture.Ship->GetActorForwardVector(),
 			ReferenceUp).GetSafeNormal();
-		const FVector HullRight = FVector::CrossProduct(ReferenceUp, HullForward).GetSafeNormal();
-		const FVector ExpectedDirection = bExpectRightAxis
-			? HullRight * FMath::Sign(RightInput)
-			: HullForward * FMath::Sign(ForwardInput);
 		const FVector StartLocation = Fixture.Ship->GetActorLocation();
 		Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
 		const FVector Displacement = Fixture.Ship->GetActorLocation() - StartLocation;
 		const FVector PlanarDisplacement = FVector::VectorPlaneProject(Displacement, ReferenceUp).GetSafeNormal();
-		TestTrue(Description, FVector::DotProduct(PlanarDisplacement, ExpectedDirection) > 0.995f);
+		TestTrue(TEXT("W moves along the hull-forward tangent"),
+			FVector::DotProduct(PlanarDisplacement, HullForward) > 0.995f);
 		TestTrue(TEXT("Planar flight stays tangent to the current planet"),
 			FMath::Abs(FVector::DotProduct(Displacement.GetSafeNormal(), ReferenceUp)) < 0.02f);
-	};
-
-	TestPlanarDirection(TEXT("W moves along the hull-forward tangent"), 1.0f, 0.0f, false);
-	TestPlanarDirection(TEXT("S moves opposite the hull-forward tangent"), -1.0f, 0.0f, false);
-	TestPlanarDirection(TEXT("D strafes along the hull-right tangent"), 0.0f, 1.0f, true);
-	TestPlanarDirection(TEXT("A strafes opposite the hull-right tangent"), 0.0f, -1.0f, true);
+	}
+	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
 
 	FJTSSpacecraftFlightStats FacingStats = Movement->GetEffectiveStats();
 	FacingStats.MaxMoveSpeed = 0.0f;
 	Movement->SetEffectiveStats(FacingStats);
 	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
-	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+	Fixture.Ship->FlightTurnAround(FInputActionValue(false));
 	Fixture.Ship->FlightSteerYaw(FInputActionValue(1.0f));
 	Movement->StopMovementImmediately();
 	const FQuat YawStartRotation = Fixture.Ship->GetActorQuat();
 	const FVector FacingUp = Fixture.Ship->GetFlightReferenceUp();
+	const FVector YawStartLocation = Fixture.Ship->GetActorLocation();
 	for (int32 TurnStep = 0; TurnStep < 8; ++TurnStep)
 	{
 		Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
@@ -463,26 +467,86 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 	const float YawedRight = FVector::DotProduct(
 		FVector::CrossProduct(FacingUp, StartForward).GetSafeNormal(),
 		YawedForward);
-	TestTrue(TEXT("Right arrow yaws the hull without using the camera"), YawedRight > 0.2f);
+	TestTrue(TEXT("D yaws the hull to its own right without using the camera"), YawedRight > 0.2f);
 	TestTrue(TEXT("Key yaw keeps the spacecraft aligned to radial up"),
 		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), FacingUp) > 0.95f);
-	TestTrue(TEXT("Mouse look left the hull where the keys put it"),
-		Fixture.Ship->GetActorQuat().AngularDistance(YawStartRotation) > 0.05f);
+	TestTrue(TEXT("Yaw does not translate the hull"),
+		FVector::DistSquared(Fixture.Ship->GetActorLocation(), YawStartLocation) < FMath::Square(5.0f));
+
+	Fixture.Ship->FlightSteerYaw(FInputActionValue(-1.0f));
+	const FQuat LeftStartRotation = Fixture.Ship->GetActorQuat();
+	for (int32 TurnStep = 0; TurnStep < 8; ++TurnStep)
+	{
+		Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
+	}
+	const float YawedLeft = FVector::DotProduct(
+		FVector::CrossProduct(FacingUp, LeftStartRotation.GetForwardVector()).GetSafeNormal(),
+		Fixture.Ship->GetActorForwardVector());
+	TestTrue(TEXT("A yaws the hull to its own left"), YawedLeft < -0.2f);
+	Fixture.Ship->FlightSteerYaw(FInputActionValue(0.0f));
 
 	FJTSSpacecraftFlightStats ReverseStats = Movement->GetEffectiveStats();
 	ReverseStats.MaxMoveSpeed = 1000.0f;
+	ReverseStats.FacingTurnRate = 3600.0f;
+	ReverseStats.FacingTurnAcceleration = 36000.0f;
 	Movement->SetEffectiveStats(ReverseStats);
-	Fixture.Ship->FlightSteerYaw(FInputActionValue(0.0f));
-	Fixture.Ship->FlightMoveForward(FInputActionValue(-1.0f));
-	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
 	Movement->StopMovementImmediately();
-	const FVector ReverseFacing = Fixture.Ship->GetActorForwardVector();
-	const FVector ReverseStart = Fixture.Ship->GetActorLocation();
-	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
-	const FVector ReverseDirection = (Fixture.Ship->GetActorLocation() - ReverseStart).GetSafeNormal();
-	TestTrue(TEXT("S applies direct reverse thrust"), FVector::DotProduct(ReverseDirection, ReverseFacing) < -0.995f);
-	TestTrue(TEXT("S does not turn the spacecraft around"),
-		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), ReverseFacing) > 0.995f);
+	const FVector TurnAroundDeckUp = Fixture.Ship->GetActorUpVector().GetSafeNormal();
+	const FVector TurnAroundFacing = FVector::VectorPlaneProject(
+		Fixture.Ship->GetActorForwardVector(),
+		TurnAroundDeckUp).GetSafeNormal();
+	const FVector TurnAroundStart = Fixture.Ship->GetActorLocation();
+	Fixture.Ship->FlightTurnAround(FInputActionValue(true));
+	for (int32 TurnStep = 0; TurnStep < 20; ++TurnStep)
+	{
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		TestTrue(TEXT("S keeps the deck plane fixed while the nose swings"),
+			FVector::DotProduct(Fixture.Ship->GetActorUpVector(), TurnAroundDeckUp) > 0.999f);
+	}
+	const FVector TurnedInDeck = FVector::VectorPlaneProject(
+		Fixture.Ship->GetActorForwardVector(),
+		TurnAroundDeckUp).GetSafeNormal();
+	TestTrue(TEXT("S turns the nose around in place until it faces the old tail"),
+		FVector::DotProduct(TurnedInDeck, -TurnAroundFacing) > 0.95f);
+	TestTrue(TEXT("The turnaround leaves the ship's deck plane unchanged"),
+		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), TurnAroundDeckUp) > 0.999f);
+	TestTrue(TEXT("The turnaround does not translate the hull"),
+		FVector::DistSquared(Fixture.Ship->GetActorLocation(), TurnAroundStart) < FMath::Square(8.0f));
+	const FQuat HeldTurnRotation = Fixture.Ship->GetActorQuat();
+	for (int32 HoldStep = 0; HoldStep < 10; ++HoldStep)
+	{
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+	}
+	TestTrue(TEXT("Holding S after the swap does not keep spinning"),
+		Fixture.Ship->GetActorQuat().AngularDistance(HeldTurnRotation) < 0.05f);
+	Fixture.Ship->FlightTurnAround(FInputActionValue(false));
+
+	// A level start hides a turnaround that flattens onto radial up. Pitch the hull first, then S
+	// must yaw inside that tilted deck instead of rolling the belly over.
+	Fixture.Ship->FlightSteerPitch(FInputActionValue(1.0f));
+	for (int32 PitchStep = 0; PitchStep < 16; ++PitchStep)
+	{
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+	}
+	Fixture.Ship->FlightSteerPitch(FInputActionValue(0.0f));
+	Movement->StopMovementImmediately();
+	const FVector PitchedDeckUp = Fixture.Ship->GetActorUpVector().GetSafeNormal();
+	const FVector PitchedForward = FVector::VectorPlaneProject(
+		Fixture.Ship->GetActorForwardVector(),
+		PitchedDeckUp).GetSafeNormal();
+	TestTrue(TEXT("Pitch leaves the hull off the radial horizon before the turnaround"),
+		FMath::Abs(FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FacingUp)) > 0.25f);
+	Fixture.Ship->FlightTurnAround(FInputActionValue(true));
+	for (int32 TurnStep = 0; TurnStep < 20; ++TurnStep)
+	{
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+	}
+	TestTrue(TEXT("A pitched hull turns around inside its own deck plane"),
+		FVector::DotProduct(
+			FVector::VectorPlaneProject(Fixture.Ship->GetActorForwardVector(), PitchedDeckUp).GetSafeNormal(),
+			-PitchedForward) > 0.95f
+		&& FVector::DotProduct(Fixture.Ship->GetActorUpVector(), PitchedDeckUp) > 0.999f);
+	Fixture.Ship->FlightTurnAround(FInputActionValue(false));
 
 	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
 	Movement->StopMovementImmediately();
@@ -529,7 +593,7 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 		FVector::DotProduct(DiveCameraForward, DiveUp) < HullDiveComponent - 0.15f);
 
 	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
-	Fixture.Ship->FlightMoveRight(FInputActionValue(0.0f));
+	Fixture.Ship->FlightSteerYaw(FInputActionValue(0.0f));
 	Movement->StopMovementImmediately();
 	Fixture.Ship->FlightMoveVertical(FInputActionValue(1.0f));
 	const FVector LiftUp = Fixture.Ship->GetFlightReferenceUp();
@@ -582,10 +646,10 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 
 	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
 	Movement->StopMovementImmediately();
-	Fixture.Ship->FlightMoveRight(FInputActionValue(1.0f));
+	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
 	const FVector RecoveryStart = Fixture.Ship->GetActorLocation();
 	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
-	TestTrue(TEXT("Terrain protection leaves tangential controls available instead of wedging the craft"),
+	TestTrue(TEXT("Terrain protection leaves hull-forward flight available instead of wedging the craft"),
 		FVector::DistSquared(Fixture.Ship->GetActorLocation(), RecoveryStart) > FMath::Square(10.0f));
 	return true;
 }
@@ -684,16 +748,30 @@ bool FJTSSpaceFlightFrameRegression::RunTest(const FString& Parameters)
 	Movement->StopMovementImmediately();
 	const FQuat ReverseStartRotation = Fixture.Ship->GetActorQuat();
 	const FVector ReverseStartLocation = Fixture.Ship->GetActorLocation();
+	const FVector DeckUp = ReverseStartRotation.GetUpVector().GetSafeNormal();
+	const FVector DeckForward = FVector::VectorPlaneProject(
+		ReverseStartRotation.GetForwardVector(),
+		DeckUp).GetSafeNormal();
 	Fixture.Ship->FlightLookPitch(FInputActionValue(-60.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER)));
-	Fixture.Ship->FlightMoveForward(FInputActionValue(-1.0f));
-	Movement->TickComponent(0.1f, LEVELTICK_All, nullptr);
-	Fixture.Ship->Tick(0.1f);
-	const FVector ReverseDisplacement = Fixture.Ship->GetActorLocation() - ReverseStartLocation;
-	TestTrue(TEXT("Deep-space S is reverse thrust relative to the hull"),
-		FVector::DotProduct(ReverseDisplacement.GetSafeNormal(), -ReverseStartRotation.GetAxisX()) > 0.995f);
-	TestTrue(TEXT("Deep-space S does not change the craft attitude"),
-		Fixture.Ship->GetActorQuat().AngularDistance(ReverseStartRotation) < 0.001f);
 	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+	Fixture.Ship->FlightTurnAround(FInputActionValue(true));
+	for (int32 TurnStep = 0; TurnStep < 20; ++TurnStep)
+	{
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		Fixture.Ship->Tick(0.05f);
+		TestTrue(TEXT("Deep-space S keeps the captured deck plane"),
+			FVector::DotProduct(Fixture.Ship->GetActorUpVector(), DeckUp) > 0.999f);
+	}
+	const FVector TurnedDeckForward = FVector::VectorPlaneProject(
+		Fixture.Ship->GetActorForwardVector(),
+		DeckUp).GetSafeNormal();
+	TestTrue(TEXT("Deep-space S turns the nose onto the old tail inside the ship's plane"),
+		FVector::DotProduct(TurnedDeckForward, -DeckForward) > 0.95f);
+	TestTrue(TEXT("Deep-space turnaround does not roll the deck onto another up axis"),
+		FVector::DotProduct(Fixture.Ship->GetActorUpVector(), DeckUp) > 0.999f);
+	TestTrue(TEXT("Deep-space turnaround does not translate"),
+		FVector::DistSquared(Fixture.Ship->GetActorLocation(), ReverseStartLocation) < FMath::Square(8.0f));
+	Fixture.Ship->FlightTurnAround(FInputActionValue(false));
 	Movement->StopMovementImmediately();
 
 	AJTSPlanetAnchor* const DestinationPlanet = Fixture.AddFlightPlanet(TEXT("Destination"), FVector(100000.0f, 0.0f, 0.0f));

@@ -2292,8 +2292,18 @@ void AJTSCharacter::ApplyBoardedPresentation()
 	}
 	if (GetMesh() != nullptr)
 	{
-		if (bNowBoarded) { bPreviousMeshVisible = GetMesh()->IsVisible(); GetMesh()->SetVisibility(false, true); }
-		else { GetMesh()->SetVisibility(bPreviousMeshVisible, true); }
+		// Do not propagate. The gun is attached under this mesh, and propagation sets
+		// its bHiddenInGame. Disembark used to restore only the character, so the gun
+		// stayed hidden and the palm update stayed off until a shot showed it again.
+		if (bNowBoarded) { bPreviousMeshVisible = GetMesh()->IsVisible(); GetMesh()->SetVisibility(false, false); }
+		else
+		{
+			GetMesh()->SetVisibility(bPreviousMeshVisible, true);
+			if (IsValid(WeaponVisualComponent))
+			{
+				WeaponVisualComponent->RestoreAfterCharacterMeshShown();
+			}
+		}
 	}
 	if (DebugVisual != nullptr)
 	{

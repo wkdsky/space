@@ -375,6 +375,45 @@ void UJTSWeaponVisualComponent::UpdatePalmAnchor()
 	HandAttachmentAnchor->SetWorldRotation(PalmRotation);
 }
 
+void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
+{
+	if (!IsValid(WeaponBody) || !IsValid(WeaponGrip) || !IsValid(WeaponBarrel))
+	{
+		return;
+	}
+
+	const UJTSInventoryComponent* const Inventory = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<UJTSInventoryComponent>()
+		: nullptr;
+	const EJTSItemId ItemId = IsValid(Inventory) ? Inventory->GetActiveItemId() : EJTSItemId::None;
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if (!IsValid(Definition) || !Definition->IsHoldable())
+	{
+		return;
+	}
+
+	// SetVisibility(false, true) on the skeletal mesh walks every attached child and
+	// sets bHiddenInGame. The visible flag comes back; this flag does not.
+	WeaponGrip->SetHiddenInGame(false);
+	WeaponBody->SetHiddenInGame(false);
+	WeaponBarrel->SetHiddenInGame(false);
+	if (IsValid(WeaponSight))
+	{
+		WeaponSight->SetHiddenInGame(false);
+	}
+	WeaponGrip->SetVisibility(true);
+	WeaponBody->SetVisibility(true);
+	WeaponBarrel->SetVisibility(true);
+	if (IsValid(WeaponSight))
+	{
+		WeaponSight->SetVisibility(WeaponSight->GetStaticMesh() != nullptr);
+	}
+
+	SetComponentTickEnabled(true);
+	UpdatePalmAnchor();
+	ApplyPresentationTransform();
+}
+
 void UJTSWeaponVisualComponent::AttachToRootFallback()
 {
 	if (GetOwner() == nullptr)

@@ -494,18 +494,18 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveForward);
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveForward);
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveForward);
-	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveRight);
-	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveRight);
-	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightSteerYaw);
+	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightSteerYaw);
+	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightSteerYaw);
+	EnhancedInputComponent->BindAction(FlightTurnAroundAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightTurnAround);
+	EnhancedInputComponent->BindAction(FlightTurnAroundAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightTurnAround);
+	EnhancedInputComponent->BindAction(FlightTurnAroundAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightTurnAround);
 	EnhancedInputComponent->BindAction(FlightAscendAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightAscendStarted);
 	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveVertical);
 	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveVertical);
 	EnhancedInputComponent->BindAction(FlightVerticalAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveVertical);
 	EnhancedInputComponent->BindAction(FlightLookYawAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightLookYaw);
 	EnhancedInputComponent->BindAction(FlightLookPitchAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightLookPitch);
-	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightSteerYaw);
-	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightSteerYaw);
-	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightSteerYaw);
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightSteerPitch);
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightSteerPitch);
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightSteerPitch);
@@ -543,6 +543,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightInputMappingContext = NewObject<UInputMappingContext>(this, TEXT("JTSFlightInputMappingContext"), RF_Transient);
 	FlightForwardAction = NewObject<UInputAction>(this, TEXT("FlightForwardAction"), RF_Transient);
 	FlightRightAction = NewObject<UInputAction>(this, TEXT("FlightRightAction"), RF_Transient);
+	FlightTurnAroundAction = NewObject<UInputAction>(this, TEXT("FlightTurnAroundAction"), RF_Transient);
 	FlightVerticalAction = NewObject<UInputAction>(this, TEXT("FlightVerticalAction"), RF_Transient);
 	FlightAscendAction = NewObject<UInputAction>(this, TEXT("FlightAscendAction"), RF_Transient);
 	FlightLookYawAction = NewObject<UInputAction>(this, TEXT("FlightLookYawAction"), RF_Transient);
@@ -557,6 +558,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 
 	FlightForwardAction->ValueType = EInputActionValueType::Axis1D;
 	FlightRightAction->ValueType = EInputActionValueType::Axis1D;
+	FlightTurnAroundAction->ValueType = EInputActionValueType::Boolean;
 	FlightVerticalAction->ValueType = EInputActionValueType::Axis1D;
 	FlightAscendAction->ValueType = EInputActionValueType::Boolean;
 	FlightLookYawAction->ValueType = EInputActionValueType::Axis1D;
@@ -570,7 +572,8 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightRelinquishDriverAction->ValueType = EInputActionValueType::Boolean;
 
 	FlightInputMappingContext->MapKey(FlightForwardAction, EKeys::W);
-	FlightInputMappingContext->MapKey(FlightRightAction, EKeys::D);
+	FlightInputMappingContext->MapKey(FlightSteerYawAction, EKeys::D);
+	FlightInputMappingContext->MapKey(FlightTurnAroundAction, EKeys::S);
 	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::SpaceBar);
 	FlightInputMappingContext->MapKey(FlightAscendAction, EKeys::SpaceBar);
 	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::R);
@@ -589,8 +592,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 		FEnhancedActionKeyMapping& Mapping = FlightInputMappingContext->MapKey(Action, Key);
 		Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(FlightInputMappingContext));
 	};
-	AddNegatedMapping(FlightForwardAction, EKeys::S);
-	AddNegatedMapping(FlightRightAction, EKeys::A);
+	AddNegatedMapping(FlightSteerYawAction, EKeys::A);
 	AddNegatedMapping(FlightVerticalAction, EKeys::LeftControl);
 	AddNegatedMapping(FlightVerticalAction, EKeys::RightControl);
 	AddNegatedMapping(FlightSteerYawAction, EKeys::Left);
@@ -646,7 +648,15 @@ void AJTSSpacecraftActor::FlightMoveForward(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
 {
-	LocalFlightInput.MoveRight = Value.Get<float>();
+	LocalFlightInput.MoveRight = 0.0f;
+	LocalFlightInput.Yaw = Value.Get<float>();
+	SubmitFlightInput();
+}
+
+void AJTSSpacecraftActor::FlightTurnAround(const FInputActionValue& Value)
+{
+	LocalFlightInput.bTurnAround = Value.Get<bool>();
+	LocalFlightInput.MoveForward = FMath::Max(0.0f, LocalFlightInput.MoveForward);
 	SubmitFlightInput();
 }
 
@@ -2638,13 +2648,14 @@ void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputStat
 		return;
 	}
 	const FVector2D MoveInput(
-		FMath::Clamp(InputState.MoveRight, -1.0f, 1.0f),
-		FMath::Clamp(InputState.MoveForward, -1.0f, 1.0f));
-	FlightMovementComponent->SetMoveInput(MoveInput.GetClampedToMaxSize(1.0f));
+		0.0f,
+		FMath::Clamp(InputState.MoveForward, 0.0f, 1.0f));
+	FlightMovementComponent->SetMoveInput(MoveInput);
 	FlightMovementComponent->SetVerticalInput(ClampedLift);
 	FlightMovementComponent->SetSteeringInput(FVector2D(
 		FMath::Clamp(InputState.Yaw, -1.0f, 1.0f),
 		FMath::Clamp(InputState.Pitch, -1.0f, 1.0f)));
+	FlightMovementComponent->SetTurnAround(InputState.bTurnAround);
 	FlightMovementComponent->SetBoosting(InputState.bBoosting);
 	FlightMovementComponent->SetBraking(InputState.bBraking);
 	ReplicatedPresentationForward = IsLanded()

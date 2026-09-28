@@ -92,18 +92,24 @@ struct SPACE_API FJTSSpacecraftInputState
 {
 	GENERATED_BODY()
 
+	/** Hull-forward throttle. Positive only: W thrusts along the ship's own facing. */
 	UPROPERTY()
 	float MoveForward = 0.0f;
 
+	/** Unused by the current flight scheme. Kept so older replicated packets still deserialize. */
 	UPROPERTY()
 	float MoveRight = 0.0f;
 
 	UPROPERTY()
 	float Lift = 0.0f;
 
-	/** Hull yaw rate from the steering keys. Positive yaws to the pilot's right. The camera never writes this. */
+	/** Hull yaw rate. Positive yaws to the ship's right. A/D write this. The camera never writes this. */
 	UPROPERTY()
 	float Yaw = 0.0f;
+
+	/** Held S: rotate in place on the horizontal plane until the nose and tail have swapped. */
+	UPROPERTY()
+	bool bTurnAround = false;
 
 	/** Hull pitch rate from the steering keys. Positive pitches the nose away from the reference horizon. */
 	UPROPERTY()

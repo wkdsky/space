@@ -69,6 +69,8 @@ public:
 	void SetMoveInput(const FVector2D& Value);
 	void SetVerticalInput(float Value);
 	void SetSteeringInput(const FVector2D& Value);
+	/** S latches an in-place horizontal 180. The ship does not translate from this command. */
+	void SetTurnAround(bool bNewTurnAround);
 	void SetBoosting(bool bNewBoosting);
 	void SetBraking(bool bNewBraking);
 	void ClearInput();
@@ -264,6 +266,12 @@ private:
 	float VerticalInput = 0.0f;
 	/** X is yaw, Y is pitch. Both are rates in [-1, 1] from the steering keys. */
 	FVector2D SteeringInput = FVector2D::ZeroVector;
+	bool bTurnAround = false;
+	/** Opposite of the hull forward, lying in the deck plane captured when S was pressed. */
+	FVector TurnAroundTargetForward = FVector::ZeroVector;
+	/** Deck normal captured when S was pressed. The turnaround yaws about this axis. */
+	FVector TurnAroundDeckUp = FVector::ZeroVector;
+	bool bTurnAroundLatched = false;
 	FVector CurrentReferenceUp = FVector::UpVector;
 	FVector InertialReferenceUp = FVector::UpVector;
 	FVector CachedSurfaceNormal = FVector::UpVector;

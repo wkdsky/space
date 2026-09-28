@@ -33,6 +33,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Presentation")
 	void RefreshWeaponVisual();
 
+	/**
+	 * Boarding hides the character mesh with propagation, which also sets the attached
+	 * gun bHiddenInGame. Disembark only restores the mesh, so the gun stays hidden and
+	 * the palm update never runs until a shot calls SetVisibility again.
+	 */
+	void RestoreAfterCharacterMeshShown();
+
 	/** Allows the character to keep the mesh presentation in sync with its ADS transition. */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Presentation")
 	void SetAimAlpha(float NewAimAlpha);

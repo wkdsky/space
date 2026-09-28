@@ -395,6 +395,7 @@ private:
 	void UnregisterFlightInputMappingContext();
 	void FlightMoveForward(const FInputActionValue& Value);
 	void FlightMoveRight(const FInputActionValue& Value);
+	void FlightTurnAround(const FInputActionValue& Value);
 	void FlightAscendStarted(const FInputActionValue& Value);
 	void FlightMoveVertical(const FInputActionValue& Value);
 	void FlightSteerYaw(const FInputActionValue& Value);
@@ -622,6 +623,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightRightAction;
+
+	/** S. In-place horizontal turnaround, independent of the camera. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightTurnAroundAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightVerticalAction;

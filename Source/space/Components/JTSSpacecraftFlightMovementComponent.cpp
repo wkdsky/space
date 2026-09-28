@@ -121,6 +121,15 @@ void UJTSSpacecraftFlightMovementComponent::SetSteeringInput(const FVector2D& Va
 		FMath::Clamp(Value.Y, -1.0f, 1.0f));
 }
 
+void UJTSSpacecraftFlightMovementComponent::SetTurnAround(bool bNewTurnAround)
+{
+	if (bAssistedLanding)
+	{
+		return;
+	}
+	bTurnAround = bNewTurnAround;
+}
+
 void UJTSSpacecraftFlightMovementComponent::SetBoosting(bool bNewBoosting)
 {
 	SetBoostState(bNewBoosting && !bAssistedLanding);
@@ -136,6 +145,10 @@ void UJTSSpacecraftFlightMovementComponent::ClearInput()
 	MoveInput = FVector2D::ZeroVector;
 	VerticalInput = 0.0f;
 	SteeringInput = FVector2D::ZeroVector;
+	bTurnAround = false;
+	bTurnAroundLatched = false;
+	TurnAroundTargetForward = FVector::ZeroVector;
+	TurnAroundDeckUp = FVector::ZeroVector;
 	CurrentFacingTurnSpeedRadians = 0.0f;
 	bBraking = false;
 	SetBoostState(false);
@@ -455,6 +468,25 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 {
 	const FVector ReferenceUp = GetReferenceUp();
+	if (bTurnAround)
+	{
+		if (!bTurnAroundLatched && IsValid(GetPawnOwner()))
+		{
+			// Latch the deck the ship is already flying in. S yaws inside that plane.
+			const FVector DeckUp = GetPawnOwner()->GetActorUpVector().GetSafeNormal();
+			const FVector HullForward = GetPawnOwner()->GetActorForwardVector().GetSafeNormal();
+			TurnAroundDeckUp = DeckUp;
+			TurnAroundTargetForward = FVector::VectorPlaneProject(-HullForward, DeckUp).GetSafeNormal();
+			bTurnAroundLatched = !TurnAroundDeckUp.IsNearlyZero() && !TurnAroundTargetForward.IsNearlyZero();
+		}
+	}
+	else
+	{
+		bTurnAroundLatched = false;
+		TurnAroundTargetForward = FVector::ZeroVector;
+		TurnAroundDeckUp = FVector::ZeroVector;
+	}
+
 	const FVector TargetVelocity = BuildTargetVelocity(ReferenceUp);
 	const float Rate = bBraking ? EffectiveStats.BrakeStrength : GetAccelerationRate();
 	Velocity = FMath::VInterpConstantTo(Velocity, TargetVelocity, DeltaTime, FMath::Max(1.0f, Rate));
@@ -679,7 +711,8 @@ FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime, con
 	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
 	const FQuat FreeFlightRotation = BuildFreeFlightDesiredRotation(CurrentRotation, ReferenceUp);
 	const float AssistAlpha = GetSurfaceFlightAssistAlpha();
-	if (AssistAlpha <= KINDA_SMALL_NUMBER)
+	// Surface leveling would tilt the deck while S is spinning the nose inside that deck's plane.
+	if (AssistAlpha <= KINDA_SMALL_NUMBER || (bTurnAround && bTurnAroundLatched))
 	{
 		return InterpolateTowardRotation(DeltaTime, CurrentRotation, FreeFlightRotation);
 	}
@@ -736,12 +769,6 @@ FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(
 	const FVector& ReferenceUp) const
 {
 	check(IsValid(UpdatedComponent));
-	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
-	if (SteeringInput.SizeSquared() <= FMath::Square(DeadZone))
-	{
-		return CurrentRotation;
-	}
-
 	const FVector SafeUp = ReferenceUp.GetSafeNormal();
 	const FVector CurrentForward = UpdatedComponent->GetForwardVector().GetSafeNormal();
 	if (SafeUp.IsNearlyZero() || CurrentForward.IsNearlyZero())
@@ -755,26 +782,53 @@ FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(
 		FVector FallbackRight;
 		SafeUp.FindBestAxisVectors(PlanarForward, FallbackRight);
 	}
-	const FVector PlanarRight = FVector::CrossProduct(SafeUp, PlanarForward).GetSafeNormal();
-	if (PlanarRight.IsNearlyZero())
+
+	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
+	const bool bYawing = FMath::Abs(SteeringInput.X) > DeadZone;
+	const bool bPitching = FMath::Abs(SteeringInput.Y) > DeadZone;
+	const bool bTurningAround = bTurnAround && bTurnAroundLatched
+		&& !TurnAroundTargetForward.IsNearlyZero()
+		&& !TurnAroundDeckUp.IsNearlyZero();
+	if (!bYawing && !bPitching && !bTurningAround)
 	{
 		return CurrentRotation;
+	}
+
+	// S keeps the deck where it is and only swaps nose with tail inside that plane.
+	if (bTurningAround)
+	{
+		const FVector DeckUp = TurnAroundDeckUp.GetSafeNormal();
+		FVector DesiredForward = FVector::VectorPlaneProject(TurnAroundTargetForward, DeckUp).GetSafeNormal();
+		if (DesiredForward.IsNearlyZero() || FVector::CrossProduct(DesiredForward, DeckUp).IsNearlyZero())
+		{
+			return CurrentRotation;
+		}
+		return FRotationMatrix::MakeFromXZ(DesiredForward, DeckUp).ToQuat();
+	}
+
+	const float Step = FMath::DegreesToRadians(12.0f);
+	FVector DesiredPlanar = PlanarForward;
+	if (bYawing)
+	{
+		DesiredPlanar = FQuat(SafeUp, SteeringInput.X * Step).RotateVector(PlanarForward).GetSafeNormal();
 	}
 
 	const float VerticalComponent = FVector::DotProduct(CurrentForward, SafeUp);
 	const float TangentComponent = FVector::VectorPlaneProject(CurrentForward, SafeUp).Size();
-	const float CurrentPitch = FMath::Atan2(VerticalComponent, TangentComponent);
-	const float Step = FMath::DegreesToRadians(12.0f);
-	const float TargetPitch = FMath::Clamp(CurrentPitch + SteeringInput.Y * Step, -1.5f, 1.5f);
-	const FVector PitchedForward = (
-		PlanarForward * FMath::Cos(TargetPitch) + SafeUp * FMath::Sin(TargetPitch)).GetSafeNormal();
-	const FVector YawedForward = FQuat(SafeUp, SteeringInput.X * Step).RotateVector(PitchedForward).GetSafeNormal();
-	if (YawedForward.IsNearlyZero())
+	float CurrentPitch = FMath::Atan2(VerticalComponent, TangentComponent);
+	if (bPitching)
+	{
+		CurrentPitch = FMath::Clamp(CurrentPitch + SteeringInput.Y * Step, -1.5f, 1.5f);
+	}
+
+	const FVector DesiredForward = (
+		DesiredPlanar * FMath::Cos(CurrentPitch) + SafeUp * FMath::Sin(CurrentPitch)).GetSafeNormal();
+	if (DesiredForward.IsNearlyZero())
 	{
 		return CurrentRotation;
 	}
 
-	const FQuat Alignment = FQuat::FindBetweenNormals(CurrentForward, YawedForward);
+	const FQuat Alignment = FQuat::FindBetweenNormals(CurrentForward, DesiredForward);
 	return (Alignment * CurrentRotation).GetNormalized();
 }
 
@@ -1010,43 +1064,20 @@ FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity(const FVector
 	}
 
 	FVector HullForward;
-	FVector HullRight;
-	GetHullBasis(ReferenceUp, HullForward, HullRight);
-	const FVector2D ClampedMoveInput = MoveInput.GetClampedToMaxSize(1.0f);
-	const float MoveMagnitude = ClampedMoveInput.Size();
+	FVector UnusedRight;
+	GetHullBasis(ReferenceUp, HullForward, UnusedRight);
 	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
-	const APawn* const OwningPawn = GetPawnOwner();
-	FVector ForwardDirection = HullForward;
+	const float ForwardThrottle = FMath::Clamp(MoveInput.Y, 0.0f, 1.0f);
 	const float AssistAlpha = GetSurfaceFlightAssistAlpha();
-	if (ClampedMoveInput.Y > DeadZone)
+	FVector HullRelativeDirection = FVector::ZeroVector;
+	if (ForwardThrottle > DeadZone)
 	{
-		ForwardDirection = ConstrainForwardToSurfaceEnvelope(HullForward, ReferenceUp, AssistAlpha);
-	}
-	else if (ClampedMoveInput.Y < -DeadZone && IsValid(OwningPawn))
-	{
-		// Deep-space S remains a true hull-relative reverse thruster. Near terrain it blends to a
-		// tangent reverse command, preventing a pitched hull from turning S into a ground dive.
-		const FVector ActorForward = OwningPawn->GetActorForwardVector().GetSafeNormal();
-		FVector SurfaceForward = FVector::VectorPlaneProject(HullForward, ReferenceUp).GetSafeNormal();
-		if (SurfaceForward.IsNearlyZero())
-		{
-			SurfaceForward = FVector::VectorPlaneProject(ActorForward, ReferenceUp).GetSafeNormal();
-		}
-		ForwardDirection = BlendUnitDirections(ActorForward, SurfaceForward, AssistAlpha);
-	}
-	FVector HullRelativeDirection = ForwardDirection * ClampedMoveInput.Y + HullRight * ClampedMoveInput.X;
-	if (MoveMagnitude <= DeadZone)
-	{
-		HullRelativeDirection = FVector::ZeroVector;
-	}
-	else
-	{
-		HullRelativeDirection.Normalize();
+		HullRelativeDirection = ConstrainForwardToSurfaceEnvelope(HullForward, ReferenceUp, AssistAlpha);
 	}
 
 	const float MoveSpeed = EffectiveStats.MaxMoveSpeed
-		* (bBoosting ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
-	return HullRelativeDirection * MoveSpeed * MoveMagnitude
+		* (bBoosting && ForwardThrottle > DeadZone ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
+	return HullRelativeDirection * MoveSpeed * ForwardThrottle
 		+ ReferenceUp * VerticalInput * EffectiveStats.LiftSpeed;
 }
 
