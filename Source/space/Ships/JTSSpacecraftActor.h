@@ -33,6 +33,7 @@ class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 class UJTSSpacecraftFlightMovementComponent;
+class UJTSSpacecraftPresentationComponent;
 struct FHitResult;
 struct FInputActionValue;
 
@@ -157,6 +158,14 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	float GetThrottleNormalized() const;
+
+	UJTSSpacecraftFlightMovementComponent* GetFlightMovement() const;
+
+	/** Rear-nozzle strength for presentation. Local pilots read their own keys; everyone else reads the driver's replicated intent. */
+	float GetPresentationMainThrottle() const;
+
+	/** Belly-nozzle strength for presentation. Positive only while lift is commanded. */
+	float GetPresentationLiftThrottle() const;
 
 	/** Called by SpaceWorld after a target planet is selected. */
 	void SetFlightTargetPlanet(class AJTSPlanetAnchor* Planet);
@@ -476,6 +485,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Ground Probe", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftGroundProbeComponent> GroundProbeComponent;
 
+	/** Cosmetic gear fold and exhaust. It reads flight state and does not move the ship. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftPresentationComponent> PresentationComponent;
+
 	/** Dedicated driving boom whose rotation is maintained in the active planet-relative camera frame. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USpringArmComponent> FlightCameraBoom;
@@ -675,6 +688,17 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_FlightState, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
 	EJTSSpacecraftLandingAssistPhase LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
+
+	/** Driver forward throttle copied for remote exhaust. The owning pilot uses LocalFlightInput instead. */
+	UPROPERTY(Replicated, Transient)
+	float ReplicatedPresentationForward = 0.0f;
+
+	/** Driver lift command copied for remote belly exhaust. */
+	UPROPERTY(Replicated, Transient)
+	float ReplicatedPresentationLift = 0.0f;
+
+	UPROPERTY(Replicated, Transient)
+	bool bReplicatedPresentationBoost = false;
 
 	/** Server check cadence while Ctrl is held; LandingSite data owns the actual capture height. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02", UIMax = "0.5"))

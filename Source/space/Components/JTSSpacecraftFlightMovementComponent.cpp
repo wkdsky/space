@@ -242,6 +242,11 @@ float UJTSSpacecraftFlightMovementComponent::GetThrottleNormalized() const
 	return MoveInput.Y;
 }
 
+float UJTSSpacecraftFlightMovementComponent::GetVerticalInput() const
+{
+	return VerticalInput;
+}
+
 FJTSSpacecraftFlightStats UJTSSpacecraftFlightMovementComponent::GetBaseStats() const
 {
 	return BaseStats;

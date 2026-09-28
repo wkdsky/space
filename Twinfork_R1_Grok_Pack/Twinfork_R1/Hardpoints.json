@@ -1,0 +1,228 @@
+{
+  "revision": "TWINFORK_R1",
+  "units": "cm",
+  "frame": {
+    "forward": "+X",
+    "right": "+Y",
+    "up": "+Z",
+    "origin": "longitudinal bounds midpoint at centerline Z=0, not center of mass"
+  },
+  "base_dimensions_cm": {
+    "length": 1300,
+    "width": 900,
+    "nominal_landed_height": 420
+  },
+  "ground_z_cm": -190,
+  "sockets": [
+    {
+      "name": "HP_L1",
+      "position_cm": [
+        650,
+        -345,
+        20
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "front_cartridge"
+    },
+    {
+      "name": "HP_L2",
+      "position_cm": [
+        180,
+        -345,
+        115
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "top_rail"
+    },
+    {
+      "name": "HP_L3",
+      "position_cm": [
+        -220,
+        -450,
+        20
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "outer_side"
+    },
+    {
+      "name": "HP_R1",
+      "position_cm": [
+        650,
+        345,
+        20
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "front_cartridge"
+    },
+    {
+      "name": "HP_R2",
+      "position_cm": [
+        180,
+        345,
+        115
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "top_rail"
+    },
+    {
+      "name": "HP_R3",
+      "position_cm": [
+        -220,
+        450,
+        20
+      ],
+      "local_forward": [
+        1,
+        0,
+        0
+      ],
+      "local_up": [
+        0,
+        0,
+        1
+      ],
+      "default_module": null,
+      "type": "outer_side"
+    },
+    {
+      "name": "Muzzle_Main",
+      "position_cm": [
+        300,
+        0,
+        -74
+      ],
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "role": "built_in_fixed_gun"
+    },
+    {
+      "name": "FX_Main",
+      "position_cm": [
+        -650,
+        0,
+        15
+      ],
+      "axis": [
+        -1,
+        0,
+        0
+      ],
+      "role": "exhaust"
+    },
+    {
+      "name": "FX_Landing_1",
+      "position_cm": [
+        430,
+        -345,
+        -71
+      ],
+      "axis": [
+        0,
+        0,
+        -1
+      ],
+      "role": "exhaust"
+    },
+    {
+      "name": "FX_Landing_2",
+      "position_cm": [
+        -330,
+        -345,
+        -71
+      ],
+      "axis": [
+        0,
+        0,
+        -1
+      ],
+      "role": "exhaust"
+    },
+    {
+      "name": "FX_Landing_3",
+      "position_cm": [
+        430,
+        345,
+        -71
+      ],
+      "axis": [
+        0,
+        0,
+        -1
+      ],
+      "role": "exhaust"
+    },
+    {
+      "name": "FX_Landing_4",
+      "position_cm": [
+        -330,
+        345,
+        -71
+      ],
+      "axis": [
+        0,
+        0,
+        -1
+      ],
+      "role": "exhaust"
+    }
+  ],
+  "notes": [
+    "External weapons absent by default; built-in main gun remains.",
+    "Muzzle axes are forward; exhaust axes point out of nozzle.",
+    "Mounts are assembly pivots, not projectile origins.",
+    "Mirror side bracket geometry without reversing weapon forward."
+  ]
+}

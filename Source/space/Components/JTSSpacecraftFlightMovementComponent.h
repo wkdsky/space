@@ -111,6 +111,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	float GetThrottleNormalized() const;
 
+	/** Positive while the pilot is commanding lift. Space is +1, descend is negative. */
+	UFUNCTION(BlueprintPure, Category = "Flight")
+	float GetVerticalInput() const;
+
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	FJTSSpacecraftFlightStats GetBaseStats() const;
 

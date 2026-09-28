@@ -1,0 +1,114 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+
+#include "JTSSpacecraftPresentationComponent.generated.h"
+
+class UMaterialInstanceDynamic;
+class UStaticMeshComponent;
+
+/**
+ * Cosmetic landing gear and exhaust for one spacecraft.
+ *
+ * Gear deployment follows the replicated flight state, so every client plays the same
+ * retraction. Exhaust strength follows the locally predicted flight input: Space lights
+ * the belly nozzles, W lights the rear nozzle. Neither path changes movement.
+ */
+UCLASS(ClassGroup = (Ship), meta = (BlueprintSpawnableComponent))
+class SPACE_API UJTSSpacecraftPresentationComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UJTSSpacecraftPresentationComponent();
+
+	virtual void BeginPlay() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	/** 0 is fully retracted into the belly, 1 is the deployed stance. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Presentation")
+	float GetGearDeployAlpha() const;
+
+protected:
+	/** Seconds for a full gear deploy or retract. The landing assist itself is about two seconds. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Gear", meta = (ClampMin = "0.05", UIMin = "0.05"))
+	float GearTransitionDuration = 2.4f;
+
+	/** How quickly a plume catches the commanded throttle. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "0.1", UIMin = "0.1"))
+	float ExhaustResponse = 11.0f;
+
+	/** Visible length of one rear plume at full forward throttle, in centimetres. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float MainPlumeLength = 780.0f;
+
+	/** Visible length of one belly plume at full lift, in centimetres. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float LiftPlumeLength = 210.0f;
+
+	/** Width of one rear plume at full throttle. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float MainPlumeRadius = 52.0f;
+
+	/** Width of one belly plume at full lift. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float LiftPlumeRadius = 26.0f;
+
+	/** Smallest scale that still reads as an idle glow before the plume is hidden. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "0.0", UIMin = "0.0", ClampMax = "0.5"))
+	float ExhaustVisibleThreshold = 0.04f;
+
+private:
+	struct FGearBinding
+	{
+		/** Weak so a blueprint recompile during play cannot leave a dangling component in the tick. */
+		TWeakObjectPtr<USceneComponent> Component;
+		/** Gear_FL and the rest. The upper, shin and foot of one leg share this name. */
+		FName LegName = NAME_None;
+		bool bIsShin = false;
+		bool bIsFoot = false;
+		FVector DeployedLocation = FVector::ZeroVector;
+		FRotator DeployedRotation = FRotator::ZeroRotator;
+		FVector DeployedScale = FVector::OneVector;
+	};
+
+	struct FPlumeBinding
+	{
+		TWeakObjectPtr<UStaticMeshComponent> Component;
+		TWeakObjectPtr<UStaticMeshComponent> Core;
+		TWeakObjectPtr<UStaticMeshComponent> Halo;
+		TObjectPtr<UMaterialInstanceDynamic> Material;
+		TObjectPtr<UMaterialInstanceDynamic> CoreMaterial;
+		TObjectPtr<UMaterialInstanceDynamic> HaloMaterial;
+		bool bIsMainNozzle = false;
+		/** Centre bell of the rear row. It runs longer than the two outboard bells. */
+		bool bIsCentreBell = false;
+		float Length = 1.0f;
+		float Radius = 1.0f;
+	};
+
+	void DiscoverRig();
+	void ReleaseExhaustCores();
+	void EnsureExhaustCore(FPlumeBinding& Plume);
+	void ApplyGearPose(const FGearBinding& Leg, float Eased) const;
+	void UpdateGear(float DeltaTime);
+	void UpdateExhaust(float DeltaTime);
+	float GetDesiredGearAlpha() const;
+	float GetCommandedMainThrottle() const;
+	float GetCommandedLiftThrottle() const;
+	void ApplyPlume(FPlumeBinding& Plume, float Strength);
+
+	TArray<FGearBinding> Gear;
+	TArray<FPlumeBinding> Plumes;
+	/** Authored deployed poses, keyed by component name. Rediscovery must not recapture an animated pose. */
+	TMap<FName, FVector> CapturedGearLocation;
+	TMap<FName, FRotator> CapturedGearRotation;
+	TMap<FName, FVector> CapturedGearScale;
+	float GearAlpha = 1.0f;
+	float SmoothedMainThrottle = 0.0f;
+	float SmoothedLiftThrottle = 0.0f;
+	bool bRigReady = false;
+};

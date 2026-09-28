@@ -28,6 +28,7 @@
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftPresentationComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -143,6 +144,7 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	FlightMovementComponent->SetUpdatedComponent(SceneRoot);
 
 	GroundProbeComponent = CreateDefaultSubobject<UJTSSpacecraftGroundProbeComponent>(TEXT("GroundProbeComponent"));
+	PresentationComponent = CreateDefaultSubobject<UJTSSpacecraftPresentationComponent>(TEXT("PresentationComponent"));
 
 	// Retain the legacy subobject name so existing Blueprint component templates keep their camera tuning.
 	FlightCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -1510,6 +1512,42 @@ float AJTSSpacecraftActor::GetThrottleNormalized() const
 	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetThrottleNormalized() : 0.0f;
 }
 
+UJTSSpacecraftFlightMovementComponent* AJTSSpacecraftActor::GetFlightMovement() const
+{
+	return FlightMovementComponent;
+}
+
+float AJTSSpacecraftActor::GetPresentationMainThrottle() const
+{
+	if (IsLanded())
+	{
+		return 0.0f;
+	}
+
+	const float Forward = IsLocallyControlled()
+		? LocalFlightInput.MoveForward
+		: ReplicatedPresentationForward;
+	const bool bBoosting = IsLocallyControlled()
+		? LocalFlightInput.bBoosting
+		: bReplicatedPresentationBoost;
+	const float ClampedForward = FMath::Clamp(Forward, 0.0f, 1.0f);
+	const float Boost = bBoosting && ClampedForward > 0.05f ? 0.25f : 0.0f;
+	return FMath::Clamp(ClampedForward + Boost, 0.0f, 1.0f);
+}
+
+float AJTSSpacecraftActor::GetPresentationLiftThrottle() const
+{
+	if (IsLanded())
+	{
+		return 0.0f;
+	}
+
+	const float Lift = IsLocallyControlled()
+		? LocalFlightInput.Lift
+		: ReplicatedPresentationLift;
+	return FMath::Clamp(Lift, 0.0f, 1.0f);
+}
+
 void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
 {
 	if (!HasAuthority())
@@ -2609,6 +2647,13 @@ void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputStat
 		FMath::Clamp(InputState.Pitch, -1.0f, 1.0f)));
 	FlightMovementComponent->SetBoosting(InputState.bBoosting);
 	FlightMovementComponent->SetBraking(InputState.bBraking);
+	ReplicatedPresentationForward = IsLanded()
+		? 0.0f
+		: FMath::Clamp(InputState.MoveForward, 0.0f, 1.0f);
+	ReplicatedPresentationLift = IsLanded()
+		? 0.0f
+		: FMath::Clamp(InputState.Lift, 0.0f, 1.0f);
+	bReplicatedPresentationBoost = !IsLanded() && InputState.bBoosting && ReplicatedPresentationForward > 0.05f;
 }
 
 void AJTSSpacecraftActor::ServerSetFlightInput_Implementation(const FJTSSpacecraftInputState& InputState)
@@ -2754,6 +2799,9 @@ void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AJTSSpacecraftActor, FlightState);
 	DOREPLIFETIME(AJTSSpacecraftActor, LastLandingFailure);
 	DOREPLIFETIME(AJTSSpacecraftActor, LandingAssistPhase);
+	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationForward);
+	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationLift);
+	DOREPLIFETIME(AJTSSpacecraftActor, bReplicatedPresentationBoost);
 }
 
 void AJTSSpacecraftActor::RestoreStorageFromExpedition(const TMap<EJTSResourceType, int32>& NewStorage)
