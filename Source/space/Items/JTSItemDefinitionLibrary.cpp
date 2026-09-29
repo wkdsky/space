@@ -44,6 +44,8 @@ namespace
 		case EJTSItemId::Food: return TEXT("/Game/Space/Data/Items/DA_Item_Food.DA_Item_Food");
 		case EJTSItemId::MoonAntCorpse: return TEXT("/Game/Space/Data/Items/DA_Item_MoonAntCorpse.DA_Item_MoonAntCorpse");
 		case EJTSItemId::Axe: return TEXT("/Game/Space/Data/Items/DA_Item_Axe.DA_Item_Axe");
+		case EJTSItemId::WaistLamp: return TEXT("/Game/Space/Data/Items/DA_Item_WaistLamp.DA_Item_WaistLamp");
+		case EJTSItemId::IceAxe: return TEXT("/Game/Space/Data/Items/DA_Item_IceAxe.DA_Item_IceAxe");
 		default: return FString();
 		}
 	}
@@ -199,6 +201,31 @@ namespace
 			Definition->MiningWork = 1.0f;
 			Definition->AccentColor = FLinearColor(0.90f, 0.34f, 0.14f, 1.0f);
 			break;
+		case EJTSItemId::WaistLamp:
+			Definition->DisplayName = FText::FromString(TEXT("头灯"));
+			Definition->Description = FText::FromString(TEXT("戴在额头的便携头灯。选中后按 F 开关，灯光跟着视线，双手保持空闲。"));
+			Definition->PrimaryCategory = EJTSItemCategory::Utility;
+			Definition->ShopCategories = { EJTSShopCategory::Utility };
+			Definition->AffinityTags = { TEXT("Light"), TEXT("Worn"), TEXT("Utility") };
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::ShopPurchasable });
+			Definition->CombatDamage = 0.0f;
+			Definition->MiningWork = 0.0f;
+			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 2), Cost(EJTSResourceType::Ore, 2) };
+			Definition->AccentColor = FLinearColor(0.92f, 0.95f, 1.0f, 1.0f);
+			break;
+		case EJTSItemId::IceAxe:
+			Definition->DisplayName = FText::FromString(TEXT("登山镐"));
+			Definition->Description = FText::FromString(TEXT("双手登山镐。攻击力和斧头接近。面对超过 50 度、站不住的坡面时，WASD 可以沿墙攀爬。"));
+			Definition->PrimaryCategory = EJTSItemCategory::Utility;
+			Definition->ShopCategories = { EJTSShopCategory::Utility, EJTSShopCategory::Mining };
+			Definition->AffinityTags = { TEXT("Climbing"), TEXT("Two-Handed"), TEXT("Melee") };
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::MeleeOverride, EJTSItemCapability::ShopPurchasable });
+			Definition->CombatDamage = 3.0f;
+			Definition->MiningWork = 0.0f;
+			Definition->MeleeAttackInterval = 0.62f;
+			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 6), Cost(EJTSResourceType::Ore, 4) };
+			Definition->AccentColor = FLinearColor(0.62f, 0.72f, 0.82f, 1.0f);
+			break;
 		default:
 			break;
 		}
@@ -302,7 +329,9 @@ const TArray<EJTSItemId>& UJTSItemDefinitionLibrary::GetDefaultShopCatalog()
 		EJTSItemId::Knife,
 		EJTSItemId::Pistol,
 		EJTSItemId::MachineGun,
-		EJTSItemId::Sniper
+		EJTSItemId::Sniper,
+		EJTSItemId::WaistLamp,
+		EJTSItemId::IceAxe
 	};
 	return Catalog;
 }

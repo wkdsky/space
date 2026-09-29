@@ -723,6 +723,8 @@ void UJTSShopWidget::RefreshCatalog()
 			case EJTSItemId::Pistol: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePistolBuy); break;
 			case EJTSItemId::MachineGun: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMachineGunBuy); break;
 			case EJTSItemId::Sniper: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleSniperBuy); break;
+			case EJTSItemId::WaistLamp: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWaistLampBuy); break;
+			case EJTSItemId::IceAxe: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleIceAxeBuy); break;
 			default: break;
 			}
 		}
@@ -891,6 +893,8 @@ void UJTSShopWidget::HandleKnifeBuy() { RequestPurchase(EJTSItemId::Knife); }
 void UJTSShopWidget::HandlePistolBuy() { RequestPurchase(EJTSItemId::Pistol); }
 void UJTSShopWidget::HandleMachineGunBuy() { RequestPurchase(EJTSItemId::MachineGun); }
 void UJTSShopWidget::HandleSniperBuy() { RequestPurchase(EJTSItemId::Sniper); }
+void UJTSShopWidget::HandleWaistLampBuy() { RequestPurchase(EJTSItemId::WaistLamp); }
+void UJTSShopWidget::HandleIceAxeBuy() { RequestPurchase(EJTSItemId::IceAxe); }
 void UJTSShopWidget::HandleDebugResourcesClicked()
 {
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))

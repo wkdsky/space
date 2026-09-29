@@ -1172,6 +1172,14 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		{
 			DesiredScale = FVector(0.78f, 0.14f, 0.09f);
 		}
+		else if (ItemType == EJTSWorldPickupItemType::WaistLamp)
+		{
+			DesiredScale = FVector(0.22f, 0.16f, 0.28f);
+		}
+		else if (ItemType == EJTSWorldPickupItemType::IceAxe)
+		{
+			DesiredScale = FVector(0.72f, 0.16f, 0.12f);
+		}
 		else
 		{
 			DesiredScale = FVector(0.62f, 0.16f, 0.12f);
@@ -1268,6 +1276,14 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 
 	case EJTSWorldPickupItemType::Axe:
 		ItemColor = FLinearColor(0.88f, 0.30f, 0.12f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::WaistLamp:
+		ItemColor = FLinearColor(0.92f, 0.95f, 1.0f, 1.0f);
+		break;
+
+	case EJTSWorldPickupItemType::IceAxe:
+		ItemColor = FLinearColor(0.62f, 0.72f, 0.82f, 1.0f);
 		break;
 
 	default:
@@ -1368,6 +1384,12 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 	case EJTSWorldPickupItemType::Axe:
 		return TEXT("AXE");
 
+	case EJTSWorldPickupItemType::WaistLamp:
+		return TEXT("HEADLAMP");
+
+	case EJTSWorldPickupItemType::IceAxe:
+		return TEXT("ICE AXE");
+
 	default:
 		return TEXT("UNKNOWN");
 	}
@@ -1389,6 +1411,8 @@ EJTSItemId AJTSWorldPickupActor::ItemTypeToItemId(EJTSWorldPickupItemType InItem
 	case EJTSWorldPickupItemType::Pistol: return EJTSItemId::Pistol;
 	case EJTSWorldPickupItemType::MachineGun: return EJTSItemId::MachineGun;
 	case EJTSWorldPickupItemType::Axe: return EJTSItemId::Axe;
+	case EJTSWorldPickupItemType::WaistLamp: return EJTSItemId::WaistLamp;
+	case EJTSWorldPickupItemType::IceAxe: return EJTSItemId::IceAxe;
 	default: return EJTSItemId::None;
 	}
 }
@@ -1409,6 +1433,8 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::ItemIdToItemType(EJTSItemId ItemId
 	case EJTSItemId::Pistol: return EJTSWorldPickupItemType::Pistol;
 	case EJTSItemId::MachineGun: return EJTSWorldPickupItemType::MachineGun;
 	case EJTSItemId::Axe: return EJTSWorldPickupItemType::Axe;
+	case EJTSItemId::WaistLamp: return EJTSWorldPickupItemType::WaistLamp;
+	case EJTSItemId::IceAxe: return EJTSWorldPickupItemType::IceAxe;
 	default: return EJTSWorldPickupItemType::Rock;
 	}
 }

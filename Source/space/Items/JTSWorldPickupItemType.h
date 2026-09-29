@@ -19,5 +19,7 @@ enum class EJTSWorldPickupItemType : uint8
 	Knife UMETA(DisplayName = "Knife"),
 	Pistol UMETA(DisplayName = "Pistol"),
 	MachineGun UMETA(DisplayName = "Machine Gun"),
-	Axe UMETA(DisplayName = "Axe")
+	Axe UMETA(DisplayName = "Axe"),
+	WaistLamp UMETA(DisplayName = "Waist Lamp"),
+	IceAxe UMETA(DisplayName = "Ice Axe")
 };

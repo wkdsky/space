@@ -671,6 +671,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			InventorySlotTexts.Add(SlotText);
 		}
 		}
+		EquipmentHintText = MakeTextBlock(WidgetTree, TEXT("EquipmentHintText"), TEXT(""), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
+		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -132.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
 		InteractionPromptText = MakeTextBlock(WidgetTree, TEXT("InteractionPromptText"), TEXT(""), 17.0f, FLinearColor(0.90f, 0.96f, 1.0f, 1.0f), ETextJustify::Center);
 		InteractionPromptSlot = AddCanvasChild(
 			GameplayLayer,
@@ -841,7 +843,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		BoardingLabelText = MakeTextBlock(WidgetTree, TEXT("BoardingLabelText"), TEXT("BOARDING"), 18.0f, FLinearColor(0.70f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, BoardingLabelText, FAnchors(0.5f, 0.5f), FVector2D(0.0f, 40.0f), FVector2D(180.0f, 30.0f), FVector2D(0.5f, 0.5f));
 
-		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    HOLD F: BOARD    V: CAMERA    WHEEL: ZOOM"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
+		GameplayHelpText = MakeTextBlock(WidgetTree, TEXT("HelpText"), TEXT("WASD: MOVE    SHIFT: RUN    LMB: ATTACK    HOLD R: BOARD    F: HEADLAMP    V: CAMERA    WHEEL: ZOOM"), 16.0f, FLinearColor(0.85f, 0.95f, 1.0f, 1.0f), ETextJustify::Right);
 		AddCanvasChild(GameplayLayer, GameplayHelpText, FAnchors(1.0f, 1.0f), FVector2D(-28.0f, -20.0f), FVector2D(960.0f, 56.0f), FVector2D(1.0f, 1.0f));
 	}
 
@@ -962,6 +964,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 	ApplyLayerVisibility(FuelToMoonPanel, false);
 	ApplyLayerVisibility(InventoryPanel, false);
 	ApplyLayerVisibility(InteractionPromptText, false);
+	ApplyLayerVisibility(EquipmentHintText, false);
 	ApplyLayerVisibility(CrosshairText, false);
 	SetSpacecraftNavigationVisibility(false, false);
 	ApplyLayerVisibility(GameplayHelpText, false);
@@ -1167,6 +1170,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	}
 	ApplyLayerVisibility(ShipResourcesPanel, bGameplaySurface);
 	ApplyLayerVisibility(InteractionPromptText, bGameplaySurface && !bGameMenuOpen);
+	ApplyLayerVisibility(EquipmentHintText, bGameplaySurface && !bGameMenuOpen);
 	ApplyLayerVisibility(CrosshairText, false);
 	ApplyLayerVisibility(GameplayHelpText, bSpaceFlight && !bGameMenuOpen);
 	if (!bSpaceFlight)
@@ -1424,8 +1428,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 
 	ApplyLayerVisibility(FlightTelemetryText, true);
 	RefreshFlightNavigation();
-	const bool bAirborneNavigation = IsValid(Spacecraft) && !Spacecraft->IsLanded();
-	ApplyLayerVisibility(GameplayHelpText, !bAirborneNavigation);
+	ApplyLayerVisibility(GameplayHelpText, true);
 	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
 	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
 	// altitude reference.
@@ -1518,7 +1521,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		FString HelpText;
 		if (FlightState == EJTSSpacecraftFlightState::Landed)
 		{
-			HelpText = TEXT("W/S FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK    WHEEL DISTANCE\nSPACE TAKE OFF    SHIFT BOOST    C BRAKE    F DISEMBARK");
+			HelpText = TEXT("W/S FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK    WHEEL DISTANCE\nSPACE TAKE OFF    SHIFT BOOST    C BRAKE    R DISEMBARK");
 		}
 		else if (FlightState == EJTSSpacecraftFlightState::LandingAssist)
 		{
@@ -1526,7 +1529,9 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		}
 		else
 		{
-			HelpText = TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    W + LOOK UP TO DEPART\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND");
+			HelpText = Spacecraft->AreHeadlightsOn()
+				? TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    L LIGHTS OFF\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND")
+				: TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    L LIGHTS\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND");
 		}
 		GameplayHelpText->SetText(FText::FromString(HelpText));
 	}
@@ -1554,6 +1559,7 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 	RefreshInventorySlots();
 	RefreshInteractionPrompt();
+	RefreshEquipmentHint();
 	const UJTSRangedWeaponComponent* const CrosshairRanged = PlayerCharacter != nullptr
 		? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
 	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
@@ -1804,6 +1810,34 @@ FVector2D UJTSPrototypeHUDWidget::GetViewportWidgetLocalSize() const
 	return FVector2D(FMath::Max(1.0f, LocalSize.X), FMath::Max(1.0f, LocalSize.Y));
 }
 
+void UJTSPrototypeHUDWidget::RefreshEquipmentHint()
+{
+	FText Hint;
+	const AJTSPlayerController* const OwningController = Cast<AJTSPlayerController>(GetOwningPlayer());
+	if (!bGameMenuOpen && (!IsValid(OwningController) || !OwningController->IsSpaceShopOpen()))
+	{
+		if (const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
+			IsValid(PlayerCharacter) && !PlayerCharacter->IsBoarded())
+		{
+			if (const UJTSInventoryComponent* const Inventory = PlayerCharacter->FindComponentByClass<UJTSInventoryComponent>();
+				IsValid(Inventory) && Inventory->GetActiveItemId() == EJTSItemId::WaistLamp && Inventory->OwnsWaistLamp())
+			{
+				Hint = Inventory->IsWaistLampEquipped()
+					? FText::FromString(TEXT("[F] 关掉头灯"))
+					: FText::FromString(TEXT("[F] 打开头灯"));
+			}
+		}
+	}
+
+	if (EquipmentHintText != nullptr)
+	{
+		EquipmentHintText->SetText(Hint);
+		EquipmentHintText->SetVisibility(Hint.IsEmpty()
+			? ESlateVisibility::Collapsed
+			: ESlateVisibility::SelfHitTestInvisible);
+	}
+}
+
 void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 {
 	FText PromptText;
@@ -1819,7 +1853,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 		if (IsValid(DrivenSpacecraft) && DrivenSpacecraft->IsLanded())
 		{
 			TargetName = FText::FromString(TEXT("SPACECRAFT LANDED"));
-			PromptText = FText::FromString(TEXT("[F] DISEMBARK"));
+			PromptText = FText::FromString(TEXT("[R] DISEMBARK"));
 			bUseCenteredPrompt = true;
 		}
 		else if (AJTSCharacter* const PlayerCharacter = FindPlayerCharacter())
@@ -1828,7 +1862,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 				IsValid(BoardedSpacecraft) && BoardedSpacecraft->CanDisembarkPlayer(PlayerCharacter))
 			{
 				TargetName = FText::FromString(TEXT("SPACECRAFT LANDED"));
-				PromptText = FText::FromString(TEXT("[F] DISEMBARK"));
+				PromptText = FText::FromString(TEXT("[R] DISEMBARK"));
 				bUseCenteredPrompt = true;
 			}
 			else if (!PlayerCharacter->IsBoarded())

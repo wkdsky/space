@@ -100,6 +100,66 @@ EJTSItemId UJTSInventoryComponent::GetActiveItemId() const
 	return GetActiveItem().ItemId;
 }
 
+bool UJTSInventoryComponent::IsWaistLampEquipped() const
+{
+	return bWaistLampEquipped && OwnsWaistLamp();
+}
+
+bool UJTSInventoryComponent::OwnsWaistLamp() const
+{
+	return GetItemCount(EJTSItemId::WaistLamp) > 0;
+}
+
+void UJTSInventoryComponent::RequestToggleWaistLamp()
+{
+	if (GetOwner() == nullptr)
+	{
+		return;
+	}
+	if (!GetOwner()->HasAuthority())
+	{
+		ServerToggleWaistLamp();
+		return;
+	}
+	if (GetActiveItemId() != EJTSItemId::WaistLamp || !OwnsWaistLamp())
+	{
+		return;
+	}
+	SetWaistLampEquipped(!bWaistLampEquipped);
+}
+
+void UJTSInventoryComponent::ServerToggleWaistLamp_Implementation()
+{
+	RequestToggleWaistLamp();
+}
+
+void UJTSInventoryComponent::ClearWaistLampIfAbsent()
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !bWaistLampEquipped)
+	{
+		return;
+	}
+	if (!OwnsWaistLamp())
+	{
+		SetWaistLampEquipped(false);
+	}
+}
+
+void UJTSInventoryComponent::SetWaistLampEquipped(bool bEquipped)
+{
+	if (bWaistLampEquipped == bEquipped)
+	{
+		return;
+	}
+	bWaistLampEquipped = bEquipped;
+	NotifyInventoryChanged();
+}
+
+void UJTSInventoryComponent::OnRep_WaistLampEquipped()
+{
+	NotifyInventoryChanged();
+}
+
 bool UJTSInventoryComponent::SelectQuickbarSlot(int32 SlotIndex)
 {
 	if (SlotIndex < 0 || SlotIndex >= GetInventoryCapacity())
@@ -375,6 +435,7 @@ bool UJTSInventoryComponent::DropItemQuantityAtSlot(int32 SlotIndex, int32 Count
 	{
 		ItemSlots[SlotIndex].Clear();
 	}
+	ClearWaistLampIfAbsent();
 	NotifyInventoryChanged();
 	return true;
 }
@@ -413,6 +474,7 @@ bool UJTSInventoryComponent::DestroyItemQuantityAtSlot(int32 SlotIndex, int32 Co
 	{
 		ItemSlots[SlotIndex].Clear();
 	}
+	ClearWaistLampIfAbsent();
 	NotifyInventoryChanged();
 	return true;
 }
@@ -649,4 +711,5 @@ void UJTSInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(UJTSInventoryComponent, ItemSlots);
 	DOREPLIFETIME(UJTSInventoryComponent, SelectedQuickbarSlot);
 	DOREPLIFETIME_CONDITION(UJTSInventoryComponent, QuickbarPageIndex, COND_OwnerOnly);
+	DOREPLIFETIME(UJTSInventoryComponent, bWaistLampEquipped);
 }

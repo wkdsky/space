@@ -8,6 +8,7 @@
 #include "JTSSpacecraftPresentationComponent.generated.h"
 
 class UMaterialInstanceDynamic;
+class USpotLightComponent;
 class UStaticMeshComponent;
 
 /**
@@ -61,6 +62,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "0.0", UIMin = "0.0", ClampMax = "0.5"))
 	float ExhaustVisibleThreshold = 0.04f;
 
+	/** How far one nose beam still lights terrain, in centimetres. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Headlight", meta = (ClampMin = "100.0", UIMin = "100.0"))
+	float HeadlightRange = 12000.0f;
+
 private:
 	struct FGearBinding
 	{
@@ -100,8 +105,19 @@ private:
 	float GetCommandedMainThrottle() const;
 	float GetCommandedLiftThrottle() const;
 	void ApplyPlume(FPlumeBinding& Plume, float Strength);
+	void EnsureHeadlights();
+	void UpdateHeadlights();
+
+	struct FHeadlightBinding
+	{
+		TWeakObjectPtr<UStaticMeshComponent> Housing;
+		TWeakObjectPtr<UStaticMeshComponent> Lens;
+		TWeakObjectPtr<USpotLightComponent> Beam;
+		TObjectPtr<UMaterialInstanceDynamic> LensMaterial;
+	};
 
 	TArray<FGearBinding> Gear;
+	TArray<FHeadlightBinding> Headlights;
 	TArray<FPlumeBinding> Plumes;
 	/** Authored deployed poses, keyed by component name. Rediscovery must not recapture an animated pose. */
 	TMap<FName, FVector> CapturedGearLocation;

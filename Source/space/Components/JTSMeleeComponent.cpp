@@ -704,6 +704,7 @@ EJTSMeleeAttackType UJTSMeleeComponent::GetCurrentAttackType() const
 		return EJTSMeleeAttackType::Knife;
 
 	case EJTSItemId::Axe:
+	case EJTSItemId::IceAxe:
 		return EJTSMeleeAttackType::Axe;
 
 	case EJTSItemId::Pickaxe:

@@ -63,6 +63,8 @@ private:
 	UFUNCTION() void HandlePistolBuy();
 	UFUNCTION() void HandleMachineGunBuy();
 	UFUNCTION() void HandleSniperBuy();
+	UFUNCTION() void HandleWaistLampBuy();
+	UFUNCTION() void HandleIceAxeBuy();
 	UFUNCTION() void HandleDebugResourcesClicked();
 	UFUNCTION() void HandleDebugLevelsClicked();
 	UFUNCTION() void HandleSupplyTabClicked();

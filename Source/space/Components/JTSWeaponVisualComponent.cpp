@@ -3,12 +3,11 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Math/RotationMatrix.h"
-#include "GameFramework/Controller.h"
-#include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
@@ -17,6 +16,7 @@
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Player/JTSCharacter.h"
 
 UJTSWeaponVisualComponent::UJTSWeaponVisualComponent()
 {
@@ -71,9 +71,12 @@ void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		ShotKickAlpha = 0.0f;
 	}
 	UpdatePalmAnchor();
+	UpdateLeftAxeAnchor();
+	UpdateWaistLamp();
 	ApplyPresentationTransform();
 	const bool bHeldItemVisible = IsValid(WeaponBody) && WeaponBody->IsVisible();
-	if (!bHeldItemVisible && ShotKickAlpha <= 0.0f && !bMeleeSwingPresentationActive)
+	const bool bLampVisible = IsValid(WaistLampLight) && WaistLampLight->IsVisible();
+	if (!bHeldItemVisible && !bLampVisible && !bTwoHandVisible && ShotKickAlpha <= 0.0f && !bMeleeSwingPresentationActive)
 	{
 		SetComponentTickEnabled(false);
 	}
@@ -225,6 +228,147 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 	WeaponBody = CreateMesh(TEXT("WeaponVisualBody"));
 	WeaponBarrel = CreateMesh(TEXT("WeaponVisualBarrel"));
 	WeaponSight = CreateMesh(TEXT("WeaponVisualSight"));
+	auto MakePiece = [this](const FName Name, USceneComponent* Parent) -> UStaticMeshComponent*
+	{
+		if (!IsValid(Parent) || !IsValid(CubeMesh))
+		{
+			return nullptr;
+		}
+		UStaticMeshComponent* Component = NewObject<UStaticMeshComponent>(GetOwner(), Name);
+		if (!IsValid(Component))
+		{
+			return nullptr;
+		}
+		GetOwner()->AddInstanceComponent(Component);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->SetStaticMesh(CubeMesh);
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Component->SetGenerateOverlapEvents(false);
+		Component->SetCanEverAffectNavigation(false);
+		Component->SetCastShadow(true);
+		Component->SetVisibility(false);
+		Component->SetHiddenInGame(true);
+		if (IsValid(BasicShapeMaterial))
+		{
+			Component->SetMaterial(0, BasicShapeMaterial);
+		}
+		Component->AttachToComponent(Parent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		Component->SetAbsolute(false, false, true);
+		if (UWorld* const World = GetOwner()->GetWorld())
+		{
+			Component->RegisterComponentWithWorld(World);
+		}
+		return Component;
+	};
+
+	LeftHandAttachmentAnchor = NewObject<USceneComponent>(GetOwner(), TEXT("LeftIceAxeAnchor"));
+	if (IsValid(LeftHandAttachmentAnchor))
+	{
+		GetOwner()->AddInstanceComponent(LeftHandAttachmentAnchor);
+		LeftHandAttachmentAnchor->SetMobility(EComponentMobility::Movable);
+		LeftHandAttachmentAnchor->AttachToComponent(AttachParent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		LeftHandAttachmentAnchor->SetAbsolute(true, true, true);
+		if (UWorld* const World = GetOwner()->GetWorld())
+		{
+			LeftHandAttachmentAnchor->RegisterComponentWithWorld(World);
+		}
+		LeftAxeGrip = MakePiece(TEXT("LeftIceAxeGrip"), LeftHandAttachmentAnchor);
+		LeftAxeShaft = MakePiece(TEXT("LeftIceAxeShaft"), LeftHandAttachmentAnchor);
+		LeftAxeHead = MakePiece(TEXT("LeftIceAxeHead"), LeftHandAttachmentAnchor);
+		LeftAxeMaterial = IsValid(LeftAxeShaft) ? LeftAxeShaft->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+		if (IsValid(LeftAxeHead) && IsValid(LeftAxeMaterial))
+		{
+			LeftAxeHead->SetMaterial(0, LeftAxeMaterial);
+		}
+		if (IsValid(LeftAxeGrip))
+		{
+			LeftAxeGrip->SetRelativeLocation(FVector(0.0f, 0.0f, -3.0f));
+			LeftAxeGrip->SetRelativeRotation(FRotator::ZeroRotator);
+			LeftAxeGrip->SetWorldScale3D(FVector(0.10f, 0.07f, 0.09f));
+		}
+		if (IsValid(LeftAxeShaft))
+		{
+			LeftAxeShaft->SetRelativeLocation(FVector(20.0f, 0.0f, 0.0f));
+			LeftAxeShaft->SetRelativeRotation(FRotator::ZeroRotator);
+			LeftAxeShaft->SetWorldScale3D(FVector(0.42f, 0.04f, 0.04f));
+		}
+		if (IsValid(LeftAxeHead))
+		{
+			LeftAxeHead->SetRelativeLocation(FVector(42.0f, 0.0f, 2.5f));
+			LeftAxeHead->SetRelativeRotation(FRotator(0.0f, 0.0f, 18.0f));
+			LeftAxeHead->SetWorldScale3D(FVector(0.14f, 0.045f, 0.10f));
+		}
+	}
+
+	// One anchor follows the forehead. The housing and the single beam hang off it.
+	USceneComponent* const LampParent = IsValid(CharacterMesh) ? CharacterMesh : AttachParent;
+	WaistLampAnchor = CreateScene(TEXT("WaistLampAnchor"), LampParent);
+	if (IsValid(WaistLampAnchor))
+	{
+		WaistLampAnchor->SetAbsolute(true, true, true);
+	}
+	// A small helmet lamp: dark housing, one horizontal warm lens. Absolute scale
+	// keeps the skeletal mesh from blowing the pieces up.
+	WaistLampBody = MakePiece(TEXT("WaistLampBody"), IsValid(WaistLampAnchor) ? WaistLampAnchor.Get() : LampParent);
+	if (IsValid(WaistLampBody))
+	{
+		WaistLampBody->SetAbsolute(false, false, true);
+		WaistLampBody->SetRelativeLocation(FVector::ZeroVector);
+		WaistLampBody->SetRelativeRotation(FRotator::ZeroRotator);
+		WaistLampBody->SetWorldScale3D(FVector(0.022f, 0.062f, 0.028f));
+		WaistLampBody->SetCastShadow(true);
+	}
+	WaistLampLens = MakePiece(TEXT("WaistLampLens"), IsValid(WaistLampBody) ? WaistLampBody.Get() : WaistLampAnchor.Get());
+	if (IsValid(WaistLampLens))
+	{
+		WaistLampLens->SetAbsolute(false, false, true);
+		// Housing is a 100 cm cube. 56 sits just proud of the front face, and the
+		// lens itself is a wide short oval in the same proportions as the beam.
+		WaistLampLens->SetWorldScale3D(FVector(0.006f, 0.050f, 0.016f));
+		WaistLampLens->SetRelativeLocation(FVector(56.0f, 0.0f, 0.0f));
+		WaistLampLens->SetCastShadow(false);
+	}
+	const FLinearColor LampColor(1.0f, 0.90f, 0.66f);
+	WaistLampLight = NewObject<USpotLightComponent>(GetOwner(), TEXT("WaistLampLight"));
+	if (IsValid(WaistLampLight) && IsValid(WaistLampBody))
+	{
+		GetOwner()->AddInstanceComponent(WaistLampLight);
+		WaistLampLight->SetMobility(EComponentMobility::Movable);
+		WaistLampLight->AttachToComponent(WaistLampBody, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		WaistLampLight->SetIntensity(0.0f);
+		// 55 m of slow falloff. A short radius dies on the lip, so the floor of
+		// a pit in front of the player stays black.
+		WaistLampLight->SetAttenuationRadius(5500.0f);
+		// Inner well inside outer, so the rim is a wide fade instead of a hard oval.
+		WaistLampLight->SetInnerConeAngle(8.0f);
+		WaistLampLight->SetOuterConeAngle(58.0f);
+		WaistLampLight->SetUseInverseSquaredFalloff(false);
+		WaistLampLight->SetLightFalloffExponent(2.2f);
+		// A large soft source. A tiny source becomes a clipped white disc.
+		WaistLampLight->SetSourceRadius(80.0f);
+		WaistLampLight->SetSoftSourceRadius(160.0f);
+		WaistLampLight->SetIndirectLightingIntensity(0.0f);
+		WaistLampLight->SetVolumetricScatteringIntensity(0.0f);
+		WaistLampLight->SetSpecularScale(0.0f);
+		// Exposure is fixed on the player camera. This blend would scale the
+		// lamp with the old auto-exposure compensation and blow the near patch.
+		WaistLampLight->InverseExposureBlend = 0.0f;
+		WaistLampLight->SetLightColor(LampColor);
+		WaistLampLight->SetCastShadows(false);
+		WaistLampLight->SetVisibility(false);
+		// Written in world space every pose. A parented rotation was leaving
+		// the beam on the nearest ground instead of following the view.
+		WaistLampLight->SetAbsolute(true, true, true);
+		WaistLampLight->SetWorldLocation(FVector::ZeroVector);
+		WaistLampLight->SetWorldRotation(FRotator::ZeroRotator);
+		if (UWorld* const World = GetOwner()->GetWorld())
+		{
+			WaistLampLight->RegisterComponentWithWorld(World);
+		}
+	}
+	WaistLampMaterial = IsValid(WaistLampBody) ? WaistLampBody->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+	WaistLampLensMaterial = IsValid(WaistLampLens) ? WaistLampLens->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+
 	WeaponGripMaterial = IsValid(WeaponGrip) ? WeaponGrip->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
 	WeaponBodyMaterial = IsValid(WeaponBody) ? WeaponBody->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
 	WeaponBarrelMaterial = IsValid(WeaponBarrel) ? WeaponBarrel->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
@@ -299,22 +443,20 @@ void UJTSWeaponVisualComponent::ConfigureAttachment()
 	AttachToRootFallback();
 }
 
-void UJTSWeaponVisualComponent::UpdatePalmAnchor()
+void UJTSWeaponVisualComponent::UpdateHandAnchor(
+	USceneComponent* Anchor,
+	const FName WristBone,
+	const FName IndexBone,
+	const FName ForearmBone,
+	const bool bRightHand)
 {
-	if (bUsingFallbackAttachment || !IsValid(HandAttachmentAnchor) || GetOwner() == nullptr)
+	if (!IsValid(Anchor) || GetOwner() == nullptr)
 	{
 		return;
 	}
-
 	USkeletalMeshComponent* const CharacterMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
-	if (!IsValid(CharacterMesh))
-	{
-		return;
-	}
-
-	const FName WristBone(TEXT("Wrist_R"));
-	const FName IndexBone(TEXT("Index1_R"));
-	if (CharacterMesh->GetBoneIndex(WristBone) == INDEX_NONE
+	if (!IsValid(CharacterMesh)
+		|| CharacterMesh->GetBoneIndex(WristBone) == INDEX_NONE
 		|| CharacterMesh->GetBoneIndex(IndexBone) == INDEX_NONE)
 	{
 		return;
@@ -328,13 +470,8 @@ void UJTSWeaponVisualComponent::UpdatePalmAnchor()
 		return;
 	}
 
-	// Index1_R is the knuckle. A short step past it lands in the palm instead of the wrist.
-	// Location is absolute so the skeleton's bone scale cannot multiply this centimetre
-	// offset and throw the item away from the hand.
 	const FVector Palm = Wrist + AlongFingers * 1.35f;
-	const FVector AlongHand = AlongFingers.GetSafeNormal();
-	const FName ForearmBone(TEXT("LowerArm_R"));
-	FVector AlongForearm = AlongHand;
+	FVector AlongForearm = AlongFingers.GetSafeNormal();
 	if (CharacterMesh->GetBoneIndex(ForearmBone) != INDEX_NONE)
 	{
 		const FVector Elbow = CharacterMesh->GetBoneLocation(ForearmBone, EBoneSpaces::WorldSpace);
@@ -348,19 +485,26 @@ void UJTSWeaponVisualComponent::UpdatePalmAnchor()
 	const AActor* const Owner = GetOwner();
 	const FVector Up = Owner->GetActorUpVector().GetSafeNormal();
 	FQuat PalmRotation = Owner->GetActorQuat();
-	if (bRangedVisible)
+	if (bTwoHandVisible)
 	{
-		// The barrel is the forearm. Wherever the arm points, the muzzle points.
+		// Akimbo carry: mesh +X is the shaft and it stands straight up, the same
+		// way dual pistols keep both muzzles vertical. Each axe uses its own fist,
+		// so the two shafts stay parallel and never cross the chest.
+		const FVector Side = FVector::CrossProduct(Up, Owner->GetActorForwardVector()).GetSafeNormal();
+		const FVector Outward = (bRightHand ? Side : -Side).GetSafeNormal();
+		const FVector PalmUp = Outward.IsNearlyZero() ? Owner->GetActorForwardVector() : Outward;
+		PalmRotation = FRotationMatrix::MakeFromXZ(Up, PalmUp).ToQuat();
+	}
+	else if (bRangedVisible && bRightHand)
+	{
 		const FVector Side = FVector::CrossProduct(Up, AlongForearm).GetSafeNormal();
 		const FVector PalmUp = Side.IsNearlyZero()
 			? Up
 			: FVector::CrossProduct(AlongForearm, Side).GetSafeNormal();
 		PalmRotation = FRotationMatrix::MakeFromXZ(AlongForearm, PalmUp).ToQuat();
 	}
-	else
+	else if (bRightHand)
 	{
-		// At rest the shaft stands on the actor up. A chop swings that same axis
-		// with the forearm, so the whole tool travels the arc the hand travels.
 		const float Swing = FVector::DotProduct(AlongForearm, Up);
 		const FVector Shaft = (Up + AlongForearm * FMath::Max(0.0f, -Swing)).GetSafeNormal();
 		const FVector Forward = FVector::VectorPlaneProject(Owner->GetActorForwardVector(), Shaft).GetSafeNormal();
@@ -370,9 +514,107 @@ void UJTSWeaponVisualComponent::UpdatePalmAnchor()
 		}
 	}
 
-	HandAttachmentAnchor->SetAbsolute(true, true, true);
-	HandAttachmentAnchor->SetWorldLocation(Palm);
-	HandAttachmentAnchor->SetWorldRotation(PalmRotation);
+	Anchor->SetAbsolute(true, true, true);
+	Anchor->SetWorldLocation(Palm);
+	Anchor->SetWorldRotation(PalmRotation);
+}
+
+void UJTSWeaponVisualComponent::UpdatePalmAnchor()
+{
+	if (bUsingFallbackAttachment || !IsValid(HandAttachmentAnchor))
+	{
+		return;
+	}
+	UpdateHandAnchor(HandAttachmentAnchor, TEXT("Wrist_R"), TEXT("Index1_R"), TEXT("LowerArm_R"), true);
+}
+
+void UJTSWeaponVisualComponent::UpdateLeftAxeAnchor()
+{
+	if (!bTwoHandVisible || !IsValid(LeftHandAttachmentAnchor))
+	{
+		return;
+	}
+	UpdateHandAnchor(LeftHandAttachmentAnchor, TEXT("Wrist_L"), TEXT("Index1_L"), TEXT("LowerArm_L"), false);
+}
+
+void UJTSWeaponVisualComponent::UpdateWaistLamp()
+{
+	if (!IsValid(WaistLampBody) || !IsValid(WaistLampLens) || !IsValid(WaistLampLight) || !IsValid(WaistLampAnchor) || GetOwner() == nullptr)
+	{
+		return;
+	}
+	const UJTSInventoryComponent* const Inventory = GetOwner()->FindComponentByClass<UJTSInventoryComponent>();
+	const bool bLit = IsValid(Inventory) && Inventory->IsWaistLampEquipped();
+	USkeletalMeshComponent* const CharacterMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+	const bool bMeshShown = IsValid(CharacterMesh) && !CharacterMesh->bHiddenInGame;
+	if (!bLit || !bMeshShown)
+	{
+		WaistLampBody->SetVisibility(false);
+		WaistLampBody->SetHiddenInGame(true);
+		WaistLampLens->SetVisibility(false);
+		WaistLampLens->SetHiddenInGame(true);
+		WaistLampLight->SetVisibility(false);
+		WaistLampLight->SetIntensity(0.0f);
+		return;
+	}
+
+	// Same pitch the planet camera uses. Positive aim pitch looks up. The body
+	// forward has no pitch, and a light that stays level keeps its hotspot on
+	// the ground under the head.
+	const FVector ActorUp = GetOwner()->GetActorUpVector().GetSafeNormal();
+	const FVector ActorForward = GetOwner()->GetActorForwardVector().GetSafeNormal();
+	const AJTSCharacter* const Character = Cast<AJTSCharacter>(GetOwner());
+	const float ViewPitch = IsValid(Character) ? Character->GetAimPitch() : 0.0f;
+	const FVector ActorRight = FVector::CrossProduct(ActorUp, ActorForward).GetSafeNormal();
+	FVector Beam = ActorForward;
+	if (!ActorRight.IsNearlyZero())
+	{
+		// Actor right is Cross(up, forward). A positive angle around that axis
+		// pitches the beam down, so look-up (positive aim pitch) uses the opposite sign.
+		Beam = FQuat(ActorRight, FMath::DegreesToRadians(-ViewPitch)).RotateVector(ActorForward).GetSafeNormal();
+	}
+	const FVector BeamUp = FVector::VectorPlaneProject(ActorUp, Beam).GetSafeNormal();
+	FVector HeadLocation = GetOwner()->GetActorLocation() + ActorUp * 168.0f;
+	const FName HeadName(TEXT("Head"));
+	if (IsValid(CharacterMesh) && CharacterMesh->GetBoneIndex(HeadName) != INDEX_NONE)
+	{
+		HeadLocation = CharacterMesh->GetBoneLocation(HeadName, EBoneSpaces::WorldSpace);
+	}
+	const FVector LampLocation = HeadLocation + Beam * 14.0f + ActorUp * 4.0f;
+	WaistLampAnchor->SetWorldLocation(LampLocation);
+	WaistLampAnchor->SetWorldRotation(FRotationMatrix::MakeFromXZ(
+		Beam, BeamUp.IsNearlyZero() ? ActorUp : BeamUp).Rotator());
+	WaistLampLight->SetWorldLocation(LampLocation + Beam * 6.0f);
+	WaistLampLight->SetWorldRotation(FRotationMatrix::MakeFromXZ(
+		Beam, BeamUp.IsNearlyZero() ? ActorUp : BeamUp).Rotator());
+	WaistLampBody->SetWorldScale3D(FVector(0.022f, 0.062f, 0.028f));
+	WaistLampBody->SetVisibility(true);
+	WaistLampBody->SetHiddenInGame(false);
+	WaistLampLens->SetWorldScale3D(FVector(0.006f, 0.050f, 0.016f));
+	WaistLampLens->SetVisibility(true);
+	WaistLampLens->SetHiddenInGame(false);
+	if (IsValid(WaistLampMaterial))
+	{
+		const FLinearColor Housing(0.045f, 0.048f, 0.052f, 1.0f);
+		WaistLampMaterial->SetVectorParameterValue(TEXT("Color"), Housing);
+		WaistLampMaterial->SetVectorParameterValue(TEXT("BaseColor"), Housing);
+		WaistLampMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor::Black);
+	}
+	if (IsValid(WaistLampLensMaterial))
+	{
+		const FLinearColor Glow(1.0f, 0.90f, 0.66f, 1.0f);
+		WaistLampLensMaterial->SetVectorParameterValue(TEXT("Color"), Glow);
+		WaistLampLensMaterial->SetVectorParameterValue(TEXT("BaseColor"), Glow);
+		WaistLampLensMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), Glow * 4.0f);
+	}
+	// The near ground stays a readable grey. Reach comes from the 55 m radius
+	// and the wide outer cone, not from a hot core.
+	WaistLampLight->SetIntensity(32.0f);
+	WaistLampLight->SetAttenuationRadius(5500.0f);
+	WaistLampLight->SetInnerConeAngle(8.0f);
+	WaistLampLight->SetOuterConeAngle(58.0f);
+	WaistLampLight->SetVisibility(true);
+	SetComponentTickEnabled(true);
 }
 
 void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
@@ -498,11 +740,14 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
 	if (!IsValid(Definition) || !Definition->IsHoldable())
 	{
+		bTwoHandVisible = false;
 		SetVisible(false);
+		UpdateWaistLamp();
 		UE_LOG(LogTemp, Log, TEXT("JTS weapon visual: hidden for %s ActiveItem=%d."), *GetNameSafe(GetOwner()), static_cast<int32>(ItemId));
 		return;
 	}
 	bRangedVisible = Definition->IsRangedWeapon();
+	bTwoHandVisible = ItemId == EJTSItemId::IceAxe;
 	// Mesh +X is the barrel or the shaft. The palm anchor already aims that axis:
 	// a gun along the forearm, a tool along the chop. No extra local pitch here.
 	DefaultCarryRotation = FRotator::ZeroRotator;
@@ -561,6 +806,16 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(65.0f, 0.0f, 0.0f), FVector::OneVector);
 			DefaultGripScale = FVector(0.22f, 0.12f, 0.12f);
 			break;
+		case EJTSItemId::IceAxe:
+			// Shaft along mesh +X. The palm frame already points +X straight up.
+			BodyScale = FVector(0.42f, 0.04f, 0.04f);
+			BarrelScale = FVector(0.14f, 0.045f, 0.10f);
+			DefaultBodyLocation = FVector(20.0f, 0.0f, 0.0f);
+			DefaultBarrelLocation = FVector(42.0f, 0.0f, 2.5f);
+			DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -3.0f), FVector::OneVector);
+			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(48.0f, 0.0f, 3.0f), FVector::OneVector);
+			DefaultGripScale = FVector(0.10f, 0.07f, 0.09f);
+			break;
 		case EJTSItemId::Pickaxe:
 		case EJTSItemId::Axe:
 			BodyScale = FVector(0.76f, 0.07f, 0.07f);
@@ -610,6 +865,10 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	{
 		ItemColor = FLinearColor(1.0f, 0.42f, 0.08f, 1.0f);
 	}
+	else if (ItemId == EJTSItemId::IceAxe)
+	{
+		ItemColor = FLinearColor(0.72f, 0.78f, 0.84f, 1.0f);
+	}
 
 	auto ApplyMaterialColor = [](UMaterialInstanceDynamic* Material, const FLinearColor& Color)
 	{
@@ -626,6 +885,29 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	ApplyMaterialColor(WeaponBodyMaterial, ItemColor);
 	ApplyMaterialColor(WeaponBarrelMaterial, ItemColor);
 	ApplyMaterialColor(WeaponSightMaterial, ItemColor);
+	if (bTwoHandVisible)
+	{
+		ApplyMaterialColor(LeftAxeMaterial, ItemColor);
+		auto ShowLeft = [](UStaticMeshComponent* Piece, const bool bShow)
+		{
+			if (!IsValid(Piece))
+			{
+				return;
+			}
+			Piece->SetVisibility(bShow);
+			Piece->SetHiddenInGame(!bShow);
+		};
+		ShowLeft(LeftAxeGrip, true);
+		ShowLeft(LeftAxeShaft, true);
+		ShowLeft(LeftAxeHead, true);
+	}
+	else
+	{
+		if (IsValid(LeftAxeGrip)) LeftAxeGrip->SetVisibility(false);
+		if (IsValid(LeftAxeShaft)) LeftAxeShaft->SetVisibility(false);
+		if (IsValid(LeftAxeHead)) LeftAxeHead->SetVisibility(false);
+	}
+	UpdateWaistLamp();
 	SetAimAlpha(AimAlpha);
 	UpdatePalmAnchor();
 	ValidateAttachmentAfterPose();
@@ -775,7 +1057,11 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	}
 	if (IsValid(WeaponBarrel))
 	{
-		WeaponBarrel->SetRelativeRotation(FRotator::ZeroRotator);
+		// The ice-axe head sits across the top of an upright shaft. Other tools
+		// keep the head on the shaft axis.
+		WeaponBarrel->SetRelativeRotation(bTwoHandVisible
+			? FRotator(0.0f, 0.0f, 18.0f)
+			: FRotator::ZeroRotator);
 		WeaponBarrel->SetRelativeLocation(DefaultBarrelLocation);
 	}
 	if (IsValid(WeaponSight))
@@ -790,6 +1076,7 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 	if (!bVisible)
 	{
 		bRangedVisible = false;
+		bTwoHandVisible = false;
 		bMeleeSwingPresentationActive = false;
 		ShotKickAlpha = 0.0f;
 		SetComponentTickEnabled(false);
@@ -807,6 +1094,12 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 	if (IsValid(WeaponGrip)) WeaponGrip->SetHiddenInGame(!bVisible);
 	if (IsValid(WeaponBody)) WeaponBody->SetHiddenInGame(!bVisible);
 	if (IsValid(WeaponBarrel)) WeaponBarrel->SetHiddenInGame(!bVisible);
+	if (!bVisible)
+	{
+		if (IsValid(LeftAxeGrip)) LeftAxeGrip->SetVisibility(false);
+		if (IsValid(LeftAxeShaft)) LeftAxeShaft->SetVisibility(false);
+		if (IsValid(LeftAxeHead)) LeftAxeHead->SetVisibility(false);
+	}
 	if (IsValid(WeaponSight)) WeaponSight->SetHiddenInGame(!bVisible);
 }
 

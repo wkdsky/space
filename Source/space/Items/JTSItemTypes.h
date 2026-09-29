@@ -26,7 +26,11 @@ enum class EJTSItemId : uint8
 	MachineGun UMETA(DisplayName = "Machine Gun"),
 	Axe UMETA(DisplayName = "Axe"),
 	/** Stable append-only identity for the long-range precision weapon. */
-	Sniper UMETA(DisplayName = "Sniper Rifle")
+	Sniper UMETA(DisplayName = "Sniper Rifle"),
+	/** White belt lamp. Worn at the waist, toggled with F from the quickbar. */
+	WaistLamp UMETA(DisplayName = "Waist Lamp"),
+	/** Two-handed climbing tool. Also a light melee weapon. */
+	IceAxe UMETA(DisplayName = "Ice Axe")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */

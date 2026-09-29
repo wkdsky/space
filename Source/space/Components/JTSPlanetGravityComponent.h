@@ -35,6 +35,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Gravity")
 	bool IsUsingPlanetGravity() const;
 
+	/** Wall climbing owns gravity until it lets go. The radial update must not turn it back on. */
+	void SetSurfaceGravitySuspended(bool bSuspended);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(
@@ -67,5 +70,6 @@ private:
 	bool bCapturedDefaultGravityScale = false;
 	float DefaultGravityScale = 1.0f;
 	bool bUsingPlanetGravity = false;
+	bool bSurfaceGravitySuspended = false;
 	double LastDebugLogTime = -1.0;
 };

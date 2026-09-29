@@ -18,6 +18,7 @@ class UJTSHealthComponent;
 class UJTSInventoryComponent;
 class UJTSPlanetGravityComponent;
 class UJTSRangedWeaponComponent;
+class UJTSWallClimbComponent;
 class UJTSWeaponVisualComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
@@ -190,12 +191,13 @@ private:
 	void HandleJumpStarted(const FInputActionValue& Value);
 	void HandleInteractStarted(const FInputActionValue& Value);
 	void HandleBoardStarted(const FInputActionValue& Value);
+	void HandleEquipStarted(const FInputActionValue& Value);
 	void HandleBoardTriggered(const FInputActionValue& Value);
 	void HandleBoardCompleted(const FInputActionValue& Value);
 	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
-	/** A ranged click turns the body onto the camera only when the gun arm cannot reach it. */
+	/** Ordinary standing third person never snaps the body onto a gun click. Aim, first person, and a jump already face the camera. */
 	void AlignBodyToViewOnAttack();
 	float GetRawViewYawDelta() const;
 	/**
@@ -350,6 +352,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged|Presentation", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSWeaponVisualComponent> WeaponVisualComponent;
 
+	/** Ice-axe traversal on slopes steeper than the standing limit. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Climb", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSWallClimbComponent> WallClimbComponent;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Health", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerMaxHealth = 10.0f;
 
@@ -380,9 +386,12 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Gravity", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
 
-	/** Maximum terrain angle a character can stand on. Individual character Blueprints may tune this per project. */
+	/**
+	 * Standing limit. Slopes steeper than this cannot be walked; the ice axe climbs them instead.
+	 * Individual character Blueprints may tune this per project.
+	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
-	float MaxWalkableSlopeDegrees = 60.0f;
+	float MaxWalkableSlopeDegrees = 50.0f;
 
 	/** Explicit real-planet ownership. This prevents a character from selecting the first planet in the world. */
 	UPROPERTY(ReplicatedUsing = OnRep_GameplayPlanet, VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Planet", meta = (AllowPrivateAccess = "true"))
@@ -544,6 +553,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> BoardAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> EquipAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> AttackAction;

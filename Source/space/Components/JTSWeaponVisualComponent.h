@@ -11,6 +11,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
 class USceneComponent;
+class USpotLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -63,6 +64,9 @@ private:
 	void AttachToRootFallback();
 	/** Places the grip in the palm from the posed wrist and finger bones, in world centimetres. */
 	void UpdatePalmAnchor();
+	void UpdateHandAnchor(USceneComponent* Anchor, const FName WristBone, const FName IndexBone, const FName ForearmBone, bool bRightHand);
+	void UpdateLeftAxeAnchor();
+	void UpdateWaistLamp();
 	void ValidateAttachmentAfterPose();
 	bool IsCurrentAttachmentPlausible() const;
 	void SetVisible(bool bVisible);
@@ -71,6 +75,46 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> HandAttachmentAnchor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> LeftHandAttachmentAnchor;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> LeftAxeGrip;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> LeftAxeShaft;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> LeftAxeHead;
+
+	/** Welded to the waist bone so the lamp yaws and bends with the hips. */
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> WaistLampAnchor;
+
+	/** Dark housing of the belt lamp. The glowing face is a separate lens. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> WaistLampBody;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> WaistLampLens;
+
+	/**
+	 * One headlamp spot. Wide enough to spill into a pit below the lip and long
+	 * enough to still read at tens of metres. Exposure stays manual, so a turn
+	 * does not leave the previous patch on screen.
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<USpotLightComponent> WaistLampLight;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> LeftAxeMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> WaistLampMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> WaistLampLensMaterial;
 
 	/** Carries transient aim and melee pose offsets without moving the authored grip pivot. */
 	UPROPERTY(Transient)
@@ -152,6 +196,7 @@ private:
 	float AimAlpha = 0.0f;
 	float ShotKickAlpha = 0.0f;
 	bool bRangedVisible = false;
+	bool bTwoHandVisible = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Presentation|Shot", meta = (ClampMin = "1.0"))
 	float ShotKickRecoverySpeed = 20.0f;

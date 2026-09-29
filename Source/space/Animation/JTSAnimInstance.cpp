@@ -8,6 +8,7 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
@@ -49,6 +50,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bHasHeldItem = false;
 	bActiveRangedWeapon = false;
 	bMeleeHeld = false;
+	bTwoHandHeld = false;
 	if (IsValid(Character))
 	{
 		if (const UJTSInventoryComponent* const Inventory = Character->FindComponentByClass<UJTSInventoryComponent>())
@@ -61,7 +63,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const bool bGun = ActiveId == EJTSItemId::Pistol
 				|| ActiveId == EJTSItemId::MachineGun
 				|| ActiveId == EJTSItemId::Sniper;
-			bMeleeHeld = bHasHeldItem && !bGun;
+			bTwoHandHeld = bHasHeldItem && ActiveId == EJTSItemId::IceAxe;
+			bMeleeHeld = bHasHeldItem && !bGun && !bTwoHandHeld;
 		}
 		if (const UJTSRangedWeaponComponent* const Ranged = Character->FindComponentByClass<UJTSRangedWeaponComponent>())
 		{
@@ -173,6 +176,18 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			MeleeChopStroke = 0.0f;
 			MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, DeltaSeconds, 8.0f);
 		}
+
+		const UJTSWallClimbComponent* const Climb = Character->FindComponentByClass<UJTSWallClimbComponent>();
+		const bool bClimbing = IsValid(Climb) && Climb->IsClimbing();
+		if (bClimbing)
+		{
+			ClimbSwingAlpha = Climb->GetSwingAlpha();
+			bClimbLeadLeft = Climb->IsLeadHandLeft();
+		}
+		else
+		{
+			ClimbSwingAlpha = FMath::FInterpTo(ClimbSwingAlpha, 0.0f, DeltaSeconds, 8.0f);
+		}
 		// Head pitch always tracks the view, including the ordinary third-person stance.
 		// Right-click aiming still uses the same pitch; it only changes the camera and crosshair.
 		{
@@ -184,20 +199,17 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const FRotator RelativeAim = (CharacterController->GetControlRotation() - Character->GetActorRotation()).GetNormalized();
 			RawAimYaw = FRotator::NormalizeAxis(RelativeAim.Yaw);
 		}
-		// Ordinary grounded third person still yaws only the chest toward the camera.
+		// Ordinary grounded third person keeps the player's facing. The arms only cover
+		// the view while it is already close to the body. Past that cone the arms
+		// return forward instead of dragging the barrel onto screen center.
 		// Aim, first person, and a jump already turn the whole actor with the view,
 		// so an extra spine yaw there twists the upper body off the legs.
-		// A held gun is the exception: the arm has to keep meeting the camera even
-		// while the feet stay put, until the view leaves the arm's reach.
+		const UJTSWallClimbComponent* const ClimbState = Character->FindComponentByClass<UJTSWallClimbComponent>();
+		const bool bClimbingNow = IsValid(ClimbState) && ClimbState->IsClimbing();
 		const bool bWholeBodyOnView = Character->IsFirstPersonView()
-			|| bAirborne
+			|| (bAirborne && !bTwoHandHeld && !bClimbingNow)
 			|| bWeaponAiming;
-		const bool bArmTracksView = bActiveRangedWeapon && !bWholeBodyOnView;
-		// RawAimYaw is the full camera yaw. The presentation yaw fades out past the
-		// cone, which would pull a held gun back to the chest before the body turns.
-		AimYaw = bWholeBodyOnView
-			? 0.0f
-			: (bArmTracksView ? RawAimYaw : Character->GetPresentationAimYaw());
+		AimYaw = bWholeBodyOnView ? 0.0f : Character->GetPresentationAimYaw();
 		TurnShuffleAlpha = bWholeBodyOnView ? 0.0f : Character->GetTurnShuffleAlpha();
 		const float YawLimit = 48.0f;
 		const float DesiredUpperYaw = FMath::Clamp(AimYaw, -YawLimit, YawLimit);
@@ -314,15 +326,17 @@ void UJTSAnimInstance::ApplyFacingPose()
 	// Component-space bone locations are not actor-aligned on this mesh: the clip
 	// stores the body along component +Y. Actor axes have to be expressed in that
 	// same frame before a hinge or an aim direction will move the drawn limb.
-	const int32 SpineBone = Mesh->GetBoneIndex(TEXT("Spine_03"));
-	const int32 PelvisBone = Mesh->GetBoneIndex(TEXT("Pelvis"));
+	// Casual_2's spine is Hips -> Abdomen -> Torso -> Chest. Pelvis and Spine_03
+	// are not on this skeleton, so the body axis comes from Hips to Chest.
+	const int32 SpineBone = Mesh->GetBoneIndex(TEXT("Chest"));
+	const int32 PelvisBone = Mesh->GetBoneIndex(TEXT("Hips"));
 	FVector PoseUp = ActorUp;
 	FVector PoseForward = ActorForward;
 	FVector PoseRight = ActorRight;
 	if (Pose.IsValidIndex(SpineBone) && Pose.IsValidIndex(PelvisBone))
 	{
 		const FVector Spine = (Pose[SpineBone].GetLocation() - Pose[PelvisBone].GetLocation()).GetSafeNormal();
-		if (!Spine.IsNearlyZero())
+		if (!Spine.IsNearlyZero() && FVector::DotProduct(Spine, ActorUp) > 0.2f)
 		{
 			PoseUp = Spine;
 			PoseRight = FVector::CrossProduct(PoseUp, ActorForward).GetSafeNormal();
@@ -430,7 +444,50 @@ void UJTSAnimInstance::ApplyFacingPose()
 	TurnBone(TEXT("Head"), FVector::UpVector, BodyYaw * 0.18f);
 	TurnBone(TEXT("Head"), FVector::RightVector, -AimPitch * 0.85f);
 
-	if (bActiveRangedWeapon)
+	const AJTSCharacter* const PoseCharacter = Cast<AJTSCharacter>(Mesh->GetOwner());
+	const UJTSWallClimbComponent* const Climb = PoseCharacter != nullptr
+		? PoseCharacter->FindComponentByClass<UJTSWallClimbComponent>()
+		: nullptr;
+	if (IsValid(Climb) && Climb->IsClimbing())
+	{
+		// Both hands stay in an L against the wall. The planted axe is already in
+		// the stone. The lead axe lifts, then comes back down in the step direction.
+		const FVector WallNormal = ComponentRotation.UnrotateVector(Climb->GetSurfaceNormal()).GetSafeNormal();
+		const FVector Step = ComponentRotation.UnrotateVector(Climb->GetStepDirection()).GetSafeNormal();
+		const FVector IntoWall = WallNormal.IsNearlyZero() ? PoseForward : -WallNormal;
+		const FVector AlongStep = Step.IsNearlyZero() ? PoseUp : Step;
+		const float Swing = FMath::Clamp(ClimbSwingAlpha, 0.0f, 1.0f);
+		const float Raised = Swing < 0.45f ? Swing / 0.45f : (1.0f - Swing) / 0.55f;
+		const FVector PlantFore = IntoWall;
+		const FVector PlantUpper = (IntoWall * 0.55f - PoseUp * 0.45f).GetSafeNormal();
+		const FVector SwingFore = (IntoWall + AlongStep * (0.85f * Raised)).GetSafeNormal();
+		const FVector SwingUpper = (IntoWall * 0.35f + AlongStep * Raised - PoseUp * 0.35f).GetSafeNormal();
+		const bool bLeftLeads = bClimbLeadLeft;
+		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), bLeftLeads ? SwingUpper : PlantUpper);
+		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), bLeftLeads ? SwingFore : PlantFore);
+		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), bLeftLeads ? PlantUpper : SwingUpper);
+		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), bLeftLeads ? PlantFore : SwingFore);
+		CloseGrip(true);
+		CloseGrip(false);
+	}
+	else if (bTwoHandHeld)
+	{
+		// Dual upright carry in front of the chest. Each upper arm reaches
+		// forward from its own shoulder, the elbow bends, and the forearm
+		// stands up so the pick is an L in front of that shoulder. The two
+		// forearms stay on their own sides and never meet.
+		const FVector UpperL = (PoseForward * 0.88f - PoseRight * 0.32f - PoseUp * 0.28f).GetSafeNormal();
+		const FVector UpperR = (PoseForward * 0.88f + PoseRight * 0.32f - PoseUp * 0.28f).GetSafeNormal();
+		const FVector ForeL = (PoseUp * 0.78f + PoseForward * 0.58f - PoseRight * 0.10f).GetSafeNormal();
+		const FVector ForeR = (PoseUp * 0.78f + PoseForward * 0.58f + PoseRight * 0.10f).GetSafeNormal();
+		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), UpperL);
+		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), ForeL);
+		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), UpperR);
+		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), ForeR);
+		CloseGrip(true);
+		CloseGrip(false);
+	}
+	else if (bActiveRangedWeapon)
 	{
 		// The gun stays glued in the right hand. Pitch and the same limited yaw swing
 		// that whole arm together, so the barrel never leaves the forearm.

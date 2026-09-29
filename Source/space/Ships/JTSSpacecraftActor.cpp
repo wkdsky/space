@@ -167,6 +167,27 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	FlightCamera->SetupAttachment(FlightCameraBoom, USpringArmComponent::SocketName);
 	FlightCamera->bUsePawnControlRotation = false;
 	FlightCamera->SetFieldOfView(NormalFlightFOV);
+	// Same exposure lock as the on-foot camera. A sweeping headlight was leaving
+	// a ghost because exposure kept catching up after the beam moved.
+	FlightCamera->PostProcessBlendWeight = 1.0f;
+	FlightCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
+	FlightCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+	FlightCamera->PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	FlightCamera->PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = false;
+	FlightCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
+	FlightCamera->PostProcessSettings.AutoExposureBias = 0.0f;
+	FlightCamera->PostProcessSettings.bOverride_MotionBlurAmount = true;
+	FlightCamera->PostProcessSettings.MotionBlurAmount = 0.0f;
+	FlightCamera->PostProcessSettings.bOverride_MotionBlurMax = true;
+	FlightCamera->PostProcessSettings.MotionBlurMax = 0.0f;
+	FlightCamera->PostProcessSettings.bOverride_BloomIntensity = true;
+	FlightCamera->PostProcessSettings.BloomIntensity = 0.0f;
+	FlightCamera->PostProcessSettings.bOverride_LocalExposureHighlightContrastScale = true;
+	FlightCamera->PostProcessSettings.LocalExposureHighlightContrastScale = 1.0f;
+	FlightCamera->PostProcessSettings.bOverride_LocalExposureShadowContrastScale = true;
+	FlightCamera->PostProcessSettings.LocalExposureShadowContrastScale = 1.0f;
+	FlightCamera->PostProcessSettings.bOverride_LocalExposureDetailStrength = true;
+	FlightCamera->PostProcessSettings.LocalExposureDetailStrength = 1.0f;
 
 	BoardingTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("BoardingTrigger"));
 	BoardingTrigger->SetupAttachment(SceneRoot);
@@ -519,6 +540,7 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightDisembarkStarted);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
+	EnhancedInputComponent->BindAction(FlightHeadlightAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightHeadlightStarted);
 	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightRelinquishDriverStarted);
 	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightRelinquishDriverReleased);
 	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightRelinquishDriverReleased);
@@ -555,6 +577,7 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightBrakeAction = NewObject<UInputAction>(this, TEXT("FlightBrakeAction"), RF_Transient);
 	FlightDisembarkAction = NewObject<UInputAction>(this, TEXT("FlightDisembarkAction"), RF_Transient);
 	FlightRelinquishDriverAction = NewObject<UInputAction>(this, TEXT("FlightRelinquishDriverAction"), RF_Transient);
+	FlightHeadlightAction = NewObject<UInputAction>(this, TEXT("FlightHeadlightAction"), RF_Transient);
 
 	FlightForwardAction->ValueType = EInputActionValueType::Axis1D;
 	FlightRightAction->ValueType = EInputActionValueType::Axis1D;
@@ -570,13 +593,14 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightBrakeAction->ValueType = EInputActionValueType::Boolean;
 	FlightDisembarkAction->ValueType = EInputActionValueType::Boolean;
 	FlightRelinquishDriverAction->ValueType = EInputActionValueType::Boolean;
+	FlightHeadlightAction->ValueType = EInputActionValueType::Boolean;
 
 	FlightInputMappingContext->MapKey(FlightForwardAction, EKeys::W);
 	FlightInputMappingContext->MapKey(FlightSteerYawAction, EKeys::D);
 	FlightInputMappingContext->MapKey(FlightTurnAroundAction, EKeys::S);
 	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::SpaceBar);
 	FlightInputMappingContext->MapKey(FlightAscendAction, EKeys::SpaceBar);
-	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::R);
+	FlightInputMappingContext->MapKey(FlightDisembarkAction, EKeys::R);
 	FlightInputMappingContext->MapKey(FlightLookYawAction, EKeys::MouseX);
 	FlightInputMappingContext->MapKey(FlightLookPitchAction, EKeys::MouseY);
 	FlightInputMappingContext->MapKey(FlightSteerYawAction, EKeys::Right);
@@ -584,8 +608,8 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightInputMappingContext->MapKey(FlightCameraZoomAction, EKeys::MouseWheelAxis);
 	FlightInputMappingContext->MapKey(FlightBoostAction, EKeys::LeftShift);
 	FlightInputMappingContext->MapKey(FlightBrakeAction, EKeys::C);
-	FlightInputMappingContext->MapKey(FlightDisembarkAction, EKeys::F);
 	FlightInputMappingContext->MapKey(FlightRelinquishDriverAction, EKeys::Q);
+	FlightInputMappingContext->MapKey(FlightHeadlightAction, EKeys::L);
 
 	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
 	{
@@ -754,6 +778,42 @@ void AJTSSpacecraftActor::FlightBrakeStopped(const FInputActionValue& Value)
 	SubmitFlightInput();
 }
 
+void AJTSSpacecraftActor::FlightHeadlightStarted(const FInputActionValue& Value)
+{
+	if (!Value.Get<bool>() || FlightState != EJTSSpacecraftFlightState::Flying)
+	{
+		return;
+	}
+	if (HasAuthority())
+	{
+		bHeadlightsRequested = !bHeadlightsRequested;
+		ForceNetUpdate();
+	}
+	else
+	{
+		ServerToggleHeadlights();
+	}
+}
+
+void AJTSSpacecraftActor::ServerToggleHeadlights_Implementation()
+{
+	if (FlightState != EJTSSpacecraftFlightState::Flying)
+	{
+		return;
+	}
+	bHeadlightsRequested = !bHeadlightsRequested;
+	ForceNetUpdate();
+}
+
+bool AJTSSpacecraftActor::AreHeadlightsOn() const
+{
+	return bHeadlightsRequested && FlightState == EJTSSpacecraftFlightState::Flying;
+}
+
+void AJTSSpacecraftActor::OnRep_Headlights()
+{
+}
+
 void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
 {
 	if (!Value.Get<bool>() || !bDisembarkInputArmed || bDisembarkRequestPending)
@@ -888,7 +948,7 @@ void AJTSSpacecraftActor::UpdateDisembarkInputGate()
 	const APlayerController* const PlayerController = Cast<APlayerController>(GetController());
 	if (IsValid(PlayerController)
 		&& PlayerController->IsLocalController()
-		&& !PlayerController->IsInputKeyDown(EKeys::F))
+		&& !PlayerController->IsInputKeyDown(EKeys::R))
 	{
 		bDisembarkInputArmed = true;
 	}
@@ -1799,6 +1859,7 @@ bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransfor
 		if (FlightMovementComponent->BeginAssistedLanding(Planet, PendingLandingClearance, DurationSeconds))
 		{
 			FlightState = EJTSSpacecraftFlightState::LandingAssist;
+			bHeadlightsRequested = false;
 			return true;
 		}
 	}
@@ -1831,6 +1892,7 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 		}
 	}
 	FlightState = EJTSSpacecraftFlightState::Landed;
+	bHeadlightsRequested = false;
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::Touchdown;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
 
@@ -2367,20 +2429,20 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 	{
 		if (IsEarthCollectionActive())
 		{
-			return FText::FromString(TEXT("HOLD [F] BOARD"));
+			return FText::FromString(TEXT("HOLD [R] BOARD"));
 		}
 
-		return FText::FromString(TEXT("[E] SHIP TERMINAL\nHOLD [F] BOARD"));
+		return FText::FromString(TEXT("[E] SHIP TERMINAL\nHOLD [R] BOARD"));
 	}
 
 	return CanDisembarkPlayer(InteractingPawn)
-		? FText::FromString(TEXT("[F] DISEMBARK"))
+		? FText::FromString(TEXT("[R] DISEMBARK"))
 		: FText::GetEmpty();
 }
 
 void AJTSSpacecraftActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	// Earth exposes the ship as an interaction target solely so its hold-F boarding path and prompt
+	// Earth exposes the ship as an interaction target solely so its hold-R boarding path and prompt
 	// use the shared interaction validation. The supply screen remains a SpaceWorld-only feature.
 	if (!CanUseShipTerminal(InteractingPawn))
 	{
@@ -2813,6 +2875,7 @@ void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationForward);
 	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationLift);
 	DOREPLIFETIME(AJTSSpacecraftActor, bReplicatedPresentationBoost);
+	DOREPLIFETIME(AJTSSpacecraftActor, bHeadlightsRequested);
 }
 
 void AJTSSpacecraftActor::RestoreStorageFromExpedition(const TMap<EJTSResourceType, int32>& NewStorage)

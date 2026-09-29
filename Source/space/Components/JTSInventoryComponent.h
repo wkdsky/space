@@ -65,6 +65,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Inventory|Quickbar")
 	EJTSItemId GetActiveItemId() const;
 
+	/** True while the belt lamp is lit. Hands stay free; selecting another slot does not stow it. */
+	UFUNCTION(BlueprintPure, Category = "Inventory|Equipment")
+	bool IsWaistLampEquipped() const;
+
+	/** Owner request. The server clips or removes the lamp only when that item is selected. */
+	UFUNCTION(BlueprintCallable, Category = "Inventory|Equipment")
+	void RequestToggleWaistLamp();
+
+	/** Server-only. Drops and destroys call this so a removed lamp cannot stay lit. */
+	void ClearWaistLampIfAbsent();
+
+	UFUNCTION(BlueprintPure, Category = "Inventory|Equipment")
+	bool OwnsWaistLamp() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Inventory|Quickbar")
 	bool SelectQuickbarSlot(int32 SlotIndex);
 
@@ -159,4 +173,15 @@ private:
 
 	UFUNCTION()
 	void OnRep_QuickbarPageIndex();
+
+	UFUNCTION(Server, Reliable)
+	void ServerToggleWaistLamp();
+
+	UFUNCTION()
+	void OnRep_WaistLampEquipped();
+
+	void SetWaistLampEquipped(bool bEquipped);
+
+	UPROPERTY(ReplicatedUsing = OnRep_WaistLampEquipped, VisibleAnywhere, Category = "Inventory|Equipment")
+	bool bWaistLampEquipped = false;
 };

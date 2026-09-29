@@ -336,6 +336,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRelinquishDriverSeat();
 
+	/** Driver toggles the nose beams. They only emit while the ship is flying. */
+	UFUNCTION(Server, Reliable)
+	void ServerToggleHeadlights();
+
+	/** True when the driver has asked for the nose beams and the ship is in flight. */
+	UFUNCTION(BlueprintPure, Category = "Ship|Presentation")
+	bool AreHeadlightsOn() const;
+
 	/** Server-side seat claim. Passengers call this through their own player controller. */
 	bool TryClaimDriverSeat(APlayerController* RequestingController);
 
@@ -407,6 +415,7 @@ private:
 	void FlightBoostStopped(const FInputActionValue& Value);
 	void FlightBrakeStarted(const FInputActionValue& Value);
 	void FlightBrakeStopped(const FInputActionValue& Value);
+	void FlightHeadlightStarted(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
 	void FlightDisembarkReleased(const FInputActionValue& Value);
 	void FlightRelinquishDriverStarted(const FInputActionValue& Value);
@@ -662,6 +671,17 @@ private:
 	/** Long-press while flying gives up the driver seat. The same key drops or destroys items on foot. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightRelinquishDriverAction;
+
+	/** L, while flying. Turns the nose beams on or off. Landing forces them off. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightHeadlightAction;
+
+	/** Driver's request. Presentation still keeps the beams dark while landed or landing. */
+	UPROPERTY(ReplicatedUsing = OnRep_Headlights, VisibleInstanceOnly, Transient, Category = "Ship|Presentation")
+	bool bHeadlightsRequested = false;
+
+	UFUNCTION()
+	void OnRep_Headlights();
 
 	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> RegisteredFlightInputSubsystem;
 	TWeakObjectPtr<UInputComponent> BoundFlightInputComponent;

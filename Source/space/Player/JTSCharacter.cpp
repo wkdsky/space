@@ -36,8 +36,10 @@
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Interaction/InteractionComponent.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Modes/JTSSpaceWorldGameMode.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -78,6 +80,7 @@ AJTSCharacter::AJTSCharacter()
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
 	WeaponVisualComponent = CreateDefaultSubobject<UJTSWeaponVisualComponent>(TEXT("WeaponVisualComponent"));
+	WallClimbComponent = CreateDefaultSubobject<UJTSWallClimbComponent>(TEXT("WallClimbComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
 	MovementComponent->AddTickPrerequisiteComponent(PlanetGravityComponent);
 
@@ -97,6 +100,30 @@ AJTSCharacter::AJTSCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+	// Auto exposure was the smear: it brightened the whole frame for the lamp,
+	// then took a second to darken again after the beam moved, so the old
+	// patch stayed grey. Manual exposure holds one brightness.
+	FollowCamera->PostProcessBlendWeight = 1.0f;
+	FollowCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
+	FollowCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+	FollowCamera->PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	FollowCamera->PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = false;
+	FollowCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
+	FollowCamera->PostProcessSettings.AutoExposureBias = 0.0f;
+	FollowCamera->PostProcessSettings.bOverride_MotionBlurAmount = true;
+	FollowCamera->PostProcessSettings.MotionBlurAmount = 0.0f;
+	FollowCamera->PostProcessSettings.bOverride_MotionBlurMax = true;
+	FollowCamera->PostProcessSettings.MotionBlurMax = 0.0f;
+	FollowCamera->PostProcessSettings.bOverride_BloomIntensity = true;
+	FollowCamera->PostProcessSettings.BloomIntensity = 0.0f;
+	// Local exposure was still lifting the patch the beam just left, which
+	// reads as a ghost that fades a moment later. The beam edge is the falloff.
+	FollowCamera->PostProcessSettings.bOverride_LocalExposureHighlightContrastScale = true;
+	FollowCamera->PostProcessSettings.LocalExposureHighlightContrastScale = 1.0f;
+	FollowCamera->PostProcessSettings.bOverride_LocalExposureShadowContrastScale = true;
+	FollowCamera->PostProcessSettings.LocalExposureShadowContrastScale = 1.0f;
+	FollowCamera->PostProcessSettings.bOverride_LocalExposureDetailStrength = true;
+	FollowCamera->PostProcessSettings.LocalExposureDetailStrength = 1.0f;
 
 	DebugVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebugVisual"));
 	DebugVisual->SetupAttachment(GetCapsuleComponent());
@@ -798,6 +825,7 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleBoardTriggered);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleBoardCompleted);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleBoardCanceled);
+	EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
@@ -844,6 +872,7 @@ void AJTSCharacter::InitializeInput()
 	SprintAction = NewObject<UInputAction>(this, TEXT("SprintAction"), RF_Transient);
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
 	BoardAction = NewObject<UInputAction>(this, TEXT("BoardAction"), RF_Transient);
+	EquipAction = NewObject<UInputAction>(this, TEXT("EquipAction"), RF_Transient);
 	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
 	AimAction = NewObject<UInputAction>(this, TEXT("AimAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
@@ -865,6 +894,7 @@ void AJTSCharacter::InitializeInput()
 	SprintAction->ValueType = EInputActionValueType::Boolean;
 	InteractAction->ValueType = EInputActionValueType::Boolean;
 	BoardAction->ValueType = EInputActionValueType::Boolean;
+	EquipAction->ValueType = EInputActionValueType::Boolean;
 	AttackAction->ValueType = EInputActionValueType::Boolean;
 	AimAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
@@ -884,7 +914,8 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputMappingContext->MapKey(SprintAction, EKeys::LeftShift);
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
-	InputMappingContext->MapKey(BoardAction, EKeys::F);
+	InputMappingContext->MapKey(BoardAction, EKeys::R);
+	InputMappingContext->MapKey(EquipAction, EKeys::F);
 	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
 	InputMappingContext->MapKey(AimAction, EKeys::RightMouseButton);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
@@ -1044,6 +1075,19 @@ void AJTSCharacter::MoveForward(const FInputActionValue& Value)
 	}
 
 	const float MovementValue = Value.Get<float>();
+	if (!FMath::IsNearlyZero(MovementValue) && IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+	{
+		const FVector Up = GetCharacterMovement() != nullptr
+			? (-GetCharacterMovement()->GetGravityDirection()).GetSafeNormal()
+			: FVector::UpVector;
+		WallClimbComponent->SubmitClimbIntent(Up * FMath::Sign(MovementValue), false);
+		return;
+	}
+	if (MovementValue > 0.2f && IsValid(WallClimbComponent) && !WallClimbComponent->IsClimbing()
+		&& IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe)
+	{
+		WallClimbComponent->TryAttachFromApproach();
+	}
 	if (!FMath::IsNearlyZero(MovementValue))
 	{
 		FVector ForwardDirection;
@@ -1061,6 +1105,15 @@ void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 	}
 
 	const float MovementValue = Value.Get<float>();
+	if (!FMath::IsNearlyZero(MovementValue) && IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+	{
+		const FVector Up = GetCharacterMovement() != nullptr
+			? (-GetCharacterMovement()->GetGravityDirection()).GetSafeNormal()
+			: FVector::UpVector;
+		const FVector WallRight = FVector::CrossProduct(Up, WallClimbComponent->GetSurfaceNormal()).GetSafeNormal();
+		WallClimbComponent->SubmitClimbIntent(WallRight * FMath::Sign(MovementValue), false);
+		return;
+	}
 	if (!FMath::IsNearlyZero(MovementValue))
 	{
 		FVector ForwardDirection;
@@ -1159,6 +1212,11 @@ void AJTSCharacter::StopSprint(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 {
+	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+	{
+		WallClimbComponent->SubmitClimbIntent(FVector::ZeroVector, true);
+		return;
+	}
 	if (!IsBoarded())
 	{
 		// UE 5.8 CharacterMovement applies JumpZVelocity along LocalUp when custom gravity is active.
@@ -1234,6 +1292,19 @@ void AJTSCharacter::HandleBoardStarted(const FInputActionValue& Value)
 	BeginBoardingHold();
 }
 
+void AJTSCharacter::HandleEquipStarted(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (IsGameplayInputBlocked() || IsBoarded())
+	{
+		return;
+	}
+	if (IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::WaistLamp)
+	{
+		InventoryComponent->RequestToggleWaistLamp();
+	}
+}
+
 void AJTSCharacter::HandleBoardTriggered(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
@@ -1280,12 +1351,9 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 		return;
 	}
 
-	// A ranged click asks the body to catch the screen center. A tool, a melee weapon,
-	// and empty hands keep the body on its own facing and swing that way.
-	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
-	{
-		AlignBodyToViewOnAttack();
-	}
+	// Ordinary standing third person keeps the body where the player put it.
+	// Aim, first person, and a jump already face the camera, so a gun click does not add a snap.
+	AlignBodyToViewOnAttack();
 	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
 	{
 		RangedWeaponComponent->StartFire();
@@ -1395,43 +1463,19 @@ bool AJTSCharacter::WantsContinuousViewFacing() const
 	const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || bPressedJump;
 	// Aim and first person always match the camera, on the ground and in the air.
 	// A jump does the same from the press, so the body is already on the view when the feet leave.
+	const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
 	return bFirstPersonView
-		|| bAirborne
+		|| (bAirborne && !bIceAxeHeld)
 		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
 }
 
 void AJTSCharacter::AlignBodyToViewOnAttack()
 {
-	// Aim, first person, and a jump already keep the whole body on the camera.
-	// A click there must not leave a follow that survives after the player lets go.
-	if (WantsContinuousViewFacing())
-	{
-		bWantsViewFacing = false;
-		return;
-	}
-
-	FVector ViewForward = FVector::ZeroVector;
-	if (!GetViewTangentForward(ViewForward))
-	{
-		return;
-	}
-
-	// The gun arm already covers this much yaw on its own. Inside that cone the
-	// barrel meets the camera without turning the feet. Past it, the body catches up.
-	const float ArmReachDegrees = FMath::Max(10.0f, UpperBodyYawLimitDegrees);
-	if (FMath::Abs(GetViewBodyYawDeltaDegrees(ViewForward)) <= ArmReachDegrees)
-	{
-		bWantsViewFacing = false;
-		return;
-	}
-
-	// One press, one catch. Holding the button does not keep the legs on the camera.
-	bWantsViewFacing = true;
-	PendingViewFacingForward = ViewForward;
-	if (!HasAuthority())
-	{
-		ServerRequestViewFacing(ViewForward);
-	}
+	// Standing ordinary third person leaves facing to the player. The gun arm covers
+	// the view while it is close, and a large orbit stays an orbit.
+	// Aim, first person, and a jump already keep the whole body on the camera, so a
+	// click there must not leave a follow that survives after the player lets go.
+	bWantsViewFacing = false;
 }
 
 void AJTSCharacter::ServerRequestViewFacing_Implementation(FVector_NetQuantizeNormal ViewForward)
@@ -1496,7 +1540,7 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 
 void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 {
-	if (IsBoarded())
+	if (IsBoarded() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()))
 	{
 		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
 		return;
@@ -1524,8 +1568,9 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 		bUseControllerRotationYaw = false;
 		if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 		{
+			const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
 			const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing();
-			Movement->bOrientRotationToMovement = !bFeetCatching;
+			Movement->bOrientRotationToMovement = !bFeetCatching && !bIceAxeHeld;
 		}
 	}
 	StepBodyTowardView(FeetForward, DeltaSeconds, bUsePlanetFrame);
@@ -1904,6 +1949,11 @@ void AJTSCharacter::UpdatePlanetGameplayFrame(float DeltaSeconds)
 
 void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float DeltaSeconds)
 {
+	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+	{
+		TurnShuffleAlpha = 0.0f;
+		return;
+	}
 	const FVector TargetUp = DesiredUp.GetSafeNormal();
 	if (!bPlanetFrameInitialized)
 	{
@@ -2067,8 +2117,11 @@ void AJTSCharacter::ApplyCameraView()
 	}
 	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
+		const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
+		const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
 		// A click is one frame. It must not flip movement orientation onto the camera.
-		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing();
+		// Ice axes keep the body where the player put it, including while the feet are moving.
+		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bIceAxeHeld && !bClimbing;
 		bUseControllerRotationYaw = false;
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
@@ -2680,7 +2733,7 @@ bool AJTSCharacter::FindLegacySafeDisembarkLocation(AJTSSpacecraftActor* Spacecr
 
 void AJTSCharacter::HandleGameplayPhaseChanged(EJTSGameplayPhase NewGameplayPhase)
 {
-	// Boarding is deliberately available through the same hold-F affordance on Earth and
+	// Boarding is deliberately available through the same hold-R affordance on Earth and
 	// on a ready planetary surface. Do not cancel a just-started hold merely because the
 	// replicated SpaceWorld phase arrived a frame after the player did.
 	const bool bBoardingSupportedInCurrentWorld = NewGameplayPhase == EJTSGameplayPhase::EarthCollection

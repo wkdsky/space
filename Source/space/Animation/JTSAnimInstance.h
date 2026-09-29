@@ -83,6 +83,15 @@ protected:
 	/** Held item that uses the present-arms pose (knife, axe, pickaxe). Ranged weapons stay on the gun clip. */
 	bool bMeleeHeld = false;
 
+	/** Both hands carry an L (ice axes). Distinct from the one-handed chop. */
+	bool bTwoHandHeld = false;
+
+	/** 0 while a planted axe rests, 1 at the top of the moving axe's chop. */
+	float ClimbSwingAlpha = 0.0f;
+
+	/** True while the left axe is the one swinging. The other hand stays planted. */
+	bool bClimbLeadLeft = false;
+
 	/** 0 on the ground, rises while airborne so the jump tuck can play out and then release. */
 	float JumpTuckAlpha = 0.0f;
 

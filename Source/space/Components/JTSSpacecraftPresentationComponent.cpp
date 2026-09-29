@@ -2,8 +2,11 @@
 
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
 
+#include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetLandingTypes.h"
 
@@ -25,6 +28,7 @@ void UJTSSpacecraftPresentationComponent::BeginPlay()
 	{
 		ApplyGearPose(Leg, Eased);
 	}
+	EnsureHeadlights();
 	SmoothedMainThrottle = GetCommandedMainThrottle();
 	SmoothedLiftThrottle = GetCommandedLiftThrottle();
 	for (FPlumeBinding& Plume : Plumes)
@@ -49,6 +53,11 @@ void UJTSSpacecraftPresentationComponent::TickComponent(
 	{
 		DiscoverRig();
 	}
+	if (Headlights.Num() == 0)
+	{
+		EnsureHeadlights();
+	}
+	UpdateHeadlights();
 	UpdateGear(DeltaTime);
 	UpdateExhaust(DeltaTime);
 }
@@ -148,6 +157,175 @@ void UJTSSpacecraftPresentationComponent::DiscoverRig()
 	}
 
 	bRigReady = Gear.Num() > 0 || Plumes.Num() > 0;
+}
+
+void UJTSSpacecraftPresentationComponent::EnsureHeadlights()
+{
+	AJTSSpacecraftActor* const Ship = Cast<AJTSSpacecraftActor>(GetOwner());
+	if (!IsValid(Ship) || Headlights.Num() > 0)
+	{
+		return;
+	}
+	UStaticMeshComponent* Hull = nullptr;
+	{
+		TInlineComponentArray<UStaticMeshComponent*> Meshes(Ship);
+		for (UStaticMeshComponent* const Mesh : Meshes)
+		{
+			if (IsValid(Mesh) && Mesh->GetName().Contains(TEXT("SpacecraftMesh")))
+			{
+				Hull = Mesh;
+				break;
+			}
+		}
+	}
+	if (!IsValid(Hull))
+	{
+		Hull = Ship->FindComponentByClass<UStaticMeshComponent>();
+	}
+	UStaticMesh* const Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UMaterialInterface* const ShapeMaterial = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!IsValid(Hull) || !IsValid(Hull->GetStaticMesh()) || !IsValid(Cube) || !IsValid(ShapeMaterial))
+	{
+		return;
+	}
+
+	// The live hull is the twin-fork ship. Each side hull ends in a flat nose
+	// whose face centre, measured on the hull mesh, is (647, ±345, 19) cm.
+	// The housing is centred a few centimetres proud of that face. A scaled
+	// hull multiplies the local offset, so the pods stay on the same lips.
+	// Kenney SpeederA is the old single-body mesh; its nose is the +X extreme
+	// of the mesh bounds, split onto the two forward cheeks.
+	const FBoxSphereBounds MeshBounds = Hull->GetStaticMesh()->GetBounds();
+	const FVector BoundsOrigin = MeshBounds.Origin;
+	const FVector BoundsExtent = MeshBounds.BoxExtent;
+	const bool bTwinFork = BoundsExtent.X > 200.0f && BoundsExtent.Y > 200.0f;
+	const FVector SideOffset = bTwinFork
+		? FVector(660.0f, 345.0f, 19.0f)
+		: FVector(BoundsOrigin.X + BoundsExtent.X * 0.92f, BoundsExtent.Y * 0.62f, BoundsOrigin.Z + BoundsExtent.Z * 0.35f);
+	const FLinearColor HousingColor(0.035f, 0.038f, 0.042f, 1.0f);
+	const FLinearColor LensColor(0.72f, 0.88f, 1.0f, 1.0f);
+	const FLinearColor BeamColor(0.86f, 0.93f, 1.0f);
+	// Engine cube is 100 cm. These scales are in the hull component's local
+	// centimetres, so a blueprint mesh scale carries the housings with the hull.
+	const FVector HousingScale = bTwinFork
+		? FVector(0.16f, 0.55f, 0.28f)
+		: FVector(0.05f, 0.12f, 0.055f);
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		const float Side = Index == 0 ? 1.0f : -1.0f;
+		const FVector Pod(SideOffset.X, SideOffset.Y * Side, SideOffset.Z);
+
+		UStaticMeshComponent* const Housing = NewObject<UStaticMeshComponent>(
+			Ship, *FString::Printf(TEXT("HeadlightHousing_%s"), Side > 0.0f ? TEXT("R") : TEXT("L")));
+		UStaticMeshComponent* const Lens = NewObject<UStaticMeshComponent>(
+			Ship, *FString::Printf(TEXT("HeadlightLens_%s"), Side > 0.0f ? TEXT("R") : TEXT("L")));
+		USpotLightComponent* const Beam = NewObject<USpotLightComponent>(
+			Ship, *FString::Printf(TEXT("HeadlightBeam_%s"), Side > 0.0f ? TEXT("R") : TEXT("L")));
+		if (!IsValid(Housing) || !IsValid(Lens) || !IsValid(Beam))
+		{
+			continue;
+		}
+
+		Ship->AddInstanceComponent(Housing);
+		Housing->SetStaticMesh(Cube);
+		Housing->SetMobility(EComponentMobility::Movable);
+		Housing->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Housing->SetCastShadow(false);
+		Housing->SetMaterial(0, ShapeMaterial);
+		Housing->SetupAttachment(Hull);
+		Housing->SetRelativeLocation(Pod);
+		Housing->SetRelativeRotation(FRotator::ZeroRotator);
+		Housing->SetRelativeScale3D(HousingScale);
+		Housing->RegisterComponent();
+		if (UMaterialInstanceDynamic* const HousingMaterial = Housing->CreateDynamicMaterialInstance(0, ShapeMaterial))
+		{
+			HousingMaterial->SetVectorParameterValue(TEXT("Color"), HousingColor);
+			HousingMaterial->SetVectorParameterValue(TEXT("BaseColor"), HousingColor);
+			HousingMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor::Black);
+		}
+
+		Ship->AddInstanceComponent(Lens);
+		Lens->SetStaticMesh(Cube);
+		Lens->SetMobility(EComponentMobility::Movable);
+		Lens->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Lens->SetCastShadow(false);
+		Lens->SetupAttachment(Housing);
+		// Sit the glowing face on the nose of the housing. Relative location is
+		// in the housing's scaled space: half the 100 cm cube, plus a little proud.
+		Lens->SetRelativeLocation(FVector(58.0f, 0.0f, 0.0f));
+		Lens->SetRelativeRotation(FRotator::ZeroRotator);
+		Lens->SetRelativeScale3D(FVector(0.08f, 0.78f, 0.62f));
+		Lens->RegisterComponent();
+		UMaterialInstanceDynamic* const LensMaterial = Lens->CreateDynamicMaterialInstance(0, ShapeMaterial);
+		if (IsValid(LensMaterial))
+		{
+			LensMaterial->SetVectorParameterValue(TEXT("Color"), LensColor);
+			LensMaterial->SetVectorParameterValue(TEXT("BaseColor"), LensColor);
+			LensMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LensColor * 24.0f);
+		}
+
+		Ship->AddInstanceComponent(Beam);
+		Beam->SetupAttachment(Housing);
+		Beam->SetMobility(EComponentMobility::Movable);
+		// A few centimetres proud of the lens, in housing-local space, aimed along +X.
+		Beam->SetRelativeLocation(FVector(70.0f, 0.0f, 0.0f));
+		// Tilt down a little so the near ground is in the wash and the far
+		// surface the pilot is flying toward still catches the edge.
+		Beam->SetRelativeRotation(FRotator(-6.0f, 0.0f, 0.0f));
+		Beam->SetIntensity(0.0f);
+		Beam->SetAttenuationRadius(HeadlightRange);
+		// Wide inner-to-outer gap so the pool fades out past the useful beam
+		// instead of ending on a hard edge.
+		Beam->SetInnerConeAngle(14.0f);
+		Beam->SetOuterConeAngle(48.0f);
+		Beam->SetUseInverseSquaredFalloff(false);
+		Beam->SetLightFalloffExponent(2.0f);
+		Beam->SetSourceRadius(120.0f);
+		Beam->SetSoftSourceRadius(240.0f);
+		Beam->SetSpecularScale(0.0f);
+		Beam->SetVolumetricScatteringIntensity(0.0f);
+		Beam->InverseExposureBlend = 0.0f;
+		Beam->SetLightColor(BeamColor);
+		Beam->SetCastShadows(false);
+		Beam->SetVisibility(false);
+		Beam->RegisterComponent();
+
+		FHeadlightBinding& Binding = Headlights.AddDefaulted_GetRef();
+		Binding.Housing = Housing;
+		Binding.Lens = Lens;
+		Binding.Beam = Beam;
+		Binding.LensMaterial = LensMaterial;
+	}
+}
+
+void UJTSSpacecraftPresentationComponent::UpdateHeadlights()
+{
+	const AJTSSpacecraftActor* const Ship = Cast<AJTSSpacecraftActor>(GetOwner());
+	const bool bLit = IsValid(Ship) && Ship->AreHeadlightsOn();
+	const FLinearColor LensColor = bLit
+		? FLinearColor(0.72f, 0.88f, 1.0f, 1.0f)
+		: FLinearColor(0.08f, 0.09f, 0.10f, 1.0f);
+	for (FHeadlightBinding& Binding : Headlights)
+	{
+		if (USpotLightComponent* const Beam = Binding.Beam.Get())
+		{
+			Beam->SetVisibility(bLit);
+			// Two soft floods. Bright enough to read the ground ahead, dim
+			// enough that the near surface stays off pure white.
+			Beam->SetIntensity(bLit ? 180.0f : 0.0f);
+			Beam->SetAttenuationRadius(HeadlightRange);
+			Beam->SetInnerConeAngle(14.0f);
+			Beam->SetOuterConeAngle(48.0f);
+		}
+		if (IsValid(Binding.LensMaterial))
+		{
+			Binding.LensMaterial->SetVectorParameterValue(TEXT("Color"), LensColor);
+			Binding.LensMaterial->SetVectorParameterValue(TEXT("BaseColor"), LensColor);
+			Binding.LensMaterial->SetVectorParameterValue(
+				TEXT("EmissiveColor"), bLit ? LensColor * 2.0f : FLinearColor::Black);
+		}
+	}
 }
 
 void UJTSSpacecraftPresentationComponent::ReleaseExhaustCores()

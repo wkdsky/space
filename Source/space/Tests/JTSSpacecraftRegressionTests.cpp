@@ -170,8 +170,9 @@ bool FJTSBoardingRegression::RunTest(const FString& Parameters)
 		AJTSCharacter* Character = nullptr;
 		Controllers.Add(Fixture.AddPlayer(Character, Index == 0));
 		Characters.Add(Character);
-		TestTrue(TEXT("Character movement accepts the configured 60 degree walkable slope"),
-			Character->GetCharacterMovement()->GetWalkableFloorAngle() >= 59.99f);
+		TestTrue(TEXT("Character movement accepts the configured 50 degree walkable slope"),
+			Character->GetCharacterMovement()->GetWalkableFloorAngle() >= 49.99f
+			&& Character->GetCharacterMovement()->GetWalkableFloorAngle() <= 50.01f);
 		if (Index == 0)
 		{
 			const UEnhancedInputComponent* const CharacterInput = Cast<UEnhancedInputComponent>(Character->InputComponent);

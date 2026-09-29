@@ -34,6 +34,19 @@ bool UJTSPlanetGravityComponent::IsUsingPlanetGravity() const
 	return bUsingPlanetGravity;
 }
 
+void UJTSPlanetGravityComponent::SetSurfaceGravitySuspended(bool bSuspended)
+{
+	bSurfaceGravitySuspended = bSuspended;
+	ACharacter* const Character = Cast<ACharacter>(GetOwner());
+	UCharacterMovementComponent* const MovementComponent = Character != nullptr
+		? Character->GetCharacterMovement()
+		: nullptr;
+	if (bSuspended && IsValid(MovementComponent))
+	{
+		MovementComponent->GravityScale = 0.0f;
+	}
+}
+
 void UJTSPlanetGravityComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -91,6 +104,11 @@ void UJTSPlanetGravityComponent::UpdatePlanetGravity()
 		: nullptr;
 	if (!IsValid(Character) || !IsValid(MovementComponent))
 	{
+		return;
+	}
+	if (bSurfaceGravitySuspended)
+	{
+		MovementComponent->GravityScale = 0.0f;
 		return;
 	}
 

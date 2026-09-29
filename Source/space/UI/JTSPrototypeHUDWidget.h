@@ -72,6 +72,7 @@ private:
 	void RefreshFuelToMoonHud();
 	void RefreshInventorySlots();
 	void RefreshInteractionPrompt();
+	void RefreshEquipmentHint();
 	void RefreshSpacecraftNavigation(AJTSSpacecraftActor* Spacecraft);
 	bool ProjectWorldToViewportWidget(const FVector& WorldLocation, FVector2D& OutWidgetPosition) const;
 	FVector2D GetViewportWidgetLocalSize() const;
@@ -289,6 +290,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> InventoryTitleText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> EquipmentHintText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> InteractionPromptText;
