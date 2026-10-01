@@ -1562,21 +1562,27 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	RefreshEquipmentHint();
 	const UJTSRangedWeaponComponent* const CrosshairRanged = PlayerCharacter != nullptr
 		? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
+	const UJTSMeleeComponent* const CrosshairMelee = PlayerCharacter != nullptr
+		? PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>() : nullptr;
+	const float PunchHitFeedback = IsValid(CrosshairMelee)
+		? CrosshairMelee->GetConfirmedPunchHitFeedbackAlpha() : 0.0f;
 	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
 		&& !bGameMenuOpen
 		&& PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded()
 		&& IsValid(CrosshairRanged)
 		&& CrosshairRanged->IsAiming();
-	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming);
+	const bool bShowPunchHit = !bGameMenuOpen && PlayerCharacter != nullptr
+		&& !PlayerCharacter->IsBoarded() && PunchHitFeedback > 0.0f;
+	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming || bShowPunchHit);
 	if (CrosshairText != nullptr)
 	{
 		const UJTSRangedWeaponComponent* const Ranged = PlayerCharacter != nullptr
 			? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
 		const bool bEquippedRanged = IsValid(Ranged) && Ranged->HasActiveRangedWeapon();
-		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : 0.0f;
+		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : PunchHitFeedback;
 		CrosshairText->SetRenderScale(FVector2D(1.0f + 0.22f * ReticleKick));
-		CrosshairText->SetColorAndOpacity(FSlateColor(bEquippedRanged && Ranged->HasRecentConfirmedHit()
+		CrosshairText->SetColorAndOpacity(FSlateColor(bShowPunchHit || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
 			? FLinearColor(1.0f, 0.56f, 0.24f) : FLinearColor::White));
 	}
 	// The quickbar and contextual interaction prompt already teach surface actions. A second

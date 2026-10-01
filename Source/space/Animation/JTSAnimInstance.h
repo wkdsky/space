@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Animation/AnimInstance.h"
+#include "ReferenceSkeleton.h"
 
 #include "JTSAnimInstance.generated.h"
 
@@ -37,6 +38,20 @@ protected:
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 	virtual void NativePostEvaluateAnimation() override;
 	void ApplyFacingPose();
+	void ApplyStiffUnarmedArms(
+		TArray<FTransform>& Pose,
+		USkeletalMeshComponent* Mesh,
+		const FReferenceSkeleton* Skeleton,
+		const FVector& PoseUp,
+		const FVector& PoseForward,
+		const FVector& PoseRight);
+	void ApplyStylizedRunStride(
+		TArray<FTransform>& Pose,
+		USkeletalMeshComponent* Mesh,
+		const FReferenceSkeleton* Skeleton,
+		const FVector& PoseUp,
+		const FVector& PoseForward,
+		const FVector& PoseRight);
 
 	/** Updated from AJTSCharacter once per animation update. */
 	UPROPERTY(BlueprintReadOnly, Category = "Aim", meta = (AllowPrivateAccess = "true"))
@@ -109,4 +124,45 @@ protected:
 
 	/** True once this press has played its chop, so a lingering attack clock cannot restart the lift. */
 	bool bMeleeChopLatched = false;
+
+	/** State machine that owns the ground locomotion asset player, selected by the Animation Blueprint. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose")
+	FName GroundPoseMachine;
+
+	/** Ground state that owns the walk/run blend space player. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose")
+	FName GroundPoseState;
+
+	/** 0-1 through one left-right cycle, read from the Animation Blueprint's ground player. */
+	float GaitPhase = 0.0f;
+
+	bool bGroundGaitMoving = false;
+
+	/** 0 idle, 1 walk, 2 run. Ground speed selects the run silhouette. */
+	float GaitBlend = 0.0f;
+
+	/** Upper arm angle away from straight down during an unarmed run. 90 degrees is horizontal. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose|Style", meta = (ClampMin = "0", ClampMax = "100"))
+	float RunArmSpreadDegrees = 88.0f;
+
+	/** Extra forward thigh swing on the raised leg of the authored run cycle. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose|Style", meta = (ClampMin = "0", ClampMax = "35"))
+	float RunStrideAccentDegrees = 24.0f;
+
+	/** Moves the pelvis back relative to the planted feet while keeping the torso upright. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose|Style", meta = (ClampMin = "0", ClampMax = "15"))
+	float RunPelvisBackOffsetCm = 9.0f;
+
+	/** Lowers the pelvis and whole torso without shortening the upper body. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose|Style", meta = (ClampMin = "0", ClampMax = "20"))
+	float RunPelvisDropCm = 12.0f;
+
+	/** Moves the trailing contact foot slightly forward without raising it off the ground. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose|Style", meta = (ClampMin = "0", ClampMax = "10"))
+	float RunRearFootAdvanceCm = 5.0f;
+
+	/** Lift both fists through chained unarmed punches. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Style", meta = (ClampMin = "0", ClampMax = "30"))
+	float PunchComboArmLiftDegrees = 10.0f;
+
 };

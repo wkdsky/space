@@ -8,6 +8,7 @@
 
 class AActor;
 class APawn;
+class USoundBase;
 
 /** Broad attack category used by animation and presentation code. */
 UENUM(BlueprintType)
@@ -82,6 +83,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerReleaseAttack();
 
+	UFUNCTION(Client, Unreliable)
+	void ClientConfirmPunchHit();
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPunchImpact(FVector_NetQuantize Location);
+
 	/** Presentation is multicasted after the server accepts each attack segment. */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastBeginAttackPresentation(EJTSAttackType AttackType, bool bUseLeftPunch, bool bIsComboContinuation);
@@ -122,6 +129,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
 	float GetMeleeSwingPhase() const;
 
+	/** Seconds since this punch's presentation began. Zero once the swing has been cleared. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	float GetPunchVisualElapsed() const;
+	float GetUnarmedPunchHitDelay() const { return FMath::Max(0.01f, UnarmedPunchHitDelay); }
+	float GetUnarmedPunchChainDelay() const { return FMath::Max(GetUnarmedPunchHitDelay(), UnarmedPunchChainDelay); }
+	float GetUnarmedPunchRecoveryDelay() const { return FMath::Max(GetUnarmedPunchChainDelay() + 0.01f, UnarmedPunchRecoveryDelay); }
+
+	UFUNCTION(BlueprintPure, Category = "Melee|Feedback")
+	float GetConfirmedPunchHitFeedbackAlpha() const;
+
+	/** True while a punch presentation is still travelling or settling. */
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsPunchVisualActive() const;
+
 	/** Selects the alternating punch asset for the current unarmed swing. */
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
 	bool IsCurrentPunchLeft() const;
@@ -139,6 +160,8 @@ private:
 	AActor* FindBestMeleeTarget(APawn* AttackingPawn) const;
 	bool FindBestAimCandidate(APawn* AttackingPawn, AActor*& OutTarget, FVector& OutTargetLocation, bool bRequireMeleeTargetInterface) const;
 	bool FindBestPunchCandidate(APawn* AttackingPawn, AActor*& OutTarget, FVector& OutTargetLocation, bool bRequireMeleeTargetInterface, bool bRequireLineOfSight, float MaximumTargetRange) const;
+	/** Analytic fist path for the current punch. Presentation and the server sweep share this so a hit does not wait on a rendered pose. */
+	bool GetPunchFistPath(APawn* AttackingPawn, FVector& OutStart, FVector& OutEnd) const;
 	FVector GetMeleeTargetAimPoint(AActor* Candidate) const;
 	bool IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const;
 	bool IsValidDamageTarget(AActor* Candidate, APawn* AttackingPawn) const;
@@ -158,6 +181,7 @@ private:
 	void ScheduleUnarmedPunchEvents();
 	void ClearUnarmedPunchTimers();
 	void HandleUnarmedPunchHit();
+	void SweepPunchFist();
 	void HandleUnarmedPunchChainWindow();
 	void HandleUnarmedPunchRecovery();
 	void ScheduleHeldWeaponEvents();
@@ -196,15 +220,27 @@ private:
 
 	/** Server-authoritative hit frame for the native empty-hand punch loop. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.01", UIMin = "0.01"))
-	float UnarmedPunchHitDelay = 0.18f;
+	float UnarmedPunchHitDelay = 0.11f;
 
 	/** Held or buffered input starts the next alternating punch before the hands return to rest. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02"))
-	float UnarmedPunchChainDelay = 0.36f;
+	float UnarmedPunchChainDelay = 0.18f;
 
 	/** Without more input, the final punch is allowed to finish and settle back to the lowered idle pose. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.03", UIMin = "0.03"))
-	float UnarmedPunchRecoveryDelay = 0.58f;
+	float UnarmedPunchRecoveryDelay = 0.35f;
+
+	/** Selected by the player Blueprint; played for everyone at a confirmed punch impact. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch|Feedback", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USoundBase> PunchImpactSound;
+
+	/** Light air movement cue for each accepted punch, including misses. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch|Feedback", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USoundBase> PunchSwingSound;
+
+	/** Brief local view response on confirmed contact. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch|Feedback", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "4.0"))
+	float PunchHitViewKickDegrees = 0.65f;
 
 	/** Native timing fallback for held melee weapons and tools, so they do not depend on Blueprint animation notifies. */
 	/** Lands with the visual strike: the raise into the first cut is about 0.22s and the cut itself is 0.15s. */
@@ -233,6 +269,14 @@ private:
 	/** Local presentation clock for a held-weapon chop. Starts when the multicast presentation begins. */
 	bool bMeleeSwingClockActive = false;
 	float MeleeSwingClockElapsed = 0.0f;
+
+	/**
+	 * Local presentation clock for one unarmed punch. One BeginAttack is one legal hit;
+	 * a left-right visual cycle is two of those swings.
+	 */
+	bool bPunchVisualClockActive = false;
+	float PunchVisualElapsed = 0.0f;
+	double LastConfirmedPunchHitSeconds = -100.0;
 
 	/** Camera distance used only to acquire what lies under the screen-center crosshair. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))

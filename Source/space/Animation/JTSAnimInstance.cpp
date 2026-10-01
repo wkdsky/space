@@ -12,6 +12,7 @@
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Player/JTSPlayerState.h"
 
 float UJTSAnimInstance::GetAimPitch() const
 {
@@ -74,9 +75,11 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		bMeleeHeld = bMeleeHeld && !bActiveRangedWeapon;
 
 		const UCharacterMovementComponent* const Movement = Character->GetCharacterMovement();
-		// The jump button is enough. Waiting for MOVE_Falling left the first frames
-		// on the ground clip, which reads as the tuck starting late.
-		const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || Character->bPressedJump;
+		// Planet landing leaves MOVE_Falling on until the floor sweep catches up, and a
+		// standing character on that mode was holding the jump tuck. A real jump still
+		// starts on the button press, before the movement mode leaves the ground.
+		const bool bPressedJump = Character->bPressedJump;
+		const bool bAirborne = bPressedJump || (IsValid(Movement) && Movement->IsFalling() && !Character->IsSupportedByFloor());
 		if (bAirborne)
 		{
 			AirTime += DeltaSeconds;
@@ -91,6 +94,36 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			JumpTuckAlpha = FMath::FInterpTo(JumpTuckAlpha, 0.0f, DeltaSeconds, 9.0f);
 		}
 
+		const UJTSWallClimbComponent* const GroundClimb = Character->FindComponentByClass<UJTSWallClimbComponent>();
+		const bool bGroundClimbing = IsValid(GroundClimb) && GroundClimb->IsClimbing();
+		const AJTSPlayerState* const GroundState = Character->GetPlayerState<AJTSPlayerState>();
+		const bool bGroundDead = IsValid(GroundState)
+			&& GroundState->GetExpeditionStatus() == EJTSPlayerExpeditionStatus::Dead;
+		const float SpeedScale = IsValid(GroundState)
+			? FMath::Max(0.1f, GroundState->GetRunSpeedMultiplier()) : 1.0f;
+		const bool bGroundEligible = !bAirborne && !bGroundClimbing && !Character->IsBoarded() && !bGroundDead;
+		const FVector GroundVelocity = IsValid(Movement) ? Movement->Velocity : FVector::ZeroVector;
+		const FVector GroundUp = Character->GetActorUpVector();
+		const FVector GroundPlanar = FVector::VectorPlaneProject(GroundVelocity, GroundUp);
+		const float GroundSpeed = GroundPlanar.Size();
+		// A new step starts at the selected walk/run stride, rather than spending
+		// its first few frames interpolating through tiny idle strides. The pose's
+		// running phase still follows the blend space player after evaluation.
+		const bool bGroundMoving = bGroundEligible && GroundSpeed > 20.0f && JumpTuckAlpha < 0.02f;
+		// Normal movement tops out at 500 cm/s; sprint starts above it and reaches
+		// 800 cm/s. Keep the authored walk untouched until actual speed passes the
+		// normal walk band, then blend in the stylized run presentation.
+		const float TargetRun = FMath::GetMappedRangeValueClamped(
+			FVector2D(550.0f * SpeedScale, 700.0f * SpeedScale), FVector2D(0.0f, 1.0f), GroundSpeed);
+		if (bGroundMoving && !bGroundGaitMoving)
+		{
+			GaitBlend = 1.0f + TargetRun;
+		}
+		else
+		{
+			GaitBlend = FMath::FInterpTo(GaitBlend, bGroundMoving ? 1.0f + TargetRun : 0.0f, DeltaSeconds, 8.0f);
+		}
+		bGroundGaitMoving = bGroundMoving;
 		if (bMeleeHeld)
 		{
 			const UJTSMeleeComponent* const Melee = Character->FindComponentByClass<UJTSMeleeComponent>();
@@ -202,12 +235,9 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		// Ordinary grounded third person keeps the player's facing. The arms only cover
 		// the view while it is already close to the body. Past that cone the arms
 		// return forward instead of dragging the barrel onto screen center.
-		// Aim, first person, and a jump already turn the whole actor with the view,
-		// so an extra spine yaw there twists the upper body off the legs.
-		const UJTSWallClimbComponent* const ClimbState = Character->FindComponentByClass<UJTSWallClimbComponent>();
-		const bool bClimbingNow = IsValid(ClimbState) && ClimbState->IsClimbing();
+		// First person and weapon aiming already turn the whole actor with the view.
+		// Ordinary third-person jumps keep the movement heading instead.
 		const bool bWholeBodyOnView = Character->IsFirstPersonView()
-			|| (bAirborne && !bTwoHandHeld && !bClimbingNow)
 			|| bWeaponAiming;
 		AimYaw = bWholeBodyOnView ? 0.0f : Character->GetPresentationAimYaw();
 		TurnShuffleAlpha = bWholeBodyOnView ? 0.0f : Character->GetTurnShuffleAlpha();
@@ -233,6 +263,16 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 void UJTSAnimInstance::NativePostEvaluateAnimation()
 {
 	Super::NativePostEvaluateAnimation();
+	if (!GroundPoseMachine.IsNone() && !GroundPoseState.IsNone())
+	{
+		const int32 PlayerIndex = GetInstanceAssetPlayerIndex(GroundPoseMachine, GroundPoseState);
+		if (PlayerIndex != INDEX_NONE)
+		{
+			// Keep the run's subtle shoulder variation and pelvis pulse on the
+			// authored locomotion clock. Walking arms stay still.
+			GaitPhase = FMath::Frac(GetInstanceAssetPlayerTimeFraction(PlayerIndex));
+		}
+	}
 	ApplyFacingPose();
 }
 
@@ -531,12 +571,9 @@ void UJTSAnimInstance::ApplyFacingPose()
 	}
 	else
 	{
-		// The idle clip itself holds the left arm out. Empty hands force both arms down.
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), -PoseUp);
-		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), -PoseUp);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), -PoseUp);
-		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), -PoseUp);
+		ApplyStiffUnarmedArms(Pose, Mesh, Skeleton, PoseUp, PoseForward, PoseRight);
 	}
+	ApplyStylizedRunStride(Pose, Mesh, Skeleton, PoseUp, PoseForward, PoseRight);
 
 	if (JumpTuckAlpha > 0.02f)
 	{
@@ -609,7 +646,7 @@ void UJTSAnimInstance::ApplyFacingPose()
 		SeatShoe(ToeR, AnkleR, RestToeR, RestAnkleR, FoldR);
 		SeatShoe(ToeL, AnkleL, RestToeL, RestAnkleL, FoldL);
 	}
-	else if (TurnShuffleAlpha >= 0.02f)
+	else if (TurnShuffleAlpha >= 0.02f && GaitBlend <= 0.02f)
 	{
 		const float TurnSign = RawAimYaw >= 0.0f ? 1.0f : -1.0f;
 		const auto StepLeg = [&TurnBone, TurnSign, this](const FName Thigh, const FName Shin, float LiftDegrees, float SideSign)
@@ -653,4 +690,636 @@ void UJTSAnimInstance::ApplyFacingPose()
 		}
 	}
 
+}
+
+namespace
+{
+	float StiffSmooth(const float Value)
+	{
+		const float Clamped = FMath::Clamp(Value, 0.0f, 1.0f);
+		return Clamped * Clamped * (3.0f - 2.0f * Clamped);
+	}
+
+	void StiffAimSegment(
+		TArray<FTransform>& Pose,
+		const USkeletalMeshComponent* Mesh,
+		const FReferenceSkeleton* Skeleton,
+		const FName BoneName,
+		const FName ChildName,
+		const FVector& Aim)
+	{
+		const int32 BoneIndex = Mesh->GetBoneIndex(BoneName);
+		const int32 ChildIndex = Mesh->GetBoneIndex(ChildName);
+		if (Skeleton == nullptr || !Pose.IsValidIndex(BoneIndex) || !Pose.IsValidIndex(ChildIndex))
+		{
+			return;
+		}
+		const FVector AimDir = Aim.GetSafeNormal();
+		const FVector Origin = Pose[BoneIndex].GetLocation();
+		const FVector Dir = (Pose[ChildIndex].GetLocation() - Origin).GetSafeNormal();
+		if (Dir.IsNearlyZero() || AimDir.IsNearlyZero() || FVector::DotProduct(Dir, AimDir) > 0.999f)
+		{
+			return;
+		}
+		const FQuat Delta = FQuat::FindBetweenNormals(Dir, AimDir);
+		for (int32 Index = 0; Index < Pose.Num(); ++Index)
+		{
+			int32 Walk = Index;
+			bool bUnder = false;
+			while (Walk >= 0)
+			{
+				if (Walk == BoneIndex)
+				{
+					bUnder = true;
+					break;
+				}
+				Walk = Skeleton->GetParentIndex(Walk);
+			}
+			if (!bUnder)
+			{
+				continue;
+			}
+			Pose[Index].SetLocation(Origin + Delta.RotateVector(Pose[Index].GetLocation() - Origin));
+			Pose[Index].SetRotation(Delta * Pose[Index].GetRotation());
+			Pose[Index].NormalizeRotation();
+		}
+	}
+
+	void StiffCurlFingers(
+		TArray<FTransform>& Pose,
+		const USkeletalMeshComponent* Mesh,
+		const FReferenceSkeleton* Skeleton,
+		const bool bRightHand,
+		const float Amount)
+	{
+		if (Skeleton == nullptr || Amount <= 0.01f)
+		{
+			return;
+		}
+		const TCHAR* const Suffix = bRightHand ? TEXT("_R") : TEXT("_L");
+		const int32 IndexKnuckle = Mesh->GetBoneIndex(*FString::Printf(TEXT("Index2%s"), Suffix));
+		const int32 MiddleRoot = Mesh->GetBoneIndex(*FString::Printf(TEXT("Middle1%s"), Suffix));
+		const int32 MiddleKnuckle = Mesh->GetBoneIndex(*FString::Printf(TEXT("Middle2%s"), Suffix));
+		const int32 PinkyKnuckle = Mesh->GetBoneIndex(*FString::Printf(TEXT("Pinky2%s"), Suffix));
+		const int32 ThumbKnuckle = Mesh->GetBoneIndex(*FString::Printf(TEXT("Thumb2%s"), Suffix));
+		if (!Pose.IsValidIndex(IndexKnuckle) || !Pose.IsValidIndex(MiddleRoot)
+			|| !Pose.IsValidIndex(MiddleKnuckle) || !Pose.IsValidIndex(PinkyKnuckle)
+			|| !Pose.IsValidIndex(ThumbKnuckle))
+		{
+			return;
+		}
+		// All four first finger bones share one position on this mesh. The actual
+		// knuckle spread starts at bone 2, so use that spread to find the palm.
+		const FVector KnuckleSpan = Pose[IndexKnuckle].GetLocation() - Pose[PinkyKnuckle].GetLocation();
+		const FVector FingerOut = Pose[MiddleKnuckle].GetLocation() - Pose[MiddleRoot].GetLocation();
+		FVector PalmInside = FVector::CrossProduct(KnuckleSpan, FingerOut).GetSafeNormal();
+		if (PalmInside.IsNearlyZero())
+		{
+			return;
+		}
+		if (FVector::DotProduct(PalmInside, Pose[ThumbKnuckle].GetLocation() - Pose[MiddleKnuckle].GetLocation()) < 0.0f)
+		{
+			PalmInside *= -1.0f;
+		}
+
+		auto RotateBranch = [&](const int32 BoneIndex, const FVector& Axis, const float Degrees)
+		{
+			if (!Pose.IsValidIndex(BoneIndex) || Axis.IsNearlyZero())
+			{
+				return;
+			}
+			const FQuat Curl(Axis, FMath::DegreesToRadians(Degrees * Amount));
+			const FVector Origin = Pose[BoneIndex].GetLocation();
+			for (int32 Index = 0; Index < Pose.Num(); ++Index)
+			{
+				int32 Walk = Index;
+				while (Walk >= 0 && Walk != BoneIndex)
+				{
+					Walk = Skeleton->GetParentIndex(Walk);
+				}
+				if (Walk != BoneIndex)
+				{
+					continue;
+				}
+				Pose[Index].SetLocation(Origin + Curl.RotateVector(Pose[Index].GetLocation() - Origin));
+				Pose[Index].SetRotation(Curl * Pose[Index].GetRotation());
+				Pose[Index].NormalizeRotation();
+			}
+		};
+		auto CurlFinger = [&](const TCHAR* Prefix, const float KnuckleDegrees, const float TipDegrees)
+		{
+			const int32 Root = Mesh->GetBoneIndex(*FString::Printf(TEXT("%s1%s"), Prefix, Suffix));
+			const int32 Knuckle = Mesh->GetBoneIndex(*FString::Printf(TEXT("%s2%s"), Prefix, Suffix));
+			const int32 Middle = Mesh->GetBoneIndex(*FString::Printf(TEXT("%s3%s"), Prefix, Suffix));
+			if (!Pose.IsValidIndex(Root) || !Pose.IsValidIndex(Knuckle) || !Pose.IsValidIndex(Middle))
+			{
+				return;
+			}
+			const FVector FingerOutward = (Pose[Knuckle].GetLocation() - Pose[Root].GetLocation()).GetSafeNormal();
+			const FVector CurlAxis = FVector::CrossProduct(FingerOutward, PalmInside).GetSafeNormal();
+			RotateBranch(Root, CurlAxis, 8.0f);
+			RotateBranch(Knuckle, CurlAxis, KnuckleDegrees);
+			RotateBranch(Middle, CurlAxis, TipDegrees);
+		};
+		CurlFinger(TEXT("Index"), 80.0f, 65.0f);
+		CurlFinger(TEXT("Middle"), 82.0f, 67.0f);
+		CurlFinger(TEXT("Ring"), 80.0f, 65.0f);
+		CurlFinger(TEXT("Pinky"), 76.0f, 62.0f);
+
+		const int32 ThumbRoot = Mesh->GetBoneIndex(*FString::Printf(TEXT("Thumb1%s"), Suffix));
+		const int32 ThumbTip = Mesh->GetBoneIndex(*FString::Printf(TEXT("Thumb3%s"), Suffix));
+		if (Pose.IsValidIndex(ThumbRoot) && Pose.IsValidIndex(ThumbTip))
+		{
+			const FVector ThumbOut = (Pose[ThumbKnuckle].GetLocation() - Pose[ThumbRoot].GetLocation()).GetSafeNormal();
+			const FVector TowardPalm = (Pose[MiddleKnuckle].GetLocation() - Pose[ThumbRoot].GetLocation()).GetSafeNormal();
+			RotateBranch(ThumbRoot, FVector::CrossProduct(ThumbOut, TowardPalm).GetSafeNormal(), 25.0f);
+			const FVector ThumbEnd = (Pose[ThumbTip].GetLocation() - Pose[ThumbKnuckle].GetLocation()).GetSafeNormal();
+			const FVector TowardFingers = (Pose[MiddleKnuckle].GetLocation() - Pose[ThumbKnuckle].GetLocation()).GetSafeNormal();
+			RotateBranch(ThumbKnuckle, FVector::CrossProduct(ThumbEnd, TowardFingers).GetSafeNormal(), 45.0f);
+		}
+	}
+}
+
+void UJTSAnimInstance::ApplyStylizedRunStride(
+	TArray<FTransform>& Pose,
+	USkeletalMeshComponent* Mesh,
+	const FReferenceSkeleton* Skeleton,
+	const FVector& PoseUp,
+	const FVector& PoseForward,
+	const FVector& PoseRight)
+{
+	const float RunAlpha = FMath::Clamp(GaitBlend - 1.0f, 0.0f, 1.0f);
+	if (RunAlpha <= 0.01f || JumpTuckAlpha > 0.02f || Skeleton == nullptr)
+	{
+		return;
+	}
+
+	const int32 LeftAnkle = Mesh->GetBoneIndex(TEXT("LowerLeg_L_end"));
+	const int32 RightAnkle = Mesh->GetBoneIndex(TEXT("LowerLeg_R_end"));
+	if (!Pose.IsValidIndex(LeftAnkle) || !Pose.IsValidIndex(RightAnkle))
+	{
+		return;
+	}
+	const FVector LeftAnkleStart = Pose[LeftAnkle].GetLocation();
+	const FVector RightAnkleStart = Pose[RightAnkle].GetLocation();
+
+	auto IsUnder = [&](const int32 BoneIndex, const int32 AncestorIndex)
+	{
+		int32 Parent = BoneIndex;
+		while (Parent >= 0 && Parent != AncestorIndex)
+		{
+			Parent = Skeleton->GetParentIndex(Parent);
+		}
+		return Parent == AncestorIndex;
+	};
+	const int32 Body = Mesh->GetBoneIndex(TEXT("Body"));
+	const int32 Hips = Mesh->GetBoneIndex(TEXT("Hips"));
+	const int32 LeftThigh = Mesh->GetBoneIndex(TEXT("UpperLeg_L"));
+	const int32 RightThigh = Mesh->GetBoneIndex(TEXT("UpperLeg_R"));
+	if (!Pose.IsValidIndex(Body) || !Pose.IsValidIndex(Hips)
+		|| !Pose.IsValidIndex(LeftThigh) || !Pose.IsValidIndex(RightThigh)
+		|| !IsUnder(Hips, Body) || !IsUnder(LeftThigh, Body) || !IsUnder(RightThigh, Body))
+	{
+		return;
+	}
+	// The butt, torso and both leg roots are children of Body. Move them as one
+	// rigid block so the upper-body length stays the same, then solve each leg
+	// back to its authored ankle target. The shoes are separate Root children.
+	const float LagPulse = 0.90f + 0.10f * FMath::Cos(GaitPhase * 2.0f * TWO_PI);
+	const FVector DesiredBodyOffset = -PoseForward * (RunPelvisBackOffsetCm * RunAlpha * LagPulse)
+		- PoseUp * (RunPelvisDropCm * RunAlpha);
+	auto CanReachAnkles = [&](const float OffsetScale)
+	{
+		const FVector Offset = DesiredBodyOffset * OffsetScale;
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			const bool bRight = Side == 1;
+			const int32 Thigh = bRight ? RightThigh : LeftThigh;
+			const int32 Knee = Mesh->GetBoneIndex(bRight ? TEXT("LowerLeg_R") : TEXT("LowerLeg_L"));
+			const int32 Ankle = bRight ? RightAnkle : LeftAnkle;
+			if (!Pose.IsValidIndex(Knee))
+			{
+				return false;
+			}
+			const float UpperLength = FVector::Distance(Pose[Thigh].GetLocation(), Pose[Knee].GetLocation());
+			const float LowerLength = FVector::Distance(Pose[Knee].GetLocation(), Pose[Ankle].GetLocation());
+			const FVector AnkleGoal = bRight ? RightAnkleStart : LeftAnkleStart;
+			const float GoalDistance = FVector::Distance(Pose[Thigh].GetLocation() + Offset, AnkleGoal);
+			if (GoalDistance <= FMath::Abs(UpperLength - LowerLength) + 0.5f
+				|| GoalDistance >= UpperLength + LowerLength - 0.5f)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	float BodyOffsetScale = 1.0f;
+	if (!CanReachAnkles(BodyOffsetScale))
+	{
+		float Low = 0.0f;
+		float High = 1.0f;
+		for (int32 Step = 0; Step < 8; ++Step)
+		{
+			const float Mid = 0.5f * (Low + High);
+			if (CanReachAnkles(Mid))
+			{
+				Low = Mid;
+			}
+			else
+			{
+				High = Mid;
+			}
+		}
+		BodyOffsetScale = Low;
+	}
+	const FVector BodyOffset = DesiredBodyOffset * BodyOffsetScale;
+	for (int32 Index = 0; Index < Pose.Num(); ++Index)
+	{
+		if (IsUnder(Index, Body))
+		{
+			Pose[Index].AddToTranslation(BodyOffset);
+		}
+	}
+	auto RotateBranch = [&](const int32 RootIndex, const FVector& From, const FVector& To, const FQuat& Rotation)
+	{
+		for (int32 Index = 0; Index < Pose.Num(); ++Index)
+		{
+			if (!IsUnder(Index, RootIndex))
+			{
+				continue;
+			}
+			Pose[Index].SetLocation(To + Rotation.RotateVector(Pose[Index].GetLocation() - From));
+			Pose[Index].SetRotation(Rotation * Pose[Index].GetRotation());
+			Pose[Index].NormalizeRotation();
+		}
+	};
+	auto CarryShoe = [&](const bool bRight, const int32 Thigh, const FVector& OldAnkle, const FVector& NewAnkle, const FQuat& Rotation)
+	{
+		// On Casual_2, Foot and PT are root children rather than shin children.
+		const int32 Foot = Mesh->GetBoneIndex(bRight ? TEXT("Foot_R") : TEXT("Foot_L"));
+		const int32 Toe = Mesh->GetBoneIndex(bRight ? TEXT("PT_R") : TEXT("PT_L"));
+		if (Pose.IsValidIndex(Foot) && !IsUnder(Foot, Thigh))
+		{
+			RotateBranch(Foot, OldAnkle, NewAnkle, Rotation);
+		}
+		if (Pose.IsValidIndex(Toe) && !IsUnder(Toe, Thigh) && (!Pose.IsValidIndex(Foot) || !IsUnder(Toe, Foot)))
+		{
+			RotateBranch(Toe, OldAnkle, NewAnkle, Rotation);
+		}
+	};
+	auto SolveLegToAnkle = [&](const bool bRight, const FVector& AnkleGoal, const bool bMoveShoe)
+	{
+		const int32 Thigh = bRight ? RightThigh : LeftThigh;
+		const int32 Knee = Mesh->GetBoneIndex(bRight ? TEXT("LowerLeg_R") : TEXT("LowerLeg_L"));
+		const int32 Ankle = bRight ? RightAnkle : LeftAnkle;
+		if (!Pose.IsValidIndex(Thigh) || !Pose.IsValidIndex(Knee))
+		{
+			return false;
+		}
+		const FVector HipPosition = Pose[Thigh].GetLocation();
+		const FVector KneePosition = Pose[Knee].GetLocation();
+		const FVector OldAnkle = Pose[Ankle].GetLocation();
+		const float UpperLength = FVector::Distance(HipPosition, KneePosition);
+		const float LowerLength = FVector::Distance(KneePosition, OldAnkle);
+		const FVector HipToGoal = AnkleGoal - HipPosition;
+		const float GoalDistance = HipToGoal.Size();
+		if (UpperLength < 1.0f || LowerLength < 1.0f
+			|| GoalDistance <= FMath::Abs(UpperLength - LowerLength) + 0.5f
+			|| GoalDistance >= UpperLength + LowerLength - 0.5f)
+		{
+			return false;
+		}
+		const FVector GoalDirection = HipToGoal / GoalDistance;
+		FVector KneePole = (KneePosition - HipPosition
+			- GoalDirection * FVector::DotProduct(KneePosition - HipPosition, GoalDirection)).GetSafeNormal();
+		if (KneePole.IsNearlyZero())
+		{
+			KneePole = (PoseForward - GoalDirection * FVector::DotProduct(PoseForward, GoalDirection)).GetSafeNormal();
+			if (KneePole.IsNearlyZero())
+			{
+				KneePole = (PoseRight - GoalDirection * FVector::DotProduct(PoseRight, GoalDirection)).GetSafeNormal();
+				if (KneePole.IsNearlyZero())
+				{
+					return false;
+				}
+			}
+		}
+		const float Along = (UpperLength * UpperLength + GoalDistance * GoalDistance - LowerLength * LowerLength)
+			/ (2.0f * GoalDistance);
+		const float Outward = FMath::Sqrt(FMath::Max(0.0f, UpperLength * UpperLength - Along * Along));
+		const FVector KneeGoal = HipPosition + GoalDirection * Along + KneePole * Outward;
+		const FQuat UpperTurn = FQuat::FindBetweenNormals(
+			(KneePosition - HipPosition).GetSafeNormal(), (KneeGoal - HipPosition).GetSafeNormal());
+		RotateBranch(Thigh, HipPosition, HipPosition, UpperTurn);
+		const FVector NewKnee = Pose[Knee].GetLocation();
+		const FQuat LowerTurn = FQuat::FindBetweenNormals(
+			(Pose[Ankle].GetLocation() - NewKnee).GetSafeNormal(), (AnkleGoal - NewKnee).GetSafeNormal());
+		RotateBranch(Knee, NewKnee, NewKnee, LowerTurn);
+		if (bMoveShoe)
+		{
+			// Preserve the authored shoe orientation while the contact advances.
+			CarryShoe(bRight, Thigh, OldAnkle, Pose[Ankle].GetLocation(), FQuat::Identity);
+		}
+		return true;
+	};
+	// The relocated pelvis bends both legs around the original ankle positions;
+	// grounded shoes stay on the floor and the airborne shoe keeps its height.
+	SolveLegToAnkle(false, LeftAnkleStart, false);
+	SolveLegToAnkle(true, RightAnkleStart, false);
+	auto AdvanceRearContact = [&](const bool bRight)
+	{
+		const int32 Thigh = bRight ? RightThigh : LeftThigh;
+		const int32 Ankle = bRight ? RightAnkle : LeftAnkle;
+		const FVector HipPosition = Pose[Thigh].GetLocation();
+		const FVector OldAnkle = Pose[Ankle].GetLocation();
+		// Judge the rear contact against the authored hip position. The stylized
+		// pelvis setback must not turn off this small foot placement correction.
+		const float BehindHip = FVector::DotProduct(HipPosition - BodyOffset - OldAnkle, PoseForward);
+		const float OtherFootAbove = FVector::DotProduct(
+			(bRight ? LeftAnkleStart - RightAnkleStart : RightAnkleStart - LeftAnkleStart), PoseUp);
+		// Only adjust the low foot near the end of support. The airborne rear leg
+		// keeps the authored toe-off path, and the leading foot keeps its landing.
+		const float RearWeight = StiffSmooth((BehindHip - 1.0f) / 16.0f)
+			* StiffSmooth((OtherFootAbove - 18.0f) / 20.0f);
+		const float Advance = RunRearFootAdvanceCm * RunAlpha * RearWeight;
+		if (Advance > 0.05f)
+		{
+			SolveLegToAnkle(bRight, OldAnkle + PoseForward * Advance, true);
+		}
+	};
+	auto AccentLeg = [&](const bool bRight)
+	{
+		const int32 Thigh = Mesh->GetBoneIndex(bRight ? TEXT("UpperLeg_R") : TEXT("UpperLeg_L"));
+		const int32 Knee = Mesh->GetBoneIndex(bRight ? TEXT("LowerLeg_R") : TEXT("LowerLeg_L"));
+		const int32 Ankle = bRight ? RightAnkle : LeftAnkle;
+		if (!Pose.IsValidIndex(Thigh) || !Pose.IsValidIndex(Knee))
+		{
+			return;
+		}
+		const FVector HipPosition = Pose[Thigh].GetLocation();
+		const FVector ThighDirection = (Pose[Knee].GetLocation() - HipPosition).GetSafeNormal();
+		const float ForwardSwing = FVector::DotProduct(ThighDirection, PoseForward);
+		const float HeightDifference = FVector::DotProduct(
+			(bRight ? RightAnkleStart - LeftAnkleStart : LeftAnkleStart - RightAnkleStart), PoseUp);
+		// Accent the forward swing while its foot is raised. Leave the low support
+		// foot on the authored contact path so the runner still pushes off the floor.
+		const float SwingWeight = FMath::Clamp((ForwardSwing - 0.15f) / 0.45f, 0.0f, 1.0f);
+		const float AirWeight = FMath::Clamp((HeightDifference - 2.0f) / 12.0f, 0.0f, 1.0f);
+		const float Accent = RunStrideAccentDegrees * RunAlpha * SwingWeight * AirWeight;
+		if (Accent <= 0.05f)
+		{
+			return;
+		}
+
+		const FVector OldAnklePosition = Pose[Ankle].GetLocation();
+		const FQuat Pitch(PoseRight, FMath::DegreesToRadians(-Accent));
+		RotateBranch(Thigh, HipPosition, HipPosition, Pitch);
+		const FVector NewAnklePosition = Pose[Ankle].GetLocation();
+		CarryShoe(bRight, Thigh, OldAnklePosition, NewAnklePosition, Pitch);
+	};
+	AdvanceRearContact(false);
+	AdvanceRearContact(true);
+	AccentLeg(false);
+	AccentLeg(true);
+}
+
+void UJTSAnimInstance::ApplyStiffUnarmedArms(
+	TArray<FTransform>& Pose,
+	USkeletalMeshComponent* Mesh,
+	const FReferenceSkeleton* Skeleton,
+	const FVector& PoseUp,
+	const FVector& PoseForward,
+	const FVector& PoseRight)
+{
+	const AJTSCharacter* const Character = Cast<AJTSCharacter>(Mesh->GetOwner());
+	const UJTSMeleeComponent* const Melee = IsValid(Character)
+		? Character->FindComponentByClass<UJTSMeleeComponent>()
+		: nullptr;
+	const bool bPunching = IsValid(Melee) && Melee->IsPunchVisualActive();
+	const float PunchElapsed = bPunching ? Melee->GetPunchVisualElapsed() : 0.0f;
+	const bool bPunchLeft = bPunching && Melee->IsCurrentPunchLeft();
+	const bool bPunchCombo = bPunching && Melee->IsContinuingUnarmedCombo();
+	const float PunchHitDelay = bPunching ? Melee->GetUnarmedPunchHitDelay() : 0.11f;
+	const float PunchChainDelay = bPunching ? Melee->GetUnarmedPunchChainDelay() : 0.18f;
+	const float PunchRecoveryDelay = bPunching ? Melee->GetUnarmedPunchRecoveryDelay() : 0.35f;
+	// A follow-up starts while the first fist is still returning. Reconstruct
+	// the outgoing hand at the chain boundary so its wrist and shoulder stay
+	// continuous when the component starts the next legal attack segment.
+	const float GuardTime = FMath::Min(0.035f, PunchHitDelay * 0.32f);
+	const float ContactHoldEnd = FMath::Min(PunchChainDelay, PunchHitDelay + 0.018f);
+	const float RetractEnd = FMath::Max(ContactHoldEnd + 0.01f,
+		FMath::Min(PunchRecoveryDelay - 0.10f, PunchChainDelay + 0.075f));
+	const float PreviousAtChain = 1.0f - StiffSmooth(FMath::Clamp(
+		(PunchChainDelay - ContactHoldEnd) / (RetractEnd - ContactHoldEnd), 0.0f, 1.0f));
+	const float PreviousExtend = bPunchCombo
+		? PreviousAtChain * (1.0f - StiffSmooth(FMath::Clamp(PunchElapsed / 0.10f, 0.0f, 1.0f)))
+		: 0.0f;
+	const float GuardRise = bPunchCombo ? 1.0f
+		: bPunching ? FMath::Clamp(PunchElapsed / GuardTime, 0.0f, 1.0f) : 0.0f;
+	const float StrikeStart = bPunchCombo ? 0.0f : GuardTime;
+	const float Strike = bPunching
+		? FMath::Clamp((PunchElapsed - StrikeStart) / FMath::Max(0.01f, PunchHitDelay - StrikeStart), 0.0f, 1.0f)
+		: 0.0f;
+	const float StrikeStartExtend = bPunchCombo ? -0.12f * PreviousAtChain : -0.16f;
+	const float PunchExtend = !bPunching ? 0.0f
+		: !bPunchCombo && PunchElapsed < GuardTime ? -0.16f * GuardRise
+		: PunchElapsed < PunchHitDelay ? FMath::Lerp(StrikeStartExtend, 1.0f, FMath::Pow(Strike, 1.45f))
+		: PunchElapsed < ContactHoldEnd ? 1.0f
+		: 1.0f - StiffSmooth(FMath::Clamp(
+			(PunchElapsed - ContactHoldEnd) / (RetractEnd - ContactHoldEnd), 0.0f, 1.0f));
+	const float FadeStart = FMath::Max(PunchChainDelay, PunchRecoveryDelay - 0.10f);
+	const float PunchFade = bPunching && PunchElapsed > FadeStart
+		? 1.0f - StiffSmooth(FMath::Clamp((PunchElapsed - FadeStart) / (PunchRecoveryDelay - FadeStart), 0.0f, 1.0f))
+		: 1.0f;
+	const float PunchEnter = bPunchCombo ? 1.0f : StiffSmooth(GuardRise);
+	const float PunchCover = bPunching ? PunchFade * PunchEnter : 0.0f;
+	const float PunchDrive = FMath::Clamp(PunchExtend, 0.0f, 1.0f) * PunchCover;
+	const float PreviousDrive = PreviousExtend * PunchCover;
+	const float TorsoDrive = PunchDrive - PreviousDrive;
+	const float PunchCoil = bPunchCombo ? 0.0f : GuardRise * (1.0f - Strike) * PunchCover;
+	const FQuat PunchAim(PoseRight, FMath::DegreesToRadians(-FMath::Clamp(IsValid(Character) ? Character->GetAimPitch() : 0.0f, -55.0f, 55.0f)));
+	const FVector PunchForward = PunchAim.RotateVector(PoseForward);
+	const FVector PunchUp = PunchAim.RotateVector(PoseUp);
+	const float Run = FMath::Clamp(GaitBlend - 1.0f, 0.0f, 1.0f);
+	const float Walk = FMath::Clamp(GaitBlend, 0.0f, 1.0f) * (1.0f - Run);
+	// The source Run clip starts on the opposite support leg from Walk.
+	const float Phase = GaitPhase * TWO_PI + PI * Run;
+
+	auto PlaceArm = [&](const bool bRight)
+	{
+		// Walking holds both arms at the sides without a gait swing. Running uses a
+		// broad horizontal upper-arm silhouette with both forearms hanging down.
+		FVector WalkUpper = -PoseUp;
+		const float WalkAbduction = 12.0f + 2.0f * Walk;
+		WalkUpper = FQuat(PoseForward, FMath::DegreesToRadians(bRight ? WalkAbduction : -WalkAbduction)).RotateVector(WalkUpper).GetSafeNormal();
+		FVector BendAxis = FVector::CrossProduct(WalkUpper, PoseForward).GetSafeNormal();
+		if (BendAxis.IsNearlyZero())
+		{
+			BendAxis = PoseRight;
+		}
+		FVector WalkFore = FQuat(BendAxis, FMath::DegreesToRadians(-8.0f)).RotateVector(WalkUpper);
+		if (FVector::DotProduct(WalkFore, PoseForward) < FVector::DotProduct(WalkUpper, PoseForward))
+		{
+			WalkFore = FQuat(BendAxis, FMath::DegreesToRadians(8.0f)).RotateVector(WalkUpper);
+		}
+		const FVector Side = bRight ? PoseRight : -PoseRight;
+		const float Spread = FMath::DegreesToRadians(RunArmSpreadDegrees);
+		const FVector RunUpper = (Side * FMath::Sin(Spread)
+			- PoseUp * FMath::Cos(Spread)
+			+ PoseForward * (0.08f + (bRight ? 1.0f : -1.0f) * FMath::Cos(Phase) * 0.06f)).GetSafeNormal();
+		const FVector RunFore = -PoseUp;
+		const FVector Upper = FMath::Lerp(WalkUpper, RunUpper, Run).GetSafeNormal();
+		const FVector Fore = FMath::Lerp(WalkFore.GetSafeNormal(), RunFore, Run).GetSafeNormal();
+		const FString Suffix = bRight ? TEXT("_R") : TEXT("_L");
+		StiffAimSegment(Pose, Mesh, Skeleton, *FString::Printf(TEXT("UpperArm%s"), *Suffix), *FString::Printf(TEXT("LowerArm%s"), *Suffix), Upper);
+		StiffAimSegment(Pose, Mesh, Skeleton, *FString::Printf(TEXT("LowerArm%s"), *Suffix), *FString::Printf(TEXT("Wrist%s"), *Suffix), Fore.GetSafeNormal());
+	};
+
+	PlaceArm(false);
+	PlaceArm(true);
+
+	if (PunchCover > 0.01f)
+	{
+		// The strike starts in the waist and shoulder, while the opposite arm
+		// stays near the face. Rotate only the upper body so planted feet and the
+		// walking cadence keep their existing motion.
+		auto RotateTorsoBranch = [&](const FName BoneName, const FVector& Axis, const float Degrees)
+		{
+			const int32 BoneIndex = Mesh->GetBoneIndex(BoneName);
+			if (!Pose.IsValidIndex(BoneIndex) || Axis.IsNearlyZero() || FMath::IsNearlyZero(Degrees))
+			{
+				return;
+			}
+			const FVector Origin = Pose[BoneIndex].GetLocation();
+			const FQuat Rotation(Axis, FMath::DegreesToRadians(Degrees));
+			for (int32 Index = 0; Index < Pose.Num(); ++Index)
+			{
+				int32 Parent = Index;
+				while (Parent >= 0 && Parent != BoneIndex)
+				{
+					Parent = Skeleton->GetParentIndex(Parent);
+				}
+				if (Parent != BoneIndex)
+				{
+					continue;
+				}
+				Pose[Index].SetLocation(Origin + Rotation.RotateVector(Pose[Index].GetLocation() - Origin));
+				Pose[Index].SetRotation(Rotation * Pose[Index].GetRotation());
+				Pose[Index].NormalizeRotation();
+			}
+		};
+		const float LeadSign = bPunchLeft ? 1.0f : -1.0f;
+		RotateTorsoBranch(TEXT("Abdomen"), PoseRight,
+			FMath::Max(PunchDrive, PreviousDrive) * 6.0f - PunchCoil * 1.5f);
+		RotateTorsoBranch(TEXT("Abdomen"), PoseUp,
+			LeadSign * (TorsoDrive * 6.0f - PunchCoil * 2.0f));
+		RotateTorsoBranch(TEXT("Chest"), PoseUp,
+			LeadSign * (TorsoDrive * 11.0f - PunchCoil * 3.0f));
+
+		// Shoulder_L/R are real clavicle parents on Casual_2. Bring the lead
+		// shoulder forward with the trunk instead of asking a fully extended
+		// elbow to create reach it cannot anatomically provide. The branch
+		// translation keeps the upper arm and wrist lengths unchanged.
+		auto ProtractShoulder = [&](const bool bRight)
+		{
+			const FName ShoulderName = bRight ? TEXT("Shoulder_R") : TEXT("Shoulder_L");
+			const int32 ShoulderIndex = Mesh->GetBoneIndex(ShoulderName);
+			const int32 UpperIndex = Mesh->GetBoneIndex(bRight ? TEXT("UpperArm_R") : TEXT("UpperArm_L"));
+			const int32 LowerIndex = Mesh->GetBoneIndex(bRight ? TEXT("LowerArm_R") : TEXT("LowerArm_L"));
+			const int32 WristIndex = Mesh->GetBoneIndex(bRight ? TEXT("Wrist_R") : TEXT("Wrist_L"));
+			if (!Pose.IsValidIndex(ShoulderIndex) || !Pose.IsValidIndex(UpperIndex)
+				|| !Pose.IsValidIndex(LowerIndex) || !Pose.IsValidIndex(WristIndex))
+			{
+				return;
+			}
+			const float ArmScale = (FVector::Distance(Pose[UpperIndex].GetLocation(), Pose[LowerIndex].GetLocation())
+				+ FVector::Distance(Pose[LowerIndex].GetLocation(), Pose[WristIndex].GetLocation())) / 41.0f;
+			const bool bLeadShoulder = bRight != bPunchLeft;
+			const float LeadAmount = bLeadShoulder
+				? 5.0f * PunchDrive - 1.5f * PunchCoil : 5.0f * PreviousDrive;
+			const FVector Delta = PoseForward * (LeadAmount * ArmScale);
+			for (int32 Index = 0; Index < Pose.Num(); ++Index)
+			{
+				int32 Parent = Index;
+				while (Parent >= 0 && Parent != ShoulderIndex)
+				{
+					Parent = Skeleton->GetParentIndex(Parent);
+				}
+				if (Parent == ShoulderIndex)
+				{
+					Pose[Index].AddToTranslation(Delta);
+				}
+			}
+		};
+		ProtractShoulder(false);
+		ProtractShoulder(true);
+
+		auto PunchArm = [&](const bool bRight, const float Extend)
+		{
+			const FString Suffix = bRight ? TEXT("_R") : TEXT("_L");
+			const int32 UpperIndex = Mesh->GetBoneIndex(*FString::Printf(TEXT("UpperArm%s"), *Suffix));
+			const int32 LowerIndex = Mesh->GetBoneIndex(*FString::Printf(TEXT("LowerArm%s"), *Suffix));
+			const int32 WristIndex = Mesh->GetBoneIndex(*FString::Printf(TEXT("Wrist%s"), *Suffix));
+			if (!Pose.IsValidIndex(UpperIndex) || !Pose.IsValidIndex(LowerIndex) || !Pose.IsValidIndex(WristIndex))
+			{
+				return;
+			}
+			const FVector Shoulder = Pose[UpperIndex].GetLocation();
+			const FVector RestElbow = Pose[LowerIndex].GetLocation();
+			const FVector RestWrist = Pose[WristIndex].GetLocation();
+			const float UpperLength = FVector::Distance(Shoulder, RestElbow);
+			const float ForeLength = FVector::Distance(RestElbow, RestWrist);
+			if (UpperLength < 1.0f || ForeLength < 1.0f)
+			{
+				return;
+			}
+			const FVector Side = bRight ? PoseRight : -PoseRight;
+			const float ArmScale = (UpperLength + ForeLength) / 41.0f;
+			// The guarded fist remains in front of the shoulder. A combo moves the
+			// previous fist back along this line while the other one extends.
+			const FVector GuardOffset = PunchForward * (FMath::Lerp(22.0f, 39.0f, Extend) * ArmScale)
+				+ Side * (4.0f * ArmScale) - PunchUp * (8.0f * ArmScale);
+			// Raise both fists together during a chain. Ease in across the first
+			// part of the next strike so the previous punch does not pop upward.
+			const float ComboLift = bPunchCombo
+				? PunchComboArmLiftDegrees * StiffSmooth(FMath::Clamp(PunchElapsed / 0.08f, 0.0f, 1.0f))
+				: 0.0f;
+			const FQuat ComboLiftRotation(PoseRight, FMath::DegreesToRadians(-ComboLift));
+			const FVector GuardToPunch = Shoulder + ComboLiftRotation.RotateVector(GuardOffset);
+			const FVector BlendedWrist = FMath::Lerp(RestWrist, GuardToPunch, PunchCover);
+			const FVector WristOffset = BlendedWrist - Shoulder;
+			const float WristDistance = FMath::Clamp(WristOffset.Size(),
+				FMath::Abs(UpperLength - ForeLength) + 0.5f, UpperLength + ForeLength - 0.5f);
+			const FVector WristDirection = WristOffset.GetSafeNormal();
+			if (WristDirection.IsNearlyZero())
+			{
+				return;
+			}
+			const FVector WristTarget = Shoulder + WristDirection * WristDistance;
+			FVector ElbowPole = (Side - WristDirection * FVector::DotProduct(Side, WristDirection)).GetSafeNormal();
+			if (ElbowPole.IsNearlyZero())
+			{
+				ElbowPole = (-PoseUp - WristDirection * FVector::DotProduct(-PoseUp, WristDirection)).GetSafeNormal();
+			}
+			const float Along = (UpperLength * UpperLength + WristDistance * WristDistance - ForeLength * ForeLength)
+				/ (2.0f * WristDistance);
+			const float Outward = FMath::Sqrt(FMath::Max(0.0f, UpperLength * UpperLength - Along * Along));
+			const FVector ElbowTarget = Shoulder + WristDirection * Along + ElbowPole * Outward;
+			StiffAimSegment(Pose, Mesh, Skeleton, *FString::Printf(TEXT("UpperArm%s"), *Suffix),
+				*FString::Printf(TEXT("LowerArm%s"), *Suffix), ElbowTarget - Shoulder);
+			StiffAimSegment(Pose, Mesh, Skeleton, *FString::Printf(TEXT("LowerArm%s"), *Suffix),
+				*FString::Printf(TEXT("Wrist%s"), *Suffix), WristTarget - ElbowTarget);
+		};
+		// The last fist is still coming home while this one is already leaving.
+		// On the first strike the opposite fist only counters the shoulder turn.
+		const float CounterExtend = bPunchCombo ? PreviousExtend : -0.12f * PunchDrive;
+		const float LeftExtend = bPunchLeft ? PunchExtend : CounterExtend;
+		const float RightExtend = bPunchLeft ? CounterExtend : PunchExtend;
+		PunchArm(false, LeftExtend);
+		PunchArm(true, RightExtend);
+	}
+
+	const float Grip = FMath::Lerp(0.45f, 1.0f, PunchCover);
+	StiffCurlFingers(Pose, Mesh, Skeleton, false, Grip);
+	StiffCurlFingers(Pose, Mesh, Skeleton, true, Grip);
 }

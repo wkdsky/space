@@ -161,6 +161,9 @@ public:
 	/** Restores the character if its spacecraft is destroyed during teardown. */
 	void HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft);
 
+	/** True while a floor sweep is holding the capsule. Planet landing can still report MOVE_Falling. */
+	bool IsSupportedByFloor() const;
+
 protected:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
@@ -197,18 +200,18 @@ private:
 	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
-	/** Ordinary standing third person never snaps the body onto a gun click. Aim, first person, and a jump already face the camera. */
+	/** Ordinary third person never snaps the body onto a gun click. Aim and first person already face the camera. */
 	void AlignBodyToViewOnAttack();
 	float GetRawViewYawDelta() const;
 	/**
-	 * First person, third-person aim, and any jump keep the whole body on the camera.
-	 * Grounded ordinary third person does not: the legs stay put and only the upper body yaws.
+	 * First person and third-person aim keep the whole body on the camera.
+	 * Ordinary third person keeps its movement heading on the ground and in the air.
 	 */
 	bool WantsContinuousViewFacing() const;
 	bool GetViewTangentForward(FVector& OutForward) const;
 	float GetViewBodyYawDeltaDegrees(const FVector& ViewForward) const;
 	bool IsMovingOnFoot() const;
-	/** Horizontal direction the feet should catch: the view while attacking, otherwise the walk direction. */
+	/** Desired body heading: the view in aim/first person, otherwise the travel direction. */
 	bool GetDesiredFeetForward(FVector& OutForward) const;
 	void UpdateFacingPresentation(float DeltaSeconds);
 	void StepBodyTowardView(const FVector& ViewForward, float DeltaSeconds, bool bUsePlanetFrame);

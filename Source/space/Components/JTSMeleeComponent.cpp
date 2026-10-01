@@ -3,6 +3,7 @@
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
@@ -10,10 +11,12 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Player/JTSCharacter.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSMoonAntActor.h"
@@ -49,16 +52,34 @@ UJTSMeleeComponent::UJTSMeleeComponent()
 void UJTSMeleeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (!bMeleeSwingClockActive)
+	if (bMeleeSwingClockActive)
 	{
-		SetComponentTickEnabled(false);
-		return;
+		MeleeSwingClockElapsed += DeltaTime;
+		if (MeleeSwingClockElapsed >= FMath::Max(0.15f, HeldWeaponRecoveryDelay))
+		{
+			bMeleeSwingClockActive = false;
+			MeleeSwingClockElapsed = 0.0f;
+		}
 	}
-	MeleeSwingClockElapsed += DeltaTime;
-	if (MeleeSwingClockElapsed >= FMath::Max(0.15f, HeldWeaponRecoveryDelay))
+	if (bPunchVisualClockActive)
 	{
-		bMeleeSwingClockActive = false;
-		MeleeSwingClockElapsed = 0.0f;
+		PunchVisualElapsed += DeltaTime;
+		// The fist is travelling toward its endpoint for the whole approach. Sample that path
+		// each frame so a target crossed before the hit timer still counts as this one swing.
+		if (GetOwner() != nullptr && GetOwner()->HasAuthority()
+			&& CurrentAttackType == EJTSAttackType::Punch
+			&& PunchVisualElapsed <= GetUnarmedPunchHitDelay() + DeltaTime)
+		{
+			SweepPunchFist();
+		}
+		if (PunchVisualElapsed >= GetUnarmedPunchRecoveryDelay() + 0.05f)
+		{
+			bPunchVisualClockActive = false;
+			PunchVisualElapsed = 0.0f;
+		}
+	}
+	if (!bMeleeSwingClockActive && !bPunchVisualClockActive)
+	{
 		SetComponentTickEnabled(false);
 	}
 }
@@ -106,6 +127,8 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	bCurrentPunchIsComboContinuation = false;
 	bMeleeSwingClockActive = false;
 	MeleeSwingClockElapsed = 0.0f;
+	bPunchVisualClockActive = false;
+	PunchVisualElapsed = 0.0f;
 	NextAttackTime = 0.0;
 	Super::EndPlay(EndPlayReason);
 }
@@ -336,9 +359,9 @@ void UJTSMeleeComponent::ScheduleUnarmedPunchEvents()
 	}
 
 	ClearUnarmedPunchTimers();
-	const float HitDelay = FMath::Max(0.01f, UnarmedPunchHitDelay);
-	const float ChainDelay = FMath::Max(HitDelay, UnarmedPunchChainDelay);
-	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, UnarmedPunchRecoveryDelay);
+	const float HitDelay = GetUnarmedPunchHitDelay();
+	const float ChainDelay = GetUnarmedPunchChainDelay();
+	const float RecoveryDelay = GetUnarmedPunchRecoveryDelay();
 	FTimerManager& TimerManager = World->GetTimerManager();
 	TimerManager.SetTimer(UnarmedPunchHitTimerHandle, this, &UJTSMeleeComponent::HandleUnarmedPunchHit, HitDelay, false);
 	TimerManager.SetTimer(UnarmedPunchChainTimerHandle, this, &UJTSMeleeComponent::HandleUnarmedPunchChainWindow, ChainDelay, false);
@@ -515,6 +538,8 @@ void UJTSMeleeComponent::PerformHitCheck()
 		{
 			// PunchMaxTargets is intentionally clamped to one. This set also protects duplicate AttackHit notifies.
 			HitActorsThisSwing.Add(Candidate);
+			ClientConfirmPunchHit();
+			MulticastPunchImpact(CandidateLocation);
 		}
 
 		if (bDebugMeleeAim)
@@ -673,6 +698,23 @@ float UJTSMeleeComponent::GetMeleeSwingPhase() const
 bool UJTSMeleeComponent::IsCurrentPunchLeft() const
 {
 	return bCurrentPunchUsesLeft;
+}
+
+float UJTSMeleeComponent::GetPunchVisualElapsed() const
+{
+	return bPunchVisualClockActive ? PunchVisualElapsed : 0.0f;
+}
+
+float UJTSMeleeComponent::GetConfirmedPunchHitFeedbackAlpha() const
+{
+	return GetWorld() != nullptr
+		? FMath::Clamp(1.0f - static_cast<float>((GetWorld()->GetTimeSeconds() - LastConfirmedPunchHitSeconds) / 0.16), 0.0f, 1.0f)
+		: 0.0f;
+}
+
+bool UJTSMeleeComponent::IsPunchVisualActive() const
+{
+	return bPunchVisualClockActive;
 }
 
 bool UJTSMeleeComponent::IsContinuingUnarmedCombo() const
@@ -955,6 +997,141 @@ bool UJTSMeleeComponent::FindBestPunchCandidate(
 	return IsValid(OutTarget);
 }
 
+bool UJTSMeleeComponent::GetPunchFistPath(APawn* AttackingPawn, FVector& OutStart, FVector& OutEnd) const
+{
+	if (!IsValid(AttackingPawn))
+	{
+		return false;
+	}
+
+	const FVector Up = AttackingPawn->GetActorUpVector();
+	const FVector Forward = FVector::VectorPlaneProject(AttackingPawn->GetActorForwardVector(), Up).GetSafeNormal();
+	const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+	if (Forward.IsNearlyZero() || Right.IsNearlyZero())
+	{
+		return false;
+	}
+
+	FVector CameraLocation;
+	FVector CameraDirection;
+	const float CameraPitch = GetPlayerAimView(AttackingPawn, CameraLocation, CameraDirection)
+		? FMath::Asin(FMath::Clamp(FVector::DotProduct(CameraDirection, Up), -1.0f, 1.0f))
+		: 0.0f;
+	const FQuat PitchRotation(Right, -FMath::Clamp(CameraPitch, FMath::DegreesToRadians(-55.0f), FMath::DegreesToRadians(55.0f)));
+	const FVector PunchForward = PitchRotation.RotateVector(Forward);
+	const FVector PunchUp = PitchRotation.RotateVector(Up);
+	const float Chest = AttackingPawn->GetSimpleCollisionHalfHeight() * 0.50f;
+	const FVector Shoulder = AttackingPawn->GetActorLocation()
+		+ Up * Chest
+		+ Right * (bCurrentPunchUsesLeft ? -19.0f : 19.0f);
+	// The visual wrist begins about 9 cm in front of the upper-arm joint. At
+	// contact the waist turn and lead shoulder add reach to the straightened
+	// arm. This path remains available when a dedicated server skips mesh poses.
+	OutStart = Shoulder + PunchForward * 31.0f - PunchUp * 8.0f;
+	OutEnd = Shoulder + PunchForward * 60.0f - PunchUp * 8.0f;
+	return true;
+}
+
+void UJTSMeleeComponent::SweepPunchFist()
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !bIsAttacking
+		|| CurrentAttackType != EJTSAttackType::Punch || HitActorsThisSwing.Num() >= PunchMaxTargets)
+	{
+		return;
+	}
+
+	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
+	UWorld* const World = GetWorld();
+	FVector FistStart = FVector::ZeroVector;
+	FVector FistEnd = FVector::ZeroVector;
+	if (!IsValid(AttackingPawn) || !IsValid(World) || !GetPunchFistPath(AttackingPawn, FistStart, FistEnd))
+	{
+		return;
+	}
+
+	const float HitDelay = GetUnarmedPunchHitDelay();
+	const float GuardTime = bCurrentPunchIsComboContinuation
+		? 0.0f : FMath::Min(0.035f, HitDelay * 0.32f);
+	const float Travel = FMath::Pow(FMath::Clamp(
+		(PunchVisualElapsed - GuardTime) / FMath::Max(0.01f, HitDelay - GuardTime),
+		0.0f,
+		1.0f), 1.45f);
+	FVector Sample = FMath::Lerp(FistStart, FistEnd, Travel);
+	// Once this frame's pose has been evaluated, follow the wrist instead of the analytic lane.
+	if (const USkeletalMeshComponent* const Mesh = AttackingPawn->FindComponentByClass<USkeletalMeshComponent>())
+	{
+		const FName WristName = bCurrentPunchUsesLeft ? TEXT("Wrist_L") : TEXT("Wrist_R");
+		if (Mesh->GetBoneIndex(WristName) != INDEX_NONE && Mesh->PoseTickedThisFrame())
+		{
+			Sample = Mesh->GetBoneLocation(WristName, EBoneSpaces::WorldSpace);
+		}
+	}
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSPunchFistSweep), false, AttackingPawn);
+	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
+	TArray<FOverlapResult> OverlapResults;
+	if (!World->OverlapMultiByObjectType(
+		OverlapResults,
+		Sample,
+		FQuat::Identity,
+		FCollisionObjectQueryParams(FCollisionObjectQueryParams::AllObjects),
+		FCollisionShape::MakeSphere(14.0f),
+		QueryParams))
+	{
+		return;
+	}
+
+	AActor* BestTarget = nullptr;
+	FVector BestLocation = FVector::ZeroVector;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	TSet<AActor*> SeenActors;
+	for (const FOverlapResult& OverlapResult : OverlapResults)
+	{
+		AActor* const Candidate = OverlapResult.GetActor();
+		if (!IsValid(Candidate) || SeenActors.Contains(Candidate) || HitActorsThisSwing.Contains(Candidate))
+		{
+			continue;
+		}
+		SeenActors.Add(Candidate);
+		if (!IsValidDamageTarget(Candidate, AttackingPawn)
+			|| !IsWithinPunchRange(AttackingPawn, Candidate->GetActorLocation()))
+		{
+			continue;
+		}
+		const FVector CandidateLocation = GetMeleeTargetAimPoint(Candidate);
+		if (!HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation))
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(Sample, CandidateLocation);
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			BestTarget = Candidate;
+			BestLocation = CandidateLocation;
+		}
+	}
+
+	if (!IsValid(BestTarget))
+	{
+		return;
+	}
+
+	const bool bApplied = ApplyAttackToTarget(BestTarget, AttackingPawn, EJTSMeleeAttackType::Punch);
+	if (bApplied)
+	{
+		HitActorsThisSwing.Add(BestTarget);
+		ClientConfirmPunchHit();
+		MulticastPunchImpact(BestLocation);
+	}
+	if (bDebugMeleeAim)
+	{
+		const FColor SweepColor = bApplied ? FColor::Green : FColor::Orange;
+		DrawDebugLine(World, FistStart, FistEnd, SweepColor, false, 0.6f, 0, 1.25f);
+		DrawDebugSphere(World, Sample, 14.0f, 10, SweepColor, false, 0.6f, 0, 1.0f);
+		DrawDebugSphere(World, BestLocation, 16.0f, 10, SweepColor, false, 0.6f, 0, 1.0f);
+	}
+}
+
 FVector UJTSMeleeComponent::GetMeleeTargetAimPoint(AActor* Candidate) const
 {
 	if (!IsValid(Candidate))
@@ -1154,6 +1331,27 @@ void UJTSMeleeComponent::ServerReleaseAttack_Implementation()
 	}
 }
 
+void UJTSMeleeComponent::ClientConfirmPunchHit_Implementation()
+{
+	if (GetWorld() != nullptr)
+	{
+		LastConfirmedPunchHitSeconds = GetWorld()->GetTimeSeconds();
+	}
+	if (AJTSCharacter* const Character = Cast<AJTSCharacter>(GetOwner()))
+	{
+		Character->ApplyWeaponViewKick(PunchHitViewKickDegrees);
+	}
+}
+
+void UJTSMeleeComponent::MulticastPunchImpact_Implementation(FVector_NetQuantize Location)
+{
+	if (IsValid(PunchImpactSound))
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, PunchImpactSound, FVector(Location), 0.9f,
+			FMath::FRandRange(0.97f, 1.03f));
+	}
+}
+
 void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 	EJTSAttackType AttackType,
 	bool bUseLeftPunch,
@@ -1163,7 +1361,18 @@ void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 	bCurrentPunchUsesLeft = bUseLeftPunch;
 	bCurrentPunchIsComboContinuation = bIsComboContinuation;
 	bIsAttacking = true;
-	if (AttackType != EJTSAttackType::Punch)
+	if (AttackType == EJTSAttackType::Punch)
+	{
+		bPunchVisualClockActive = true;
+		PunchVisualElapsed = 0.0f;
+		SetComponentTickEnabled(true);
+		if (IsValid(PunchSwingSound) && IsValid(GetOwner()))
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, PunchSwingSound, GetOwner()->GetActorLocation(), 0.35f,
+				FMath::FRandRange(0.97f, 1.03f));
+		}
+	}
+	else
 	{
 		bMeleeSwingClockActive = true;
 		MeleeSwingClockElapsed = 0.0f;
@@ -1179,6 +1388,8 @@ void UJTSMeleeComponent::MulticastEndAttackPresentation_Implementation(EJTSAttac
 	bCurrentPunchIsComboContinuation = false;
 	bMeleeSwingClockActive = false;
 	MeleeSwingClockElapsed = 0.0f;
+	bPunchVisualClockActive = false;
+	PunchVisualElapsed = 0.0f;
 	SetComponentTickEnabled(false);
 	OnAttackFinished.Broadcast(AttackType);
 }

@@ -1352,7 +1352,7 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 	}
 
 	// Ordinary standing third person keeps the body where the player put it.
-	// Aim, first person, and a jump already face the camera, so a gun click does not add a snap.
+	// Aim and first person already face the camera, so a gun click does not add a snap.
 	AlignBodyToViewOnAttack();
 	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
 	{
@@ -1401,18 +1401,26 @@ float AJTSCharacter::GetViewBodyYawDeltaDegrees(const FVector& ViewForward) cons
 	return FRotator::NormalizeAxis(Signed);
 }
 
+bool AJTSCharacter::IsSupportedByFloor() const
+{
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	return IsValid(Movement)
+		&& (Movement->IsMovingOnGround()
+			|| (Movement->CurrentFloor.bBlockingHit && !Movement->CurrentFloor.bLineTrace));
+}
+
 bool AJTSCharacter::IsMovingOnFoot() const
 {
 	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
 	return IsValid(Movement) && Movement->Velocity.SizeSquared() > FMath::Square(40.0f)
-		&& Movement->IsMovingOnGround();
+		&& IsSupportedByFloor();
 }
 
 bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 {
-	// First person, aim, a jump, and the single frame of a grounded click face the camera.
+	// First person, aim, and the single frame of a grounded click face the camera.
 	// After that click, grounded ordinary third person falls through to the walk
-	// direction, so orbiting the camera never starts another foot shuffle.
+	// direction. In the air it keeps following travel velocity, not camera yaw.
 	if (bWantsViewFacing || WantsContinuousViewFacing())
 	{
 		if (IsLocallyControlled() && GetViewTangentForward(OutForward))
@@ -1459,13 +1467,9 @@ bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 
 bool AJTSCharacter::WantsContinuousViewFacing() const
 {
-	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
-	const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || bPressedJump;
-	// Aim and first person always match the camera, on the ground and in the air.
-	// A jump does the same from the press, so the body is already on the view when the feet leave.
-	const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
+	// Jumping does not change the facing mode. Aim and first person keep their
+	// existing view-facing behavior on the ground and in the air.
 	return bFirstPersonView
-		|| (bAirborne && !bIceAxeHeld)
 		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
 }
 
@@ -1473,7 +1477,7 @@ void AJTSCharacter::AlignBodyToViewOnAttack()
 {
 	// Standing ordinary third person leaves facing to the player. The gun arm covers
 	// the view while it is close, and a large orbit stays an orbit.
-	// Aim, first person, and a jump already keep the whole body on the camera, so a
+	// Aim and first person already keep the whole body on the camera, so a
 	// click there must not leave a follow that survives after the player lets go.
 	bWantsViewFacing = false;
 }
@@ -1494,16 +1498,15 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	const float YawDelta = GetViewBodyYawDeltaDegrees(ViewForward);
 	const float AbsYaw = FMath::Abs(YawDelta);
 	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
-	const bool bAirborne = (IsValid(Movement) && Movement->IsFalling()) || bPressedJump;
+	const bool bAirborne = bPressedJump || (IsValid(Movement) && Movement->IsFalling() && !IsSupportedByFloor());
 	const bool bLockedToView = WantsContinuousViewFacing();
 	// The click flag is consumed here. Later ticks must not treat it as a held follow.
 	const bool bClickAlign = bWantsViewFacing;
 	bWantsViewFacing = false;
-	// Grounded ordinary third person only shuffles for a walk or that one click.
-	// Aim, first person, and a jump rotate the body with the camera and never
-	// play the shuffle, so the jump tuck stays one continuous pose.
+	// Ordinary third person uses travel velocity in the air and never shuffles
+	// while airborne. Aim and first person continue to follow the camera.
 	const bool bPlayShuffle = !bAirborne && !bLockedToView && (IsMovingOnFoot() || bClickAlign);
-	const bool bTurnBody = bPlayShuffle || bLockedToView;
+	const bool bTurnBody = bPlayShuffle || bAirborne || bLockedToView;
 	const float TargetShuffle = bPlayShuffle && AbsYaw > 4.0f ? 1.0f : 0.0f;
 	TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, TargetShuffle, DeltaSeconds, bPlayShuffle ? 10.0f : 6.0f);
 	if (!bTurnBody)
@@ -1512,7 +1515,8 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	}
 
 	// A grounded click catches the whole remaining yaw on that press.
-	// Aim, first person, and a jump snap the whole body onto the camera this frame.
+	// Aim and first person snap the whole body onto the camera this frame.
+	// An ordinary jump can turn only at the same limited rate as a running turn.
 	// The upper body is not left twisted behind a slower capsule turn.
 	const float DegreesPerSecond = FMath::Max(60.0f, FootShuffleDegreesPerSecond);
 	const float StepDegrees = (bClickAlign || bLockedToView)
@@ -1552,6 +1556,16 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 	{
 		bWantsViewFacing = false;
 	}
+	// Keep CharacterMovement from turning toward camera-relative input during a
+	// jump. The presentation turn below follows planar velocity at a limited rate.
+	bUseControllerRotationYaw = false;
+	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
+	{
+		const bool bAirborne = bPressedJump || (Movement->IsFalling() && !IsSupportedByFloor());
+		const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
+		const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing() || bAirborne;
+		Movement->bOrientRotationToMovement = !bFeetCatching && !bIceAxeHeld;
+	}
 
 	FVector FeetForward = FVector::ZeroVector;
 	if (!GetDesiredFeetForward(FeetForward))
@@ -1560,19 +1574,9 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 		return;
 	}
 
-	// Grounded ordinary third person leaves the legs where they are.
-	// Aim, first person, a jump, and that one click own the facing instead.
+	// Grounded ordinary third person follows the walk direction. In the air it
+	// continues from the movement heading without a camera-driven snap.
 	const bool bUsePlanetFrame = IsRealPlanetGameplayActive();
-	if (!bUsePlanetFrame)
-	{
-		bUseControllerRotationYaw = false;
-		if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
-		{
-			const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
-			const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing();
-			Movement->bOrientRotationToMovement = !bFeetCatching && !bIceAxeHeld;
-		}
-	}
 	StepBodyTowardView(FeetForward, DeltaSeconds, bUsePlanetFrame);
 }
 
@@ -2121,7 +2125,8 @@ void AJTSCharacter::ApplyCameraView()
 		const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
 		// A click is one frame. It must not flip movement orientation onto the camera.
 		// Ice axes keep the body where the player put it, including while the feet are moving.
-		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bIceAxeHeld && !bClimbing;
+		const bool bAirborne = bPressedJump || (MovementComponent->IsFalling() && !IsSupportedByFloor());
+		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bAirborne && !bIceAxeHeld && !bClimbing;
 		bUseControllerRotationYaw = false;
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
@@ -2376,15 +2381,6 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 		&& RangedWeaponComponent->IsAiming()
 		&& RangedWeaponComponent->HasActiveRangedWeapon();
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
-	if (!IsRealPlanetGameplayActive() && !WantsContinuousViewFacing())
-	{
-		// Free look leaves the capsule where the last step put it.
-		bUseControllerRotationYaw = false;
-		if (UCharacterMovementComponent* Movement = GetCharacterMovement())
-		{
-			Movement->bOrientRotationToMovement = true;
-		}
-	}
 	AimCameraAlpha = FMath::FInterpTo(AimCameraAlpha, TargetAlpha, DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
 
 	if (CameraBoom != nullptr)
