@@ -631,6 +631,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 
 		CruiseNavigationWidget = WidgetTree->ConstructWidget<UJTSCruiseNavigationWidget>(UJTSCruiseNavigationWidget::StaticClass(), TEXT("CruiseNavigation"));
 		AddCanvasChild(GameplayLayer, CruiseNavigationWidget, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 14.0f), FVector2D(520.0f, 560.0f), FVector2D(1.0f, 0.0f));
+		CruiseNavigationWidget->SetRenderTransformPivot(FVector2D(1.0f, 0.0f));
+		CruiseNavigationWidget->SetRenderScale(FVector2D(0.5f, 0.5f));
 		ApplyLayerVisibility(CruiseNavigationWidget, false);
 		FlightSpeedText = MakeTextBlock(
 			WidgetTree,
@@ -710,16 +712,85 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			FlightNavPlanetText = MakeTextBlock(WidgetTree, TEXT("FlightNavPlanet"), TEXT(""), 12.0f, FLinearColor(0.55f, 0.74f, 0.86f, 1.0f), ETextJustify::Center);
 			AddCanvasChild(FlightNavPanel, FlightNavPlanetText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 210.0f), FVector2D(240.0f, 20.0f), FVector2D(0.5f, 0.0f));
 
-			FlightNavControlsText = MakeTextBlock(
-				WidgetTree,
-				TEXT("FlightNavControls"),
-				TEXT(""),
-				11.0f,
-				FLinearColor(0.78f, 0.90f, 1.0f, 1.0f),
-				ETextJustify::Left);
-			AddCanvasChild(GameplayLayer, FlightNavControlsText, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 584.0f), FVector2D(520.0f, 132.0f), FVector2D(1.0f, 0.0f));
+			FlightControlsPanel = MakeBorder(WidgetTree, TEXT("FlightControlsPanel"),
+				FLinearColor(0.025f, 0.045f, 0.075f, 0.78f), 9.0f);
+			AddCanvasChild(GameplayLayer, FlightControlsPanel, FAnchors(1.0f, 0.0f),
+				FVector2D(-18.0f, 308.0f), FVector2D(430.0f, 174.0f), FVector2D(1.0f, 0.0f));
+			UVerticalBox* const ControlsContent = WidgetTree->ConstructWidget<UVerticalBox>(
+				UVerticalBox::StaticClass(), TEXT("FlightControlsContent"));
+			FlightControlsPanel->SetContent(ControlsContent);
+			AddVerticalChild(ControlsContent,
+				MakeTextBlock(WidgetTree, TEXT("FlightControlsHeading"), TEXT("飞行操控"), 15.0f,
+					FLinearColor(0.83f, 0.94f, 1.0f, 1.0f)), FMargin(2.0f, 0.0f, 2.0f, 5.0f));
+			UHorizontalBox* const Columns = WidgetTree->ConstructWidget<UHorizontalBox>(
+				UHorizontalBox::StaticClass(), TEXT("FlightControlsColumns"));
+			AddVerticalChild(ControlsContent, Columns, FMargin(0.0f));
+			UVerticalBox* const PrimaryColumn = WidgetTree->ConstructWidget<UVerticalBox>(
+				UVerticalBox::StaticClass(), TEXT("FlightControlsPrimary"));
+			UVerticalBox* const SecondaryColumn = WidgetTree->ConstructWidget<UVerticalBox>(
+				UVerticalBox::StaticClass(), TEXT("FlightControlsSecondary"));
+			if (UHorizontalBoxSlot* const ColumnSlot = Columns->AddChildToHorizontalBox(PrimaryColumn))
+			{
+				ColumnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+			if (UHorizontalBoxSlot* const ColumnSlot = Columns->AddChildToHorizontalBox(SecondaryColumn))
+			{
+				ColumnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+			const auto AddControlRow = [this](UVerticalBox* Column, const TCHAR* RowName,
+				const TCHAR* FirstKey, const TCHAR* SecondKey, const TCHAR* Description)
+			{
+				UHorizontalBox* const Row = WidgetTree->ConstructWidget<UHorizontalBox>(
+					UHorizontalBox::StaticClass(), FName(RowName));
+				AddVerticalChild(Column, Row, FMargin(0.0f, 1.0f));
+				const auto AddKeycap = [this, Row, RowName](const TCHAR* Key, int32 Index)
+				{
+					UBorder* const Cap = MakeBorder(WidgetTree,
+						*FString::Printf(TEXT("%sKey%d"), RowName, Index),
+						FLinearColor(0.12f, 0.29f, 0.40f, 1.0f), 0.0f);
+					Cap->SetPadding(FMargin(5.0f, 2.0f));
+					Cap->SetHorizontalAlignment(HAlign_Center);
+					Cap->SetVerticalAlignment(VAlign_Center);
+					UTextBlock* const Glyph = MakeTextBlock(WidgetTree,
+						*FString::Printf(TEXT("%sGlyph%d"), RowName, Index), Key, 11.0f,
+						FLinearColor(0.96f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
+					Glyph->SetAutoWrapText(false);
+					Cap->SetContent(Glyph);
+					if (UHorizontalBoxSlot* const KeySlot = Row->AddChildToHorizontalBox(Cap))
+					{
+						KeySlot->SetPadding(FMargin(0.0f, 0.0f, 4.0f, 0.0f));
+						KeySlot->SetVerticalAlignment(VAlign_Center);
+					}
+				};
+				AddKeycap(FirstKey, 0);
+				if (SecondKey != nullptr)
+				{
+					AddKeycap(SecondKey, 1);
+				}
+				UTextBlock* const Label = MakeTextBlock(WidgetTree,
+					*FString::Printf(TEXT("%sDescription"), RowName), Description, 11.0f,
+					FLinearColor(0.75f, 0.88f, 0.97f, 1.0f));
+				Label->SetAutoWrapText(false);
+				if (UHorizontalBoxSlot* const LabelSlot = Row->AddChildToHorizontalBox(Label))
+				{
+					LabelSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				return Row;
+			};
+			AddControlRow(PrimaryColumn, TEXT("FlightForwardHint"), TEXT("W"), TEXT("S"), TEXT("前进 / 后退"));
+			AddControlRow(PrimaryColumn, TEXT("FlightStrafeHint"), TEXT("A"), TEXT("D"), TEXT("左右平移"));
+			AddControlRow(PrimaryColumn, TEXT("FlightLiftHint"), TEXT("SPACE"), TEXT("CTRL"), TEXT("起飞 / 上升 / 下降"));
+			AddControlRow(PrimaryColumn, TEXT("FlightBoostHint"), TEXT("SHIFT"), nullptr, TEXT("加速推进"));
+			AddControlRow(PrimaryColumn, TEXT("FlightRollHint"), TEXT("Q"), TEXT("E"), TEXT("机身翻滚"));
+			AddControlRow(SecondaryColumn, TEXT("FlightLookHint"), TEXT("ALT"), nullptr, TEXT("自由观察"));
+			AddControlRow(SecondaryColumn, TEXT("FlightTurnHint"), TEXT("T"), nullptr, TEXT("快速调头"));
+			AddControlRow(SecondaryColumn, TEXT("FlightZoomHint"), TEXT("WHEEL"), nullptr, TEXT("镜头远近"));
+			AddControlRow(SecondaryColumn, TEXT("FlightLightHint"), TEXT("L"), nullptr, TEXT("前灯"));
+			FlightLandedExitRow = AddControlRow(SecondaryColumn, TEXT("FlightLandedExitHint"),
+				TEXT("R"), nullptr, TEXT("着陆后下船"));
+			FlightLandedExitRow->SetVisibility(ESlateVisibility::Collapsed);
 			ApplyLayerVisibility(FlightNavPanel, false);
-			ApplyLayerVisibility(FlightNavControlsText, false);
+			ApplyLayerVisibility(FlightControlsPanel, false);
 		}
 
 		PlayerCardPanel = MakeBorder(WidgetTree, TEXT("PlayerCardPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 5.0f);
@@ -1374,7 +1445,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	ApplyLayerVisibility(InteractionPromptText, bGameplaySurface && !bGameMenuOpen);
 	ApplyLayerVisibility(EquipmentHintText, bGameplaySurface && !bGameMenuOpen);
 	ApplyLayerVisibility(CrosshairText, false);
-	ApplyLayerVisibility(GameplayHelpText, bSpaceFlight && !bGameMenuOpen);
+	ApplyLayerVisibility(GameplayHelpText, false);
 	if (!bSpaceFlight)
 	{
 		SetFlightNavigationVisible(false);
@@ -1422,7 +1493,7 @@ void UJTSPrototypeHUDWidget::SetFlightNavigationVisible(bool bVisible)
 	ApplyLayerVisibility(FlightTelemetryText, false);
 	if (!bVisible)
 	{
-		ApplyLayerVisibility(FlightNavControlsText, false);
+		ApplyLayerVisibility(FlightControlsPanel, false);
 	}
 }
 
@@ -1459,31 +1530,20 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 		&& IsValid(SpaceWorldManager)
 		&& SpaceWorldManager->IsAirborneTravel();
 	SetFlightNavigationVisible(bShowNavigation);
+	const bool bLocalDriver = IsLocalFlightDriver(Spacecraft);
+	if (FlightControlsPanel != nullptr)
+	{
+		FlightControlsPanel->SetVisibility(bLocalDriver && !bGameMenuOpen
+			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (FlightLandedExitRow != nullptr)
+	{
+		FlightLandedExitRow->SetVisibility(bLocalDriver && Spacecraft->IsLanded()
+			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
 	if (!bShowNavigation || CruiseNavigationWidget == nullptr)
 	{
 		return;
-	}
-
-	const bool bLocalDriver = IsLocalFlightDriver(Spacecraft);
-	if (FlightNavControlsText != nullptr)
-	{
-		if (UCanvasPanelSlot* const ControlsSlot = Cast<UCanvasPanelSlot>(FlightNavControlsText->Slot))
-		{
-			ControlsSlot->SetPosition(FVector2D(-18.0f, 584.0f));
-			ControlsSlot->SetSize(FVector2D(520.0f, 132.0f));
-		}
-	}
-	ApplyLayerVisibility(FlightNavControlsText, bLocalDriver);
-	if (bLocalDriver && FlightNavControlsText != nullptr)
-	{
-		const float HoldProgress = Spacecraft->GetDriverRelinquishHoldProgress();
-		const FString RelinquishLine = HoldProgress > 0.01f
-			? FString::Printf(TEXT("HOLD Q  LEAVE SEAT  %d%%"), FMath::RoundToInt(HoldProgress * 100.0f))
-			: FString(TEXT("HOLD Q  LEAVE SEAT"));
-		FlightNavControlsText->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), 14.0f));
-		FlightNavControlsText->SetText(FText::FromString(FString::Printf(
-			TEXT("W/S  THRUST    A/D  STRAFE\nARROWS  STEER HULL\nMOUSE  FREE CAMERA    WHEEL  ZOOM\nSPACE / CTRL  CLIMB / DESCEND\nSHIFT  BOOST     C  BRAKE\n%s"),
-			*RelinquishLine)));
 	}
 
 	const AJTSPlanetAnchor* SurfacePlanet = Spacecraft->GetFlightPlanet();
@@ -1630,14 +1690,16 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 
 	ApplyLayerVisibility(FlightTelemetryText, true);
 	RefreshFlightNavigation();
-	ApplyLayerVisibility(GameplayHelpText, true);
+	ApplyLayerVisibility(GameplayHelpText, false);
 	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
 	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
 	// altitude reference.
 	const AJTSPlanetAnchor* const Planet = Spacecraft->GetFlightPlanet();
 	if (!IsValid(Planet))
 	{
-		FlightTelemetryText->SetText(FText::FromString(TEXT("DEEP SPACE\nFREE FLIGHT")));
+		FlightTelemetryText->SetText(FText::FromString(Spacecraft->IsFlightAssistEnabled()
+			? TEXT("DEEP SPACE\nFLIGHT ASSIST")
+			: TEXT("DEEP SPACE\nINERTIAL FLIGHT")));
 		return;
 	}
 
@@ -1718,25 +1780,6 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		AltitudeMeters,
 		*StateLine)));
 	FlightTelemetryText->SetColorAndOpacity(FSlateColor(StateColor));
-	if (GameplayHelpText != nullptr)
-	{
-		FString HelpText;
-		if (FlightState == EJTSSpacecraftFlightState::Landed)
-		{
-			HelpText = TEXT("W/S FORWARD/REVERSE    A/D STRAFE    MOUSE LOOK    WHEEL DISTANCE\nSPACE TAKE OFF    SHIFT BOOST    C BRAKE    R DISEMBARK");
-		}
-		else if (FlightState == EJTSSpacecraftFlightState::LandingAssist)
-		{
-			HelpText = TEXT("AUTO-LANDING IN PROGRESS\nSPACE ABORT");
-		}
-		else
-		{
-			HelpText = Spacecraft->AreHeadlightsOn()
-				? TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    L LIGHTS OFF\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND")
-				: TEXT("W/S FLY/REVERSE    A/D STRAFE    MOUSE LOOK    L LIGHTS\nSPACE/CTRL UP/DOWN    LOW-ALT DIVE ASSIST    HOLD CTRL OVER PAD TO LAND");
-		}
-		GameplayHelpText->SetText(FText::FromString(HelpText));
-	}
 }
 
 void UJTSPrototypeHUDWidget::RefreshGameplayHud()

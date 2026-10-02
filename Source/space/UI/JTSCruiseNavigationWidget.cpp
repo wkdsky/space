@@ -187,8 +187,9 @@ public:
 		StrokeRoundedRect(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2D(2.0f, 2.0f), Size - FVector2D(4.0f, 4.0f), 10.0f, PanelEdge * Tint, 1.5f);
 		StrokeLine(OutDrawElements, LayerId + 1, AllottedGeometry, FVector2D(20.0f, 52.0f), FVector2D(Size.X - 20.0f, 52.0f), InkDim * Tint, 1.0f);
 
-		const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
-		const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 15);
+		// The HUD renders this dial at half size; 1.4x source fonts keep text at 70% on screen.
+		const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 22);
+		const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 21);
 		DrawText(OutDrawElements, LayerId + 2, AllottedGeometry, TitleFont, LeftCaption, FVector2D(24.0f, 16.0f), Ink * Tint, ETextJustify::Left);
 		DrawText(OutDrawElements, LayerId + 2, AllottedGeometry, TitleFont, RightCaption, FVector2D(Size.X - 24.0f, 16.0f), Ink * Tint, ETextJustify::Right);
 
@@ -517,7 +518,7 @@ private:
 				Geometry,
 				LabelFont,
 				RangeLabel,
-				NamePosition + FVector2D(0.0f, 20.0f),
+					NamePosition + FVector2D(0.0f, 28.0f),
 				Ink * Tint,
 				bLabelOnLeft ? ETextJustify::Right : ETextJustify::Left);
 		}
@@ -560,7 +561,7 @@ private:
 		PaintShipPerspective(OutDrawElements, LayerId + 2, Geometry, ShipAnchor, Tint);
 
 		const FString Distance = Contacts.Num() > 0 ? FormatSurfaceRange(Contacts[0].RangeCentimeters) : FString(TEXT("0 m"));
-		const FSlateFontInfo DistanceFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 40);
+		const FSlateFontInfo DistanceFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 56);
 		DrawText(
 			OutDrawElements,
 			LayerId + 1,

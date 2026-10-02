@@ -93,28 +93,40 @@ struct SPACE_API FJTSSpacecraftInputState
 {
 	GENERATED_BODY()
 
-	/** Hull-forward throttle. Positive only: W thrusts along the ship's own facing. */
+	/** Signed hull-forward thrust. */
 	UPROPERTY()
 	float MoveForward = 0.0f;
 
-	/** Unused by the current flight scheme. Kept so older replicated packets still deserialize. */
+	/** Signed hull-right thrust. */
 	UPROPERTY()
 	float MoveRight = 0.0f;
 
 	UPROPERTY()
 	float Lift = 0.0f;
 
-	/** Hull yaw rate. Positive yaws to the ship's right. A/D write this. The camera never writes this. */
+	/** Hull yaw rate. Positive yaws to the ship's right. */
 	UPROPERTY()
 	float Yaw = 0.0f;
 
-	/** Held S: rotate in place on the horizontal plane until the nose and tail have swapped. */
+	/** Held turnaround command; separate from signed reverse thrust. */
 	UPROPERTY()
 	bool bTurnAround = false;
 
 	/** Hull pitch rate from the steering keys. Positive pitches the nose away from the reference horizon. */
 	UPROPERTY()
 	float Pitch = 0.0f;
+
+	/** Signed rotation about the ship's nose. */
+	UPROPERTY()
+	float Roll = 0.0f;
+
+	/** When disabled, translation retains inertia after thrust is released. */
+	UPROPERTY()
+	bool bFlightAssistEnabled = true;
+
+	/** Pilot-selected cap on commanded translation, from precision approach to full speed. */
+	UPROPERTY()
+	float SpeedLimit = 1.0f;
 
 	UPROPERTY()
 	bool bBoosting = false;

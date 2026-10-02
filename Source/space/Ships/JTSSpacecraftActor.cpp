@@ -320,10 +320,21 @@ void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	if (HasAuthority())
 	{
+		if (DriverPlayerState != nullptr && FlightMovementComponent != nullptr && GetWorld() != nullptr
+			&& GetWorld()->GetTimeSeconds() - LastFlightInputTimeSeconds > 0.5)
+		{
+			FlightMovementComponent->ClearInput();
+			bAutomaticLandingDescentHeld = false;
+			AutomaticLandingCheckElapsed = 0.0f;
+			ReplicatedPresentationForward = 0.0f;
+			ReplicatedPresentationLift = 0.0f;
+			bReplicatedPresentationBoost = false;
+		}
 		UpdateAutomaticLanding(DeltaSeconds);
 	}
 	UpdateDisembarkInputGate();
 	UpdateFlightCamera(DeltaSeconds);
+	UpdateMouseFlightSteering(DeltaSeconds);
 }
 
 void AJTSSpacecraftActor::BeginPlay()
@@ -408,6 +419,7 @@ void AJTSSpacecraftActor::BeginPlay()
 
 void AJTSSpacecraftActor::PossessedBy(AController* NewController)
 {
+	LastFlightInputTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
 	bDisembarkInputArmed = false;
 	bFlightCameraFrameInitialized = false;
 	UnregisterFlightInputMappingContext();
@@ -426,12 +438,27 @@ void AJTSSpacecraftActor::UnPossessed()
 	bDisembarkRequestPending = false;
 	CancelDriverRelinquishHold();
 	LocalFlightInput = FJTSSpacecraftInputState();
+	bHasSubmittedFlightInput = false;
+	FlightKeyYaw = 0.0f;
+	FlightKeyPitch = 0.0f;
+	bFlightFreeLookHeld = false;
+	bFlightCameraRecentering = false;
 	bFlightCameraFrameInitialized = false;
 	UnregisterFlightInputMappingContext();
 	BoundFlightInputComponent.Reset();
 	if (FlightMovementComponent != nullptr)
 	{
 		FlightMovementComponent->ClearInput();
+		if (HasAuthority())
+		{
+			FlightMovementComponent->SetFlightAssistEnabled(true);
+			FlightMovementComponent->SetSpeedLimit(1.0f);
+		}
+	}
+	if (HasAuthority())
+	{
+		bReplicatedFlightAssistEnabled = true;
+		ReplicatedFlightSpeedLimit = 1.0f;
 	}
 	Super::UnPossessed();
 }
@@ -440,6 +467,12 @@ void AJTSSpacecraftActor::OnRep_Controller()
 {
 	bDisembarkInputArmed = false;
 	bFlightCameraFrameInitialized = false;
+	FlightKeyYaw = 0.0f;
+	FlightKeyPitch = 0.0f;
+	bFlightFreeLookHeld = false;
+	bFlightCameraRecentering = false;
+	LocalFlightInput = FJTSSpacecraftInputState();
+	bHasSubmittedFlightInput = false;
 	UnregisterFlightInputMappingContext();
 	Super::OnRep_Controller();
 	EnsureFlightInputMapping();
@@ -528,6 +561,9 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveForward);
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveForward);
 	EnhancedInputComponent->BindAction(FlightForwardAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveForward);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightMoveRight);
+	EnhancedInputComponent->BindAction(FlightRightAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightMoveRight);
 	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightSteerYaw);
 	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightSteerYaw);
 	EnhancedInputComponent->BindAction(FlightSteerYawAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightSteerYaw);
@@ -543,20 +579,21 @@ void AJTSSpacecraftActor::SetupPlayerInputComponent(UInputComponent* PlayerInput
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightSteerPitch);
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightSteerPitch);
 	EnhancedInputComponent->BindAction(FlightSteerPitchAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightSteerPitch);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightRollAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightRoll);
+	EnhancedInputComponent->BindAction(FlightFreeLookAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightFreeLookStarted);
+	EnhancedInputComponent->BindAction(FlightFreeLookAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightFreeLookStopped);
+	EnhancedInputComponent->BindAction(FlightFreeLookAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightFreeLookStopped);
+	EnhancedInputComponent->BindAction(FlightRecenterCameraAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightRecenterCamera);
 	EnhancedInputComponent->BindAction(FlightCameraZoomAction, ETriggerEvent::Triggered, this, &AJTSSpacecraftActor::FlightCameraZoom);
 	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightBoostStarted);
 	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightBoostStopped);
 	EnhancedInputComponent->BindAction(FlightBoostAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBoostStopped);
-	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightBrakeStarted);
-	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightBrakeStopped);
-	EnhancedInputComponent->BindAction(FlightBrakeAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightBrakeStopped);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightDisembarkStarted);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
 	EnhancedInputComponent->BindAction(FlightDisembarkAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightDisembarkReleased);
 	EnhancedInputComponent->BindAction(FlightHeadlightAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightHeadlightStarted);
-	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Started, this, &AJTSSpacecraftActor::FlightRelinquishDriverStarted);
-	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Completed, this, &AJTSSpacecraftActor::FlightRelinquishDriverReleased);
-	EnhancedInputComponent->BindAction(FlightRelinquishDriverAction, ETriggerEvent::Canceled, this, &AJTSSpacecraftActor::FlightRelinquishDriverReleased);
 
 	BoundFlightInputComponent = PlayerInputComponent;
 	RegisterFlightInputMappingContext();
@@ -585,11 +622,12 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightLookPitchAction = NewObject<UInputAction>(this, TEXT("FlightLookPitchAction"), RF_Transient);
 	FlightSteerYawAction = NewObject<UInputAction>(this, TEXT("FlightSteerYawAction"), RF_Transient);
 	FlightSteerPitchAction = NewObject<UInputAction>(this, TEXT("FlightSteerPitchAction"), RF_Transient);
+	FlightRollAction = NewObject<UInputAction>(this, TEXT("FlightRollAction"), RF_Transient);
+	FlightFreeLookAction = NewObject<UInputAction>(this, TEXT("FlightFreeLookAction"), RF_Transient);
+	FlightRecenterCameraAction = NewObject<UInputAction>(this, TEXT("FlightRecenterCameraAction"), RF_Transient);
 	FlightCameraZoomAction = NewObject<UInputAction>(this, TEXT("FlightCameraZoomAction"), RF_Transient);
 	FlightBoostAction = NewObject<UInputAction>(this, TEXT("FlightBoostAction"), RF_Transient);
-	FlightBrakeAction = NewObject<UInputAction>(this, TEXT("FlightBrakeAction"), RF_Transient);
 	FlightDisembarkAction = NewObject<UInputAction>(this, TEXT("FlightDisembarkAction"), RF_Transient);
-	FlightRelinquishDriverAction = NewObject<UInputAction>(this, TEXT("FlightRelinquishDriverAction"), RF_Transient);
 	FlightHeadlightAction = NewObject<UInputAction>(this, TEXT("FlightHeadlightAction"), RF_Transient);
 
 	FlightForwardAction->ValueType = EInputActionValueType::Axis1D;
@@ -601,27 +639,30 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 	FlightLookPitchAction->ValueType = EInputActionValueType::Axis1D;
 	FlightSteerYawAction->ValueType = EInputActionValueType::Axis1D;
 	FlightSteerPitchAction->ValueType = EInputActionValueType::Axis1D;
+	FlightRollAction->ValueType = EInputActionValueType::Axis1D;
+	FlightFreeLookAction->ValueType = EInputActionValueType::Boolean;
+	FlightRecenterCameraAction->ValueType = EInputActionValueType::Boolean;
 	FlightCameraZoomAction->ValueType = EInputActionValueType::Axis1D;
 	FlightBoostAction->ValueType = EInputActionValueType::Boolean;
-	FlightBrakeAction->ValueType = EInputActionValueType::Boolean;
 	FlightDisembarkAction->ValueType = EInputActionValueType::Boolean;
-	FlightRelinquishDriverAction->ValueType = EInputActionValueType::Boolean;
 	FlightHeadlightAction->ValueType = EInputActionValueType::Boolean;
 
 	FlightInputMappingContext->MapKey(FlightForwardAction, EKeys::W);
-	FlightInputMappingContext->MapKey(FlightSteerYawAction, EKeys::D);
-	FlightInputMappingContext->MapKey(FlightTurnAroundAction, EKeys::S);
+	FlightInputMappingContext->MapKey(FlightRightAction, EKeys::D);
+	FlightInputMappingContext->MapKey(FlightTurnAroundAction, EKeys::T);
 	FlightInputMappingContext->MapKey(FlightVerticalAction, EKeys::SpaceBar);
 	FlightInputMappingContext->MapKey(FlightAscendAction, EKeys::SpaceBar);
-	FlightInputMappingContext->MapKey(FlightDisembarkAction, EKeys::R);
 	FlightInputMappingContext->MapKey(FlightLookYawAction, EKeys::MouseX);
 	FlightInputMappingContext->MapKey(FlightLookPitchAction, EKeys::MouseY);
 	FlightInputMappingContext->MapKey(FlightSteerYawAction, EKeys::Right);
 	FlightInputMappingContext->MapKey(FlightSteerPitchAction, EKeys::Up);
+	FlightInputMappingContext->MapKey(FlightRollAction, EKeys::E);
+	FlightInputMappingContext->MapKey(FlightFreeLookAction, EKeys::LeftAlt);
+	FlightInputMappingContext->MapKey(FlightFreeLookAction, EKeys::RightAlt);
+	FlightInputMappingContext->MapKey(FlightRecenterCameraAction, EKeys::MiddleMouseButton);
 	FlightInputMappingContext->MapKey(FlightCameraZoomAction, EKeys::MouseWheelAxis);
 	FlightInputMappingContext->MapKey(FlightBoostAction, EKeys::LeftShift);
-	FlightInputMappingContext->MapKey(FlightBrakeAction, EKeys::C);
-	FlightInputMappingContext->MapKey(FlightRelinquishDriverAction, EKeys::Q);
+	FlightInputMappingContext->MapKey(FlightDisembarkAction, EKeys::R);
 	FlightInputMappingContext->MapKey(FlightHeadlightAction, EKeys::L);
 
 	auto AddNegatedMapping = [this](UInputAction* Action, const FKey& Key)
@@ -629,7 +670,9 @@ void AJTSSpacecraftActor::InitializeFlightInput()
 		FEnhancedActionKeyMapping& Mapping = FlightInputMappingContext->MapKey(Action, Key);
 		Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(FlightInputMappingContext));
 	};
-	AddNegatedMapping(FlightSteerYawAction, EKeys::A);
+	AddNegatedMapping(FlightForwardAction, EKeys::S);
+	AddNegatedMapping(FlightRightAction, EKeys::A);
+	AddNegatedMapping(FlightRollAction, EKeys::Q);
 	AddNegatedMapping(FlightVerticalAction, EKeys::LeftControl);
 	AddNegatedMapping(FlightVerticalAction, EKeys::RightControl);
 	AddNegatedMapping(FlightSteerYawAction, EKeys::Left);
@@ -685,15 +728,14 @@ void AJTSSpacecraftActor::FlightMoveForward(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
 {
-	LocalFlightInput.MoveRight = 0.0f;
-	LocalFlightInput.Yaw = Value.Get<float>();
+	LocalFlightInput.MoveRight = Value.Get<float>();
 	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightTurnAround(const FInputActionValue& Value)
 {
 	LocalFlightInput.bTurnAround = Value.Get<bool>();
-	LocalFlightInput.MoveForward = FMath::Max(0.0f, LocalFlightInput.MoveForward);
+	if (LocalFlightInput.bTurnAround && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
 	SubmitFlightInput();
 }
 
@@ -703,6 +745,7 @@ void AJTSSpacecraftActor::FlightAscendStarted(const FInputActionValue& Value)
 	{
 		return;
 	}
+	bFlightCameraRecentering = true;
 
 	if (HasAuthority())
 	{
@@ -722,49 +765,63 @@ void AJTSSpacecraftActor::FlightMoveVertical(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightSteerYaw(const FInputActionValue& Value)
 {
-	LocalFlightInput.Yaw = Value.Get<float>();
+	FlightKeyYaw = Value.Get<float>();
+	if (!FMath::IsNearlyZero(FlightKeyYaw) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
+	LocalFlightInput.Yaw = FlightKeyYaw;
 	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightSteerPitch(const FInputActionValue& Value)
 {
-	LocalFlightInput.Pitch = Value.Get<float>();
+	FlightKeyPitch = Value.Get<float>();
+	if (!FMath::IsNearlyZero(FlightKeyPitch) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
+	LocalFlightInput.Pitch = FlightKeyPitch;
 	SubmitFlightInput();
+}
+
+void AJTSSpacecraftActor::FlightRoll(const FInputActionValue& Value)
+{
+	LocalFlightInput.Roll = Value.Get<float>();
+	if (!FMath::IsNearlyZero(LocalFlightInput.Roll) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
+	SubmitFlightInput();
+}
+
+void AJTSSpacecraftActor::FlightFreeLookStarted(const FInputActionValue& Value)
+{
+	bFlightFreeLookHeld = Value.Get<bool>();
+	bFlightCameraRecentering = false;
+}
+
+void AJTSSpacecraftActor::FlightFreeLookStopped(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	bFlightFreeLookHeld = false;
+	bFlightCameraRecentering = true;
+}
+
+void AJTSSpacecraftActor::FlightRecenterCamera(const FInputActionValue& Value)
+{
+	if (Value.Get<bool>()) bFlightCameraRecentering = true;
 }
 
 void AJTSSpacecraftActor::FlightLookYaw(const FInputActionValue& Value)
 {
-	InitializeFlightCameraFrame();
-	const FVector ReferenceUp = GetFlightReferenceUp();
-	if (ReferenceUp.IsNearlyZero())
-	{
-		return;
-	}
-
-	FlightCameraTangentForward = GetStableFlightTangent(ReferenceUp, FlightCameraTangentForward);
-	const float YawDeltaRadians = FMath::DegreesToRadians(
-		Value.Get<float>() * FlightCameraLookSensitivity);
-	FlightCameraTangentForward = FQuat(ReferenceUp, YawDeltaRadians)
-		.RotateVector(FlightCameraTangentForward)
-		.GetSafeNormal();
-	UpdateFlightCameraFrame(0.0f);
+	ApplyFlightCameraLook(Value.Get<float>() * FlightCameraLookSensitivity, 0.0f);
 }
 
 void AJTSSpacecraftActor::FlightLookPitch(const FInputActionValue& Value)
 {
-	InitializeFlightCameraFrame();
 	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
 	const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
-	FlightCameraPitch = FMath::Clamp(
-		FlightCameraPitch + Value.Get<float>() * FlightCameraLookSensitivity * PitchDirection,
-		FMath::Min(FlightCameraPitchMin, FlightCameraPitchMax),
-		FMath::Max(FlightCameraPitchMin, FlightCameraPitchMax));
-	UpdateFlightCameraFrame(0.0f);
+	ApplyFlightCameraLook(0.0f, Value.Get<float>() * FlightCameraLookSensitivity * PitchDirection);
 }
 
 void AJTSSpacecraftActor::FlightCameraZoom(const FInputActionValue& Value)
 {
-	AdjustFlightCameraDistance(Value.Get<float>());
+	if (!bFlightFreeLookHeld)
+	{
+		AdjustFlightCameraDistance(Value.Get<float>());
+	}
 }
 
 void AJTSSpacecraftActor::FlightBoostStarted(const FInputActionValue& Value)
@@ -776,18 +833,6 @@ void AJTSSpacecraftActor::FlightBoostStarted(const FInputActionValue& Value)
 void AJTSSpacecraftActor::FlightBoostStopped(const FInputActionValue& Value)
 {
 	LocalFlightInput.bBoosting = false;
-	SubmitFlightInput();
-}
-
-void AJTSSpacecraftActor::FlightBrakeStarted(const FInputActionValue& Value)
-{
-	LocalFlightInput.bBraking = Value.Get<bool>();
-	SubmitFlightInput();
-}
-
-void AJTSSpacecraftActor::FlightBrakeStopped(const FInputActionValue& Value)
-{
-	LocalFlightInput.bBraking = false;
 	SubmitFlightInput();
 }
 
@@ -829,7 +874,8 @@ void AJTSSpacecraftActor::OnRep_Headlights()
 
 void AJTSSpacecraftActor::FlightDisembarkStarted(const FInputActionValue& Value)
 {
-	if (!Value.Get<bool>() || !bDisembarkInputArmed || bDisembarkRequestPending)
+	if (!Value.Get<bool>() || !bDisembarkInputArmed || bDisembarkRequestPending
+		|| (!IsLanded() && !IsEarthCollectionActive()))
 	{
 		return;
 	}
@@ -1016,27 +1062,6 @@ FVector AJTSSpacecraftActor::GetFlightReferenceUp() const
 	return ActorUp.IsNearlyZero() ? FVector::UpVector : ActorUp;
 }
 
-FVector AJTSSpacecraftActor::GetStableFlightTangent(
-	const FVector& UpVector,
-	const FVector& PreferredDirection) const
-{
-	FVector Tangent = FVector::VectorPlaneProject(PreferredDirection, UpVector).GetSafeNormal();
-	if (!Tangent.IsNearlyZero())
-	{
-		return Tangent;
-	}
-
-	Tangent = FVector::VectorPlaneProject(GetActorForwardVector(), UpVector).GetSafeNormal();
-	if (!Tangent.IsNearlyZero())
-	{
-		return Tangent;
-	}
-
-	FVector FallbackRight;
-	UpVector.FindBestAxisVectors(Tangent, FallbackRight);
-	return Tangent.GetSafeNormal();
-}
-
 void AJTSSpacecraftActor::InitializeFlightCameraFrame()
 {
 	if (bFlightCameraFrameInitialized)
@@ -1044,46 +1069,49 @@ void AJTSSpacecraftActor::InitializeFlightCameraFrame()
 		return;
 	}
 
-	const FVector ReferenceUp = GetFlightReferenceUp();
-	FVector PreferredViewForward = GetActorForwardVector();
+	FlightCameraAimRotation = GetActorQuat();
 	if (const AController* const CurrentController = GetController())
 	{
-		const FVector ControllerForward = CurrentController->GetControlRotation().Vector().GetSafeNormal();
-		if (!ControllerForward.IsNearlyZero())
+		const FVector ViewForward = CurrentController->GetControlRotation().Vector().GetSafeNormal();
+		if (!ViewForward.IsNearlyZero())
 		{
-			PreferredViewForward = ControllerForward;
+			FlightCameraAimRotation = FRotationMatrix::MakeFromXZ(ViewForward, GetFlightReferenceUp()).ToQuat();
+			bFlightCameraRecentering = true;
 		}
 	}
-
-	FlightCameraTangentForward = GetStableFlightTangent(ReferenceUp, PreferredViewForward);
-	FlightCameraPitch = FMath::Clamp(
-		FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
-			FVector::DotProduct(PreferredViewForward.GetSafeNormal(), ReferenceUp),
-			-1.0f,
-			1.0f))),
-		FMath::Min(FlightCameraPitchMin, FlightCameraPitchMax),
-		FMath::Max(FlightCameraPitchMin, FlightCameraPitchMax));
-	LastFlightCameraUp = ReferenceUp;
+	LastFlightCameraHullRotation = GetActorQuat();
 	bFlightCameraFrameInitialized = true;
 	UpdateFlightCameraFrame(0.0f);
 }
 
 FVector AJTSSpacecraftActor::GetFlightCameraForward(const FVector& ReferenceUp) const
 {
-	const FVector TangentForward = GetStableFlightTangent(ReferenceUp, FlightCameraTangentForward);
-	const FVector CameraRight = FVector::CrossProduct(ReferenceUp, TangentForward).GetSafeNormal();
-	if (CameraRight.IsNearlyZero())
-	{
-		return TangentForward;
-	}
-	return FQuat(CameraRight, FMath::DegreesToRadians(-FlightCameraPitch))
-		.RotateVector(TangentForward)
-		.GetSafeNormal();
+	static_cast<void>(ReferenceUp);
+	return FlightCameraAimRotation.GetForwardVector();
+}
+
+void AJTSSpacecraftActor::ApplyFlightCameraLook(float YawDegrees, float PitchDegrees)
+{
+	InitializeFlightCameraFrame();
+	if (FMath::IsNearlyZero(YawDegrees) && FMath::IsNearlyZero(PitchDegrees)) return;
+	const FQuat YawDelta(FlightCameraAimRotation.GetUpVector(), FMath::DegreesToRadians(YawDegrees));
+	const FQuat PitchDelta(FlightCameraAimRotation.GetRightVector(), FMath::DegreesToRadians(-PitchDegrees));
+	const FQuat DesiredAim = (PitchDelta * YawDelta * FlightCameraAimRotation).GetNormalized();
+	const FRotator Relative = (GetActorQuat().Inverse() * DesiredAim).Rotator();
+	const float YawLimit = bFlightFreeLookHeld ? 170.0f : FMath::Clamp(FlightCoupledLookLimit, 1.0f, 89.0f);
+	const float PitchLimit = bFlightFreeLookHeld ? 85.0f : FMath::Clamp(FlightCoupledLookLimit, 1.0f, 89.0f);
+	FlightCameraAimRotation = (GetActorQuat() * FRotator(
+		FMath::Clamp(FRotator::NormalizeAxis(Relative.Pitch),
+			FMath::Max(-PitchLimit, FMath::Min(FlightCameraPitchMin, FlightCameraPitchMax)),
+			FMath::Min(PitchLimit, FMath::Max(FlightCameraPitchMin, FlightCameraPitchMax))),
+		FMath::Clamp(FRotator::NormalizeAxis(Relative.Yaw), -YawLimit, YawLimit),
+		0.0f).Quaternion()).GetNormalized();
+	bFlightCameraRecentering = false;
+	UpdateFlightCameraFrame(0.0f);
 }
 
 void AJTSSpacecraftActor::UpdateFlightCameraFrame(float DeltaSeconds)
 {
-	static_cast<void>(DeltaSeconds);
 	if (!IsValid(FlightCameraBoom))
 	{
 		return;
@@ -1094,31 +1122,28 @@ void AJTSSpacecraftActor::UpdateFlightCameraFrame(float DeltaSeconds)
 		return;
 	}
 
-	const FVector ReferenceUp = GetFlightReferenceUp();
-	if (ReferenceUp.IsNearlyZero())
+	const FQuat HullRotation = GetActorQuat();
+	const FQuat HullDelta = (HullRotation * LastFlightCameraHullRotation.Inverse()).GetNormalized();
+	const APlayerController* const LocalDriver = Cast<APlayerController>(GetController());
+	if (!IsValid(LocalDriver) || !LocalDriver->IsLocalController()
+		|| (!bFlightFreeLookHeld && (bFlightCameraRecentering
+			|| !FMath::IsNearlyZero(FlightKeyYaw) || !FMath::IsNearlyZero(FlightKeyPitch)
+			|| !FMath::IsNearlyZero(LocalFlightInput.Roll) || LocalFlightInput.bTurnAround)))
 	{
-		return;
+		FlightCameraAimRotation = (HullDelta * FlightCameraAimRotation).GetNormalized();
 	}
-	if (!LastFlightCameraUp.IsNearlyZero())
+	LastFlightCameraHullRotation = HullRotation;
+	if (bFlightCameraRecentering && !bFlightFreeLookHeld)
 	{
-		const FQuat ParallelTransport = FQuat::FindBetweenNormals(LastFlightCameraUp, ReferenceUp);
-		FlightCameraTangentForward = GetStableFlightTangent(
-			ReferenceUp,
-			ParallelTransport.RotateVector(FlightCameraTangentForward));
+		const float Alpha = 1.0f - FMath::Exp(-FMath::Max(0.1f, FlightCameraRecenterSpeed) * FMath::Max(0.0f, DeltaSeconds));
+		FlightCameraAimRotation = FQuat::Slerp(FlightCameraAimRotation, HullRotation, Alpha).GetNormalized();
+		if (FlightCameraAimRotation.AngularDistance(HullRotation) < FMath::DegreesToRadians(0.1f))
+		{
+			FlightCameraAimRotation = HullRotation;
+			bFlightCameraRecentering = false;
+		}
 	}
-	else
-	{
-		FlightCameraTangentForward = GetStableFlightTangent(ReferenceUp, FlightCameraTangentForward);
-	}
-	LastFlightCameraUp = ReferenceUp;
-	FlightCameraPitch = FMath::Clamp(
-		FlightCameraPitch,
-		FMath::Min(FlightCameraPitchMin, FlightCameraPitchMax),
-		FMath::Max(FlightCameraPitchMin, FlightCameraPitchMax));
-
-	const FQuat CameraRotation = FRotationMatrix::MakeFromXZ(
-		GetFlightCameraForward(ReferenceUp),
-		ReferenceUp).ToQuat();
+	const FQuat CameraRotation = FlightCameraAimRotation;
 	FlightCameraBoom->bUsePawnControlRotation = false;
 	FlightCameraBoom->SetUsingAbsoluteRotation(true);
 	FlightCameraBoom->SetWorldRotation(CameraRotation);
@@ -1190,6 +1215,59 @@ EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, E
 	}
 
 	return EJTSShopPurchaseResult::Succeeded;
+}
+
+void AJTSSpacecraftActor::UpdateMouseFlightSteering(float DeltaSeconds)
+{
+	APlayerController* const PlayerController = Cast<APlayerController>(GetController());
+	if (!IsValid(PlayerController) || !PlayerController->IsLocalController() || !bFlightCameraFrameInitialized)
+	{
+		return;
+	}
+	if (PlayerController->IsMoveInputIgnored())
+	{
+		const bool bAssistEnabled = LocalFlightInput.bFlightAssistEnabled;
+		const float CurrentSpeedLimit = LocalFlightInput.SpeedLimit;
+		LocalFlightInput = FJTSSpacecraftInputState();
+		LocalFlightInput.bFlightAssistEnabled = bAssistEnabled;
+		LocalFlightInput.SpeedLimit = CurrentSpeedLimit;
+		FlightKeyYaw = 0.0f;
+		FlightKeyPitch = 0.0f;
+		bFlightFreeLookHeld = false;
+		bFlightCameraRecentering = true;
+		SubmitFlightInput();
+		return;
+	}
+	const bool bLookInputIgnored = PlayerController->IsLookInputIgnored();
+	if (bLookInputIgnored)
+	{
+		FlightKeyYaw = 0.0f;
+		FlightKeyPitch = 0.0f;
+	}
+
+	float MouseYaw = 0.0f;
+	float MousePitch = 0.0f;
+	if (!bLookInputIgnored && !bFlightFreeLookHeld && !bFlightCameraRecentering
+		&& FlightState == EJTSSpacecraftFlightState::Flying)
+	{
+		const FRotator Relative = (GetActorQuat().Inverse() * FlightCameraAimRotation).Rotator();
+		const float DeadAngle = FMath::Max(0.0f, FlightMouseSteerDeadAngle);
+		const float Range = FMath::Max(1.0f, FlightMouseSteerFullAngle - DeadAngle);
+		auto SteeringFromAngle = [DeadAngle, Range](float Angle)
+		{
+			return FMath::Sign(Angle) * FMath::Clamp((FMath::Abs(Angle) - DeadAngle) / Range, 0.0f, 1.0f);
+		};
+		MouseYaw = SteeringFromAngle(FRotator::NormalizeAxis(Relative.Yaw));
+		MousePitch = SteeringFromAngle(FRotator::NormalizeAxis(Relative.Pitch));
+	}
+	LocalFlightInput.Yaw = FMath::Clamp(FlightKeyYaw + MouseYaw, -1.0f, 1.0f);
+	LocalFlightInput.Pitch = FMath::Clamp(FlightKeyPitch + MousePitch, -1.0f, 1.0f);
+	FlightInputSendElapsed += FMath::Max(0.0f, DeltaSeconds);
+	if (FlightInputSendElapsed >= 0.05f)
+	{
+		FlightInputSendElapsed = 0.0f;
+		SubmitFlightInput(true);
+	}
 }
 
 const UJTSStellarLootTable* AJTSSpacecraftActor::GetStellarLootTable() const
@@ -1676,6 +1754,16 @@ float AJTSSpacecraftActor::GetSpeedNormalized() const
 float AJTSSpacecraftActor::GetThrottleNormalized() const
 {
 	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetThrottleNormalized() : 0.0f;
+}
+
+bool AJTSSpacecraftActor::IsFlightAssistEnabled() const
+{
+	return IsLocallyControlled() ? LocalFlightInput.bFlightAssistEnabled : bReplicatedFlightAssistEnabled;
+}
+
+float AJTSSpacecraftActor::GetFlightSpeedLimit() const
+{
+	return IsLocallyControlled() ? LocalFlightInput.SpeedLimit : ReplicatedFlightSpeedLimit;
 }
 
 UJTSSpacecraftFlightMovementComponent* AJTSSpacecraftActor::GetFlightMovement() const
@@ -2767,8 +2855,26 @@ void AJTSSpacecraftActor::RemoveOccupant(const AJTSPlayerState* InPlayerState)
 	});
 }
 
-void AJTSSpacecraftActor::SubmitFlightInput()
+void AJTSSpacecraftActor::SubmitFlightInput(bool bHeartbeat)
 {
+	const FJTSSpacecraftInputState& Previous = LastSubmittedFlightInput;
+	if (!bHeartbeat && bHasSubmittedFlightInput
+		&& FMath::IsNearlyEqual(LocalFlightInput.MoveForward, Previous.MoveForward)
+		&& FMath::IsNearlyEqual(LocalFlightInput.MoveRight, Previous.MoveRight)
+		&& FMath::IsNearlyEqual(LocalFlightInput.Lift, Previous.Lift)
+		&& FMath::IsNearlyEqual(LocalFlightInput.Yaw, Previous.Yaw)
+		&& FMath::IsNearlyEqual(LocalFlightInput.Pitch, Previous.Pitch)
+		&& FMath::IsNearlyEqual(LocalFlightInput.Roll, Previous.Roll)
+		&& LocalFlightInput.bTurnAround == Previous.bTurnAround
+		&& LocalFlightInput.bBoosting == Previous.bBoosting
+		&& LocalFlightInput.bBraking == Previous.bBraking
+		&& LocalFlightInput.bFlightAssistEnabled == Previous.bFlightAssistEnabled
+		&& FMath::IsNearlyEqual(LocalFlightInput.SpeedLimit, Previous.SpeedLimit))
+	{
+		return;
+	}
+	LastSubmittedFlightInput = LocalFlightInput;
+	bHasSubmittedFlightInput = true;
 	if (HasAuthority())
 	{
 		ApplyFlightInputOnServer(LocalFlightInput);
@@ -2782,7 +2888,12 @@ void AJTSSpacecraftActor::SubmitFlightInput()
 void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState)
 {
 	if (!HasAuthority() || FlightMovementComponent == nullptr) return;
-	const float ClampedLift = FMath::Clamp(InputState.Lift, -1.0f, 1.0f);
+	auto SafeAxis = [](float Value)
+	{
+		return FMath::IsFinite(Value) ? FMath::Clamp(Value, -1.0f, 1.0f) : 0.0f;
+	};
+	LastFlightInputTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
+	const float ClampedLift = SafeAxis(InputState.Lift);
 	const bool bWasAutomaticLandingDescentHeld = bAutomaticLandingDescentHeld;
 	bAutomaticLandingDescentHeld = ClampedLift <= -FMath::Clamp(
 		AutomaticLandingDescentInputThreshold,
@@ -2806,22 +2917,28 @@ void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputStat
 		return;
 	}
 	const FVector2D MoveInput(
-		0.0f,
-		FMath::Clamp(InputState.MoveForward, 0.0f, 1.0f));
+		SafeAxis(InputState.MoveRight),
+		SafeAxis(InputState.MoveForward));
 	FlightMovementComponent->SetMoveInput(MoveInput);
 	FlightMovementComponent->SetVerticalInput(ClampedLift);
 	FlightMovementComponent->SetSteeringInput(FVector2D(
-		FMath::Clamp(InputState.Yaw, -1.0f, 1.0f),
-		FMath::Clamp(InputState.Pitch, -1.0f, 1.0f)));
+		SafeAxis(InputState.Yaw),
+		SafeAxis(InputState.Pitch)));
+	FlightMovementComponent->SetRollInput(SafeAxis(InputState.Roll));
+	// Retired driver shortcuts are fixed gameplay defaults, including for older or forged RPCs.
+	FlightMovementComponent->SetFlightAssistEnabled(true);
+	bReplicatedFlightAssistEnabled = true;
+	FlightMovementComponent->SetSpeedLimit(1.0f);
+	ReplicatedFlightSpeedLimit = 1.0f;
 	FlightMovementComponent->SetTurnAround(InputState.bTurnAround);
 	FlightMovementComponent->SetBoosting(InputState.bBoosting);
-	FlightMovementComponent->SetBraking(InputState.bBraking);
+	FlightMovementComponent->SetBraking(false);
 	ReplicatedPresentationForward = IsLanded()
 		? 0.0f
-		: FMath::Clamp(InputState.MoveForward, 0.0f, 1.0f);
+		: FMath::Max(0.0f, SafeAxis(InputState.MoveForward));
 	ReplicatedPresentationLift = IsLanded()
 		? 0.0f
-		: FMath::Clamp(InputState.Lift, 0.0f, 1.0f);
+		: FMath::Max(0.0f, ClampedLift);
 	bReplicatedPresentationBoost = !IsLanded() && InputState.bBoosting && ReplicatedPresentationForward > 0.05f;
 }
 
@@ -2836,7 +2953,8 @@ void AJTSSpacecraftActor::ServerSetFlightInput_Implementation(const FJTSSpacecra
 
 void AJTSSpacecraftActor::ServerRequestSurfaceTakeoff_Implementation()
 {
-	if (DriverPlayerState == nullptr)
+	const APlayerController* const DriverController = Cast<APlayerController>(GetController());
+	if (!IsValid(DriverController) || DriverController->GetPlayerState<AJTSPlayerState>() != DriverPlayerState)
 	{
 		return;
 	}
@@ -2971,6 +3089,8 @@ void AJTSSpacecraftActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationForward);
 	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedPresentationLift);
 	DOREPLIFETIME(AJTSSpacecraftActor, bReplicatedPresentationBoost);
+	DOREPLIFETIME(AJTSSpacecraftActor, bReplicatedFlightAssistEnabled);
+	DOREPLIFETIME(AJTSSpacecraftActor, ReplicatedFlightSpeedLimit);
 	DOREPLIFETIME(AJTSSpacecraftActor, bHeadlightsRequested);
 }
 

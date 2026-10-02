@@ -204,7 +204,7 @@ void UJTSSpacecraftPresentationComponent::EnsureHeadlights()
 		? FVector(660.0f, 345.0f, 19.0f)
 		: FVector(BoundsOrigin.X + BoundsExtent.X * 0.92f, BoundsExtent.Y * 0.62f, BoundsOrigin.Z + BoundsExtent.Z * 0.35f);
 	const FLinearColor HousingColor(0.035f, 0.038f, 0.042f, 1.0f);
-	const FLinearColor LensColor(0.72f, 0.88f, 1.0f, 1.0f);
+	const FLinearColor UnlitLensColor(0.08f, 0.09f, 0.10f, 1.0f);
 	const FLinearColor BeamColor(0.86f, 0.93f, 1.0f);
 	// Engine cube is 100 cm. These scales are in the hull component's local
 	// centimetres, so a blueprint mesh scale carries the housings with the hull.
@@ -260,9 +260,9 @@ void UJTSSpacecraftPresentationComponent::EnsureHeadlights()
 		UMaterialInstanceDynamic* const LensMaterial = Lens->CreateDynamicMaterialInstance(0, ShapeMaterial);
 		if (IsValid(LensMaterial))
 		{
-			LensMaterial->SetVectorParameterValue(TEXT("Color"), LensColor);
-			LensMaterial->SetVectorParameterValue(TEXT("BaseColor"), LensColor);
-			LensMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), LensColor * 24.0f);
+			LensMaterial->SetVectorParameterValue(TEXT("Color"), UnlitLensColor);
+			LensMaterial->SetVectorParameterValue(TEXT("BaseColor"), UnlitLensColor);
+			LensMaterial->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor::Black);
 		}
 
 		Ship->AddInstanceComponent(Beam);
@@ -275,8 +275,7 @@ void UJTSSpacecraftPresentationComponent::EnsureHeadlights()
 		Beam->SetRelativeRotation(FRotator(-6.0f, 0.0f, 0.0f));
 		Beam->SetIntensity(0.0f);
 		Beam->SetAttenuationRadius(HeadlightRange);
-		// Wide inner-to-outer gap so the pool fades out past the useful beam
-		// instead of ending on a hard edge.
+		// Keep the spacecraft's two forward beam shapes and their existing fade.
 		Beam->SetInnerConeAngle(14.0f);
 		Beam->SetOuterConeAngle(48.0f);
 		Beam->SetUseInverseSquaredFalloff(false);
@@ -311,9 +310,8 @@ void UJTSSpacecraftPresentationComponent::UpdateHeadlights()
 		if (USpotLightComponent* const Beam = Binding.Beam.Get())
 		{
 			Beam->SetVisibility(bLit);
-			// Two soft floods. Bright enough to read the ground ahead, dim
-			// enough that the near surface stays off pure white.
-			Beam->SetIntensity(bLit ? 180.0f : 0.0f);
+			// Each broad beam contributes to the same patch of terrain.
+			Beam->SetIntensity(bLit ? HeadlightIntensity : 0.0f);
 			Beam->SetAttenuationRadius(HeadlightRange);
 			Beam->SetInnerConeAngle(14.0f);
 			Beam->SetOuterConeAngle(48.0f);
@@ -323,7 +321,7 @@ void UJTSSpacecraftPresentationComponent::UpdateHeadlights()
 			Binding.LensMaterial->SetVectorParameterValue(TEXT("Color"), LensColor);
 			Binding.LensMaterial->SetVectorParameterValue(TEXT("BaseColor"), LensColor);
 			Binding.LensMaterial->SetVectorParameterValue(
-				TEXT("EmissiveColor"), bLit ? LensColor * 2.0f : FLinearColor::Black);
+				TEXT("EmissiveColor"), bLit ? LensColor : FLinearColor::Black);
 		}
 	}
 }

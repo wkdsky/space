@@ -66,6 +66,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Headlight", meta = (ClampMin = "100.0", UIMin = "100.0"))
 	float HeadlightRange = 12000.0f;
 
+	/** Intensity of each of the two overlapping nose beams. Keep the combined wash near the character lamp. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Headlight", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "100.0"))
+	float HeadlightIntensity = 16.0f;
+
 private:
 	struct FGearBinding
 	{

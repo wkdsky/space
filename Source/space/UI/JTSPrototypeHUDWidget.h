@@ -230,7 +230,10 @@ private:
 	TObjectPtr<UCanvasPanelSlot> FlightNavTapeFillSlot;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> FlightNavControlsText;
+	TObjectPtr<UBorder> FlightControlsPanel;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UHorizontalBox> FlightLandedExitRow;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> StartRulesText;

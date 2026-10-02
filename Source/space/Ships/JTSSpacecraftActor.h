@@ -163,6 +163,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	float GetThrottleNormalized() const;
 
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	bool IsFlightAssistEnabled() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
+	float GetFlightSpeedLimit() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Camera")
+	bool IsFlightFreeLooking() const { return bFlightFreeLookHeld; }
+
 	UJTSSpacecraftFlightMovementComponent* GetFlightMovement() const;
 
 	/** Rear-nozzle strength for presentation. Local pilots read their own keys; everyone else reads the driver's replicated intent. */
@@ -397,6 +406,9 @@ private:
 	friend class FJTSBoardingRegression;
 	friend class FJTSHullCameraRegression;
 	friend class FJTSThirdPersonFlightRegression;
+	friend class FJTSSurfaceAttitudeRegression;
+	friend class FJTSNosePitchGuardRegression;
+	friend class FJTSPredictiveTerrainAvoidanceRegression;
 	friend class FJTSSpaceFlightFrameRegression;
 	friend class FJTSAutomaticLandingRegression;
 	friend class FJTSMarIILandingMapRegression;
@@ -412,13 +424,15 @@ private:
 	void FlightMoveVertical(const FInputActionValue& Value);
 	void FlightSteerYaw(const FInputActionValue& Value);
 	void FlightSteerPitch(const FInputActionValue& Value);
+	void FlightRoll(const FInputActionValue& Value);
+	void FlightFreeLookStarted(const FInputActionValue& Value);
+	void FlightFreeLookStopped(const FInputActionValue& Value);
+	void FlightRecenterCamera(const FInputActionValue& Value);
 	void FlightLookYaw(const FInputActionValue& Value);
 	void FlightLookPitch(const FInputActionValue& Value);
 	void FlightCameraZoom(const FInputActionValue& Value);
 	void FlightBoostStarted(const FInputActionValue& Value);
 	void FlightBoostStopped(const FInputActionValue& Value);
-	void FlightBrakeStarted(const FInputActionValue& Value);
-	void FlightBrakeStopped(const FInputActionValue& Value);
 	void FlightHeadlightStarted(const FInputActionValue& Value);
 	void FlightDisembarkStarted(const FInputActionValue& Value);
 	void FlightDisembarkReleased(const FInputActionValue& Value);
@@ -432,8 +446,9 @@ private:
 	void InitializeFlightCameraFrame();
 	void UpdateFlightCamera(float DeltaSeconds);
 	void UpdateFlightCameraFrame(float DeltaSeconds);
+	void UpdateMouseFlightSteering(float DeltaSeconds);
+	void ApplyFlightCameraLook(float YawDegrees, float PitchDegrees);
 	FVector GetFlightReferenceUp() const;
-	FVector GetStableFlightTangent(const FVector& UpVector, const FVector& PreferredDirection) const;
 	FVector GetFlightCameraForward(const FVector& ReferenceUp) const;
 	bool RequestLandingInternal(bool bAllowControlledDescentCapture);
 	void UpdateAutomaticLanding(float DeltaSeconds);
@@ -442,7 +457,7 @@ private:
 	void HandleAssistedLandingCompleted();
 	void HandleAssistedLandingFailed(EJTSLandingValidationFailure Failure);
 	void HandleAssistedLandingPhaseChanged(EJTSSpacecraftLandingAssistPhase NewPhase);
-	void SubmitFlightInput();
+	void SubmitFlightInput(bool bHeartbeat = false);
 	void ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState);
 	void SyncReplicatedStorage();
 	void RebuildStorageFromReplicatedArray();
@@ -591,6 +606,19 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.001", ClampMax = "10.0", UIMin = "0.001", UIMax = "1.0"))
 	float FlightCameraLookSensitivity = 0.18f;
 
+	/** Camera lead before mouse steering reaches full turn input. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "10.0", UIMax = "60.0"))
+	float FlightMouseSteerFullAngle = 32.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "10.0"))
+	float FlightMouseSteerDeadAngle = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "30.0", UIMax = "85.0"))
+	float FlightCoupledLookLimit = 65.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "1.0", UIMax = "15.0"))
+	float FlightCameraRecenterSpeed = 6.0f;
+
 	/** High-response spring-arm damping removes visible mouse and replicated-movement stepping. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Input", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", ClampMax = "60.0", UIMin = "1.0", UIMax = "40.0"))
 	float FlightCameraRotationLagSpeed = 24.0f;
@@ -652,7 +680,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightRightAction;
 
-	/** S. In-place horizontal turnaround, independent of the camera. */
+	/** T. Turn the nose toward the old tail within the current deck plane. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightTurnAroundAction;
 
@@ -675,21 +703,23 @@ private:
 	TObjectPtr<UInputAction> FlightSteerPitchAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightRollAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightFreeLookAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FlightRecenterCameraAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightCameraZoomAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightBoostAction;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> FlightBrakeAction;
-
-	/** Available only while a player is driving a grounded SpaceWorld spacecraft. */
+	/** R exits a landed ship; the server also validates the exit location. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> FlightDisembarkAction;
-
-	/** Long-press while flying gives up the driver seat. The same key drops or destroys items on foot. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> FlightRelinquishDriverAction;
 
 	/** L, while flying. Turns the nose beams on or off. Landing forces them off. */
 	UPROPERTY(Transient)
@@ -744,6 +774,12 @@ private:
 	UPROPERTY(Replicated, Transient)
 	bool bReplicatedPresentationBoost = false;
 
+	UPROPERTY(Replicated, Transient)
+	bool bReplicatedFlightAssistEnabled = true;
+
+	UPROPERTY(Replicated, Transient)
+	float ReplicatedFlightSpeedLimit = 1.0f;
+
 	/** Server check cadence while Ctrl is held; LandingSite data owns the actual capture height. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02", UIMax = "0.5"))
 	float AutomaticLandingCheckInterval = 0.08f;
@@ -756,9 +792,14 @@ private:
 	FTransform PendingLandingTransform = FTransform::Identity;
 	float PendingLandingClearance = 0.0f;
 	float CurrentFlightCameraArmLength = 0.0f;
-	FVector FlightCameraTangentForward = FVector::ForwardVector;
-	FVector LastFlightCameraUp = FVector::UpVector;
-	float FlightCameraPitch = 0.0f;
+	FQuat FlightCameraAimRotation = FQuat::Identity;
+	FQuat LastFlightCameraHullRotation = FQuat::Identity;
+	float FlightKeyYaw = 0.0f;
+	float FlightKeyPitch = 0.0f;
+	float FlightInputSendElapsed = 0.0f;
+	double LastFlightInputTimeSeconds = 0.0;
+	bool bFlightFreeLookHeld = false;
+	bool bFlightCameraRecentering = false;
 	float AutomaticLandingCheckElapsed = 0.0f;
 	bool bDisembarkInputArmed = false;
 	bool bDisembarkRequestPending = false;
@@ -776,6 +817,8 @@ private:
 	bool bFlightCameraDistanceInitialized = false;
 	bool bFlightCameraFrameInitialized = false;
 	FJTSSpacecraftInputState LocalFlightInput;
+	FJTSSpacecraftInputState LastSubmittedFlightInput;
+	bool bHasSubmittedFlightInput = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Boarding", meta = (AllowPrivateAccess = "true", ClampMin = "1", ClampMax = "4"))
 	int32 MaximumOccupants = 4;

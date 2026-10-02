@@ -8,7 +8,8 @@
 - Blueprint负责具体项目配置、资产选择和关卡实例设置。
 - 不要将关卡配置、资源配置、具体Actor引用硬编码到C++。
 - 优先使用 Composition、Component、Subsystem、Interface。
-
+- 游戏怪物如果是以聚居地为主的随机分布，那么已有通用模板，请复用该模板
+- 游戏资源如果是以范围为划定的随机分布，那也有一个模板了，可以复用该模板
 
 # C++ and Blueprint Rules
 
