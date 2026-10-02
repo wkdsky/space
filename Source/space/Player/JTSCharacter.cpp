@@ -36,8 +36,13 @@
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSStaminaComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
+#if !UE_BUILD_SHIPPING
+#include "Components/PointLightComponent.h"
+#endif
 #include "space/Components/JTSWeaponVisualComponent.h"
+#include "space/Animation/JTSAnimInstance.h"
 #include "space/Interaction/InteractionComponent.h"
 #include "space/Items/JTSItemTypes.h"
 #include "space/Modes/JTSSpaceWorldGameMode.h"
@@ -77,6 +82,7 @@ AJTSCharacter::AJTSCharacter()
 	InventoryComponent = CreateDefaultSubobject<UJTSInventoryComponent>(TEXT("InventoryComponent"));
 	CarryComponent = CreateDefaultSubobject<UJTSCarryComponent>(TEXT("CarryComponent"));
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
+	StaminaComponent = CreateDefaultSubobject<UJTSStaminaComponent>(TEXT("StaminaComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
 	WeaponVisualComponent = CreateDefaultSubobject<UJTSWeaponVisualComponent>(TEXT("WeaponVisualComponent"));
@@ -133,6 +139,16 @@ AJTSCharacter::AJTSCharacter()
 	DebugVisual->SetGenerateOverlapEvents(false);
 	DebugVisual->SetCanEverAffectNavigation(false);
 
+#if !UE_BUILD_SHIPPING
+	DebugBodyLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("DebugBodyLight"));
+	DebugBodyLight->SetupAttachment(GetCapsuleComponent());
+	DebugBodyLight->SetRelativeLocation(FVector(0.0f, 0.0f, 25.0f));
+	DebugBodyLight->SetLightColor(FLinearColor(0.72f, 0.84f, 1.0f));
+	DebugBodyLight->SetIntensity(300.0f);
+	DebugBodyLight->SetAttenuationRadius(260.0f);
+	DebugBodyLight->SetCastShadows(false);
+#endif
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> DebugMeshAsset(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (DebugMeshAsset.Succeeded())
 	{
@@ -153,6 +169,41 @@ UJTSInventoryComponent* AJTSCharacter::GetInventoryComponent() const
 UJTSHealthComponent* AJTSCharacter::GetHealthComponent() const
 {
 	return HealthComponent.Get();
+}
+
+UJTSStaminaComponent* AJTSCharacter::GetStaminaComponent() const
+{
+	return StaminaComponent.Get();
+}
+
+void AJTSCharacter::RefreshClimbEquipmentPresentation()
+{
+	const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
+	const UJTSAnimInstance* const Pose = IsValid(GetMesh())
+		? Cast<UJTSAnimInstance>(GetMesh()->GetAnimInstance()) : nullptr;
+	const bool bStowForPose = bClimbing || (IsValid(Pose) && Pose->IsClimbPoseActive());
+	if (bClimbing)
+	{
+		bWantsViewFacing = false;
+		PendingViewFacingForward = FVector::ZeroVector;
+		TurnShuffleAlpha = 0.0f;
+		AimCameraAlpha = 0.0f;
+		if (IsValid(RangedWeaponComponent)) RangedWeaponComponent->CancelForClimb();
+		if (IsValid(MeleeComponent))
+		{
+			if ((HasAuthority() || IsLocallyControlled()) && MeleeComponent->IsAttackInputHeld())
+			{
+				MeleeComponent->AttackReleased();
+			}
+			MeleeComponent->StopAttack();
+		}
+	}
+	if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())
+	{
+		Visual->SetClimbStowed(bStowForPose);
+	}
+	bWasClimbPoseStowed = bStowForPose;
+	if (bClimbing) UpdateAimCamera(0.0f);
 }
 
 bool AJTSCharacter::IsFirstPersonView() const
@@ -207,8 +258,12 @@ void AJTSCharacter::ApplyProgressionMovementSpeed()
 	{
 		const AJTSPlayerState* const ProgressionPlayerState = GetPlayerState<AJTSPlayerState>();
 		const float ProgressionMultiplier = ProgressionPlayerState != nullptr ? ProgressionPlayerState->GetRunSpeedMultiplier() : 1.0f;
-		const float BaseSpeed = bSprintInputActive && !IsBoarded() ? SprintingSpeed : WalkingSpeed;
-		MovementComponent->MaxWalkSpeed = BaseSpeed * FMath::Max(0.1f, ProgressionMultiplier);
+		const bool bMaySprint = bSprintInputActive && !IsBoarded()
+			&& IsValid(StaminaComponent) && StaminaComponent->CanSprint()
+			&& !(IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing());
+		const float BaseSpeed = bMaySprint ? SprintingSpeed : WalkingSpeed;
+		const float NewSpeed = BaseSpeed * FMath::Max(0.1f, ProgressionMultiplier);
+		if (!FMath::IsNearlyEqual(MovementComponent->MaxWalkSpeed, NewSpeed)) MovementComponent->MaxWalkSpeed = NewSpeed;
 	}
 }
 
@@ -400,6 +455,7 @@ float AJTSCharacter::GetRawViewYawDelta() const
 
 float AJTSCharacter::GetPresentationAimYaw() const
 {
+	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()) return 0.0f;
 	// The chest follows the camera only while the camera is still behind it.
 	// Past the comfortable cone the chest returns forward. It does not keep
 	// twisting to meet a camera that has already swung around to the front.
@@ -416,7 +472,7 @@ float AJTSCharacter::GetPresentationAimYaw() const
 
 float AJTSCharacter::GetAimPitch() const
 {
-	return AimPitch;
+	return IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing() ? 0.0f : AimPitch;
 }
 
 void AJTSCharacter::ShiftLocalViewPitch(float DeltaDegrees)
@@ -659,6 +715,7 @@ void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplySurfaceMovementSettings();
+	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 
 	if (IsValid(HealthComponent))
 	{
@@ -683,10 +740,10 @@ void AJTSCharacter::BeginPlay()
 	BindGameState();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space character initialized."));
 
-	if (IsValid(WeaponVisualComponent))
+	if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())
 	{
-		WeaponVisualComponent->Activate(true);
-		WeaponVisualComponent->RefreshWeaponVisual();
+		Visual->Activate(true);
+		Visual->RefreshWeaponVisual();
 	}
 
 	RegisterInputMappingContext();
@@ -695,6 +752,16 @@ void AJTSCharacter::BeginPlay()
 void AJTSCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	ApplyProgressionMovementSpeed();
+	const bool bClimbingNow = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
+	const UJTSAnimInstance* const ClimbPose = IsValid(GetMesh())
+		? Cast<UJTSAnimInstance>(GetMesh()->GetAnimInstance()) : nullptr;
+	const bool bStowForPose = bClimbingNow || (IsValid(ClimbPose) && ClimbPose->IsClimbPoseActive());
+	if (bWasClimbingForVisual != bClimbingNow || bWasClimbPoseStowed != bStowForPose)
+	{
+		bWasClimbingForVisual = bClimbingNow;
+		RefreshClimbEquipmentPresentation();
+	}
 
 	const bool bUsingRealPlanetFrame = IsRealPlanetGameplayActive();
 	if (bUsingRealPlanetFrame)
@@ -736,6 +803,19 @@ void AJTSCharacter::Tick(float DeltaSeconds)
 		AimPitch = FMath::FInterpTo(AimPitch, ReplicatedAimPitch, DeltaSeconds, 20.0f);
 	}
 	UpdateAimCamera(DeltaSeconds);
+}
+
+void AJTSCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+	if (IsValid(WallClimbComponent)) WallClimbComponent->TryJumpLandingGrip(Hit);
+}
+
+void AJTSCharacter::FaceRotation(FRotator NewControlRotation, float DeltaTime)
+{
+	// Controller yaw is the free-look camera. A grip owns the body's wall-facing yaw.
+	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()) return;
+	Super::FaceRotation(NewControlRotation, DeltaTime);
 }
 
 void AJTSCharacter::ApplyThirdPersonCameraOffset()
@@ -812,7 +892,9 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	}
 
 	EnhancedInputComponent->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AJTSCharacter::MoveForward);
+	EnhancedInputComponent->BindAction(MoveForwardAction, ETriggerEvent::Completed, this, &AJTSCharacter::ClearMoveForward);
 	EnhancedInputComponent->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AJTSCharacter::MoveRight);
+	EnhancedInputComponent->BindAction(MoveRightAction, ETriggerEvent::Completed, this, &AJTSCharacter::ClearMoveRight);
 	EnhancedInputComponent->BindAction(LookYawAction, ETriggerEvent::Triggered, this, &AJTSCharacter::LookYaw);
 	EnhancedInputComponent->BindAction(LookPitchAction, ETriggerEvent::Triggered, this, &AJTSCharacter::LookPitch);
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleJumpStarted);
@@ -820,6 +902,7 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &AJTSCharacter::StartSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AJTSCharacter::StopSprint);
+	EnhancedInputComponent->BindAction(ClimbAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleClimbStarted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleBoardStarted);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleBoardTriggered);
@@ -870,6 +953,7 @@ void AJTSCharacter::InitializeInput()
 	LookPitchAction = NewObject<UInputAction>(this, TEXT("LookPitchAction"), RF_Transient);
 	JumpAction = NewObject<UInputAction>(this, TEXT("JumpAction"), RF_Transient);
 	SprintAction = NewObject<UInputAction>(this, TEXT("SprintAction"), RF_Transient);
+	ClimbAction = NewObject<UInputAction>(this, TEXT("ClimbAction"), RF_Transient);
 	InteractAction = NewObject<UInputAction>(this, TEXT("InteractAction"), RF_Transient);
 	BoardAction = NewObject<UInputAction>(this, TEXT("BoardAction"), RF_Transient);
 	EquipAction = NewObject<UInputAction>(this, TEXT("EquipAction"), RF_Transient);
@@ -892,6 +976,7 @@ void AJTSCharacter::InitializeInput()
 	LookPitchAction->ValueType = EInputActionValueType::Axis1D;
 	JumpAction->ValueType = EInputActionValueType::Boolean;
 	SprintAction->ValueType = EInputActionValueType::Boolean;
+	ClimbAction->ValueType = EInputActionValueType::Boolean;
 	InteractAction->ValueType = EInputActionValueType::Boolean;
 	BoardAction->ValueType = EInputActionValueType::Boolean;
 	EquipAction->ValueType = EInputActionValueType::Boolean;
@@ -913,6 +998,7 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(LookPitchAction, EKeys::MouseY);
 	InputMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputMappingContext->MapKey(SprintAction, EKeys::LeftShift);
+	InputMappingContext->MapKey(ClimbAction, EKeys::C);
 	InputMappingContext->MapKey(InteractAction, EKeys::E);
 	InputMappingContext->MapKey(BoardAction, EKeys::R);
 	InputMappingContext->MapKey(EquipAction, EKeys::F);
@@ -1033,6 +1119,7 @@ void AJTSCharacter::BindPlayerState()
 	{
 		ApplyAvatarColor();
 		ApplyProgressionMovementSpeed();
+		if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 		if (IsValid(InventoryComponent))
 		{
 			InventoryComponent->RefreshCapacityFromProgression();
@@ -1052,6 +1139,7 @@ void AJTSCharacter::BindPlayerState()
 	}
 	ApplyAvatarColor();
 	ApplyProgressionMovementSpeed();
+	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 	if (IsValid(InventoryComponent))
 	{
 		InventoryComponent->RefreshCapacityFromProgression();
@@ -1075,18 +1163,22 @@ void AJTSCharacter::MoveForward(const FInputActionValue& Value)
 	}
 
 	const float MovementValue = Value.Get<float>();
+	ClimbForwardInput = MovementValue;
 	if (!FMath::IsNearlyZero(MovementValue) && IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
 	{
 		const FVector Up = GetCharacterMovement() != nullptr
 			? (-GetCharacterMovement()->GetGravityDirection()).GetSafeNormal()
 			: FVector::UpVector;
-		WallClimbComponent->SubmitClimbIntent(Up * FMath::Sign(MovementValue), false);
+		WallClimbComponent->SubmitClimbIntent(Up * FMath::Sign(MovementValue));
 		return;
 	}
-	if (MovementValue > 0.2f && IsValid(WallClimbComponent) && !WallClimbComponent->IsClimbing()
-		&& IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe)
+	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+	const bool bAscendingJump = IsValid(Movement) && Movement->IsFalling()
+		&& FVector::DotProduct(Movement->Velocity, -Movement->GetGravityDirection()) > 0.0f;
+	if (MovementValue > 0.3f && bPressedJump && !bAscendingJump
+		&& !bRequireForwardReleaseToAutoAttach && CanUseNormalGameplayInput() && IsValid(WallClimbComponent))
 	{
-		WallClimbComponent->TryAttachFromApproach();
+		if (WallClimbComponent->TryAutoAttach()) return;
 	}
 	if (!FMath::IsNearlyZero(MovementValue))
 	{
@@ -1105,13 +1197,14 @@ void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 	}
 
 	const float MovementValue = Value.Get<float>();
+	ClimbRightInput = MovementValue;
 	if (!FMath::IsNearlyZero(MovementValue) && IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
 	{
 		const FVector Up = GetCharacterMovement() != nullptr
 			? (-GetCharacterMovement()->GetGravityDirection()).GetSafeNormal()
 			: FVector::UpVector;
-		const FVector WallRight = FVector::CrossProduct(Up, WallClimbComponent->GetSurfaceNormal()).GetSafeNormal();
-		WallClimbComponent->SubmitClimbIntent(WallRight * FMath::Sign(MovementValue), false);
+		const FVector WallRight = FVector::CrossProduct(WallClimbComponent->GetSurfaceNormal(), Up).GetSafeNormal();
+		WallClimbComponent->SubmitClimbIntent(WallRight * FMath::Sign(MovementValue));
 		return;
 	}
 	if (!FMath::IsNearlyZero(MovementValue))
@@ -1121,6 +1214,17 @@ void AJTSCharacter::MoveRight(const FInputActionValue& Value)
 		GetMovementInputDirections(ForwardDirection, RightDirection);
 		AddMovementInput(RightDirection, MovementValue);
 	}
+}
+
+void AJTSCharacter::ClearMoveForward(const FInputActionValue& Value)
+{
+	ClimbForwardInput = 0.0f;
+	bRequireForwardReleaseToAutoAttach = false;
+}
+
+void AJTSCharacter::ClearMoveRight(const FInputActionValue& Value)
+{
+	ClimbRightInput = 0.0f;
 }
 
 void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& OutRight) const
@@ -1159,9 +1263,11 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 		const float YawDeltaRadians = FMath::DegreesToRadians(Value.Get<float>() * MouseSensitivityX);
 		PlanetCameraTangentForward = FQuat(LocalUp, YawDeltaRadians).RotateVector(PlanetCameraTangentForward).GetSafeNormal();
 		UpdatePlanetCameraFrame(LocalUp, 0.0f);
-		// The real-planet camera owns an absolute local frame. Apply the configured body behavior in
-		// this input path as well, so FaceCamera does not wait for the next actor tick.
-		UpdatePlanetBodyOrientation(LocalUp, 0.0f);
+		// Camera orbit never invokes the view-facing body path while a wall owns the capsule.
+		if (!IsValid(WallClimbComponent) || !WallClimbComponent->IsClimbing())
+		{
+			UpdatePlanetBodyOrientation(LocalUp, 0.0f);
+		}
 		return;
 	}
 
@@ -1201,12 +1307,23 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 void AJTSCharacter::StartSprint(const FInputActionValue& Value)
 {
 	bSprintInputActive = !IsBoarded();
+	if (HasAuthority()) StaminaComponent->SetSprintRequested(bSprintInputActive);
+	else ServerSetSprintIntent(bSprintInputActive);
 	ApplyProgressionMovementSpeed();
 }
 
 void AJTSCharacter::StopSprint(const FInputActionValue& Value)
 {
 	bSprintInputActive = false;
+	if (HasAuthority()) StaminaComponent->SetSprintRequested(false);
+	else ServerSetSprintIntent(false);
+	ApplyProgressionMovementSpeed();
+}
+
+void AJTSCharacter::ServerSetSprintIntent_Implementation(bool bRequested)
+{
+	bSprintInputActive = bRequested && !IsBoarded() && (!IsValid(HealthComponent) || !HealthComponent->IsDead());
+	if (IsValid(StaminaComponent)) StaminaComponent->SetSprintRequested(bSprintInputActive);
 	ApplyProgressionMovementSpeed();
 }
 
@@ -1214,11 +1331,32 @@ void AJTSCharacter::HandleJumpStarted(const FInputActionValue& Value)
 {
 	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
 	{
-		WallClimbComponent->SubmitClimbIntent(FVector::ZeroVector, true);
+		if (ClimbForwardInput < -0.3f)
+		{
+			WallClimbComponent->SubmitClimbDrop();
+			return;
+		}
+		const FVector Up = GetCharacterMovement() != nullptr
+			? (-GetCharacterMovement()->GetGravityDirection()).GetSafeNormal() : FVector::UpVector;
+		const FVector WallRight = FVector::CrossProduct(WallClimbComponent->GetSurfaceNormal(), Up).GetSafeNormal();
+		const float UpInput = ClimbForwardInput > 0.3f ? ClimbForwardInput
+			: (FMath::Abs(ClimbRightInput) > 0.3f ? 0.0f : 1.0f);
+		const FVector LeapDirection = (Up * UpInput + WallRight * ClimbRightInput).GetSafeNormal();
+		WallClimbComponent->SubmitClimbLeap(LeapDirection);
 		return;
 	}
 	if (!IsBoarded())
 	{
+		const UCharacterMovementComponent* const Movement = GetCharacterMovement();
+		const bool bAscendingJump = IsValid(Movement) && Movement->IsFalling()
+			&& FVector::DotProduct(Movement->Velocity, -Movement->GetGravityDirection()) > 0.0f;
+		if (ClimbForwardInput > 0.3f && !bAscendingJump && !bRequireForwardReleaseToAutoAttach
+			&& CanUseNormalGameplayInput() && IsValid(WallClimbComponent)
+			&& WallClimbComponent->TryAutoAttach())
+		{
+			return;
+		}
+		if (CanJump() && IsValid(WallClimbComponent)) WallClimbComponent->ArmJumpGrab();
 		// UE 5.8 CharacterMovement applies JumpZVelocity along LocalUp when custom gravity is active.
 		// Keep the standard Jump path; do not inject a World-Z LaunchCharacter impulse.
 		Jump();
@@ -1346,7 +1484,7 @@ void AJTSCharacter::HandleBoardCanceled(const FInputActionValue& Value)
 
 void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 {
-	if (!CanUseNormalGameplayInput())
+	if (!CanUseNormalGameplayInput() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()))
 	{
 		return;
 	}
@@ -1467,10 +1605,23 @@ bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 
 bool AJTSCharacter::WantsContinuousViewFacing() const
 {
+	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()) return false;
 	// Jumping does not change the facing mode. Aim and first person keep their
 	// existing view-facing behavior on the ground and in the air.
 	return bFirstPersonView
 		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
+}
+
+void AJTSCharacter::HandleClimbStarted(const FInputActionValue& Value)
+{
+	if (CanUseNormalGameplayInput() && IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+	{
+		if (ClimbForwardInput > 0.3f)
+		{
+			bRequireForwardReleaseToAutoAttach = true;
+		}
+		WallClimbComponent->ToggleAttach();
+	}
 }
 
 void AJTSCharacter::AlignBodyToViewOnAttack()
@@ -1562,9 +1713,8 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
 		const bool bAirborne = bPressedJump || (Movement->IsFalling() && !IsSupportedByFloor());
-		const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
 		const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing() || bAirborne;
-		Movement->bOrientRotationToMovement = !bFeetCatching && !bIceAxeHeld;
+		Movement->bOrientRotationToMovement = !bFeetCatching;
 	}
 
 	FVector FeetForward = FVector::ZeroVector;
@@ -1601,9 +1751,9 @@ void AJTSCharacter::HandleMeleeAttackStarted(EJTSAttackType AttackType)
 	}
 	if (AttackType != EJTSAttackType::Punch)
 	{
-		if (IsValid(WeaponVisualComponent))
+		if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())
 		{
-			WeaponVisualComponent->PlayMeleeSwingPresentation();
+			Visual->PlayMeleeSwingPresentation();
 		}
 		return;
 	}
@@ -1624,7 +1774,8 @@ void AJTSCharacter::HandleMeleeAttackFinished(EJTSAttackType AttackType)
 void AJTSCharacter::HandleAimStarted(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
-	if (!CanUseNormalGameplayInput() || !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->HasActiveRangedWeapon())
+	if (!CanUseNormalGameplayInput() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
+		|| !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->HasActiveRangedWeapon())
 	{
 		return;
 	}
@@ -2121,12 +2272,11 @@ void AJTSCharacter::ApplyCameraView()
 	}
 	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
-		const bool bIceAxeHeld = IsValid(InventoryComponent) && InventoryComponent->GetActiveItemId() == EJTSItemId::IceAxe;
 		const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
 		// A click is one frame. It must not flip movement orientation onto the camera.
 		// Ice axes keep the body where the player put it, including while the feet are moving.
 		const bool bAirborne = bPressedJump || (MovementComponent->IsFalling() && !IsSupportedByFloor());
-		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bAirborne && !bIceAxeHeld && !bClimbing;
+		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bAirborne && !bClimbing;
 		bUseControllerRotationYaw = false;
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
@@ -2357,9 +2507,9 @@ void AJTSCharacter::ApplyBoardedPresentation()
 		else
 		{
 			GetMesh()->SetVisibility(bPreviousMeshVisible, true);
-			if (IsValid(WeaponVisualComponent))
+			if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())
 			{
-				WeaponVisualComponent->RestoreAfterCharacterMeshShown();
+				Visual->RestoreAfterCharacterMeshShown();
 			}
 		}
 	}
@@ -2377,11 +2527,13 @@ void AJTSCharacter::ApplyBoardedPresentation()
 
 void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 {
-	const bool bWantsAim = IsValid(RangedWeaponComponent)
+	const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
+	const bool bWantsAim = !bClimbing && IsValid(RangedWeaponComponent)
 		&& RangedWeaponComponent->IsAiming()
 		&& RangedWeaponComponent->HasActiveRangedWeapon();
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
-	AimCameraAlpha = FMath::FInterpTo(AimCameraAlpha, TargetAlpha, DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
+	AimCameraAlpha = bClimbing ? 0.0f : FMath::FInterpTo(AimCameraAlpha, TargetAlpha,
+		DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
 
 	if (CameraBoom != nullptr)
 	{
@@ -2398,9 +2550,9 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 		const float ActiveAimFOV = IsValid(RangedWeaponComponent) ? RangedWeaponComponent->GetActiveAimFOV() : AimFOV;
 		FollowCamera->SetFieldOfView(FMath::Lerp(BaseFOV, ActiveAimFOV, AimCameraAlpha));
 	}
-	if (IsValid(WeaponVisualComponent))
+	if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())
 	{
-		WeaponVisualComponent->SetAimAlpha(AimCameraAlpha);
+		Visual->SetAimAlpha(AimCameraAlpha);
 	}
 }
 
@@ -2457,6 +2609,7 @@ void AJTSCharacter::HandlePlayerStateNetworkChanged()
 {
 	ApplyAvatarColor();
 	ApplyProgressionMovementSpeed();
+	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 	if (IsValid(InventoryComponent))
 	{
 		InventoryComponent->RefreshCapacityFromProgression();

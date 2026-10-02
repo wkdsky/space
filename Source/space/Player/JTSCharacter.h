@@ -18,8 +18,10 @@ class UJTSHealthComponent;
 class UJTSInventoryComponent;
 class UJTSPlanetGravityComponent;
 class UJTSRangedWeaponComponent;
+class UJTSStaminaComponent;
 class UJTSWallClimbComponent;
 class UJTSWeaponVisualComponent;
+class UPointLightComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
 class UInputAction;
@@ -66,6 +68,11 @@ public:
 	/** Returns the reusable player health pool used by UE's standard damage path. */
 	UFUNCTION(BlueprintPure, Category = "Health")
 	UJTSHealthComponent* GetHealthComponent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Stamina")
+	UJTSStaminaComponent* GetStaminaComponent() const;
+	/** Synchronize held-item visuals after a replicated climbing state transition. */
+	void RefreshClimbEquipmentPresentation();
 
 	UFUNCTION(BlueprintPure, Category = "Player|Camera")
 	bool IsFirstPersonView() const;
@@ -166,6 +173,8 @@ public:
 
 protected:
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void Landed(const FHitResult& Hit) override;
+	virtual void FaceRotation(FRotator NewControlRotation, float DeltaTime = 0.0f) override;
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
@@ -186,12 +195,15 @@ private:
 
 	void MoveForward(const FInputActionValue& Value);
 	void MoveRight(const FInputActionValue& Value);
+	void ClearMoveForward(const FInputActionValue& Value);
+	void ClearMoveRight(const FInputActionValue& Value);
 	void GetMovementInputDirections(FVector& OutForward, FVector& OutRight) const;
 	void LookYaw(const FInputActionValue& Value);
 	void LookPitch(const FInputActionValue& Value);
 	void StartSprint(const FInputActionValue& Value);
 	void StopSprint(const FInputActionValue& Value);
 	void HandleJumpStarted(const FInputActionValue& Value);
+	void HandleClimbStarted(const FInputActionValue& Value);
 	void HandleInteractStarted(const FInputActionValue& Value);
 	void HandleBoardStarted(const FInputActionValue& Value);
 	void HandleEquipStarted(const FInputActionValue& Value);
@@ -247,6 +259,8 @@ private:
 	void CancelItemDiscardHold();
 	void CompleteItemDiscardHold();
 	void ApplyProgressionMovementSpeed();
+	UFUNCTION(Server, Reliable)
+	void ServerSetSprintIntent(bool bRequested);
 	bool CanUseNormalGameplayInput() const;
 	bool IsGameplayInputBlocked() const;
 	bool IsSpaceWorldSurfaceGameplayActive() const;
@@ -327,6 +341,10 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Debug")
 	TObjectPtr<UStaticMeshComponent> DebugVisual;
 
+	/** Faint editor/development body light for surface traversal debugging. */
+	UPROPERTY(VisibleAnywhere, Category = "Debug")
+	TObjectPtr<UPointLightComponent> DebugBodyLight;
+
 	/** Reusable nearby-target detection and interaction execution for this player. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UInteractionComponent> InteractionComponent;
@@ -343,6 +361,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Health", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSHealthComponent> HealthComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stamina", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSStaminaComponent> StaminaComponent;
+
 	/** One camera-agnostic Moon melee path for Punch, Knife, and Axe. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMeleeComponent> MeleeComponent;
@@ -355,7 +376,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged|Presentation", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSWeaponVisualComponent> WeaponVisualComponent;
 
-	/** Ice-axe traversal on slopes steeper than the standing limit. */
+	/** Free-hand climbing on validated steep collision surfaces. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Climb", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSWallClimbComponent> WallClimbComponent;
 
@@ -390,7 +411,7 @@ private:
 	TObjectPtr<UJTSPlanetGravityComponent> PlanetGravityComponent;
 
 	/**
-	 * Standing limit. Slopes steeper than this cannot be walked; the ice axe climbs them instead.
+	 * Standing limit for normal movement. Steeper surfaces can be climbed with the independent climb action.
 	 * Individual character Blueprints may tune this per project.
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "89.0"))
@@ -552,6 +573,9 @@ private:
 	TObjectPtr<UInputAction> SprintAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ClimbAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> InteractAction;
 
 	UPROPERTY(Transient)
@@ -602,6 +626,10 @@ private:
 	bool bInteractKeyHeld = false;
 	bool bItemDiscardHoldCompleted = false;
 	bool bSprintInputActive = false;
+	bool bWasClimbingForVisual = false;
+	bool bWasClimbPoseStowed = false;
+	float ClimbForwardInput = 0.0f;
+	float ClimbRightInput = 0.0f;
 	bool bFirstPersonView = false;
 	bool bThirdPersonCameraDistanceInitialized = false;
 	bool bPlanetFrameInitialized = false;
@@ -617,4 +645,5 @@ private:
 	bool bBoardedPresentationApplied = false;
 	bool bPreviousDebugVisualVisible = true;
 	bool bPreviousMeshVisible = true;
+	bool bRequireForwardReleaseToAutoAttach = false;
 };

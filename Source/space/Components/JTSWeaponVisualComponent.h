@@ -33,6 +33,8 @@ public:
 	/** Refreshes the mesh profile after inventory replication or quickbar selection. */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Presentation")
 	void RefreshWeaponVisual();
+	/** Keeps every held mesh stowed for the entire free-hand climb, including inventory refreshes. */
+	void SetClimbStowed(bool bStowed);
 
 	/**
 	 * Boarding hides the character mesh with propagation, which also sets the attached
@@ -50,10 +52,10 @@ public:
 	void PlayMeleeSwingPresentation();
 
 	/** Cosmetic-only shot kick and a pooled muzzle flash; called for local prediction and remote shots. */
-	void PlayShotPresentation(UMaterialInterface* GlowMaterial, const FLinearColor& Color);
+	void PlayShotPresentation(UMaterialInterface* GlowMaterial, const FLinearColor& Color, bool bLeftHand = false);
 
 	/** Returns the visible muzzle point used to start a replicated projectile tracer. */
-	bool GetMuzzleWorldLocation(FVector& OutLocation) const;
+	bool GetMuzzleWorldLocation(FVector& OutLocation, bool bLeftHand = false) const;
 
 private:
 	UFUNCTION()
@@ -65,13 +67,14 @@ private:
 	/** Places the grip in the palm from the posed wrist and finger bones, in world centimetres. */
 	void UpdatePalmAnchor();
 	void UpdateHandAnchor(USceneComponent* Anchor, const FName WristBone, const FName IndexBone, const FName ForearmBone, bool bRightHand);
-	void UpdateLeftAxeAnchor();
+	void UpdateLeftPistolAnchor();
 	void UpdateWaistLamp();
 	void ValidateAttachmentAfterPose();
 	bool IsCurrentAttachmentPlausible() const;
 	void SetVisible(bool bVisible);
 	void ApplyPresentationTransform();
 	void HideShotFlash();
+	bool bClimbStowed = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> HandAttachmentAnchor;
@@ -80,13 +83,13 @@ private:
 	TObjectPtr<USceneComponent> LeftHandAttachmentAnchor;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UStaticMeshComponent> LeftAxeGrip;
+	TObjectPtr<UStaticMeshComponent> LeftPistolGrip;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UStaticMeshComponent> LeftAxeShaft;
+	TObjectPtr<UStaticMeshComponent> LeftPistolBody;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UStaticMeshComponent> LeftAxeHead;
+	TObjectPtr<UStaticMeshComponent> LeftPistolBarrel;
 
 	/** Welded to the waist bone so the lamp yaws and bends with the hips. */
 	UPROPERTY(Transient)
@@ -108,7 +111,7 @@ private:
 	TObjectPtr<USpotLightComponent> WaistLampLight;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> LeftAxeMaterial;
+	TObjectPtr<UMaterialInstanceDynamic> LeftPistolMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> WaistLampMaterial;

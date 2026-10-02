@@ -12,6 +12,7 @@
 class AJTSCharacter;
 class AJTSSpacecraftActor;
 class UJTSHealthComponent;
+class UJTSStaminaComponent;
 class UBorder;
 class UButton;
 class UCanvasPanel;
@@ -54,6 +55,8 @@ private:
 	void BindGameState();
 	void BindPlayerHealth();
 	void UnbindPlayerHealth();
+	void BindPlayerStamina();
+	void UnbindPlayerStamina();
 	void BindSpacecraftResources();
 	void UnbindSpacecraftResources();
 	void RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase);
@@ -64,6 +67,8 @@ private:
 	bool IsLocalFlightDriver(const AJTSSpacecraftActor* Spacecraft) const;
 	void SetFlightNavigationVisible(bool bVisible);
 	void RefreshPlayerHealth(float CurrentHealth, float MaxHealth);
+	void RefreshPlayerStamina(float CurrentStamina, float MaxStamina);
+	void UpdatePlayerStaminaBarPosition(AJTSCharacter* Character);
 	void RefreshShipResourcesSidebar();
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshAvatarSelection();
@@ -85,6 +90,8 @@ private:
 
 	UFUNCTION()
 	void HandlePlayerHealthChanged(float CurrentHealth, float MaxHealth);
+	UFUNCTION()
+	void HandlePlayerStaminaChanged(float CurrentStamina, float MaxStamina);
 
 	UFUNCTION()
 	void HandleShipResourcesChanged(int32 FuelCount, int32 WaterCount, int32 FoodCount);
@@ -265,6 +272,12 @@ private:
 	TObjectPtr<UTextBlock> PlayerHealthAmountText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> PlayerStaminaBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanelSlot> PlayerStaminaBarSlot;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanel> RocketIconCanvas;
 
 	UPROPERTY(Transient)
@@ -395,6 +408,7 @@ private:
 
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 	TWeakObjectPtr<UJTSHealthComponent> BoundPlayerHealthComponent;
+	TWeakObjectPtr<UJTSStaminaComponent> BoundPlayerStaminaComponent;
 	TWeakObjectPtr<AJTSSpacecraftActor> BoundSpacecraftResources;
 	mutable TWeakObjectPtr<AJTSSpacecraftActor> CachedSpacecraft;
 	EJTSGameplayPhase CachedGameplayPhase = EJTSGameplayPhase::WaitingToStart;

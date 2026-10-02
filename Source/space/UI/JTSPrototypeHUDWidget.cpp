@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -25,6 +26,8 @@
 #include "Styling/SlateTypes.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSStaminaComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
@@ -235,6 +238,7 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 	BuildWidgetTree();
 	BindGameState();
 	BindPlayerHealth();
+	BindPlayerStamina();
 	BindSpacecraftResources();
 	RefreshAvatarSelection();
 	RefreshEarthCollectionDurationText();
@@ -266,6 +270,7 @@ FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometr
 void UJTSPrototypeHUDWidget::NativeDestruct()
 {
 	UnbindPlayerHealth();
+	UnbindPlayerStamina();
 	UnbindSpacecraftResources();
 
 	if (AJTSGameState* const GameState = BoundGameState.Get())
@@ -285,6 +290,13 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	{
 		BindGameState();
 	}
+	// The persistent SpaceWorld can become playable after HUD construction, or the
+	// local pawn can change on boarding/respawn without a gameplay phase change.
+	AJTSCharacter* const CurrentCharacter = FindPlayerCharacter();
+	UJTSStaminaComponent* const CurrentStamina = IsValid(CurrentCharacter)
+		? CurrentCharacter->GetStaminaComponent() : nullptr;
+	if (BoundPlayerStaminaComponent.Get() != CurrentStamina) BindPlayerStamina();
+	UpdatePlayerStaminaBarPosition(CurrentCharacter);
 
 	const bool bEarthCollectionActive = BoundGameState.IsValid() && BoundGameState->IsEarthCollectionActive();
 	const bool bMoonExplorationActive = BoundGameState.IsValid() && BoundGameState->IsMoonExploration();
@@ -631,6 +643,18 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddCanvasChild(PlayerHealthCanvas, PlayerHealthProgressBar, FAnchors(0.0f, 0.0f), FVector2D(39.0f, 18.0f), FVector2D(112.0f, 15.0f));
 			PlayerHealthAmountText = MakeTextBlock(WidgetTree, TEXT("PlayerHealthAmountText"), TEXT("10 / 10"), 13.0f, FLinearColor(0.88f, 0.95f, 1.0f, 1.0f), ETextJustify::Center);
 			AddCanvasChild(PlayerHealthCanvas, PlayerHealthAmountText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 48.0f), FVector2D(145.0f, 20.0f), FVector2D(0.5f, 0.0f));
+		}
+		PlayerStaminaBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("PlayerStaminaBar"));
+		if (PlayerStaminaBar != nullptr)
+		{
+			FProgressBarStyle BarStyle = PlayerStaminaBar->GetWidgetStyle();
+			BarStyle.BackgroundImage.TintColor = FSlateColor(FLinearColor(0.02f, 0.05f, 0.06f, 0.72f));
+			BarStyle.FillImage.TintColor = FSlateColor(FLinearColor::White);
+			PlayerStaminaBar->SetWidgetStyle(BarStyle);
+			PlayerStaminaBar->SetFillColorAndOpacity(FLinearColor(0.28f, 0.98f, 0.58f, 1.0f));
+			PlayerStaminaBarSlot = AddCanvasChild(GameplayLayer, PlayerStaminaBar,
+				FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(96.0f, 7.0f), FVector2D(0.5f, 1.0f));
+			PlayerStaminaBar->SetVisibility(ESlateVisibility::Collapsed);
 		}
 
 		RocketIconCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RocketIconCanvas"));
@@ -1029,6 +1053,29 @@ void UJTSPrototypeHUDWidget::UnbindPlayerHealth()
 	BoundPlayerHealthComponent.Reset();
 }
 
+void UJTSPrototypeHUDWidget::BindPlayerStamina()
+{
+	AJTSCharacter* const Character = FindPlayerCharacter();
+	UJTSStaminaComponent* const NewStamina = IsValid(Character) ? Character->GetStaminaComponent() : nullptr;
+	if (BoundPlayerStaminaComponent.Get() != NewStamina)
+	{
+		UnbindPlayerStamina();
+		BoundPlayerStaminaComponent = NewStamina;
+		if (IsValid(NewStamina)) NewStamina->OnStaminaChanged.AddDynamic(this, &UJTSPrototypeHUDWidget::HandlePlayerStaminaChanged);
+	}
+	RefreshPlayerStamina(IsValid(NewStamina) ? NewStamina->GetCurrentStamina() : 0.0f,
+		IsValid(NewStamina) ? NewStamina->GetMaxStamina() : 0.0f);
+}
+
+void UJTSPrototypeHUDWidget::UnbindPlayerStamina()
+{
+	if (UJTSStaminaComponent* Previous = BoundPlayerStaminaComponent.Get())
+	{
+		Previous->OnStaminaChanged.RemoveDynamic(this, &UJTSPrototypeHUDWidget::HandlePlayerStaminaChanged);
+	}
+	BoundPlayerStaminaComponent.Reset();
+}
+
 void UJTSPrototypeHUDWidget::BindSpacecraftResources()
 {
 	AJTSSpacecraftActor* const NewSpacecraft = FindSpacecraft();
@@ -1121,6 +1168,53 @@ void UJTSPrototypeHUDWidget::HandlePlayerHealthChanged(float CurrentHealth, floa
 	RefreshPlayerHealth(CurrentHealth, MaxHealth);
 }
 
+void UJTSPrototypeHUDWidget::RefreshPlayerStamina(float CurrentStamina, float MaxStamina)
+{
+	const float Percent = MaxStamina > KINDA_SMALL_NUMBER ? FMath::Clamp(CurrentStamina / MaxStamina, 0.0f, 1.0f) : 0.0f;
+	const bool bCritical = Percent <= UJTSStaminaComponent::CriticalFraction;
+	const bool bCaution = Percent <= 0.55f;
+	const FLinearColor ActiveColor = bCritical
+		? FLinearColor(1.0f, 0.23f, 0.18f, 1.0f)
+		: bCaution ? FLinearColor(1.0f, 0.76f, 0.20f, 1.0f)
+		: FLinearColor(0.28f, 0.98f, 0.58f, 1.0f);
+	if (PlayerStaminaBar != nullptr)
+	{
+		PlayerStaminaBar->SetPercent(Percent);
+		PlayerStaminaBar->SetFillColorAndOpacity(ActiveColor);
+	}
+}
+
+void UJTSPrototypeHUDWidget::UpdatePlayerStaminaBarPosition(AJTSCharacter* Character)
+{
+	if (PlayerStaminaBar == nullptr || PlayerStaminaBarSlot == nullptr) return;
+	if (!IsValid(Character) || !BoundPlayerStaminaComponent.IsValid()
+		|| Character->IsBoarded() || Character->IsFirstPersonView())
+	{
+		PlayerStaminaBar->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	const UCapsuleComponent* const Capsule = Character->GetCapsuleComponent();
+	const float HalfHeight = IsValid(Capsule) ? Capsule->GetScaledCapsuleHalfHeight() : 90.0f;
+	const FVector AboveHead = Character->GetActorLocation()
+		+ Character->GetActorUpVector() * (HalfHeight + 28.0f);
+	FVector2D ScreenPosition;
+	const FVector2D ScreenSize = GetViewportWidgetLocalSize();
+	if (!ProjectWorldToViewportWidget(AboveHead, ScreenPosition)
+		|| ScreenPosition.X < 48.0f || ScreenPosition.X > ScreenSize.X - 48.0f
+		|| ScreenPosition.Y < 7.0f || ScreenPosition.Y > ScreenSize.Y - 7.0f)
+	{
+		PlayerStaminaBar->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	PlayerStaminaBarSlot->SetPosition(ScreenPosition);
+	PlayerStaminaBar->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+}
+
+void UJTSPrototypeHUDWidget::HandlePlayerStaminaChanged(float CurrentStamina, float MaxStamina)
+{
+	RefreshPlayerStamina(CurrentStamina, MaxStamina);
+}
+
 void UJTSPrototypeHUDWidget::HandleShipResourcesChanged(int32 FuelCount, int32 WaterCount, int32 FoodCount)
 {
 	(void)FuelCount;
@@ -1142,6 +1236,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	if (bGameplaySurface)
 	{
 		BindPlayerHealth();
+		BindPlayerStamina();
 	}
 	if (NewGameplayPhase != EJTSGameplayPhase::WaitingToStart)
 	{
@@ -1825,12 +1920,21 @@ void UJTSPrototypeHUDWidget::RefreshEquipmentHint()
 		if (const AJTSCharacter* const PlayerCharacter = FindPlayerCharacter();
 			IsValid(PlayerCharacter) && !PlayerCharacter->IsBoarded())
 		{
-			if (const UJTSInventoryComponent* const Inventory = PlayerCharacter->FindComponentByClass<UJTSInventoryComponent>();
+			if (const UJTSWallClimbComponent* const Climb = PlayerCharacter->FindComponentByClass<UJTSWallClimbComponent>();
+				IsValid(Climb) && Climb->IsClimbing())
+			{
+				Hint = FText::FromString(TEXT("[W/A/D] 沿墙攀爬  [S] 快速下攀  [空格] 跃攀  [S]+[空格] 松手下落  [C] 松手"));
+			}
+			else if (const UJTSInventoryComponent* const Inventory = PlayerCharacter->FindComponentByClass<UJTSInventoryComponent>();
 				IsValid(Inventory) && Inventory->GetActiveItemId() == EJTSItemId::WaistLamp && Inventory->OwnsWaistLamp())
 			{
 				Hint = Inventory->IsWaistLampEquipped()
 					? FText::FromString(TEXT("[F] 关掉头灯"))
 					: FText::FromString(TEXT("[F] 打开头灯"));
+			}
+			else
+			{
+				Hint = FText::FromString(TEXT("坡脚按 W+空格 抓墙  跳跃落向陡坡时自动抓墙"));
 			}
 		}
 	}

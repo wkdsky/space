@@ -15,6 +15,7 @@
 #include "TimerManager.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -53,6 +54,8 @@ bool UJTSRangedWeaponComponent::CanUseWeapon() const
 	if (const AJTSCharacter* Character = Cast<AJTSCharacter>(Pawn))
 	{
 		if (Character->IsBoarded()) return false;
+		if (const UJTSWallClimbComponent* Climb = Character->FindComponentByClass<UJTSWallClimbComponent>();
+			IsValid(Climb) && Climb->IsClimbing()) return false;
 	}
 	const UJTSHealthComponent* Health = Pawn->FindComponentByClass<UJTSHealthComponent>();
 	return !IsValid(Health) || !Health->IsDead();
@@ -88,6 +91,13 @@ void UJTSRangedWeaponComponent::StopAim()
 {
 	bIsAiming = false;
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority()) ServerStopAim();
+}
+
+void UJTSRangedWeaponComponent::CancelForClimb()
+{
+	bIsAiming = false;
+	bFireHeld = false;
+	ClearFireTimer();
 }
 
 void UJTSRangedWeaponComponent::StartFire()
@@ -170,6 +180,8 @@ bool UJTSRangedWeaponComponent::FireOnce()
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Now + KINDA_SMALL_NUMBER < NextFireTimeSeconds) return false;
 	NextFireTimeSeconds = Now + FMath::Max(0.05f, Definition->RangedFireInterval);
+	const bool bLeftShot = Definition->ItemId == EJTSItemId::IceAxe && bNextLeftServerShot;
+	if (Definition->ItemId == EJTSItemId::IceAxe) bNextLeftServerShot = !bNextLeftServerShot;
 
 	const float SpreadDegrees = bIsAiming ? Definition->RangedAimSpreadDegrees : Definition->RangedHipSpreadDegrees;
 	Direction = FMath::VRandCone(Direction, FMath::DegreesToRadians(FMath::Clamp(SpreadDegrees, 0.0f, 12.0f)));
@@ -187,7 +199,7 @@ bool UJTSRangedWeaponComponent::FireOnce()
 	if (const UJTSWeaponVisualComponent* Visual = Pawn->FindComponentByClass<UJTSWeaponVisualComponent>())
 	{
 		FVector Candidate;
-		if (Visual->GetMuzzleWorldLocation(Candidate)
+		if (Visual->GetMuzzleWorldLocation(Candidate, bLeftShot)
 			&& FVector::DistSquared(Candidate, Pawn->GetActorLocation()) < FMath::Square(350.0f))
 		{
 			MuzzleStart = Candidate;
@@ -259,13 +271,15 @@ void UJTSRangedWeaponComponent::PlayLocalShotFeedback(const UJTSItemDefinition* 
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!IsValid(Pawn)) return;
 	const FLinearColor ShotColor = Definition->AccentColor;
+	const bool bLeftShot = Definition->ItemId == EJTSItemId::IceAxe && bNextLeftFeedbackShot;
+	if (Definition->ItemId == EJTSItemId::IceAxe) bNextLeftFeedbackShot = !bNextLeftFeedbackShot;
 	UMaterialInterface* Glow = Definition->RangedGlowMaterial.LoadSynchronous();
 	FVector SoundOrigin = Pawn->GetActorLocation();
 	if (UJTSWeaponVisualComponent* Visual = Pawn->FindComponentByClass<UJTSWeaponVisualComponent>())
 	{
 		FVector MuzzleLocation;
-		if (Visual->GetMuzzleWorldLocation(MuzzleLocation)) SoundOrigin = MuzzleLocation;
-		Visual->PlayShotPresentation(Glow, ShotColor);
+		if (Visual->GetMuzzleWorldLocation(MuzzleLocation, bLeftShot)) SoundOrigin = MuzzleLocation;
+		Visual->PlayShotPresentation(Glow, ShotColor, bLeftShot);
 	}
 	if (Pawn->IsLocallyControlled())
 	{

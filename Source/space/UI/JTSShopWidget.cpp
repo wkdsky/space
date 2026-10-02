@@ -352,22 +352,22 @@ void UJTSShopWidget::BuildWidgetTree()
 	auto AddAbilityCard = [this, AbilityCanvas](const EJTSPlayerAbility Ability, const FString& Title, const FName Name, const float Y)
 	{
 		UBorder* const Card = MakeBorder(WidgetTree, Name, FLinearColor(0.045f, 0.105f, 0.165f, 1.0f));
-		AddCanvas(AbilityCanvas, Card, FAnchors(0.0f, 0.0f), FVector2D(20.0f, Y), FVector2D(1060.0f, 84.0f));
+		AddCanvas(AbilityCanvas, Card, FAnchors(0.0f, 0.0f), FVector2D(20.0f, Y), FVector2D(1060.0f, 70.0f));
 		UCanvasPanel* const CardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), *FString::Printf(TEXT("%sCanvas"), *Name.ToString()));
 		Card->SetContent(CardCanvas);
-		AddCanvas(CardCanvas, MakeText(WidgetTree, *FString::Printf(TEXT("%sTitle"), *Name.ToString()), Title, 18.0f, FLinearColor::White), FAnchors(0.0f, 0.0f), FVector2D(24.0f, 12.0f), FVector2D(570.0f, 28.0f));
+		AddCanvas(CardCanvas, MakeText(WidgetTree, *FString::Printf(TEXT("%sTitle"), *Name.ToString()), Title, 18.0f, FLinearColor::White), FAnchors(0.0f, 0.0f), FVector2D(24.0f, 7.0f), FVector2D(570.0f, 25.0f));
 		UTextBlock* const Detail = MakeText(WidgetTree, *FString::Printf(TEXT("%sDetail"), *Name.ToString()), TEXT(""), 15.0f, FLinearColor(0.68f, 0.79f, 0.90f, 1.0f));
-		AddCanvas(CardCanvas, Detail, FAnchors(0.0f, 0.0f), FVector2D(24.0f, 46.0f), FVector2D(650.0f, 25.0f));
+		AddCanvas(CardCanvas, Detail, FAnchors(0.0f, 0.0f), FVector2D(24.0f, 37.0f), FVector2D(650.0f, 22.0f));
 		UButton* const Decrease = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("%sDecrease"), *Name.ToString()));
 		Decrease->SetBackgroundColor(FLinearColor(0.12f, 0.18f, 0.27f, 1.0f));
 		Decrease->SetContent(MakeText(WidgetTree, *FString::Printf(TEXT("%sDecreaseLabel"), *Name.ToString()), TEXT("−"), 18.0f, FLinearColor::White, ETextJustify::Center));
 		UTextBlock* const Rank = MakeText(WidgetTree, *FString::Printf(TEXT("%sRank"), *Name.ToString()), TEXT("0 / 5"), 16.0f, FLinearColor(0.55f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
-		AddCanvas(CardCanvas, Rank, FAnchors(0.0f, 0.0f), FVector2D(768.0f, 28.0f), FVector2D(154.0f, 26.0f));
-		AddCanvas(CardCanvas, Decrease, FAnchors(0.0f, 0.0f), FVector2D(930.0f, 21.0f), FVector2D(52.0f, 42.0f));
+		AddCanvas(CardCanvas, Rank, FAnchors(0.0f, 0.0f), FVector2D(768.0f, 21.0f), FVector2D(154.0f, 26.0f));
+		AddCanvas(CardCanvas, Decrease, FAnchors(0.0f, 0.0f), FVector2D(930.0f, 14.0f), FVector2D(52.0f, 42.0f));
 		UButton* const Increase = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("%sIncrease"), *Name.ToString()));
 		Increase->SetBackgroundColor(FLinearColor(0.08f, 0.34f, 0.30f, 1.0f));
 		Increase->SetContent(MakeText(WidgetTree, *FString::Printf(TEXT("%sIncreaseLabel"), *Name.ToString()), TEXT("+"), 18.0f, FLinearColor::White, ETextJustify::Center));
-		AddCanvas(CardCanvas, Increase, FAnchors(0.0f, 0.0f), FVector2D(996.0f, 21.0f), FVector2D(52.0f, 42.0f));
+		AddCanvas(CardCanvas, Increase, FAnchors(0.0f, 0.0f), FVector2D(996.0f, 14.0f), FVector2D(52.0f, 42.0f));
 
 		switch (Ability)
 		{
@@ -383,6 +383,10 @@ void UJTSShopWidget::BuildWidgetTree()
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRunSpeedDecrease);
 			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRunSpeedIncrease);
 			break;
+		case EJTSPlayerAbility::Stamina:
+			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaDecrease);
+			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaIncrease);
+			break;
 		default:
 			break;
 		}
@@ -391,9 +395,10 @@ void UJTSShopWidget::BuildWidgetTree()
 		AbilityDecreaseButtons.Add(Decrease);
 		AbilityIncreaseButtons.Add(Increase);
 	};
-	AddAbilityCard(EJTSPlayerAbility::InventorySlots, TEXT("INVENTORY SLOTS"), TEXT("ShipAbilityCargo"), 66.0f);
-	AddAbilityCard(EJTSPlayerAbility::StackLimit, TEXT("STACK SIZE"), TEXT("ShipAbilityStack"), 162.0f);
-	AddAbilityCard(EJTSPlayerAbility::RunSpeed, TEXT("RUN SPEED"), TEXT("ShipAbilitySpeed"), 258.0f);
+	AddAbilityCard(EJTSPlayerAbility::InventorySlots, TEXT("INVENTORY SLOTS"), TEXT("ShipAbilityCargo"), 52.0f);
+	AddAbilityCard(EJTSPlayerAbility::StackLimit, TEXT("STACK SIZE"), TEXT("ShipAbilityStack"), 128.0f);
+	AddAbilityCard(EJTSPlayerAbility::RunSpeed, TEXT("RUN SPEED"), TEXT("ShipAbilitySpeed"), 204.0f);
+	AddAbilityCard(EJTSPlayerAbility::Stamina, TEXT("STAMINA"), TEXT("ShipAbilityStamina"), 280.0f);
 
 	ConfirmAbilitiesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityConfirm"));
 	ConfirmAbilitiesButton->SetBackgroundColor(FLinearColor(0.08f, 0.40f, 0.29f, 1.0f));
@@ -470,10 +475,11 @@ void UJTSShopWidget::RefreshAbilities()
 			: FString::Printf(TEXT("POINTS %d"), PlayerState->GetUnspentAbilityPoints())));
 	}
 
-	const TArray<EJTSPlayerAbility, TInlineAllocator<3>> Abilities = {
+	const TArray<EJTSPlayerAbility, TInlineAllocator<4>> Abilities = {
 		EJTSPlayerAbility::InventorySlots,
 		EJTSPlayerAbility::StackLimit,
-		EJTSPlayerAbility::RunSpeed };
+		EJTSPlayerAbility::RunSpeed,
+		EJTSPlayerAbility::Stamina };
 	for (int32 Index = 0; Index < Abilities.Num(); ++Index)
 	{
 		const EJTSPlayerAbility Ability = Abilities[Index];
@@ -583,6 +589,7 @@ bool UJTSShopWidget::AdjustPendingAbility(EJTSPlayerAbility Ability, int32 Delta
 	case EJTSPlayerAbility::InventorySlots: PendingRanks = &PendingAbilityAllocation.InventorySlotRanks; break;
 	case EJTSPlayerAbility::StackLimit: PendingRanks = &PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = &PendingAbilityAllocation.RunSpeedRanks; break;
+	case EJTSPlayerAbility::Stamina: PendingRanks = &PendingAbilityAllocation.StaminaRanks; break;
 	default: return false;
 	}
 
@@ -623,6 +630,7 @@ int32 UJTSShopWidget::GetPendingAbilityRank(EJTSPlayerAbility Ability) const
 	case EJTSPlayerAbility::InventorySlots: PendingRanks = PendingAbilityAllocation.InventorySlotRanks; break;
 	case EJTSPlayerAbility::StackLimit: PendingRanks = PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = PendingAbilityAllocation.RunSpeedRanks; break;
+	case EJTSPlayerAbility::Stamina: PendingRanks = PendingAbilityAllocation.StaminaRanks; break;
 	default: break;
 	}
 	return FMath::Clamp(PlayerState->GetAbilityRank(Ability) + PendingRanks, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
@@ -659,6 +667,12 @@ FString UJTSShopWidget::BuildAbilityDescription(EJTSPlayerAbility Ability) const
 			: FString::Printf(TEXT("Speed bonus  +%d%% → +%d%%"),
 				FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(CurrentRank),
 				FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(PreviewRank));
+	case EJTSPlayerAbility::Stamina:
+		return bMaxRank
+			? FString::Printf(TEXT("MAX  ·  %.0f endurance"), FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank))
+			: FString::Printf(TEXT("Run and climb pool  %.0f → %.0f"),
+				FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank),
+				FJTSPlayerProgressionRules::GetMaxStamina(PreviewRank));
 	default:
 		return FString();
 	}
@@ -917,6 +931,8 @@ void UJTSShopWidget::HandleStackLimitDecrease() { AdjustPendingAbility(EJTSPlaye
 void UJTSShopWidget::HandleStackLimitIncrease() { AdjustPendingAbility(EJTSPlayerAbility::StackLimit, 1); }
 void UJTSShopWidget::HandleRunSpeedDecrease() { AdjustPendingAbility(EJTSPlayerAbility::RunSpeed, -1); }
 void UJTSShopWidget::HandleRunSpeedIncrease() { AdjustPendingAbility(EJTSPlayerAbility::RunSpeed, 1); }
+void UJTSShopWidget::HandleStaminaDecrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, -1); }
+void UJTSShopWidget::HandleStaminaIncrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, 1); }
 
 void UJTSShopWidget::HandleConfirmAbilitiesClicked()
 {

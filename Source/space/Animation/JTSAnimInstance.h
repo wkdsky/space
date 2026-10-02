@@ -34,6 +34,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment", meta = (BlueprintThreadSafe))
 	bool HasHeldItem() const;
 
+	bool IsClimbPoseActive() const { return ClimbBlendAlpha > 0.02f; }
+
 protected:
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 	virtual void NativePostEvaluateAnimation() override;
@@ -95,17 +97,31 @@ protected:
 
 	bool bActiveRangedWeapon = false;
 
-	/** Held item that uses the present-arms pose (knife, axe, pickaxe). Ranged weapons stay on the gun clip. */
+	/** Held item that uses the present-arms pose (knife, axe, pickaxe). */
 	bool bMeleeHeld = false;
 
-	/** Both hands carry an L (ice axes). Distinct from the one-handed chop. */
+	/** Both hands carry a ranged pistol. */
 	bool bTwoHandHeld = false;
 
-	/** 0 while a planted axe rests, 1 at the top of the moving axe's chop. */
-	float ClimbSwingAlpha = 0.0f;
+	/** Normalized wall step phase, shared by hand and foothold reaches. */
+	float ClimbStepAlpha = 0.0f;
 
-	/** True while the left axe is the one swinging. The other hand stays planted. */
+	/** The side reaching for the next grip. */
 	bool bClimbLeadLeft = false;
+	bool bClimbLeaping = false;
+	bool bClimbMantling = false;
+
+	/** Local presentation only: the capsule and camera never inherit this weight shift. */
+	float ClimbBlendAlpha = 0.0f;
+	float ClimbSagCm = 0.0f;
+	float ClimbSagVelocity = 0.0f;
+	float ClimbSwayCm = 0.0f;
+	float ClimbSwayVelocity = 0.0f;
+	float PreviousClimbStepAlpha = 0.0f;
+	float LastClimbStepStartTime = -1.0f;
+	bool bWasClimbing = false;
+	FVector LastClimbSurfaceNormal = FVector::ForwardVector;
+	FVector LastClimbStepDirection = FVector::UpVector;
 
 	/** 0 on the ground, rises while airborne so the jump tuck can play out and then release. */
 	float JumpTuckAlpha = 0.0f;

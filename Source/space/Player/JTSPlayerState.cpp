@@ -24,6 +24,7 @@ int32 AJTSPlayerState::GetAbilityRank(const EJTSPlayerAbility Ability) const
 	case EJTSPlayerAbility::InventorySlots: return InventorySlotAbilityRank;
 	case EJTSPlayerAbility::StackLimit: return StackLimitAbilityRank;
 	case EJTSPlayerAbility::RunSpeed: return RunSpeedAbilityRank;
+	case EJTSPlayerAbility::Stamina: return StaminaAbilityRank;
 	default: return 0;
 	}
 }
@@ -165,7 +166,8 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 	if (!HasAuthority()
 		|| Allocation.InventorySlotRanks < 0
 		|| Allocation.StackLimitRanks < 0
-		|| Allocation.RunSpeedRanks < 0)
+		|| Allocation.RunSpeedRanks < 0
+		|| Allocation.StaminaRanks < 0)
 	{
 		return false;
 	}
@@ -174,7 +176,8 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 	if (TotalCost <= 0 || TotalCost > UnspentAbilityPoints
 		|| InventorySlotAbilityRank + Allocation.InventorySlotRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
 		|| StackLimitAbilityRank + Allocation.StackLimitRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| RunSpeedAbilityRank + Allocation.RunSpeedRanks > FJTSPlayerProgressionRules::MaximumAbilityRank)
+		|| RunSpeedAbilityRank + Allocation.RunSpeedRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
+		|| StaminaAbilityRank + Allocation.StaminaRanks > FJTSPlayerProgressionRules::MaximumAbilityRank)
 	{
 		return false;
 	}
@@ -182,6 +185,7 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 	InventorySlotAbilityRank += Allocation.InventorySlotRanks;
 	StackLimitAbilityRank += Allocation.StackLimitRanks;
 	RunSpeedAbilityRank += Allocation.RunSpeedRanks;
+	StaminaAbilityRank += Allocation.StaminaRanks;
 	UnspentAbilityPoints -= TotalCost;
 	++ProgressionRevision;
 	NotifyProgressionChanged();
@@ -194,7 +198,8 @@ void AJTSPlayerState::RestoreProgression(
 	const int32 NewUnspentAbilityPoints,
 	const int32 NewInventorySlotRank,
 	const int32 NewStackLimitRank,
-	const int32 NewRunSpeedRank)
+	const int32 NewRunSpeedRank,
+	const int32 NewStaminaRank)
 {
 	if (!HasAuthority())
 	{
@@ -209,6 +214,7 @@ void AJTSPlayerState::RestoreProgression(
 	InventorySlotAbilityRank = FMath::Clamp(NewInventorySlotRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	StackLimitAbilityRank = FMath::Clamp(NewStackLimitRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	RunSpeedAbilityRank = FMath::Clamp(NewRunSpeedRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
+	StaminaAbilityRank = FMath::Clamp(NewStaminaRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	++ProgressionRevision;
 	NotifyProgressionChanged();
 }
@@ -255,6 +261,7 @@ void AJTSPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AJTSPlayerState, InventorySlotAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, StackLimitAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, RunSpeedAbilityRank);
+	DOREPLIFETIME(AJTSPlayerState, StaminaAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, ProgressionRevision);
 }
 
@@ -274,6 +281,7 @@ void AJTSPlayerState::CopyProperties(APlayerState* PlayerState)
 		Target->InventorySlotAbilityRank = InventorySlotAbilityRank;
 		Target->StackLimitAbilityRank = StackLimitAbilityRank;
 		Target->RunSpeedAbilityRank = RunSpeedAbilityRank;
+		Target->StaminaAbilityRank = StaminaAbilityRank;
 		Target->ProgressionRevision = ProgressionRevision;
 	}
 }
@@ -294,6 +302,7 @@ void AJTSPlayerState::OverrideWith(APlayerState* PlayerState)
 		InventorySlotAbilityRank = Source->InventorySlotAbilityRank;
 		StackLimitAbilityRank = Source->StackLimitAbilityRank;
 		RunSpeedAbilityRank = Source->RunSpeedAbilityRank;
+		StaminaAbilityRank = Source->StaminaAbilityRank;
 		ProgressionRevision = Source->ProgressionRevision;
 	}
 }

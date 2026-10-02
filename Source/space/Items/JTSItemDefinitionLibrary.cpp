@@ -45,7 +45,7 @@ namespace
 		case EJTSItemId::MoonAntCorpse: return TEXT("/Game/Space/Data/Items/DA_Item_MoonAntCorpse.DA_Item_MoonAntCorpse");
 		case EJTSItemId::Axe: return TEXT("/Game/Space/Data/Items/DA_Item_Axe.DA_Item_Axe");
 		case EJTSItemId::WaistLamp: return TEXT("/Game/Space/Data/Items/DA_Item_WaistLamp.DA_Item_WaistLamp");
-		case EJTSItemId::IceAxe: return TEXT("/Game/Space/Data/Items/DA_Item_IceAxe.DA_Item_IceAxe");
+		case EJTSItemId::IceAxe: return TEXT("/Game/Space/Data/Items/DA_Item_DualPistols.DA_Item_DualPistols");
 		default: return FString();
 		}
 	}
@@ -214,17 +214,23 @@ namespace
 			Definition->AccentColor = FLinearColor(0.92f, 0.95f, 1.0f, 1.0f);
 			break;
 		case EJTSItemId::IceAxe:
-			Definition->DisplayName = FText::FromString(TEXT("登山镐"));
-			Definition->Description = FText::FromString(TEXT("双手登山镐。攻击力和斧头接近。面对超过 50 度、站不住的坡面时，WASD 可以沿墙攀爬。"));
-			Definition->PrimaryCategory = EJTSItemCategory::Utility;
-			Definition->ShopCategories = { EJTSShopCategory::Utility, EJTSShopCategory::Mining };
-			Definition->AffinityTags = { TEXT("Climbing"), TEXT("Two-Handed"), TEXT("Melee") };
-			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::MeleeOverride, EJTSItemCapability::ShopPurchasable });
-			Definition->CombatDamage = 3.0f;
+			Definition->DisplayName = FText::FromString(TEXT("双持手枪"));
+			Definition->Description = FText::FromString(TEXT("双手各持一把手枪。左键连续射击，右键瞄准；攀爬改由 C 键独立触发。"));
+			Definition->PrimaryCategory = EJTSItemCategory::Weapons;
+			Definition->ShopCategories = { EJTSShopCategory::Weapons };
+			Definition->AffinityTags = { TEXT("Weapon"), TEXT("Ranged"), TEXT("DualPistols") };
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::RangedWeapon, EJTSItemCapability::ShopPurchasable });
+			Definition->CombatDamage = 0.0f;
 			Definition->MiningWork = 0.0f;
-			Definition->MeleeAttackInterval = 0.62f;
+			Definition->RangedDamage = 2.1f;
+			Definition->RangedFireInterval = 0.22f;
+			Definition->RangedRange = 8500.0f;
+			Definition->RangedAimFOV = 68.0f;
+			Definition->RangedHipSpreadDegrees = 2.1f;
+			Definition->RangedAimSpreadDegrees = 0.5f;
+			Definition->RangedViewKickDegrees = 0.55f;
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 6), Cost(EJTSResourceType::Ore, 4) };
-			Definition->AccentColor = FLinearColor(0.62f, 0.72f, 0.82f, 1.0f);
+			Definition->AccentColor = FLinearColor(0.35f, 0.72f, 0.95f, 1.0f);
 			break;
 		default:
 			break;

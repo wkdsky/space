@@ -13,6 +13,7 @@
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSItemTypes.h"
@@ -71,7 +72,7 @@ void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		ShotKickAlpha = 0.0f;
 	}
 	UpdatePalmAnchor();
-	UpdateLeftAxeAnchor();
+	UpdateLeftPistolAnchor();
 	UpdateWaistLamp();
 	ApplyPresentationTransform();
 	const bool bHeldItemVisible = IsValid(WeaponBody) && WeaponBody->IsVisible();
@@ -261,7 +262,7 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 		return Component;
 	};
 
-	LeftHandAttachmentAnchor = NewObject<USceneComponent>(GetOwner(), TEXT("LeftIceAxeAnchor"));
+	LeftHandAttachmentAnchor = NewObject<USceneComponent>(GetOwner(), TEXT("LeftPistolAnchor"));
 	if (IsValid(LeftHandAttachmentAnchor))
 	{
 		GetOwner()->AddInstanceComponent(LeftHandAttachmentAnchor);
@@ -272,31 +273,31 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 		{
 			LeftHandAttachmentAnchor->RegisterComponentWithWorld(World);
 		}
-		LeftAxeGrip = MakePiece(TEXT("LeftIceAxeGrip"), LeftHandAttachmentAnchor);
-		LeftAxeShaft = MakePiece(TEXT("LeftIceAxeShaft"), LeftHandAttachmentAnchor);
-		LeftAxeHead = MakePiece(TEXT("LeftIceAxeHead"), LeftHandAttachmentAnchor);
-		LeftAxeMaterial = IsValid(LeftAxeShaft) ? LeftAxeShaft->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
-		if (IsValid(LeftAxeHead) && IsValid(LeftAxeMaterial))
+		LeftPistolGrip = MakePiece(TEXT("LeftPistolGrip"), LeftHandAttachmentAnchor);
+		LeftPistolBody = MakePiece(TEXT("LeftPistolBody"), LeftHandAttachmentAnchor);
+		LeftPistolBarrel = MakePiece(TEXT("LeftPistolBarrel"), LeftHandAttachmentAnchor);
+		LeftPistolMaterial = IsValid(LeftPistolBody) ? LeftPistolBody->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
+		if (IsValid(LeftPistolBarrel) && IsValid(LeftPistolMaterial))
 		{
-			LeftAxeHead->SetMaterial(0, LeftAxeMaterial);
+			LeftPistolBarrel->SetMaterial(0, LeftPistolMaterial);
 		}
-		if (IsValid(LeftAxeGrip))
+		if (IsValid(LeftPistolGrip))
 		{
-			LeftAxeGrip->SetRelativeLocation(FVector(0.0f, 0.0f, -3.0f));
-			LeftAxeGrip->SetRelativeRotation(FRotator::ZeroRotator);
-			LeftAxeGrip->SetWorldScale3D(FVector(0.10f, 0.07f, 0.09f));
+			LeftPistolGrip->SetRelativeLocation(FVector(0.0f, 0.0f, -8.0f));
+			LeftPistolGrip->SetRelativeRotation(FRotator::ZeroRotator);
+			LeftPistolGrip->SetWorldScale3D(FVector(0.16f, 0.12f, 0.32f));
 		}
-		if (IsValid(LeftAxeShaft))
+		if (IsValid(LeftPistolBody))
 		{
-			LeftAxeShaft->SetRelativeLocation(FVector(20.0f, 0.0f, 0.0f));
-			LeftAxeShaft->SetRelativeRotation(FRotator::ZeroRotator);
-			LeftAxeShaft->SetWorldScale3D(FVector(0.42f, 0.04f, 0.04f));
+			LeftPistolBody->SetRelativeLocation(FVector(13.0f, 0.0f, 0.0f));
+			LeftPistolBody->SetRelativeRotation(FRotator::ZeroRotator);
+			LeftPistolBody->SetWorldScale3D(FVector(0.48f, 0.18f, 0.14f));
 		}
-		if (IsValid(LeftAxeHead))
+		if (IsValid(LeftPistolBarrel))
 		{
-			LeftAxeHead->SetRelativeLocation(FVector(42.0f, 0.0f, 2.5f));
-			LeftAxeHead->SetRelativeRotation(FRotator(0.0f, 0.0f, 18.0f));
-			LeftAxeHead->SetWorldScale3D(FVector(0.14f, 0.045f, 0.10f));
+			LeftPistolBarrel->SetRelativeLocation(FVector(48.0f, 0.0f, 0.0f));
+			LeftPistolBarrel->SetRelativeRotation(FRotator::ZeroRotator);
+			LeftPistolBarrel->SetWorldScale3D(FVector(0.26f, 0.08f, 0.08f));
 		}
 	}
 
@@ -485,17 +486,7 @@ void UJTSWeaponVisualComponent::UpdateHandAnchor(
 	const AActor* const Owner = GetOwner();
 	const FVector Up = Owner->GetActorUpVector().GetSafeNormal();
 	FQuat PalmRotation = Owner->GetActorQuat();
-	if (bTwoHandVisible)
-	{
-		// Akimbo carry: mesh +X is the shaft and it stands straight up, the same
-		// way dual pistols keep both muzzles vertical. Each axe uses its own fist,
-		// so the two shafts stay parallel and never cross the chest.
-		const FVector Side = FVector::CrossProduct(Up, Owner->GetActorForwardVector()).GetSafeNormal();
-		const FVector Outward = (bRightHand ? Side : -Side).GetSafeNormal();
-		const FVector PalmUp = Outward.IsNearlyZero() ? Owner->GetActorForwardVector() : Outward;
-		PalmRotation = FRotationMatrix::MakeFromXZ(Up, PalmUp).ToQuat();
-	}
-	else if (bRangedVisible && bRightHand)
+	if (bRangedVisible && (bRightHand || bTwoHandVisible))
 	{
 		const FVector Side = FVector::CrossProduct(Up, AlongForearm).GetSafeNormal();
 		const FVector PalmUp = Side.IsNearlyZero()
@@ -528,7 +519,7 @@ void UJTSWeaponVisualComponent::UpdatePalmAnchor()
 	UpdateHandAnchor(HandAttachmentAnchor, TEXT("Wrist_R"), TEXT("Index1_R"), TEXT("LowerArm_R"), true);
 }
 
-void UJTSWeaponVisualComponent::UpdateLeftAxeAnchor()
+void UJTSWeaponVisualComponent::UpdateLeftPistolAnchor()
 {
 	if (!bTwoHandVisible || !IsValid(LeftHandAttachmentAnchor))
 	{
@@ -619,6 +610,18 @@ void UJTSWeaponVisualComponent::UpdateWaistLamp()
 
 void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
 {
+	if (bClimbStowed)
+	{
+		SetVisible(false);
+		return;
+	}
+	if (const UJTSWallClimbComponent* Climb = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<UJTSWallClimbComponent>() : nullptr;
+		IsValid(Climb) && Climb->IsClimbing())
+	{
+		SetVisible(false);
+		return;
+	}
 	if (!IsValid(WeaponBody) || !IsValid(WeaponGrip) || !IsValid(WeaponBarrel))
 	{
 		return;
@@ -718,9 +721,36 @@ void UJTSWeaponVisualComponent::ValidateAttachmentAfterPose()
 		DistanceFromCharacter);
 }
 
+void UJTSWeaponVisualComponent::SetClimbStowed(bool bStowed)
+{
+	if (bClimbStowed == bStowed)
+	{
+		if (bStowed) SetVisible(false);
+		return;
+	}
+	bClimbStowed = bStowed;
+	if (bStowed)
+	{
+		AimAlpha = 0.0f;
+		SetVisible(false);
+	}
+	else
+	{
+		RefreshWeaponVisual();
+	}
+}
+
 void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 {
 	EnsureMeshComponents();
+	const UJTSWallClimbComponent* const Climb = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<UJTSWallClimbComponent>() : nullptr;
+	if (bClimbStowed || (IsValid(Climb) && Climb->IsClimbing()))
+	{
+		SetVisible(false);
+		UpdateWaistLamp();
+		return;
+	}
 	if (!IsValid(WeaponPresentationRoot)
 		|| !IsValid(WeaponModelRoot)
 		|| !IsValid(WeaponMuzzle)
@@ -732,7 +762,6 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		UE_LOG(LogTemp, Warning, TEXT("JTS weapon visual: missing mesh components for %s."), *GetNameSafe(GetOwner()));
 		return;
 	}
-
 	const UJTSInventoryComponent* const Inventory = GetOwner() != nullptr
 		? GetOwner()->FindComponentByClass<UJTSInventoryComponent>()
 		: nullptr;
@@ -748,8 +777,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	}
 	bRangedVisible = Definition->IsRangedWeapon();
 	bTwoHandVisible = ItemId == EJTSItemId::IceAxe;
-	// Mesh +X is the barrel or the shaft. The palm anchor already aims that axis:
-	// a gun along the forearm, a tool along the chop. No extra local pitch here.
+	// Mesh +X follows each forearm for ranged weapons.
 	DefaultCarryRotation = FRotator::ZeroRotator;
 	SetComponentTickEnabled(true);
 
@@ -806,16 +834,6 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(65.0f, 0.0f, 0.0f), FVector::OneVector);
 			DefaultGripScale = FVector(0.22f, 0.12f, 0.12f);
 			break;
-		case EJTSItemId::IceAxe:
-			// Shaft along mesh +X. The palm frame already points +X straight up.
-			BodyScale = FVector(0.42f, 0.04f, 0.04f);
-			BarrelScale = FVector(0.14f, 0.045f, 0.10f);
-			DefaultBodyLocation = FVector(20.0f, 0.0f, 0.0f);
-			DefaultBarrelLocation = FVector(42.0f, 0.0f, 2.5f);
-			DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -3.0f), FVector::OneVector);
-			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(48.0f, 0.0f, 3.0f), FVector::OneVector);
-			DefaultGripScale = FVector(0.10f, 0.07f, 0.09f);
-			break;
 		case EJTSItemId::Pickaxe:
 		case EJTSItemId::Axe:
 			BodyScale = FVector(0.76f, 0.07f, 0.07f);
@@ -867,7 +885,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	}
 	else if (ItemId == EJTSItemId::IceAxe)
 	{
-		ItemColor = FLinearColor(0.72f, 0.78f, 0.84f, 1.0f);
+		ItemColor = FLinearColor(0.35f, 0.72f, 0.95f, 1.0f);
 	}
 
 	auto ApplyMaterialColor = [](UMaterialInstanceDynamic* Material, const FLinearColor& Color)
@@ -887,7 +905,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	ApplyMaterialColor(WeaponSightMaterial, ItemColor);
 	if (bTwoHandVisible)
 	{
-		ApplyMaterialColor(LeftAxeMaterial, ItemColor);
+		ApplyMaterialColor(LeftPistolMaterial, ItemColor);
 		auto ShowLeft = [](UStaticMeshComponent* Piece, const bool bShow)
 		{
 			if (!IsValid(Piece))
@@ -897,15 +915,15 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 			Piece->SetVisibility(bShow);
 			Piece->SetHiddenInGame(!bShow);
 		};
-		ShowLeft(LeftAxeGrip, true);
-		ShowLeft(LeftAxeShaft, true);
-		ShowLeft(LeftAxeHead, true);
+		ShowLeft(LeftPistolGrip, true);
+		ShowLeft(LeftPistolBody, true);
+		ShowLeft(LeftPistolBarrel, true);
 	}
 	else
 	{
-		if (IsValid(LeftAxeGrip)) LeftAxeGrip->SetVisibility(false);
-		if (IsValid(LeftAxeShaft)) LeftAxeShaft->SetVisibility(false);
-		if (IsValid(LeftAxeHead)) LeftAxeHead->SetVisibility(false);
+		if (IsValid(LeftPistolGrip)) LeftPistolGrip->SetVisibility(false);
+		if (IsValid(LeftPistolBody)) LeftPistolBody->SetVisibility(false);
+		if (IsValid(LeftPistolBarrel)) LeftPistolBarrel->SetVisibility(false);
 	}
 	UpdateWaistLamp();
 	SetAimAlpha(AimAlpha);
@@ -940,28 +958,35 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		*WeaponBody->GetComponentScale().ToCompactString());
 }
 
-bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation) const
+bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation, bool bLeftHand) const
 {
 	OutLocation = FVector::ZeroVector;
 	if (!IsValid(WeaponMuzzle) || !IsValid(WeaponBody) || !WeaponBody->IsVisible())
 	{
 		return false;
 	}
-
-	OutLocation = WeaponMuzzle->GetComponentLocation();
+	if (bLeftHand && bTwoHandVisible && IsValid(LeftHandAttachmentAnchor))
+	{
+		OutLocation = LeftHandAttachmentAnchor->GetComponentTransform().TransformPosition(
+			DefaultMuzzleTransform.GetLocation() - DefaultGripTransform.GetLocation());
+	}
+	else
+	{
+		OutLocation = WeaponMuzzle->GetComponentLocation();
+	}
 	return true;
 }
 
 void UJTSWeaponVisualComponent::SetAimAlpha(float NewAimAlpha)
 {
-	AimAlpha = FMath::Clamp(NewAimAlpha, 0.0f, 1.0f);
+	AimAlpha = bClimbStowed ? 0.0f : FMath::Clamp(NewAimAlpha, 0.0f, 1.0f);
 	ApplyPresentationTransform();
 }
 
 void UJTSWeaponVisualComponent::PlayShotPresentation(UMaterialInterface* GlowMaterial,
-	const FLinearColor& Color)
+	const FLinearColor& Color, bool bLeftHand)
 {
-	if (!IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	if (bClimbStowed || !IsValid(WeaponBody) || !WeaponBody->IsVisible())
 	{
 		return;
 	}
@@ -970,6 +995,12 @@ void UJTSWeaponVisualComponent::PlayShotPresentation(UMaterialInterface* GlowMat
 	ApplyPresentationTransform();
 	if (IsValid(MuzzleFlash))
 	{
+		FVector FlashLocation;
+		if (GetMuzzleWorldLocation(FlashLocation, bLeftHand))
+		{
+			MuzzleFlash->SetAbsolute(true, true, true);
+			MuzzleFlash->SetWorldLocation(FlashLocation);
+		}
 		if (IsValid(GlowMaterial))
 		{
 			MuzzleFlash->SetMaterial(0, GlowMaterial);
@@ -983,6 +1014,12 @@ void UJTSWeaponVisualComponent::PlayShotPresentation(UMaterialInterface* GlowMat
 	}
 	if (IsValid(MuzzleLight))
 	{
+		FVector FlashLocation;
+		if (GetMuzzleWorldLocation(FlashLocation, bLeftHand))
+		{
+			MuzzleLight->SetAbsolute(true, true, true);
+			MuzzleLight->SetWorldLocation(FlashLocation);
+		}
 		MuzzleLight->SetLightColor(Color);
 		MuzzleLight->SetVisibility(true);
 	}
@@ -1057,11 +1094,7 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	}
 	if (IsValid(WeaponBarrel))
 	{
-		// The ice-axe head sits across the top of an upright shaft. Other tools
-		// keep the head on the shaft axis.
-		WeaponBarrel->SetRelativeRotation(bTwoHandVisible
-			? FRotator(0.0f, 0.0f, 18.0f)
-			: FRotator::ZeroRotator);
+		WeaponBarrel->SetRelativeRotation(FRotator::ZeroRotator);
 		WeaponBarrel->SetRelativeLocation(DefaultBarrelLocation);
 	}
 	if (IsValid(WeaponSight))
@@ -1079,7 +1112,11 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 		bTwoHandVisible = false;
 		bMeleeSwingPresentationActive = false;
 		ShotKickAlpha = 0.0f;
-		SetComponentTickEnabled(false);
+		// The head lamp shares this component's pose follow. Stowing a hand item
+		// must not freeze its world-space anchor while the character climbs.
+		const UJTSInventoryComponent* const Inventory = GetOwner() != nullptr
+			? GetOwner()->FindComponentByClass<UJTSInventoryComponent>() : nullptr;
+		SetComponentTickEnabled(IsValid(Inventory) && Inventory->IsWaistLampEquipped());
 		HideShotFlash();
 		if (UWorld* const World = GetWorld())
 		{
@@ -1096,9 +1133,9 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 	if (IsValid(WeaponBarrel)) WeaponBarrel->SetHiddenInGame(!bVisible);
 	if (!bVisible)
 	{
-		if (IsValid(LeftAxeGrip)) LeftAxeGrip->SetVisibility(false);
-		if (IsValid(LeftAxeShaft)) LeftAxeShaft->SetVisibility(false);
-		if (IsValid(LeftAxeHead)) LeftAxeHead->SetVisibility(false);
+		if (IsValid(LeftPistolGrip)) { LeftPistolGrip->SetVisibility(false); LeftPistolGrip->SetHiddenInGame(true); }
+		if (IsValid(LeftPistolBody)) { LeftPistolBody->SetVisibility(false); LeftPistolBody->SetHiddenInGame(true); }
+		if (IsValid(LeftPistolBarrel)) { LeftPistolBarrel->SetVisibility(false); LeftPistolBarrel->SetHiddenInGame(true); }
 	}
 	if (IsValid(WeaponSight)) WeaponSight->SetHiddenInGame(!bVisible);
 }

@@ -188,6 +188,9 @@ struct SPACE_API FJTSPlayerSnapshot
 
 	UPROPERTY()
 	int32 RunSpeedAbilityRank = 0;
+
+	UPROPERTY()
+	int32 StaminaAbilityRank = 0;
 };
 
 /** Cross-level snapshot owned by the authoritative expedition subsystem, never by a client GameInstance. */

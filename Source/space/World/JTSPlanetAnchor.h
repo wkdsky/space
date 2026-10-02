@@ -114,6 +114,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
 	bool HasGameplaySurface() const;
 
+	/** Query the configured real mesh directly, including meshes that ignore Visibility. */
+	bool TraceGameplaySurfaceSegment(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutTraceHit) const;
+
 	/** True for the configured mesh actor/component and actors attached to it. */
 	bool OwnsGameplaySurfaceActor(const AActor* Candidate) const;
 
@@ -322,12 +325,6 @@ public:
 	void SetActivePlanet(bool bInIsActivePlanet);
 
 private:
-	/**
-	 * Queries only the configured real gameplay surface. The component trace is preferred, with a
-	 * collision-object world trace as a fallback for meshes whose collision is only exposed through
-	 * the physics scene.
-	 */
-	bool TraceGameplaySurfaceSegment(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutTraceHit) const;
 	bool TraceRadialDirectionToSurface(const FVector& RadialDirection, float CandidateDistance, FJTSPlanetSurfaceHit& OutSurfaceHit) const;
 	FVector GetFallbackTangent(const FVector& UpVector) const;
 	FTransform BuildSurfaceTransform(const FJTSPlanetSurfaceHit& SurfaceHit, const FVector& PreferredForward) const;

@@ -59,11 +59,11 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const EJTSItemId ActiveId = Inventory->GetActiveItemId();
 			const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveId);
 			bHasHeldItem = IsValid(Definition) && Definition->IsHoldable() && !Inventory->GetActiveItem().IsEmpty();
-			// Guns are the pistol, machine gun and sniper. A knife or pickaxe stays a chop
-			// even when its data asset also carries a ranged capability bit.
+			// The serialized ice-axe item now represents a pair of ranged pistols.
 			const bool bGun = ActiveId == EJTSItemId::Pistol
 				|| ActiveId == EJTSItemId::MachineGun
-				|| ActiveId == EJTSItemId::Sniper;
+				|| ActiveId == EJTSItemId::Sniper
+				|| ActiveId == EJTSItemId::IceAxe;
 			bTwoHandHeld = bHasHeldItem && ActiveId == EJTSItemId::IceAxe;
 			bMeleeHeld = bHasHeldItem && !bGun && !bTwoHandHeld;
 		}
@@ -96,12 +96,22 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 		const UJTSWallClimbComponent* const GroundClimb = Character->FindComponentByClass<UJTSWallClimbComponent>();
 		const bool bGroundClimbing = IsValid(GroundClimb) && GroundClimb->IsClimbing();
+		if (bGroundClimbing || ClimbBlendAlpha > 0.02f)
+		{
+			// The selected slot stays intact, but the animation graph must see empty hands.
+			bHasHeldItem = false;
+			bActiveRangedWeapon = false;
+			bWeaponAiming = false;
+			bMeleeHeld = false;
+			bTwoHandHeld = false;
+		}
 		const AJTSPlayerState* const GroundState = Character->GetPlayerState<AJTSPlayerState>();
 		const bool bGroundDead = IsValid(GroundState)
 			&& GroundState->GetExpeditionStatus() == EJTSPlayerExpeditionStatus::Dead;
 		const float SpeedScale = IsValid(GroundState)
 			? FMath::Max(0.1f, GroundState->GetRunSpeedMultiplier()) : 1.0f;
-		const bool bGroundEligible = !bAirborne && !bGroundClimbing && !Character->IsBoarded() && !bGroundDead;
+		const bool bGroundEligible = !bAirborne && !bGroundClimbing && ClimbBlendAlpha <= 0.02f
+			&& !Character->IsBoarded() && !bGroundDead;
 		const FVector GroundVelocity = IsValid(Movement) ? Movement->Velocity : FVector::ZeroVector;
 		const FVector GroundUp = Character->GetActorUpVector();
 		const FVector GroundPlanar = FVector::VectorPlaneProject(GroundVelocity, GroundUp);
@@ -212,38 +222,101 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 		const UJTSWallClimbComponent* const Climb = Character->FindComponentByClass<UJTSWallClimbComponent>();
 		const bool bClimbing = IsValid(Climb) && Climb->IsClimbing();
+		bClimbMantling = bClimbing && Climb->IsMantling();
+		const float PoseDelta = FMath::Clamp(DeltaSeconds, 0.0f, 0.05f);
+		const float MantleStandAlpha = bClimbMantling
+			? FMath::SmoothStep(0.43f, 0.95f, Climb->GetStepAlpha()) : 0.0f;
+		ClimbBlendAlpha = bClimbMantling
+			? FMath::Min(ClimbBlendAlpha, 1.0f - MantleStandAlpha)
+			: FMath::FInterpConstantTo(ClimbBlendAlpha, bClimbing ? 1.0f : 0.0f,
+				PoseDelta, bClimbing ? 7.0f : 6.0f);
 		if (bClimbing)
 		{
-			ClimbSwingAlpha = Climb->GetSwingAlpha();
+			ClimbStepAlpha = Climb->GetStepAlpha();
 			bClimbLeadLeft = Climb->IsLeadHandLeft();
+			bClimbLeaping = Climb->IsLeaping();
+			LastClimbSurfaceNormal = Climb->GetSurfaceNormal();
+			LastClimbStepDirection = Climb->GetStepDirection();
+			if (!bWasClimbing)
+			{
+				// The first grab arrests the fall; the body then sags under the arms.
+				ClimbSagCm = 0.0f;
+				ClimbSagVelocity = 85.0f;
+				ClimbSwayCm = 0.0f;
+				ClimbSwayVelocity = 0.0f;
+			}
+			const float StepStartTime = Climb->GetStepStartWorldTime();
+			if (StepStartTime >= 0.0f && StepStartTime != LastClimbStepStartTime)
+			{
+				const float SideIntent = FVector::DotProduct(Climb->GetStepDirection(), Character->GetActorRightVector());
+				const float SideSign = FMath::Abs(SideIntent) > 0.2f ? FMath::Sign(SideIntent)
+					: (bClimbLeadLeft ? -0.45f : 0.45f);
+				ClimbSwayVelocity += SideSign * (bClimbLeaping ? 85.0f : 48.0f);
+				LastClimbStepStartTime = StepStartTime;
+				PreviousClimbStepAlpha = 0.0f;
+			}
+			const bool bDescending = !bClimbLeaping
+				&& FVector::DotProduct(Climb->GetStepDirection(), Character->GetActorUpVector()) < -0.5f;
+			const EJTSClimbMotion Motion = bClimbLeaping ? EJTSClimbMotion::Leap
+				: bDescending ? EJTSClimbMotion::Descend : EJTSClimbMotion::Step;
+			const FJTSClimbMotionSample Phase = FJTSClimbMotionSample::Evaluate(ClimbStepAlpha, Motion);
+			if (!bClimbMantling && PreviousClimbStepAlpha < 0.78f && ClimbStepAlpha >= 0.78f)
+			{
+				// Fingers catch first; the shoulders then absorb the hanging weight.
+				ClimbSagVelocity += bClimbLeaping ? 100.0f : bDescending ? 72.0f : 48.0f;
+			}
+			PreviousClimbStepAlpha = ClimbStepAlpha;
+			const float Steepness = FMath::Clamp(1.0f - FVector::DotProduct(
+				Climb->GetSurfaceNormal(), Character->GetActorUpVector()) / 0.77f, 0.0f, 1.0f);
+			const float DesiredSag = bClimbMantling
+				? FMath::Lerp(3.0f + Steepness * 11.0f, 0.0f,
+					FMath::SmoothStep(0.20f, 0.80f, ClimbStepAlpha))
+				: 3.0f + Steepness * 11.0f
+					+ Phase.Load * (bClimbLeaping ? 11.0f : bDescending ? -3.0f : 5.0f);
+			const float SagAcceleration = (DesiredSag - ClimbSagCm) * FMath::Square(19.0f)
+				- ClimbSagVelocity * 2.0f * 0.72f * 19.0f;
+			ClimbSagVelocity += SagAcceleration * PoseDelta;
+			ClimbSagCm = FMath::Clamp(ClimbSagCm + ClimbSagVelocity * PoseDelta, -3.0f, 25.0f);
+			const float SwayAcceleration = -ClimbSwayCm * FMath::Square(13.0f)
+				- ClimbSwayVelocity * 2.0f * 0.42f * 13.0f;
+			ClimbSwayVelocity += SwayAcceleration * PoseDelta;
+			ClimbSwayCm = FMath::Clamp(ClimbSwayCm + ClimbSwayVelocity * PoseDelta, -8.0f, 8.0f);
+			JumpTuckAlpha = 0.0f;
+			GaitBlend = 0.0f;
 		}
 		else
 		{
-			ClimbSwingAlpha = FMath::FInterpTo(ClimbSwingAlpha, 0.0f, DeltaSeconds, 8.0f);
+			ClimbStepAlpha = 0.0f;
+			bClimbLeaping = false;
+			bClimbMantling = false;
+			LastClimbStepStartTime = -1.0f;
+			PreviousClimbStepAlpha = 0.0f;
 		}
-		// Head pitch always tracks the view, including the ordinary third-person stance.
-		// Right-click aiming still uses the same pitch; it only changes the camera and crosshair.
+		bWasClimbing = bClimbing;
+		const bool bClimbPoseActive = bClimbing || ClimbBlendAlpha > 0.02f;
+		// Free look never twists the torso or head away from wall handholds.
 		{
-			const float HeadPitchTarget = FMath::Clamp(Character->GetAimPitch(), -55.0f, 55.0f);
-			AimPitch = FMath::FInterpTo(AimPitch, HeadPitchTarget, DeltaSeconds, 14.0f);
+			const float HeadPitchTarget = bClimbPoseActive ? 0.0f
+				: FMath::Clamp(Character->GetAimPitch(), -55.0f, 55.0f);
+			AimPitch = bClimbPoseActive ? 0.0f : FMath::FInterpTo(AimPitch, HeadPitchTarget, DeltaSeconds, 14.0f);
 		}
 		if (const AController* const CharacterController = Character->GetController())
 		{
 			const FRotator RelativeAim = (CharacterController->GetControlRotation() - Character->GetActorRotation()).GetNormalized();
-			RawAimYaw = FRotator::NormalizeAxis(RelativeAim.Yaw);
+			RawAimYaw = bClimbPoseActive ? 0.0f : FRotator::NormalizeAxis(RelativeAim.Yaw);
 		}
 		// Ordinary grounded third person keeps the player's facing. The arms only cover
 		// the view while it is already close to the body. Past that cone the arms
 		// return forward instead of dragging the barrel onto screen center.
 		// First person and weapon aiming already turn the whole actor with the view.
 		// Ordinary third-person jumps keep the movement heading instead.
-		const bool bWholeBodyOnView = Character->IsFirstPersonView()
+		const bool bWholeBodyOnView = bClimbPoseActive || Character->IsFirstPersonView()
 			|| bWeaponAiming;
 		AimYaw = bWholeBodyOnView ? 0.0f : Character->GetPresentationAimYaw();
 		TurnShuffleAlpha = bWholeBodyOnView ? 0.0f : Character->GetTurnShuffleAlpha();
 		const float YawLimit = 48.0f;
 		const float DesiredUpperYaw = FMath::Clamp(AimYaw, -YawLimit, YawLimit);
-		UpperBodyYaw = FMath::FInterpTo(
+		UpperBodyYaw = bClimbPoseActive ? 0.0f : FMath::FInterpTo(
 			UpperBodyYaw,
 			DesiredUpperYaw,
 			DeltaSeconds,
@@ -391,6 +464,7 @@ void UJTSAnimInstance::ApplyFacingPose()
 	// Folds the fingers of one hand around a grip. The idle clip leaves them open, so a
 	// held item was floating in an open palm. Curl is applied around the palm normal, which
 	// is the same side for both hands because the finger bones mirror across the body.
+	float GripAmount = 1.0f;
 	auto CloseGrip = [&](const bool bRightHand)
 	{
 		const TCHAR* const Suffix = bRightHand ? TEXT("_R") : TEXT("_L");
@@ -419,8 +493,8 @@ void UJTSAnimInstance::ApplyFacingPose()
 
 		auto CurlChain = [&](const TCHAR* BonePrefix, const float RootDegrees, const float JointDegrees)
 		{
-			const FQuat RootCurl(PalmNormal, FMath::DegreesToRadians(RootDegrees));
-			const FQuat JointCurl(PalmNormal, FMath::DegreesToRadians(JointDegrees));
+			const FQuat RootCurl(PalmNormal, FMath::DegreesToRadians(RootDegrees * GripAmount));
+			const FQuat JointCurl(PalmNormal, FMath::DegreesToRadians(JointDegrees * GripAmount));
 			for (int32 Joint = 1; Joint <= 3; ++Joint)
 			{
 				const int32 BoneIndex = Mesh->GetBoneIndex(*FString::Printf(TEXT("%s%d%s"), BonePrefix, Joint, Suffix));
@@ -488,42 +562,203 @@ void UJTSAnimInstance::ApplyFacingPose()
 	const UJTSWallClimbComponent* const Climb = PoseCharacter != nullptr
 		? PoseCharacter->FindComponentByClass<UJTSWallClimbComponent>()
 		: nullptr;
-	if (IsValid(Climb) && Climb->IsClimbing())
+	if (IsValid(Climb) && (Climb->IsClimbing() || ClimbBlendAlpha > 0.02f))
 	{
-		// Both hands stay in an L against the wall. The planted axe is already in
-		// the stone. The lead axe lifts, then comes back down in the step direction.
-		const FVector WallNormal = ComponentRotation.UnrotateVector(Climb->GetSurfaceNormal()).GetSafeNormal();
-		const FVector Step = ComponentRotation.UnrotateVector(Climb->GetStepDirection()).GetSafeNormal();
-		const FVector IntoWall = WallNormal.IsNearlyZero() ? PoseForward : -WallNormal;
-		const FVector AlongStep = Step.IsNearlyZero() ? PoseUp : Step;
-		const float Swing = FMath::Clamp(ClimbSwingAlpha, 0.0f, 1.0f);
-		const float Raised = Swing < 0.45f ? Swing / 0.45f : (1.0f - Swing) / 0.55f;
-		const FVector PlantFore = IntoWall;
-		const FVector PlantUpper = (IntoWall * 0.55f - PoseUp * 0.45f).GetSafeNormal();
-		const FVector SwingFore = (IntoWall + AlongStep * (0.85f * Raised)).GetSafeNormal();
-		const FVector SwingUpper = (IntoWall * 0.35f + AlongStep * Raised - PoseUp * 0.35f).GetSafeNormal();
-		const bool bLeftLeads = bClimbLeadLeft;
-		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), bLeftLeads ? SwingUpper : PlantUpper);
-		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), bLeftLeads ? SwingFore : PlantFore);
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), bLeftLeads ? PlantUpper : SwingUpper);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), bLeftLeads ? PlantFore : SwingFore);
+		// Keep a copy for the short grab/release blend. The capsule remains authoritative;
+		// only the bones show weight, reach and the follow-through after leaving the wall.
+		const TArray<FTransform> UnclimbedPose = Pose;
+		const FVector WallNormal = ComponentRotation.UnrotateVector(
+			Climb->IsClimbing() ? Climb->GetSurfaceNormal() : LastClimbSurfaceNormal).GetSafeNormal();
+		const FVector WallForward = FVector::VectorPlaneProject(-WallNormal, PoseUp).GetSafeNormal();
+		const FVector WallRight = FVector::CrossProduct(PoseUp, WallForward).GetSafeNormal();
+		const FVector Step = ComponentRotation.UnrotateVector(
+			Climb->IsClimbing() ? Climb->GetStepDirection() : LastClimbStepDirection).GetSafeNormal();
+		const float Alpha = FMath::Clamp(ClimbStepAlpha, 0.0f, 1.0f);
+		const bool bLeap = bClimbLeaping;
+		const bool bDescending = !bLeap && FVector::DotProduct(Step, PoseUp) < -0.5f;
+		const EJTSClimbMotion Motion = bLeap ? EJTSClimbMotion::Leap
+			: bDescending ? EJTSClimbMotion::Descend : EJTSClimbMotion::Step;
+		const FJTSClimbMotionSample Phase = FJTSClimbMotionSample::Evaluate(Alpha, Motion);
+		const float Arc = FMath::Sin(PI * Phase.Travel);
+		const FVector Front = WallForward.IsNearlyZero() ? PoseForward : WallForward;
+		const FVector Side = WallRight.IsNearlyZero() ? PoseRight : WallRight;
+		const float Steepness = FMath::Clamp(1.0f - FVector::DotProduct(WallNormal, PoseUp) / 0.77f,
+			0.0f, 1.0f);
+
+		// Casual_2's foot and toe bones are root siblings, so save their offsets
+		// from the ankle before shifting the hips and solving the legs.
+		struct FClimbShoeRest
+		{
+			int32 Ankle;
+			int32 Foot;
+			int32 Toe;
+			FVector AnklePosition;
+			FVector FootOffset;
+			FVector ToeOffset;
+			FQuat AnkleRotation;
+		};
+		FClimbShoeRest Shoes[2];
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			const TCHAR* Suffix = Index == 0 ? TEXT("_L") : TEXT("_R");
+			FClimbShoeRest& Shoe = Shoes[Index];
+			Shoe.Ankle = Mesh->GetBoneIndex(*FString::Printf(TEXT("LowerLeg%s_end"), Suffix));
+			Shoe.Foot = Mesh->GetBoneIndex(*FString::Printf(TEXT("Foot%s"), Suffix));
+			Shoe.Toe = Mesh->GetBoneIndex(*FString::Printf(TEXT("PT%s"), Suffix));
+			Shoe.AnklePosition = Pose.IsValidIndex(Shoe.Ankle) ? Pose[Shoe.Ankle].GetLocation() : FVector::ZeroVector;
+			Shoe.FootOffset = Pose.IsValidIndex(Shoe.Foot) ? Pose[Shoe.Foot].GetLocation() - Shoe.AnklePosition : FVector::ZeroVector;
+			Shoe.ToeOffset = Pose.IsValidIndex(Shoe.Toe) ? Pose[Shoe.Toe].GetLocation() - Shoe.AnklePosition : FVector::ZeroVector;
+			Shoe.AnkleRotation = Pose.IsValidIndex(Shoe.Ankle) ? Pose[Shoe.Ankle].GetRotation() : FQuat::Identity;
+		}
+		FVector BaseShoulders[2];
+		FVector BaseHips[2];
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			const TCHAR* Suffix = Index == 0 ? TEXT("_L") : TEXT("_R");
+			const int32 Shoulder = Mesh->GetBoneIndex(*FString::Printf(TEXT("UpperArm%s"), Suffix));
+			const int32 Hip = Mesh->GetBoneIndex(*FString::Printf(TEXT("UpperLeg%s"), Suffix));
+			BaseShoulders[Index] = Pose.IsValidIndex(Shoulder) ? Pose[Shoulder].GetLocation() : FVector::ZeroVector;
+			BaseHips[Index] = Pose.IsValidIndex(Hip) ? Pose[Hip].GetLocation() : FVector::ZeroVector;
+		}
+		// Casual_2 parents Hips and both UpperLeg bones to Body. Shift that
+		// common branch so pelvis skin and thighs cannot tear apart at the crotch.
+		const int32 Body = Mesh->GetBoneIndex(TEXT("Body"));
+		if (Pose.IsValidIndex(Body))
+		{
+			const FVector BodyOffset = Front * (7.0f - Steepness * 12.0f - (bLeap ? 8.0f * Arc : 0.0f))
+				- PoseUp * (3.0f + ClimbSagCm + (bLeap ? 10.0f * Phase.Load + 14.0f * Phase.Reach : 0.0f)
+					+ (bDescending ? 5.0f * Phase.Travel : 0.0f))
+				+ PoseUp * (bClimbMantling ? 14.0f * FMath::SmoothStep(0.25f, 0.70f, Alpha) : 0.0f)
+				+ Side * ClimbSwayCm;
+			for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
+			{
+				int32 Parent = Bone;
+				while (Parent >= 0 && Parent != Body) Parent = Skeleton->GetParentIndex(Parent);
+				if (Parent == Body) Pose[Bone].AddToTranslation(BodyOffset);
+			}
+			// The chest stays nearer the hold while the pelvis hangs outward beneath it.
+			AimSegment(TEXT("Abdomen"), TEXT("Torso"), PoseUp + Front * (0.10f + 0.12f * Steepness));
+		}
+
+		auto PlaceLimb = [&](const FName RootName, const FName MidName, const FName EndName,
+			const FVector& Target, const FVector& BendPole)
+		{
+			const int32 Root = Mesh->GetBoneIndex(RootName);
+			const int32 Mid = Mesh->GetBoneIndex(MidName);
+			const int32 End = Mesh->GetBoneIndex(EndName);
+			if (!Pose.IsValidIndex(Root) || !Pose.IsValidIndex(Mid) || !Pose.IsValidIndex(End)) return;
+			const FVector Origin = Pose[Root].GetLocation();
+			const float Upper = FVector::Distance(Origin, Pose[Mid].GetLocation());
+			const float Lower = FVector::Distance(Pose[Mid].GetLocation(), Pose[End].GetLocation());
+			if (Upper < 1.0f || Lower < 1.0f) return;
+			const FVector Goal = Target - Origin;
+			const FVector Along = Goal.GetSafeNormal();
+			if (Along.IsNearlyZero()) return;
+			const float Distance = FMath::Clamp(Goal.Size(), FMath::Abs(Upper - Lower) + 0.5f, Upper + Lower - 0.5f);
+			const float JointAlong = (Upper * Upper - Lower * Lower + Distance * Distance) / (2.0f * Distance);
+			const float JointOut = FMath::Sqrt(FMath::Max(0.0f, Upper * Upper - JointAlong * JointAlong));
+			FVector Pole = FVector::VectorPlaneProject(BendPole, Along).GetSafeNormal();
+			if (Pole.IsNearlyZero()) Pole = FVector::CrossProduct(Along, Side).GetSafeNormal();
+			const FVector Elbow = Origin + Along * JointAlong + Pole * JointOut;
+			AimSegment(RootName, MidName, Elbow - Origin);
+			AimSegment(MidName, EndName, Origin + Along * Distance - Pose[Mid].GetLocation());
+		};
+		auto SeatShoeBranch = [&](const int32 Root, const FVector& NewRoot, const FQuat& Turn)
+		{
+			if (!Pose.IsValidIndex(Root)) return;
+			const FVector OldRoot = Pose[Root].GetLocation();
+			for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
+			{
+				int32 Parent = Bone;
+				while (Parent >= 0 && Parent != Root) Parent = Skeleton->GetParentIndex(Parent);
+				if (Parent != Root) continue;
+				Pose[Bone].SetLocation(NewRoot + Turn.RotateVector(Pose[Bone].GetLocation() - OldRoot));
+				Pose[Bone].SetRotation(Turn * Pose[Bone].GetRotation());
+				Pose[Bone].NormalizeRotation();
+			}
+		};
+
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			const bool bLeft = Index == 0;
+			const float Sign = bLeft ? -1.0f : 1.0f;
+			const bool bLead = bLeft == bClimbLeadLeft;
+			const TCHAR* Suffix = bLeft ? TEXT("_L") : TEXT("_R");
+			const FName ShoulderName(*FString::Printf(TEXT("UpperArm%s"), Suffix));
+			const FName ElbowName(*FString::Printf(TEXT("LowerArm%s"), Suffix));
+			const FName WristName(*FString::Printf(TEXT("Wrist%s"), Suffix));
+			const FName HipName(*FString::Printf(TEXT("UpperLeg%s"), Suffix));
+			const FName KneeName(*FString::Printf(TEXT("LowerLeg%s"), Suffix));
+			const FName AnkleName(*FString::Printf(TEXT("LowerLeg%s_end"), Suffix));
+			const int32 Shoulder = Mesh->GetBoneIndex(ShoulderName);
+			const int32 Hip = Mesh->GetBoneIndex(HipName);
+			if (!Pose.IsValidIndex(Shoulder) || !Pose.IsValidIndex(Hip)) continue;
+			// Grip targets are measured from the unmoved shoulders. As the pelvis sags
+			// or sways, the hands remain on their holds instead of following the body.
+			const float HandReach = (bLeap ? (bLead ? 39.0f : 30.0f)
+				: bDescending ? (bLead ? 27.0f : -12.0f)
+				: (bLead ? 30.0f : -11.0f)) * Phase.Reach;
+			const float HandDrag = (bLeap ? 16.0f : bDescending ? 12.0f : 9.0f)
+				* Phase.Travel * Phase.Reach;
+			// Bring the leap's search hand within the arm's reach as the torso drops.
+			// The regular grip stays farther forward against the wall.
+			const float HandDepth = bLeap ? 24.0f - 2.0f * Phase.Reach
+				: 33.0f + 7.0f * Phase.Reach;
+			const FVector HandTarget = BaseShoulders[Index] + Front * HandDepth
+				+ PoseUp * (18.0f + 4.0f * Steepness) + Side * (Sign * 12.0f)
+				+ Step * (HandReach - HandDrag);
+			PlaceLimb(ShoulderName, ElbowName, WristName, HandTarget, -PoseUp + Side * (Sign * 0.25f));
+
+			const bool bFootLeads = bLeap || (bDescending ? bLead : !bLead);
+			const float FootPhase = bDescending
+				? FMath::SmoothStep(0.02f, 0.35f, Alpha)
+					* (1.0f - FMath::SmoothStep(0.78f, 1.0f, Alpha))
+				: Phase.Reach;
+			const float FootReach = (bLeap ? 24.0f : bDescending ? (bFootLeads ? 31.0f : -6.0f)
+				: (bFootLeads ? 21.0f : -8.0f)) * FootPhase;
+			const float FootLift = (bLeap ? 30.0f * Arc : bDescending ? 6.0f * FootPhase
+				: (bFootLeads ? 13.0f : 2.0f) * Phase.Reach)
+				+ (bClimbMantling ? 28.0f * FMath::SmoothStep(0.24f, 0.68f, Alpha) : 0.0f);
+			const FVector FootTarget = BaseHips[Index] + Front * (24.0f - 7.0f * Arc)
+				- PoseUp * (54.0f - FootLift) + Side * (Sign * 15.0f) + Step * FootReach;
+			PlaceLimb(HipName, KneeName, AnkleName, FootTarget, Front + Side * (Sign * 0.15f));
+			const FClimbShoeRest& Shoe = Shoes[Index];
+			if (Pose.IsValidIndex(Shoe.Ankle))
+			{
+				const FVector AnkleNow = Pose[Shoe.Ankle].GetLocation();
+				const FQuat ShoeTurn = Pose[Shoe.Ankle].GetRotation() * Shoe.AnkleRotation.Inverse();
+				SeatShoeBranch(Shoe.Foot, AnkleNow + ShoeTurn.RotateVector(Shoe.FootOffset), ShoeTurn);
+				SeatShoeBranch(Shoe.Toe, AnkleNow + ShoeTurn.RotateVector(Shoe.ToeOffset), ShoeTurn);
+			}
+		}
+		// The supporting hand stays closed. The searching hand opens, then clamps
+		// down at the catch; a leap briefly opens both palms before they re-grip.
+		GripAmount = FMath::Clamp(1.0f - Phase.Reach * (bClimbLeadLeft ? (bLeap ? 0.32f : 0.08f)
+			: 0.72f), 0.2f, 1.0f);
 		CloseGrip(true);
+		GripAmount = FMath::Clamp(1.0f - Phase.Reach * (bClimbLeadLeft ? 0.72f
+			: (bLeap ? 0.32f : 0.08f)), 0.2f, 1.0f);
 		CloseGrip(false);
+		GripAmount = 1.0f;
+		for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
+		{
+			const FTransform ClimbTransform = Pose[Bone];
+			Pose[Bone].Blend(UnclimbedPose[Bone], ClimbTransform, ClimbBlendAlpha);
+		}
 	}
 	else if (bTwoHandHeld)
 	{
-		// Dual upright carry in front of the chest. Each upper arm reaches
-		// forward from its own shoulder, the elbow bends, and the forearm
-		// stands up so the pick is an L in front of that shoulder. The two
-		// forearms stay on their own sides and never meet.
-		const FVector UpperL = (PoseForward * 0.88f - PoseRight * 0.32f - PoseUp * 0.28f).GetSafeNormal();
-		const FVector UpperR = (PoseForward * 0.88f + PoseRight * 0.32f - PoseUp * 0.28f).GetSafeNormal();
-		const FVector ForeL = (PoseUp * 0.78f + PoseForward * 0.58f - PoseRight * 0.10f).GetSafeNormal();
-		const FVector ForeR = (PoseUp * 0.78f + PoseForward * 0.58f + PoseRight * 0.10f).GetSafeNormal();
-		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), UpperL);
-		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), ForeL);
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), UpperR);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), ForeR);
+		// Each pistol follows its own forearm and remains separated at the shoulders.
+		const AJTSCharacter* OwnerCharacter = Cast<AJTSCharacter>(Mesh->GetOwner());
+		const float Pitch = IsValid(OwnerCharacter) ? OwnerCharacter->GetAimPitch() : 0.0f;
+		const FVector Aim = FQuat(PoseUp, FMath::DegreesToRadians(BodyYaw)).RotateVector(
+			FQuat(PoseRight, FMath::DegreesToRadians(-Pitch)).RotateVector(PoseForward));
+		const FVector RightAim = (Aim + PoseRight * 0.10f).GetSafeNormal();
+		const FVector LeftAim = (Aim - PoseRight * 0.10f).GetSafeNormal();
+		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), LeftAim);
+		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), LeftAim);
+		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), RightAim);
+		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), RightAim);
 		CloseGrip(true);
 		CloseGrip(false);
 	}
@@ -573,9 +808,12 @@ void UJTSAnimInstance::ApplyFacingPose()
 	{
 		ApplyStiffUnarmedArms(Pose, Mesh, Skeleton, PoseUp, PoseForward, PoseRight);
 	}
-	ApplyStylizedRunStride(Pose, Mesh, Skeleton, PoseUp, PoseForward, PoseRight);
+	if (!(IsValid(Climb) && Climb->IsClimbing()) && ClimbBlendAlpha <= 0.02f)
+	{
+		ApplyStylizedRunStride(Pose, Mesh, Skeleton, PoseUp, PoseForward, PoseRight);
+	}
 
-	if (JumpTuckAlpha > 0.02f)
+	if (JumpTuckAlpha > 0.02f && ClimbBlendAlpha < 0.5f)
 	{
 		// Kneeling tuck for the whole jump. A turn in the air must not swap this
 		// for the shuffle, or the legs snap open before the landing.

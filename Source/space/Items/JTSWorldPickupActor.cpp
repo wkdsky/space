@@ -1178,7 +1178,7 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		}
 		else if (ItemType == EJTSWorldPickupItemType::IceAxe)
 		{
-			DesiredScale = FVector(0.72f, 0.16f, 0.12f);
+			DesiredScale = FVector(0.72f, 0.22f, 0.18f);
 		}
 		else
 		{
@@ -1283,7 +1283,7 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 		break;
 
 	case EJTSWorldPickupItemType::IceAxe:
-		ItemColor = FLinearColor(0.62f, 0.72f, 0.82f, 1.0f);
+		ItemColor = FLinearColor(0.24f, 0.62f, 1.0f, 1.0f);
 		break;
 
 	default:
@@ -1388,7 +1388,7 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 		return TEXT("HEADLAMP");
 
 	case EJTSWorldPickupItemType::IceAxe:
-		return TEXT("ICE AXE");
+		return TEXT("DUAL PISTOLS");
 
 	default:
 		return TEXT("UNKNOWN");

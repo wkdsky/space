@@ -29,8 +29,8 @@ enum class EJTSItemId : uint8
 	Sniper UMETA(DisplayName = "Sniper Rifle"),
 	/** White belt lamp. Worn at the waist, toggled with F from the quickbar. */
 	WaistLamp UMETA(DisplayName = "Waist Lamp"),
-	/** Two-handed climbing tool. Also a light melee weapon. */
-	IceAxe UMETA(DisplayName = "Ice Axe")
+	/** Serialized ice-axe value repurposed as dual pistols to preserve existing saves. */
+	IceAxe UMETA(DisplayName = "Dual Pistols")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */

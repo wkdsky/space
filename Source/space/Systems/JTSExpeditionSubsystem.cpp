@@ -318,6 +318,7 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			PlayerSnapshot.InventorySlotAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::InventorySlots);
 			PlayerSnapshot.StackLimitAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::StackLimit);
 			PlayerSnapshot.RunSpeedAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::RunSpeed);
+			PlayerSnapshot.StaminaAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Stamina);
 			if (const UJTSHealthComponent* const Health = Character != nullptr ? Character->GetHealthComponent() : nullptr)
 			{
 				PlayerSnapshot.Health = Health->GetHealth();
@@ -364,7 +365,8 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 		SavedPlayer->UnspentAbilityPoints,
 		SavedPlayer->InventorySlotAbilityRank,
 		SavedPlayer->StackLimitAbilityRank,
-		SavedPlayer->RunSpeedAbilityRank);
+			SavedPlayer->RunSpeedAbilityRank,
+			SavedPlayer->StaminaAbilityRank);
 	if (UJTSHealthComponent* const Health = Character->GetHealthComponent())
 	{
 		Health->RestoreAuthoritativeHealth(SavedPlayer->Health);

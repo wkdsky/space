@@ -41,6 +41,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Ranged|Aim")
 	void StopAim();
+	/** Clears held fire and ADS on each local copy when the character grips a wall. */
+	void CancelForClimb();
 
 	UFUNCTION(BlueprintCallable, Category = "Ranged")
 	void StartFire();
@@ -87,6 +89,8 @@ private:
 
 	FTimerHandle AutomaticFireTimerHandle;
 	bool bFireHeld = false;
+	bool bNextLeftServerShot = false;
+	bool bNextLeftFeedbackShot = false;
 	bool bDebugShotTraces = false;
 	double NextFireTimeSeconds = 0.0;
 	double NextLocalFeedbackTimeSeconds = 0.0;

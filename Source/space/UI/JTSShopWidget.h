@@ -75,6 +75,8 @@ private:
 	UFUNCTION() void HandleStackLimitIncrease();
 	UFUNCTION() void HandleRunSpeedDecrease();
 	UFUNCTION() void HandleRunSpeedIncrease();
+	UFUNCTION() void HandleStaminaDecrease();
+	UFUNCTION() void HandleStaminaIncrease();
 	UFUNCTION() void HandleConfirmAbilitiesClicked();
 	UFUNCTION() void HandleResetAbilitiesClicked();
 	UFUNCTION() void HandleCloseClicked();

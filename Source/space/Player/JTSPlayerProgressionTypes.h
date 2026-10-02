@@ -6,13 +6,14 @@
 
 #include "JTSPlayerProgressionTypes.generated.h"
 
-/** The three permanent player abilities currently available from the ship ability terminal. */
+/** Permanent player abilities available from the ship ability terminal. */
 UENUM(BlueprintType)
 enum class EJTSPlayerAbility : uint8
 {
 	InventorySlots UMETA(DisplayName = "Cargo Bays"),
 	StackLimit UMETA(DisplayName = "Stack Compression"),
-	RunSpeed UMETA(DisplayName = "Running Thrusters")
+	RunSpeed UMETA(DisplayName = "Running Thrusters"),
+	Stamina UMETA(DisplayName = "Endurance")
 };
 
 /** Client-submitted, server-validated pending allocation. Every rank costs one ability point. */
@@ -30,11 +31,15 @@ struct SPACE_API FJTSAbilityAllocation
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progression", meta = (ClampMin = "0"))
 	int32 RunSpeedRanks = 0;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progression", meta = (ClampMin = "0"))
+	int32 StaminaRanks = 0;
+
 	int32 GetTotalPointCost() const
 	{
 		return FMath::Max(0, InventorySlotRanks)
 			+ FMath::Max(0, StackLimitRanks)
-			+ FMath::Max(0, RunSpeedRanks);
+			+ FMath::Max(0, RunSpeedRanks)
+			+ FMath::Max(0, StaminaRanks);
 	}
 };
 
@@ -53,4 +58,5 @@ struct SPACE_API FJTSPlayerProgressionRules
 	static int32 GetStackLimit(int32 AbilityRank);
 	static int32 GetRunSpeedBonusPercent(int32 AbilityRank);
 	static float GetRunSpeedMultiplier(int32 AbilityRank);
+	static float GetMaxStamina(int32 AbilityRank);
 };

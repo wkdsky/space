@@ -96,7 +96,8 @@ public:
 		int32 NewUnspentAbilityPoints,
 		int32 NewInventorySlotRank,
 		int32 NewStackLimitRank,
-		int32 NewRunSpeedRank);
+		int32 NewRunSpeedRank,
+		int32 NewStaminaRank = 0);
 
 	UPROPERTY(BlueprintAssignable, Category = "Expedition")
 	FOnJTSPlayerNetworkStateChanged OnNetworkStateChanged;
@@ -150,6 +151,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 RunSpeedAbilityRank = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
+	int32 StaminaAbilityRank = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 ProgressionRevision = 0;
