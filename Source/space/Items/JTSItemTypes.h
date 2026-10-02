@@ -30,7 +30,9 @@ enum class EJTSItemId : uint8
 	/** White belt lamp. Worn at the waist, toggled with F from the quickbar. */
 	WaistLamp UMETA(DisplayName = "Waist Lamp"),
 	/** Serialized ice-axe value repurposed as dual pistols to preserve existing saves. */
-	IceAxe UMETA(DisplayName = "Dual Pistols")
+	IceAxe UMETA(DisplayName = "Dual Pistols"),
+	/** Text-only stellar loot identity; the specific entry remains data driven. */
+	StellarText UMETA(DisplayName = "Stellar Item")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */
@@ -82,7 +84,18 @@ enum class EJTSShopPurchaseResult : uint8
 	SucceededDropped UMETA(DisplayName = "Succeeded - Dropped"),
 	InvalidItem UMETA(DisplayName = "Invalid Item"),
 	InsufficientResources UMETA(DisplayName = "Insufficient Resources"),
-	DeliveryFailed UMETA(DisplayName = "Delivery Failed")
+	DeliveryFailed UMETA(DisplayName = "Delivery Failed"),
+	InventoryFull UMETA(DisplayName = "Ship Locker Full")
+};
+
+UENUM(BlueprintType)
+enum class EJTSStellarRollResult : uint8
+{
+	Succeeded,
+	InventoryFull,
+	InsufficientResources,
+	NotAvailable,
+	CoolingDown
 };
 
 /** Legacy serialized values from the retired wearable system. */
@@ -116,13 +129,26 @@ struct SPACE_API FJTSItemInstance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FGuid InstanceId;
 
-	bool IsEmpty() const { return ItemId == EJTSItemId::None || StackCount <= 0; }
+	/** Set only for StellarText items so they survive quickbar transfers and saves. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	FName StellarItemId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	FText CustomDisplayName;
+
+	bool IsEmpty() const
+	{
+		return ItemId == EJTSItemId::None || StackCount <= 0
+			|| (ItemId == EJTSItemId::StellarText && StellarItemId.IsNone());
+	}
 	void Clear()
 	{
 		ItemId = EJTSItemId::None;
 		StackCount = 0;
 		Durability = -1.0f;
 		InstanceId.Invalidate();
+		StellarItemId = NAME_None;
+		CustomDisplayName = FText::GetEmpty();
 	}
 };
 

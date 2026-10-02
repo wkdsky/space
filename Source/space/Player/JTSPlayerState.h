@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerState.h"
 #include "space/Core/JTSExpeditionTypes.h"
 #include "space/Player/JTSPlayerProgressionTypes.h"
+#include "space/Items/JTSShipLockerTypes.h"
 
 #include "JTSPlayerState.generated.h"
 
@@ -60,6 +61,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Progression")
 	float GetRunSpeedMultiplier() const;
 
+	UFUNCTION(BlueprintPure, Category = "Progression")
+	int32 GetCriticalChancePercent() const;
+
 	/** Incremented with every server-authoritative progression mutation for UI pending-state reconciliation. */
 	UFUNCTION(BlueprintPure, Category = "Progression")
 	int32 GetProgressionRevision() const { return ProgressionRevision; }
@@ -97,7 +101,28 @@ public:
 		int32 NewInventorySlotRank,
 		int32 NewStackLimitRank,
 		int32 NewRunSpeedRank,
-		int32 NewStaminaRank = 0);
+		int32 NewStaminaRank = 0,
+		int32 NewCriticalChanceRank = 0);
+
+	static constexpr int32 ShipLockerCapacity = 30;
+	const TArray<FJTSShipLockerSlot>& GetShipLockerSlots() const { return ShipLockerSlots; }
+	FJTSShipLockerSlot GetShipLockerSlot(int32 SlotIndex) const;
+	bool HasFreeShipLockerSlot() const;
+	bool HasPendingStellarReveal() const;
+	/** Server-only mutations. The controller validates ship terminal access before calling these. */
+	bool TryStorePurchasedItem(const FJTSItemInstance& Item);
+	bool TryStoreStellarItem(FName ItemId);
+	bool TryStorePendingStellarItem(FName ItemId, int32& OutSlotIndex, FGuid& OutSlotToken);
+	bool TryRevealStellarItem(int32 SlotIndex, FGuid ExpectedToken);
+	bool TryStoreCarriedItemAtSlot(int32 LockerSlotIndex, class UJTSInventoryComponent* Inventory,
+		int32 CarriedSlotIndex, FGuid ExpectedItemId);
+	bool TryExchangeShipLockerItemWithCarriedSlot(int32 LockerSlotIndex, FGuid ExpectedLockerToken,
+		class UJTSInventoryComponent* Inventory, int32 CarriedSlotIndex, FGuid ExpectedCarriedItemId,
+		const class UJTSStellarLootTable* LootTable);
+	bool TryDeleteShipLockerSlot(int32 SlotIndex, FGuid ExpectedToken);
+	bool TryTakeShipLockerItem(int32 SlotIndex, FGuid ExpectedToken, class UJTSInventoryComponent* Inventory,
+		const class UJTSStellarLootTable* LootTable);
+	void RestoreShipLockerSlots(const TArray<FJTSShipLockerSlot>& SavedSlots);
 
 	UPROPERTY(BlueprintAssignable, Category = "Expedition")
 	FOnJTSPlayerNetworkStateChanged OnNetworkStateChanged;
@@ -115,6 +140,8 @@ private:
 
 	UFUNCTION()
 	void OnRep_Progression();
+	UFUNCTION()
+	void OnRep_ShipLockerSlots();
 
 	void NotifyProgressionChanged();
 
@@ -156,5 +183,12 @@ private:
 	int32 StaminaAbilityRank = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
+	int32 CriticalChanceAbilityRank = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 ProgressionRevision = 0;
+
+	/** Owner-only contents; other expedition members cannot inspect another player's terminal items. */
+	UPROPERTY(ReplicatedUsing = OnRep_ShipLockerSlots, VisibleInstanceOnly, Category = "Ship Locker")
+	TArray<FJTSShipLockerSlot> ShipLockerSlots;
 };

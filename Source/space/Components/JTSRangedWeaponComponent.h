@@ -64,10 +64,11 @@ public:
 
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastShotTrace(FVector_NetQuantize MuzzleStart, FVector_NetQuantize TraceEnd,
-		FVector_NetQuantizeNormal ImpactNormal, EJTSItemId ShotItem, bool bHitSomething, bool bDamageableHit);
+		FVector_NetQuantizeNormal ImpactNormal, EJTSItemId ShotItem, bool bHitSomething, bool bDamageableHit,
+		bool bCritical);
 
 	UFUNCTION(Client, Unreliable)
-	void ClientConfirmRangedHit();
+	void ClientConfirmRangedHit(bool bCritical);
 
 	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
 	float GetReticleKickAlpha() const;
@@ -75,13 +76,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
 	bool HasRecentConfirmedHit() const;
 
+	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
+	bool HasRecentConfirmedCriticalHit() const;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
 	const UJTSItemDefinition* GetActiveRangedDefinition() const;
 	bool CanUseWeapon() const;
 	bool FireOnce();
-	bool GetAim(FVector& OutOrigin, FVector& OutDirection) const;
 	void PlayLocalShotFeedback(const UJTSItemDefinition* Definition);
 	/** Repeats a held trigger at the active item's configured fire interval. */
 	void ScheduleHeldFire(const UJTSItemDefinition* Definition);
@@ -96,6 +99,7 @@ private:
 	double NextLocalFeedbackTimeSeconds = 0.0;
 	double LastLocalShotSeconds = -100.0;
 	double LastConfirmedHitSeconds = -100.0;
+	double LastConfirmedCriticalHitSeconds = -100.0;
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ranged|Aim", meta = (AllowPrivateAccess = "true"))
 	bool bIsAiming = false;

@@ -961,20 +961,40 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation, bool bLeftHand) const
 {
 	OutLocation = FVector::ZeroVector;
-	if (!IsValid(WeaponMuzzle) || !IsValid(WeaponBody) || !WeaponBody->IsVisible())
+	FTransform MuzzleTransform;
+	if (!GetMuzzleWorldTransform(MuzzleTransform, bLeftHand))
+	{
+		return false;
+	}
+	OutLocation = MuzzleTransform.GetLocation();
+	return true;
+}
+
+bool UJTSWeaponVisualComponent::GetMuzzleWorldTransform(FTransform& OutTransform, bool bLeftHand) const
+{
+	OutTransform = FTransform::Identity;
+	if (!IsValid(WeaponMuzzle) || !IsValid(WeaponBody) || !WeaponBody->IsVisible() || bClimbStowed)
 	{
 		return false;
 	}
 	if (bLeftHand && bTwoHandVisible && IsValid(LeftHandAttachmentAnchor))
 	{
-		OutLocation = LeftHandAttachmentAnchor->GetComponentTransform().TransformPosition(
-			DefaultMuzzleTransform.GetLocation() - DefaultGripTransform.GetLocation());
+		const FTransform& HandTransform = LeftHandAttachmentAnchor->GetComponentTransform();
+		OutTransform = FTransform(
+			HandTransform.GetRotation() * DefaultMuzzleTransform.GetRotation(),
+			HandTransform.TransformPosition(DefaultMuzzleTransform.GetLocation() - DefaultGripTransform.GetLocation()));
 	}
 	else
 	{
-		OutLocation = WeaponMuzzle->GetComponentLocation();
+		OutTransform = WeaponMuzzle->GetComponentTransform();
 	}
-	return true;
+	return !OutTransform.GetUnitAxis(EAxis::X).IsNearlyZero();
+}
+
+bool UJTSWeaponVisualComponent::GetHeldItemTipWorldLocation(FVector& OutLocation) const
+{
+	OutLocation = FVector::ZeroVector;
+	return !bRangedVisible && GetMuzzleWorldLocation(OutLocation);
 }
 
 void UJTSWeaponVisualComponent::SetAimAlpha(float NewAimAlpha)

@@ -7,14 +7,21 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/UniformGridPanel.h"
+#include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 #include "Styling/CoreStyle.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSStellarLootTable.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
@@ -67,6 +74,13 @@ namespace
 			Result->SetAutoWrapText(true);
 			Result->SetJustification(Justify);
 		}
+		return Result;
+	}
+
+	UTextBlock* MakeButtonLabel(UWidgetTree* Tree, FName Name, const FString& Label, float FontSize)
+	{
+		UTextBlock* const Result = MakeText(Tree, Name, Label, FontSize, FLinearColor::White, ETextJustify::Center);
+		if (Result) Result->SetAutoWrapText(false);
 		return Result;
 	}
 
@@ -153,6 +167,19 @@ FReply UJTSShopWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const
 			return FReply::Handled();
 		}
 	}
+	if (bShopOpen && InKeyEvent.GetKey() == EKeys::Q)
+	{
+		AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
+		const AJTSCharacter* const Character = IsValid(Controller) ? Cast<AJTSCharacter>(Controller->GetPawn()) : nullptr;
+		const UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+		if (IsValid(Controller) && IsValid(Inventory))
+		{
+			const int32 SlotIndex = Inventory->GetSelectedQuickbarSlot();
+			const FJTSItemInstance Item = Inventory->GetItemAtSlot(SlotIndex);
+			if (!Item.IsEmpty()) Controller->ServerRequestInventoryQuantityAction(SlotIndex, Item.StackCount, false);
+		}
+		return FReply::Handled();
+	}
 
 	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
@@ -170,12 +197,21 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 	LastDisplayedResourceAmounts.Reset();
 	LastRequestedItem = EJTSItemId::None;
 	bShowingAbilityPage = false;
+	bShowingStellarPage = false;
+	bRollAnimating = false;
+	bRollResultReceived = false;
+	RolledStellarItemId = NAME_None;
+	RolledLockerSlotIndex = INDEX_NONE;
+	SelectedLockerSlot = INDEX_NONE;
+	DraggedLockerSlot = INDEX_NONE;
+	bLeverDragging = false;
+	SetLeverPull(0.0f);
 	bAbilityCommitPending = false;
 	ResetPendingAbilityAllocation();
 	RefreshAccumulator = 0.0f;
 	bShopOpen = true;
 	if (StatusText != nullptr) StatusText->SetText(FText::GetEmpty());
-	SetVisibility(ESlateVisibility::Visible);
+	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	RefreshAll();
 	return true;
 }
@@ -186,6 +222,8 @@ void UJTSShopWidget::CloseShop()
 	LastRequestedItem = EJTSItemId::None;
 	LastDisplayedResourceAmounts.Reset();
 	bAbilityCommitPending = false;
+	bLeverDragging = false;
+	SetLeverPull(0.0f);
 	ResetPendingAbilityAllocation();
 	ObservedProgressionRevision = INDEX_NONE;
 	ActiveSpacecraft.Reset();
@@ -207,11 +245,10 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 	switch (Result)
 	{
 	case EJTSShopPurchaseResult::Succeeded:
-		StatusText->SetText(FText::GetEmpty());
+		SetStatus(TEXT("已放入飞船物品栏"), false);
 		break;
 	case EJTSShopPurchaseResult::SucceededDropped:
-		StatusText->SetText(FText::FromString(TEXT("PURCHASED / AIRLOCK DROP")));
-		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)));
+		SetStatus(TEXT("已放入飞船物品栏"), false);
 		break;
 	case EJTSShopPurchaseResult::InsufficientResources:
 		StatusText->SetText(FText::FromString(FString::Printf(TEXT("MISSING %s"), *FormatMissingCosts(LastRequestedItem))));
@@ -221,6 +258,9 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 		StatusText->SetText(FText::FromString(TEXT("ITEM UNAVAILABLE")));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
+	case EJTSShopPurchaseResult::InventoryFull:
+		SetStatus(TEXT("物品栏已满，请拖拽物品到废纸篓删除"), true);
+		break;
 	case EJTSShopPurchaseResult::DeliveryFailed:
 	default:
 		StatusText->SetText(FText::FromString(TEXT("DELIVERY FAILED / MATERIALS RESTORED")));
@@ -229,6 +269,118 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 	}
 
 	RefreshAll();
+}
+
+void UJTSShopWidget::SetStatus(const FString& Message, bool bError)
+{
+	if (StatusText == nullptr) return;
+	StatusText->SetText(FText::FromString(Message));
+	StatusText->SetColorAndOpacity(FSlateColor(bError
+		? FLinearColor(1.0f, 0.42f, 0.32f, 1.0f)
+		: FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)));
+	RefreshPageVisibility();
+}
+
+void UJTSShopWidget::NotifyStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex)
+{
+	bRollResultReceived = true;
+	RolledStellarItemId = ItemId;
+	RolledLockerSlotIndex = SlotIndex;
+	if (Result == EJTSStellarRollResult::Succeeded && !ItemId.IsNone())
+	{
+		if (RollElapsed >= UJTSStellarLootTable::RevealDurationSeconds && CanFinishStellarRoll()) FinishStellarRoll();
+	}
+	else
+	{
+		bRollAnimating = false;
+		SetLeverPull(0.0f);
+		if (StellarRollButton != nullptr) StellarRollButton->SetIsEnabled(true);
+		switch (Result)
+		{
+		case EJTSStellarRollResult::InventoryFull:
+			SetStatus(TEXT("物品栏已满，请拖拽物品到废纸篓删除"), true); break;
+		case EJTSStellarRollResult::InsufficientResources:
+			SetStatus(TEXT("飞船资源不足"), true); break;
+		case EJTSStellarRollResult::CoolingDown:
+			SetStatus(TEXT("遥感装置冷却中"), true); break;
+		default:
+			SetStatus(TEXT("星际商店暂不可用"), true); break;
+		}
+	}
+	RefreshShipLocker();
+	RefreshStellarReel();
+}
+
+void UJTSShopWidget::NotifyShipLockerActionResult(bool bSucceeded, bool bTakeAction)
+{
+	SetStatus(bSucceeded
+		? (bTakeAction ? TEXT("已取到角色背包") : TEXT("物品已删除"))
+		: (bTakeAction ? TEXT("角色背包已满或物品暂不可使用") : TEXT("删除失败，请重试")),
+		!bSucceeded);
+	RefreshShipLocker();
+}
+
+void UJTSShopWidget::NotifyShipLockerExchangeResult(bool bSucceeded)
+{
+	SetStatus(bSucceeded ? TEXT("已与角色物品格交换") : TEXT("交换失败，请重试"), !bSucceeded);
+	RefreshShipLocker();
+}
+
+void UJTSShopWidget::NotifyCarriedItemActionResult(bool bSucceeded, bool bStored)
+{
+	SetStatus(bSucceeded
+		? (bStored ? TEXT("已放入飞船物品格") : TEXT("角色物品已删除"))
+		: (bStored ? TEXT("放入失败，请选择空物品格") : TEXT("删除失败，请重试")),
+		!bSucceeded);
+	RefreshShipLocker();
+}
+
+void UJTSShopWidget::UpdateCarriedDragPreview(const FVector2D& ScreenPosition,
+	const FString& ItemLabel, bool bVisible)
+{
+	if (!DragGhost || !DragGhostText || !RootCanvas) return;
+	if (!bVisible)
+	{
+		DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	const FVector2D Position = RootCanvas->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
+	if (UCanvasPanelSlot* const GhostSlot = Cast<UCanvasPanelSlot>(DragGhost->Slot))
+	{
+		GhostSlot->SetPosition(Position + FVector2D(12.0f, 12.0f));
+	}
+	DragGhostText->SetText(FText::FromString(ItemLabel));
+	DragGhost->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UJTSShopWidget::HandleCarriedItemDrop(const FVector2D& ScreenPosition,
+	int32 CarriedSlotIndex, FGuid ExpectedInstanceId)
+{
+	if (!IsShopOpen() || bShowingAbilityPage || !ExpectedInstanceId.IsValid()) return;
+	AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
+	if (!IsValid(Controller)) return;
+	if (TrashImage && TrashImage->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+	{
+		Controller->ServerDestroyCarriedItemAtShip(ActiveSpacecraft.Get(), CarriedSlotIndex, ExpectedInstanceId);
+		return;
+	}
+	for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
+	{
+		if (LockerSlotBorders[Index] && LockerSlotBorders[Index]->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+		{
+			const AJTSPlayerState* const State = Controller->GetPlayerState<AJTSPlayerState>();
+			if (State && State->GetShipLockerSlot(Index).IsEmpty())
+			{
+				Controller->ServerStoreCarriedItemInShipLocker(ActiveSpacecraft.Get(),
+					CarriedSlotIndex, ExpectedInstanceId, Index);
+			}
+			else
+			{
+				SetStatus(TEXT("格子已占用，请拖到空物品格"), true);
+			}
+			return;
+		}
+	}
 }
 
 void UJTSShopWidget::NotifyAbilityAllocationResult(bool bSucceeded)
@@ -269,6 +421,29 @@ void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		}
 		return;
 	}
+	if (bRollAnimating)
+	{
+		RollElapsed += InDeltaTime;
+		SetLeverPull(90.0f * (1.0f - FMath::Clamp(RollElapsed / 0.45f, 0.0f, 1.0f)));
+		const float Ease = FMath::Square(FMath::Clamp(RollElapsed / UJTSStellarLootTable::RevealDurationSeconds, 0.0f, 1.0f));
+		const float StepPeriod = FMath::Lerp(0.055f, 0.30f, Ease);
+		ReelStepAccumulator += InDeltaTime;
+		if (ReelStepAccumulator >= StepPeriod)
+		{
+			ReelStepAccumulator = FMath::Fmod(ReelStepAccumulator, StepPeriod);
+			if (const UJTSStellarLootTable* const Table = ActiveSpacecraft->GetStellarLootTable(); IsValid(Table) && !Table->Entries.IsEmpty())
+			{
+				ReelDisplayIndex = FMath::RandRange(0, Table->Entries.Num() - 1);
+			}
+			RefreshStellarReel();
+		}
+		const float Phase = ReelStepAccumulator / StepPeriod;
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelPreviousText ? ReelPreviousText->Slot : nullptr)) ReelSlot->SetPosition(FVector2D(18.0f, 40.0f - 78.0f * Phase));
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelCurrentText ? ReelCurrentText->Slot : nullptr)) ReelSlot->SetPosition(FVector2D(18.0f, 114.0f - 78.0f * Phase));
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelNextText ? ReelNextText->Slot : nullptr)) ReelSlot->SetPosition(FVector2D(18.0f, 192.0f - 78.0f * Phase));
+		if (bRollResultReceived && RollElapsed >= UJTSStellarLootTable::RevealDurationSeconds
+			&& CanFinishStellarRoll()) FinishStellarRoll();
+	}
 
 	RefreshAccumulator += InDeltaTime;
 	if (RefreshAccumulator >= 0.20f)
@@ -276,6 +451,109 @@ void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		RefreshAccumulator = 0.0f;
 		RefreshAll();
 	}
+}
+
+FReply UJTSShopWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bShopOpen && bShowingStellarPage && !bRollAnimating && LeverKnob
+		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+		&& LeverKnob->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+	{
+		bLeverDragging = true;
+		LeverGrabY = StellarPanel->GetCachedGeometry().AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()).Y;
+		return FReply::Handled().CaptureMouse(TakeWidget());
+	}
+	if (bShopOpen && !bShowingAbilityPage && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+		for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
+		{
+			if (LockerSlotBorders[Index] && LockerSlotBorders[Index]->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+			{
+				SelectedLockerSlot = Index;
+				const FJTSShipLockerSlot LockerEntry = State ? State->GetShipLockerSlot(Index) : FJTSShipLockerSlot();
+				DraggedLockerSlot = LockerEntry.IsEmpty() || LockerEntry.bPendingStellarReveal
+					|| (bRollAnimating && Index == RolledLockerSlotIndex) ? INDEX_NONE : Index;
+				DraggedLockerToken = LockerEntry.SlotToken;
+				RefreshShipLocker();
+				return DraggedLockerSlot != INDEX_NONE
+					? FReply::Handled().CaptureMouse(TakeWidget()) : FReply::Handled();
+			}
+		}
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply UJTSShopWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bLeverDragging && StellarPanel)
+	{
+		const float CurrentY = StellarPanel->GetCachedGeometry().AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()).Y;
+		SetLeverPull(CurrentY - LeverGrabY);
+		return FReply::Handled();
+	}
+	if (DraggedLockerSlot != INDEX_NONE && DragGhost && RootCanvas)
+	{
+		const FVector2D Position = RootCanvas->GetCachedGeometry().AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		if (UCanvasPanelSlot* const GhostSlot = Cast<UCanvasPanelSlot>(DragGhost->Slot)) GhostSlot->SetPosition(Position + FVector2D(12.0f, 12.0f));
+		if (LockerSlotTexts.IsValidIndex(DraggedLockerSlot) && DragGhostText)
+		{
+			DragGhostText->SetText(LockerSlotTexts[DraggedLockerSlot]->GetText());
+		}
+		DragGhost->SetVisibility(ESlateVisibility::HitTestInvisible);
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+}
+
+FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bLeverDragging)
+	{
+		bLeverDragging = false;
+		if (LeverPull >= 52.0f) HandleStellarRollClicked();
+		if (!bRollAnimating) SetLeverPull(0.0f);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && DraggedLockerSlot != INDEX_NONE)
+	{
+		if (TrashImage && TrashImage->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+		{
+			if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+			{
+				Controller->ServerDeleteShipLockerSlot(ActiveSpacecraft.Get(), DraggedLockerSlot, DraggedLockerToken);
+			}
+		}
+		else if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+		{
+			const int32 CarriedSlotIndex = Controller->GetCarriedQuickbarSlotAtPosition(
+				InMouseEvent.GetScreenSpacePosition());
+			if (CarriedSlotIndex != INDEX_NONE)
+			{
+				const AJTSPlayerState* const State = Controller->GetPlayerState<AJTSPlayerState>();
+				const FJTSShipLockerSlot LockerEntry = State
+					? State->GetShipLockerSlot(DraggedLockerSlot) : FJTSShipLockerSlot();
+				const AJTSCharacter* const Character = Cast<AJTSCharacter>(Controller->GetPawn());
+				const UJTSInventoryComponent* const Inventory = IsValid(Character)
+					? Character->GetInventoryComponent() : nullptr;
+				if (!LockerEntry.IsEmpty() && !LockerEntry.bPendingStellarReveal && IsValid(Inventory))
+				{
+					const FJTSItemInstance CarriedItem = Inventory->GetItemAtSlot(CarriedSlotIndex);
+					Controller->ServerExchangeShipLockerWithCarriedSlot(ActiveSpacecraft.Get(),
+						DraggedLockerSlot, DraggedLockerToken, CarriedSlotIndex, CarriedItem.InstanceId);
+				}
+				else
+				{
+					SetStatus(TEXT("此物品暂时无法移动"), true);
+				}
+			}
+		}
+		DraggedLockerSlot = INDEX_NONE;
+		DraggedLockerToken.Invalidate();
+		if (DragGhost) DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
 void UJTSShopWidget::BuildWidgetTree()
@@ -287,57 +565,147 @@ void UJTSShopWidget::BuildWidgetTree()
 
 	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyRoot"));
 	WidgetTree->RootWidget = RootCanvas;
+	RootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-	UBorder* const Dimmer = MakeBorder(WidgetTree, TEXT("ShipSupplyDimmer"), FLinearColor(0.003f, 0.008f, 0.018f, 0.84f));
-	AddCanvas(RootCanvas, Dimmer, FAnchors(0.0f, 0.0f, 1.0f, 1.0f), FVector2D::ZeroVector, FVector2D::ZeroVector);
+	UBorder* const Dimmer = MakeBorder(WidgetTree, TEXT("ShipSupplyDimmer"), FLinearColor(0.003f, 0.008f, 0.018f, 0.42f));
+	Dimmer->SetVisibility(ESlateVisibility::HitTestInvisible);
+	AddCanvas(RootCanvas, Dimmer, FAnchors(0.0f, 0.0f, 1.0f, 0.80f), FVector2D::ZeroVector, FVector2D::ZeroVector);
 
 	ShopFrame = MakeBorder(WidgetTree, TEXT("ShipSupplyFrame"), FLinearColor(0.025f, 0.060f, 0.105f, 0.995f));
-	AddCanvas(RootCanvas, ShopFrame, FAnchors(0.5f, 0.5f), FVector2D::ZeroVector, FVector2D(1160.0f, 610.0f), FVector2D(0.5f, 0.5f));
+	UScaleBox* const ResponsiveScale = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("ShipTerminalResponsiveScale"));
+	ResponsiveScale->SetStretch(EStretch::ScaleToFit);
+	AddCanvas(RootCanvas, ResponsiveScale, FAnchors(0.0f, 0.055f, 1.0f, 0.78f),
+		FVector2D(20.0f, 0.0f), FVector2D(20.0f, 0.0f));
+	USizeBox* const DesignSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ShipTerminalDesignSize"));
+	DesignSize->SetWidthOverride(1320.0f);
+	DesignSize->SetHeightOverride(720.0f);
+	DesignSize->SetContent(ShopFrame);
+	ResponsiveScale->SetContent(DesignSize);
 	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyFrameCanvas"));
 	ShopFrame->SetContent(FrameCanvas);
 
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("SHIP TERMINAL"), 28.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(440.0f, 42.0f));
+	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端  /  SHIP TERMINAL"), 28.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(600.0f, 42.0f));
 	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipTabHint"), TEXT("TAB  SWITCH"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f), ETextJustify::Right), FAnchors(1.0f, 0.0f), FVector2D(-164.0f, 93.0f), FVector2D(150.0f, 20.0f), FVector2D(1.0f, 0.0f));
 
 	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
 	CloseButton->SetBackgroundColor(FLinearColor(0.16f, 0.22f, 0.30f, 1.0f));
-	CloseButton->SetContent(MakeText(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("CLOSE  [E]"), 13.0f, FLinearColor::White, ETextJustify::Center));
+	CloseButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("关闭 [E]"), 13.0f));
 	CloseButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCloseClicked);
 	AddCanvas(FrameCanvas, CloseButton, FAnchors(1.0f, 0.0f), FVector2D(-30.0f, 25.0f), FVector2D(120.0f, 36.0f), FVector2D(1.0f, 0.0f));
 
 	SupplyTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyTab"));
 	SupplyTabButton->SetBackgroundColor(FLinearColor(0.08f, 0.29f, 0.43f, 1.0f));
-	SupplyTabButton->SetContent(MakeText(WidgetTree, TEXT("ShipSupplyTabLabel"), TEXT("SHOP"), 16.0f, FLinearColor::White, ETextJustify::Center));
+	SupplyTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyTabLabel"), TEXT("普通商店"), 16.0f));
 	SupplyTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleSupplyTabClicked);
 	AddCanvas(FrameCanvas, SupplyTabButton, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
+	StellarTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipStellarTab"));
+	StellarTabButton->SetBackgroundColor(FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
+	StellarTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarTabLabel"), TEXT("星际商店"), 16.0f));
+	StellarTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStellarTabClicked);
+	AddCanvas(FrameCanvas, StellarTabButton, FAnchors(0.0f, 0.0f), FVector2D(206.0f, 84.0f), FVector2D(168.0f, 40.0f));
+
 	AbilityTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityTab"));
 	AbilityTabButton->SetBackgroundColor(FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
-	AbilityTabLabel = MakeText(WidgetTree, TEXT("ShipAbilityTabLabel"), TEXT("ABILITIES"), 16.0f, FLinearColor::White, ETextJustify::Center);
+	AbilityTabLabel = MakeButtonLabel(WidgetTree, TEXT("ShipAbilityTabLabel"), TEXT("能力"), 16.0f);
 	AbilityTabButton->SetContent(AbilityTabLabel);
 	AbilityTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAbilityTabClicked);
-	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(206.0f, 84.0f), FVector2D(168.0f, 40.0f));
+	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(382.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
 	CatalogPanel = MakeBorder(WidgetTree, TEXT("ShipSupplyGridFrame"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
-	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1100.0f, 410.0f));
+	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
 	UCanvasPanel* const CatalogCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyCatalogCanvas"));
 	CatalogPanel->SetContent(CatalogCanvas);
 	AddCanvas(CatalogCanvas, MakeText(WidgetTree, TEXT("ShipResourcesLabel"), TEXT("SHIP RESOURCES"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(20.0f, 19.0f), FVector2D(160.0f, 22.0f));
 	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("ROCK 0   ORE 0"), 17.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f));
-	AddCanvas(CatalogCanvas, WalletText, FAnchors(0.0f, 0.0f), FVector2D(184.0f, 14.0f), FVector2D(680.0f, 30.0f));
+	AddCanvas(CatalogCanvas, WalletText, FAnchors(0.0f, 0.0f), FVector2D(16.0f, 42.0f), FVector2D(585.0f, 28.0f));
 	DebugResourcesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugResources"));
 	DebugResourcesButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
 	DebugResourcesButton->SetContent(MakeText(WidgetTree, TEXT("ShipDebugResourcesLabel"), TEXT("DEBUG +100"), 12.0f, FLinearColor::White, ETextJustify::Center));
 	DebugResourcesButton->SetToolTipText(FText::FromString(TEXT("Add 100 of every ship resource")));
 	DebugResourcesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugResourcesClicked);
-	AddCanvas(CatalogCanvas, DebugResourcesButton, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 10.0f), FVector2D(198.0f, 34.0f), FVector2D(1.0f, 0.0f));
+	AddCanvas(CatalogCanvas, DebugResourcesButton, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 10.0f), FVector2D(140.0f, 28.0f), FVector2D(1.0f, 0.0f));
 	UScrollBox* const CatalogScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ShipSupplyCatalogScroll"));
-	AddCanvas(CatalogCanvas, CatalogScroll, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 62.0f), FVector2D(1064.0f, 330.0f));
+	AddCanvas(CatalogCanvas, CatalogScroll, FAnchors(0.0f, 0.0f), FVector2D(14.0f, 88.0f), FVector2D(592.0f, 416.0f));
 	CatalogGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ShipSupplyGrid"));
 	CatalogScroll->AddChild(CatalogGrid);
 
+	StellarPanel = MakeBorder(WidgetTree, TEXT("ShipStellarPanel"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
+	AddCanvas(FrameCanvas, StellarPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
+	UCanvasPanel* const StellarCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipStellarCanvas"));
+	StellarPanel->SetContent(StellarCanvas);
+	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarTitle"), TEXT("星际联盟遥感"), 23.0f, FLinearColor(0.83f, 0.92f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 25.0f), FVector2D(450.0f, 35.0f));
+	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarHint"), TEXT("拉动摇杆，遥感信号将锁定一件随机物品"), 14.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 65.0f), FVector2D(520.0f, 26.0f));
+	UBorder* const ReelFrame = MakeBorder(WidgetTree, TEXT("ShipStellarReelFrame"), FLinearColor(0.035f, 0.075f, 0.11f, 1.0f));
+	AddCanvas(StellarCanvas, ReelFrame, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 112.0f), FVector2D(452.0f, 276.0f));
+	UCanvasPanel* const ReelCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipStellarReelCanvas"));
+	ReelCanvas->SetClipping(EWidgetClipping::ClipToBounds);
+	ReelFrame->SetContent(ReelCanvas);
+	AddCanvas(ReelCanvas, MakeBorder(WidgetTree, TEXT("ShipStellarSelection"), FLinearColor(0.08f, 0.29f, 0.36f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(8.0f, 106.0f), FVector2D(436.0f, 62.0f));
+	ReelPreviousText = MakeText(WidgetTree, TEXT("ShipStellarPrevious"), TEXT(""), 16.0f, FLinearColor(0.38f, 0.57f, 0.67f, 1.0f), ETextJustify::Center);
+	ReelCurrentText = MakeText(WidgetTree, TEXT("ShipStellarCurrent"), TEXT("等待信号"), 23.0f, FLinearColor(0.86f, 1.0f, 0.94f, 1.0f), ETextJustify::Center);
+	ReelNextText = MakeText(WidgetTree, TEXT("ShipStellarNext"), TEXT(""), 16.0f, FLinearColor(0.38f, 0.57f, 0.67f, 1.0f), ETextJustify::Center);
+	AddCanvas(ReelCanvas, ReelPreviousText, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 40.0f), FVector2D(416.0f, 45.0f));
+	AddCanvas(ReelCanvas, ReelCurrentText, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 114.0f), FVector2D(416.0f, 50.0f));
+	AddCanvas(ReelCanvas, ReelNextText, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 192.0f), FVector2D(416.0f, 45.0f));
+	LeverStem = MakeBorder(WidgetTree, TEXT("ShipLeverStem"), FLinearColor(0.66f, 0.78f, 0.82f, 1.0f));
+	LeverKnob = MakeBorder(WidgetTree, TEXT("ShipLeverKnob"), FLinearColor(1.0f, 0.43f, 0.27f, 1.0f));
+	AddCanvas(StellarCanvas, LeverStem, FAnchors(0.0f, 0.0f), FVector2D(540.0f, 190.0f), FVector2D(9.0f, 132.0f));
+	AddCanvas(StellarCanvas, LeverKnob, FAnchors(0.0f, 0.0f), FVector2D(521.0f, 160.0f), FVector2D(48.0f, 48.0f));
+	StellarRollButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipStellarRoll"));
+	StellarRollButton->SetBackgroundColor(FLinearColor(0.08f, 0.40f, 0.34f, 1.0f));
+	StellarRollButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarRollLabel"), TEXT("拉动摇杆  /  ROLL"), 17.0f));
+	StellarRollButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStellarRollClicked);
+	AddCanvas(StellarCanvas, StellarRollButton, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 411.0f), FVector2D(552.0f, 50.0f));
+	ReelCostText = MakeText(WidgetTree, TEXT("ShipStellarCost"), TEXT(""), 13.0f, FLinearColor(0.66f, 0.81f, 0.90f, 1.0f), ETextJustify::Center);
+	AddCanvas(StellarCanvas, ReelCostText, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 474.0f), FVector2D(552.0f, 24.0f));
+
+	LockerPanel = MakeBorder(WidgetTree, TEXT("ShipLockerPanel"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
+	AddCanvas(FrameCanvas, LockerPanel, FAnchors(0.0f, 0.0f), FVector2D(672.0f, 138.0f), FVector2D(618.0f, 520.0f));
+	UCanvasPanel* const LockerCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipLockerCanvas"));
+	LockerPanel->SetContent(LockerCanvas);
+	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerTitle"), TEXT("当前玩家物品格"), 20.0f, FLinearColor(0.84f, 0.93f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(18.0f, 13.0f), FVector2D(350.0f, 30.0f));
+	LockerCountText = MakeText(WidgetTree, TEXT("ShipLockerCount"), TEXT("0 / 30"), 15.0f, FLinearColor(0.40f, 1.0f, 0.74f, 1.0f), ETextJustify::Right);
+	AddCanvas(LockerCanvas, LockerCountText, FAnchors(0.0f, 0.0f), FVector2D(454.0f, 16.0f), FVector2D(142.0f, 24.0f));
+	LockerGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ShipLockerGrid"));
+	LockerGrid->SetSlotPadding(FMargin(3.0f));
+	AddCanvas(LockerCanvas, LockerGrid, FAnchors(0.0f, 0.0f), FVector2D(17.0f, 51.0f), FVector2D(584.0f, 390.0f));
+	LockerSlotBorders.Reset();
+	LockerSlotTexts.Reset();
+	LockerVisualStates.Init(INDEX_NONE, AJTSPlayerState::ShipLockerCapacity);
+	for (int32 Index = 0; Index < AJTSPlayerState::ShipLockerCapacity; ++Index)
+	{
+		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("ShipLockerCell_%02d"), Index));
+		Cell->SetWidthOverride(110.0f);
+		Cell->SetHeightOverride(60.0f);
+		UBorder* const Border = MakeBorder(WidgetTree, *FString::Printf(TEXT("ShipLockerSlot_%02d"), Index), FLinearColor(0.055f, 0.105f, 0.15f, 1.0f), 5.0f);
+		UTextBlock* const Label = MakeText(WidgetTree, *FString::Printf(TEXT("ShipLockerLabel_%02d"), Index), FString::Printf(TEXT("%02d"), Index + 1), 11.0f, FLinearColor(0.51f, 0.65f, 0.75f, 1.0f), ETextJustify::Center);
+		Border->SetContent(Label);
+		Cell->SetContent(Border);
+		LockerGrid->AddChildToUniformGrid(Cell, Index / 5, Index % 5);
+		LockerSlotBorders.Add(Border);
+		LockerSlotTexts.Add(Label);
+	}
+	TakeLockerItemButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipLockerTake"));
+	TakeLockerItemButton->SetBackgroundColor(FLinearColor(0.10f, 0.34f, 0.30f, 1.0f));
+	TakeLockerItemButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipLockerTakeLabel"), TEXT("取到角色背包"), 13.0f));
+	TakeLockerItemButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleTakeLockerItemClicked);
+	AddCanvas(LockerCanvas, TakeLockerItemButton, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 452.0f), FVector2D(182.0f, 48.0f));
+	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerDeleteHint"), TEXT("拖到废纸篓删除"), 12.0f, FLinearColor(0.75f, 0.62f, 0.56f, 1.0f), ETextJustify::Right), FAnchors(0.0f, 0.0f), FVector2D(333.0f, 466.0f), FVector2D(170.0f, 25.0f));
+	TrashImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("ShipLockerTrashImage"));
+	if (UTexture2D* const TrashTexture = TrashIcon.LoadSynchronous())
+	{
+		TrashImage->SetBrushFromTexture(TrashTexture);
+	}
+	AddCanvas(LockerCanvas, TrashImage, FAnchors(0.0f, 0.0f), FVector2D(525.0f, 447.0f), FVector2D(66.0f, 66.0f));
+	DragGhost = MakeBorder(WidgetTree, TEXT("ShipLockerDragGhost"), FLinearColor(0.08f, 0.29f, 0.36f, 0.91f), 4.0f);
+	DragGhostText = MakeText(WidgetTree, TEXT("ShipLockerDragGhostText"), TEXT(""), 12.0f, FLinearColor::White, ETextJustify::Center);
+	DragGhost->SetContent(DragGhostText);
+	AddCanvas(RootCanvas, DragGhost, FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(140.0f, 56.0f));
+	DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+
 	AbilityPanel = MakeBorder(WidgetTree, TEXT("ShipAbilityPanel"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
-	AddCanvas(FrameCanvas, AbilityPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1100.0f, 410.0f));
+	AddCanvas(FrameCanvas, AbilityPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1260.0f, 520.0f));
 	UCanvasPanel* const AbilityCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipAbilityCanvas"));
 	AbilityPanel->SetContent(AbilityCanvas);
 	AbilityProgressText = MakeText(WidgetTree, TEXT("ShipAbilityProgress"), TEXT("LEVEL 1  ·  XP 0 / 100"), 20.0f, FLinearColor(0.55f, 0.88f, 1.0f, 1.0f));
@@ -387,6 +755,10 @@ void UJTSShopWidget::BuildWidgetTree()
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaDecrease);
 			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaIncrease);
 			break;
+		case EJTSPlayerAbility::CriticalChance:
+			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCriticalChanceDecrease);
+			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCriticalChanceIncrease);
+			break;
 		default:
 			break;
 		}
@@ -399,23 +771,24 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddAbilityCard(EJTSPlayerAbility::StackLimit, TEXT("STACK SIZE"), TEXT("ShipAbilityStack"), 128.0f);
 	AddAbilityCard(EJTSPlayerAbility::RunSpeed, TEXT("RUN SPEED"), TEXT("ShipAbilitySpeed"), 204.0f);
 	AddAbilityCard(EJTSPlayerAbility::Stamina, TEXT("STAMINA"), TEXT("ShipAbilityStamina"), 280.0f);
+	AddAbilityCard(EJTSPlayerAbility::CriticalChance, TEXT("CRITICAL CHANCE"), TEXT("ShipAbilityCritical"), 356.0f);
 
 	ConfirmAbilitiesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityConfirm"));
 	ConfirmAbilitiesButton->SetBackgroundColor(FLinearColor(0.08f, 0.40f, 0.29f, 1.0f));
 	ConfirmAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityConfirmLabel"), TEXT("APPLY"), 14.0f, FLinearColor::White, ETextJustify::Center));
 	ConfirmAbilitiesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleConfirmAbilitiesClicked);
-	AddCanvas(AbilityCanvas, ConfirmAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(864.0f, 354.0f), FVector2D(216.0f, 42.0f));
+	AddCanvas(AbilityCanvas, ConfirmAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(864.0f, 438.0f), FVector2D(216.0f, 42.0f));
 	ResetAbilitiesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityReset"));
 	ResetAbilitiesButton->SetBackgroundColor(FLinearColor(0.13f, 0.18f, 0.27f, 1.0f));
 	ResetAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityResetLabel"), TEXT("UNDO"), 14.0f, FLinearColor::White, ETextJustify::Center));
 	ResetAbilitiesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleResetAbilitiesClicked);
-	AddCanvas(AbilityCanvas, ResetAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(682.0f, 354.0f), FVector2D(170.0f, 42.0f));
+	AddCanvas(AbilityCanvas, ResetAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(682.0f, 438.0f), FVector2D(170.0f, 42.0f));
 	DebugLevelsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugLevels"));
 	DebugLevelsButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
 	DebugLevelsButton->SetContent(MakeText(WidgetTree, TEXT("ShipDebugLevelsLabel"), TEXT("DEBUG +10 LVL"), 13.0f, FLinearColor::White, ETextJustify::Center));
 	DebugLevelsButton->SetToolTipText(FText::FromString(TEXT("+10 levels and +10 ability points")));
 	DebugLevelsButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugLevelsClicked);
-	AddCanvas(AbilityCanvas, DebugLevelsButton, FAnchors(0.0f, 0.0f), FVector2D(20.0f, 354.0f), FVector2D(202.0f, 42.0f));
+	AddCanvas(AbilityCanvas, DebugLevelsButton, FAnchors(0.0f, 0.0f), FVector2D(20.0f, 438.0f), FVector2D(202.0f, 42.0f));
 	AbilityStatusText = MakeText(WidgetTree, TEXT("ShipAbilityStatus"), TEXT("1 POINT PER RANK"), 13.0f, FLinearColor(0.72f, 0.82f, 0.92f, 1.0f), ETextJustify::Center);
 	AddCanvas(FrameCanvas, AbilityStatusText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -19.0f), FVector2D(1060.0f, 24.0f), FVector2D(0.5f, 1.0f));
 
@@ -433,6 +806,8 @@ void UJTSShopWidget::RefreshAll()
 		RefreshCatalog();
 	}
 	RefreshAbilities();
+	RefreshShipLocker();
+	RefreshStellarReel();
 	RefreshPageVisibility();
 }
 
@@ -457,8 +832,8 @@ void UJTSShopWidget::RefreshAbilities()
 	if (AbilityTabLabel != nullptr)
 	{
 		AbilityTabLabel->SetText(FText::FromString(PlayerState->GetUnspentAbilityPoints() > 0
-			? FString::Printf(TEXT("ABILITIES  ·  %d"), PlayerState->GetUnspentAbilityPoints())
-			: TEXT("ABILITIES")));
+			? FString::Printf(TEXT("能力  ·  %d"), PlayerState->GetUnspentAbilityPoints())
+			: TEXT("能力")));
 	}
 	if (AbilityProgressText != nullptr)
 	{
@@ -475,11 +850,12 @@ void UJTSShopWidget::RefreshAbilities()
 			: FString::Printf(TEXT("POINTS %d"), PlayerState->GetUnspentAbilityPoints())));
 	}
 
-	const TArray<EJTSPlayerAbility, TInlineAllocator<4>> Abilities = {
+	const TArray<EJTSPlayerAbility, TInlineAllocator<5>> Abilities = {
 		EJTSPlayerAbility::InventorySlots,
 		EJTSPlayerAbility::StackLimit,
 		EJTSPlayerAbility::RunSpeed,
-		EJTSPlayerAbility::Stamina };
+		EJTSPlayerAbility::Stamina,
+		EJTSPlayerAbility::CriticalChance };
 	for (int32 Index = 0; Index < Abilities.Num(); ++Index)
 	{
 		const EJTSPlayerAbility Ability = Abilities[Index];
@@ -525,28 +901,51 @@ void UJTSShopWidget::RefreshAbilities()
 
 void UJTSShopWidget::RefreshPageVisibility()
 {
+	auto SetVisibilityIfChanged = [](UWidget* Widget, ESlateVisibility NewVisibility)
+	{
+		if (Widget && Widget->GetVisibility() != NewVisibility) Widget->SetVisibility(NewVisibility);
+	};
 	if (CatalogPanel != nullptr)
 	{
-		CatalogPanel->SetVisibility(bShowingAbilityPage ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		SetVisibilityIfChanged(CatalogPanel, bShowingAbilityPage || bShowingStellarPage
+			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (StellarPanel != nullptr)
+	{
+		SetVisibilityIfChanged(StellarPanel, !bShowingAbilityPage && bShowingStellarPage
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (LockerPanel != nullptr)
+	{
+		SetVisibilityIfChanged(LockerPanel, bShowingAbilityPage
+			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (AbilityPanel != nullptr)
 	{
-		AbilityPanel->SetVisibility(bShowingAbilityPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		SetVisibilityIfChanged(AbilityPanel, bShowingAbilityPage
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (StatusText != nullptr)
 	{
-		StatusText->SetVisibility(bShowingAbilityPage || StatusText->GetText().IsEmpty()
+		SetVisibilityIfChanged(StatusText, bShowingAbilityPage || StatusText->GetText().IsEmpty()
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (AbilityStatusText != nullptr)
 	{
-		AbilityStatusText->SetVisibility(bShowingAbilityPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		SetVisibilityIfChanged(AbilityStatusText, bShowingAbilityPage
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (SupplyTabButton != nullptr)
 	{
-		SupplyTabButton->SetBackgroundColor(bShowingAbilityPage
+		SupplyTabButton->SetBackgroundColor(bShowingAbilityPage || bShowingStellarPage
 			? FLinearColor(0.10f, 0.16f, 0.25f, 1.0f)
 			: FLinearColor(0.08f, 0.29f, 0.43f, 1.0f));
+	}
+	if (StellarTabButton != nullptr)
+	{
+		StellarTabButton->SetBackgroundColor(!bShowingAbilityPage && bShowingStellarPage
+			? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f)
+			: FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
 	}
 	if (AbilityTabButton != nullptr)
 	{
@@ -558,7 +957,9 @@ void UJTSShopWidget::RefreshPageVisibility()
 
 void UJTSShopWidget::ToggleShopPage()
 {
-	bShowingAbilityPage = !bShowingAbilityPage;
+	if (!bShowingAbilityPage && !bShowingStellarPage) bShowingStellarPage = true;
+	else if (!bShowingAbilityPage) { bShowingStellarPage = false; bShowingAbilityPage = true; }
+	else bShowingAbilityPage = false;
 	RefreshAll();
 }
 
@@ -590,6 +991,7 @@ bool UJTSShopWidget::AdjustPendingAbility(EJTSPlayerAbility Ability, int32 Delta
 	case EJTSPlayerAbility::StackLimit: PendingRanks = &PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = &PendingAbilityAllocation.RunSpeedRanks; break;
 	case EJTSPlayerAbility::Stamina: PendingRanks = &PendingAbilityAllocation.StaminaRanks; break;
+	case EJTSPlayerAbility::CriticalChance: PendingRanks = &PendingAbilityAllocation.CriticalChanceRanks; break;
 	default: return false;
 	}
 
@@ -631,6 +1033,7 @@ int32 UJTSShopWidget::GetPendingAbilityRank(EJTSPlayerAbility Ability) const
 	case EJTSPlayerAbility::StackLimit: PendingRanks = PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = PendingAbilityAllocation.RunSpeedRanks; break;
 	case EJTSPlayerAbility::Stamina: PendingRanks = PendingAbilityAllocation.StaminaRanks; break;
+	case EJTSPlayerAbility::CriticalChance: PendingRanks = PendingAbilityAllocation.CriticalChanceRanks; break;
 	default: break;
 	}
 	return FMath::Clamp(PlayerState->GetAbilityRank(Ability) + PendingRanks, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
@@ -673,6 +1076,13 @@ FString UJTSShopWidget::BuildAbilityDescription(EJTSPlayerAbility Ability) const
 			: FString::Printf(TEXT("Run and climb pool  %.0f → %.0f"),
 				FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank),
 				FJTSPlayerProgressionRules::GetMaxStamina(PreviewRank));
+	case EJTSPlayerAbility::CriticalChance:
+		return bMaxRank
+			? FString::Printf(TEXT("MAX  ·  %d%% crit chance · 1.75x damage"),
+				FJTSPlayerProgressionRules::GetCriticalChancePercent(CurrentRank))
+			: FString::Printf(TEXT("Weapon crit chance  %d%% → %d%% · weak points always crit"),
+				FJTSPlayerProgressionRules::GetCriticalChancePercent(CurrentRank),
+				FJTSPlayerProgressionRules::GetCriticalChancePercent(PreviewRank));
 	default:
 		return FString();
 	}
@@ -707,19 +1117,19 @@ void UJTSShopWidget::RefreshCatalog()
 		AddCanvas(CardCanvas, MakeBorder(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyAccent_%d"), static_cast<int32>(ItemId)),
 			Definition->AccentColor.CopyWithNewOpacity(0.95f)),
-			FAnchors(0.0f, 0.0f), FVector2D(14.0f, 16.0f), FVector2D(4.0f, 112.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(10.0f, 10.0f), FVector2D(4.0f, 82.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyRole_%d"), static_cast<int32>(ItemId)),
 			ItemRoleLabel(Definition), 12.0f, Definition->AccentColor),
-			FAnchors(0.0f, 0.0f), FVector2D(30.0f, 17.0f), FVector2D(250.0f, 20.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 9.0f), FVector2D(250.0f, 20.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyName_%d"), static_cast<int32>(ItemId)),
 			Definition->DisplayName.ToString(), 19.0f, FLinearColor::White),
-			FAnchors(0.0f, 0.0f), FVector2D(30.0f, 47.0f), FVector2D(270.0f, 32.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 34.0f), FVector2D(380.0f, 28.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyCost_%d"), static_cast<int32>(ItemId)),
 			FormatCosts(ItemId), 14.0f, FLinearColor(0.72f, 0.82f, 0.90f, 1.0f)),
-			FAnchors(0.0f, 0.0f), FVector2D(30.0f, 104.0f), FVector2D(195.0f, 26.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 72.0f), FVector2D(400.0f, 23.0f));
 		if (bAffordable)
 		{
 			UButton* const BuyButton = WidgetTree->ConstructWidget<UButton>(
@@ -728,8 +1138,8 @@ void UJTSShopWidget::RefreshCatalog()
 			BuyButton->SetContent(MakeText(WidgetTree,
 				*FString::Printf(TEXT("ShipSupplyBuyLabel_%d"), static_cast<int32>(ItemId)),
 				TEXT("BUY"), 13.0f, FLinearColor::White, ETextJustify::Center));
-			AddCanvas(CardCanvas, BuyButton, FAnchors(1.0f, 0.0f), FVector2D(-16.0f, 98.0f),
-				FVector2D(88.0f, 34.0f), FVector2D(1.0f, 0.0f));
+			AddCanvas(CardCanvas, BuyButton, FAnchors(1.0f, 0.0f), FVector2D(-14.0f, 34.0f),
+				FVector2D(90.0f, 42.0f), FVector2D(1.0f, 0.0f));
 			switch (ItemId)
 			{
 			case EJTSItemId::Pickaxe: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePickaxeBuy); break;
@@ -745,11 +1155,218 @@ void UJTSShopWidget::RefreshCatalog()
 
 		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyCell_%d"), static_cast<int32>(ItemId)));
-		Cell->SetWidthOverride(330.0f);
-		Cell->SetHeightOverride(150.0f);
+		Cell->SetWidthOverride(572.0f);
+		Cell->SetHeightOverride(105.0f);
 		Cell->SetContent(Card);
-		CatalogGrid->AddChildToUniformGrid(Cell, CatalogIndex / 3, CatalogIndex % 3);
+		CatalogGrid->AddChildToUniformGrid(Cell, CatalogIndex, 0);
 		++CatalogIndex;
+	}
+}
+
+FString UJTSShopWidget::GetStellarItemLabel(FName ItemId) const
+{
+	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
+	if (const FJTSStellarLootEntry* const Entry = IsValid(Table) ? Table->FindEntry(ItemId) : nullptr)
+	{
+		return Entry->DisplayName.ToString();
+	}
+	return ItemId.IsNone() ? TEXT("等待信号") : ItemId.ToString();
+}
+
+FString UJTSShopWidget::FormatStellarCosts() const
+{
+	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
+	if (!IsValid(Table)) return TEXT("遥感奖池未配置");
+	TArray<FString> Parts;
+	for (const FJTSItemCost& Cost : Table->SpinCosts)
+	{
+		if (Cost.Amount > 0) Parts.Add(FString::Printf(TEXT("%s %d"), *ResourceLabel(Cost.ResourceType), Cost.Amount));
+	}
+	return Parts.IsEmpty() ? TEXT("本次遥感免费") : FString::Printf(TEXT("每次消耗  %s"), *FString::Join(Parts, TEXT("  /  ")));
+}
+
+void UJTSShopWidget::RefreshStellarReel()
+{
+	RefreshStellarOddsTooltip();
+	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
+	if (ReelCostText) ReelCostText->SetText(FText::FromString(FormatStellarCosts()));
+	if (StellarRollButton) StellarRollButton->SetIsEnabled(IsValid(Table) && !Table->Entries.IsEmpty() && !bRollAnimating);
+	if (!IsValid(Table) || Table->Entries.IsEmpty())
+	{
+		if (ReelCurrentText) ReelCurrentText->SetText(FText::FromString(TEXT("奖池待配置")));
+		return;
+	}
+	if (!bRollAnimating && !RolledStellarItemId.IsNone())
+	{
+		if (ReelPreviousText) ReelPreviousText->SetText(FText::GetEmpty());
+		if (ReelCurrentText) ReelCurrentText->SetText(FText::FromString(GetStellarItemLabel(RolledStellarItemId)));
+		if (ReelNextText) ReelNextText->SetText(FText::GetEmpty());
+		return;
+	}
+	const int32 Count = Table->Entries.Num();
+	const int32 Index = FMath::Clamp(ReelDisplayIndex, 0, Count - 1);
+	if (ReelPreviousText) ReelPreviousText->SetText(Table->Entries[(Index + Count - 1) % Count].DisplayName);
+	if (ReelCurrentText) ReelCurrentText->SetText(Table->Entries[Index].DisplayName);
+	if (ReelNextText) ReelNextText->SetText(Table->Entries[(Index + 1) % Count].DisplayName);
+}
+
+void UJTSShopWidget::RefreshStellarOddsTooltip()
+{
+	FString Tooltip;
+	if (!bRollAnimating)
+	{
+		const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid()
+			? ActiveSpacecraft->GetStellarLootTable() : nullptr;
+		const AJTSPlayerState* const State = GetOwningPlayer()
+			? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+		const AJTSCharacter* const Character = GetOwningPlayer()
+			? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
+		const UJTSInventoryComponent* const Inventory = IsValid(Character)
+			? Character->GetInventoryComponent() : nullptr;
+		const TArray<FJTSItemInstance> CarriedItems = IsValid(Inventory)
+			? Inventory->GetItemSlots() : TArray<FJTSItemInstance>();
+		TArray<double> Probabilities;
+		if (IsValid(Table) && IsValid(State)
+			&& Table->GetRollProbabilities(State->GetShipLockerSlots(), Probabilities, CarriedItems))
+		{
+			Tooltip = TEXT("本次遥感爆率（按当前持有道具计算）");
+			for (int32 Index = 0; Index < Table->Entries.Num(); ++Index)
+			{
+				const FJTSStellarLootEntry& Entry = Table->Entries[Index];
+				const double Percent = Probabilities[Index] * 100.0;
+				const FString Chance = Percent >= 0.01
+					? FString::Printf(TEXT("%.2f%%"), Percent)
+					: FString::Printf(TEXT("%.4f%%"), Percent);
+				const FString Name = Entry.DisplayName.IsEmpty()
+					? Entry.ItemId.ToString() : Entry.DisplayName.ToString();
+				Tooltip += FString::Printf(TEXT("\n%s  %s"), *Name, *Chance);
+			}
+		}
+		else
+		{
+			Tooltip = TEXT("遥感奖池暂不可用");
+		}
+	}
+	auto SetTooltipIfChanged = [&Tooltip](UWidget* Widget)
+	{
+		if (Widget && Widget->GetToolTipText().ToString() != Tooltip)
+		{
+			Widget->SetToolTipText(FText::FromString(Tooltip));
+		}
+	};
+	SetTooltipIfChanged(LeverKnob);
+	SetTooltipIfChanged(LeverStem);
+	SetTooltipIfChanged(StellarRollButton);
+}
+
+void UJTSShopWidget::SetLeverPull(float Distance)
+{
+	LeverPull = FMath::Clamp(Distance, 0.0f, 90.0f);
+	if (UCanvasPanelSlot* const StemSlot = Cast<UCanvasPanelSlot>(LeverStem ? LeverStem->Slot : nullptr))
+	{
+		StemSlot->SetPosition(FVector2D(540.0f, 190.0f + LeverPull));
+		StemSlot->SetSize(FVector2D(9.0f, 132.0f - LeverPull));
+	}
+	if (UCanvasPanelSlot* const KnobSlot = Cast<UCanvasPanelSlot>(LeverKnob ? LeverKnob->Slot : nullptr))
+	{
+		KnobSlot->SetPosition(FVector2D(521.0f, 160.0f + LeverPull));
+	}
+}
+
+bool UJTSShopWidget::CanFinishStellarRoll() const
+{
+	const AJTSPlayerState* const State = GetOwningPlayer()
+		? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (!IsValid(State) || RolledLockerSlotIndex < 0 || RolledStellarItemId.IsNone()) return false;
+	const FJTSShipLockerSlot LockerEntry = State->GetShipLockerSlot(RolledLockerSlotIndex);
+	return !LockerEntry.bPendingStellarReveal && LockerEntry.StellarItemId == RolledStellarItemId;
+}
+
+void UJTSShopWidget::FinishStellarRoll()
+{
+	bRollAnimating = false;
+	SetLeverPull(0.0f);
+	if (ReelPreviousText)
+	{
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelPreviousText->Slot)) ReelSlot->SetPosition(FVector2D(18.0f, 40.0f));
+	}
+	if (ReelCurrentText)
+	{
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelCurrentText->Slot)) ReelSlot->SetPosition(FVector2D(18.0f, 114.0f));
+	}
+	if (ReelNextText)
+	{
+		if (UCanvasPanelSlot* const ReelSlot = Cast<UCanvasPanelSlot>(ReelNextText->Slot)) ReelSlot->SetPosition(FVector2D(18.0f, 192.0f));
+	}
+	RefreshStellarReel();
+	SetStatus(FString::Printf(TEXT("获得：%s · 已放入飞船物品栏"), *GetStellarItemLabel(RolledStellarItemId)), false);
+	RefreshShipLocker();
+	RolledLockerSlotIndex = INDEX_NONE;
+}
+
+void UJTSShopWidget::RefreshShipLocker()
+{
+	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (!State) return;
+	int32 Used = 0;
+	for (int32 Index = 0; Index < AJTSPlayerState::ShipLockerCapacity && LockerSlotTexts.IsValidIndex(Index) && LockerSlotBorders.IsValidIndex(Index); ++Index)
+	{
+		const FJTSShipLockerSlot LockerEntry = State->GetShipLockerSlot(Index);
+		const bool bConcealed = LockerEntry.bPendingStellarReveal
+			|| (bRollAnimating && Index == RolledLockerSlotIndex);
+		const bool bEmpty = LockerEntry.IsEmpty();
+		if (!bEmpty) ++Used;
+		FString Label = FString::Printf(TEXT("%02d"), Index + 1);
+		if (!bConcealed && !LockerEntry.StandardItem.IsEmpty())
+		{
+			Label = UJTSItemDefinitionLibrary::GetItemDisplayName(LockerEntry.StandardItem.ItemId).ToString();
+		}
+		else if (!bConcealed && !LockerEntry.StellarItemId.IsNone())
+		{
+			Label = GetStellarItemLabel(LockerEntry.StellarItemId);
+		}
+		if (LockerSlotTexts[Index]->GetText().ToString() != Label)
+		{
+			LockerSlotTexts[Index]->SetText(FText::FromString(Label));
+		}
+		const int32 VisualState = bConcealed ? 3 : Index == SelectedLockerSlot ? 2 : bEmpty ? 0 : 1;
+		if (!LockerVisualStates.IsValidIndex(Index) || LockerVisualStates[Index] != VisualState)
+		{
+			LockerSlotTexts[Index]->SetColorAndOpacity(FSlateColor((bEmpty || bConcealed)
+				? FLinearColor(0.43f, 0.55f, 0.63f, 1.0f)
+				: FLinearColor(0.91f, 0.96f, 1.0f, 1.0f)));
+			LockerSlotBorders[Index]->SetBrushColor(bConcealed
+				? FLinearColor(0.13f, 0.15f, 0.14f, 1.0f)
+				: Index == SelectedLockerSlot ? FLinearColor(0.10f, 0.34f, 0.38f, 1.0f)
+					: bEmpty ? FLinearColor(0.055f, 0.105f, 0.15f, 1.0f)
+						: FLinearColor(0.08f, 0.19f, 0.23f, 1.0f));
+			if (LockerVisualStates.IsValidIndex(Index)) LockerVisualStates[Index] = VisualState;
+		}
+		const FString Tooltip = bConcealed ? TEXT("遥感扫描中，格子暂时锁定")
+			: LockerEntry.StellarItemId.IsNone() ? Label
+				: FString::Printf(TEXT("%s\n文字版道具，后续可配置玩法和美术"), *Label);
+		if (LockerSlotBorders[Index]->GetToolTipText().ToString() != Tooltip)
+		{
+			LockerSlotBorders[Index]->SetToolTipText(FText::FromString(Tooltip));
+		}
+	}
+	const FString CountLabel = FString::Printf(TEXT("%d / 30"), Used);
+	if (LockerCountText && LockerCountText->GetText().ToString() != CountLabel)
+	{
+		LockerCountText->SetText(FText::FromString(CountLabel));
+	}
+	if (TakeLockerItemButton)
+	{
+		const FJTSShipLockerSlot Selected = State->GetShipLockerSlot(SelectedLockerSlot);
+		const AJTSCharacter* const Character = GetOwningPlayer() ? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
+		const UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+		const EJTSItemId CarriedItemId = !Selected.StandardItem.IsEmpty()
+			? Selected.StandardItem.ItemId : EJTSItemId::StellarText;
+		const int32 CarriedCount = !Selected.StandardItem.IsEmpty()
+			? Selected.StandardItem.StackCount : 1;
+		TakeLockerItemButton->SetIsEnabled(!Selected.IsEmpty() && !Selected.bPendingStellarReveal
+			&& !(bRollAnimating && SelectedLockerSlot == RolledLockerSlotIndex)
+			&& IsValid(Inventory) && Inventory->CanAddItem(CarriedItemId, CarriedCount));
 	}
 }
 
@@ -772,6 +1389,17 @@ bool UJTSShopWidget::RefreshWallet()
 		}
 
 		for (const FJTSItemCost& Cost : Definition->ShopCosts)
+		{
+			if (Cost.Amount > 0 && !CurrentResourceAmounts.Contains(Cost.ResourceType))
+			{
+				ResourceOrder.Add(Cost.ResourceType);
+				CurrentResourceAmounts.Add(Cost.ResourceType, Spacecraft->GetResourceAmount(Cost.ResourceType));
+			}
+		}
+	}
+	if (const UJTSStellarLootTable* const Table = Spacecraft->GetStellarLootTable())
+	{
+		for (const FJTSItemCost& Cost : Table->SpinCosts)
 		{
 			if (Cost.Amount > 0 && !CurrentResourceAmounts.Contains(Cost.ResourceType))
 			{
@@ -891,6 +1519,12 @@ FText UJTSShopWidget::BuildItemTooltip(EJTSItemId ItemId) const
 
 void UJTSShopWidget::RequestPurchase(EJTSItemId ItemId)
 {
+	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (State && !State->HasFreeShipLockerSlot())
+	{
+		SetStatus(TEXT("物品栏已满，请拖拽物品到废纸篓删除"), true);
+		return;
+	}
 	if (!CanAfford(ItemId)) return;
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 	{
@@ -923,8 +1557,45 @@ void UJTSShopWidget::HandleDebugLevelsClicked()
 		if (ActiveSpacecraft.IsValid()) Controller->ServerRequestDebugAbilityLevels(ActiveSpacecraft.Get());
 	}
 }
-void UJTSShopWidget::HandleSupplyTabClicked() { bShowingAbilityPage = false; RefreshAll(); }
-void UJTSShopWidget::HandleAbilityTabClicked() { bShowingAbilityPage = true; RefreshAll(); }
+void UJTSShopWidget::HandleSupplyTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleStellarTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = true; RefreshAll(); }
+void UJTSShopWidget::HandleAbilityTabClicked() { bShowingAbilityPage = true; bShowingStellarPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleStellarRollClicked()
+{
+	if (bRollAnimating || !ActiveSpacecraft.IsValid()) return;
+	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (State && !State->HasFreeShipLockerSlot())
+	{
+		SetStatus(TEXT("物品栏已满，请拖拽物品到废纸篓删除"), true);
+		return;
+	}
+	bRollAnimating = true;
+	if (FSlateApplication::IsInitialized()) FSlateApplication::Get().CloseToolTip();
+	SetLeverPull(90.0f);
+	bRollResultReceived = false;
+	RolledStellarItemId = NAME_None;
+	RolledLockerSlotIndex = INDEX_NONE;
+	RollElapsed = 0.0f;
+	ReelStepAccumulator = 0.0f;
+	SetStatus(TEXT("遥感扫描中…"), false);
+	RefreshStellarReel();
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		Controller->ServerRequestStellarRoll(ActiveSpacecraft.Get());
+	}
+}
+
+void UJTSShopWidget::HandleTakeLockerItemClicked()
+{
+	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (!State || SelectedLockerSlot == INDEX_NONE || !ActiveSpacecraft.IsValid()) return;
+	const FJTSShipLockerSlot LockerEntry = State->GetShipLockerSlot(SelectedLockerSlot);
+	if (LockerEntry.IsEmpty() || LockerEntry.bPendingStellarReveal) return;
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		Controller->ServerTakeShipLockerSlot(ActiveSpacecraft.Get(), SelectedLockerSlot, LockerEntry.SlotToken);
+	}
+}
 void UJTSShopWidget::HandleInventorySlotsDecrease() { AdjustPendingAbility(EJTSPlayerAbility::InventorySlots, -1); }
 void UJTSShopWidget::HandleInventorySlotsIncrease() { AdjustPendingAbility(EJTSPlayerAbility::InventorySlots, 1); }
 void UJTSShopWidget::HandleStackLimitDecrease() { AdjustPendingAbility(EJTSPlayerAbility::StackLimit, -1); }
@@ -933,6 +1604,8 @@ void UJTSShopWidget::HandleRunSpeedDecrease() { AdjustPendingAbility(EJTSPlayerA
 void UJTSShopWidget::HandleRunSpeedIncrease() { AdjustPendingAbility(EJTSPlayerAbility::RunSpeed, 1); }
 void UJTSShopWidget::HandleStaminaDecrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, -1); }
 void UJTSShopWidget::HandleStaminaIncrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, 1); }
+void UJTSShopWidget::HandleCriticalChanceDecrease() { AdjustPendingAbility(EJTSPlayerAbility::CriticalChance, -1); }
+void UJTSShopWidget::HandleCriticalChanceIncrease() { AdjustPendingAbility(EJTSPlayerAbility::CriticalChance, 1); }
 
 void UJTSShopWidget::HandleConfirmAbilitiesClicked()
 {

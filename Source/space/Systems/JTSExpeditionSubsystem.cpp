@@ -319,6 +319,8 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			PlayerSnapshot.StackLimitAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::StackLimit);
 			PlayerSnapshot.RunSpeedAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::RunSpeed);
 			PlayerSnapshot.StaminaAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Stamina);
+			PlayerSnapshot.CriticalChanceAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::CriticalChance);
+			PlayerSnapshot.ShipLockerSlots = PlayerState->GetShipLockerSlots();
 			if (const UJTSHealthComponent* const Health = Character != nullptr ? Character->GetHealthComponent() : nullptr)
 			{
 				PlayerSnapshot.Health = Health->GetHealth();
@@ -359,6 +361,7 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 	}
 
 	PlayerState->SetAvatarColor(SavedPlayer->AvatarColor);
+	PlayerState->RestoreShipLockerSlots(SavedPlayer->ShipLockerSlots);
 	PlayerState->RestoreProgression(
 		SavedPlayer->ProgressionLevel,
 		SavedPlayer->ExperienceInCurrentLevel,
@@ -366,7 +369,8 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 		SavedPlayer->InventorySlotAbilityRank,
 		SavedPlayer->StackLimitAbilityRank,
 			SavedPlayer->RunSpeedAbilityRank,
-			SavedPlayer->StaminaAbilityRank);
+			SavedPlayer->StaminaAbilityRank,
+			SavedPlayer->CriticalChanceAbilityRank);
 	if (UJTSHealthComponent* const Health = Character->GetHealthComponent())
 	{
 		Health->RestoreAuthoritativeHealth(SavedPlayer->Health);

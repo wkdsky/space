@@ -18,6 +18,7 @@
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSMoonAntNestActor.h"
+#include "space/World/JTSMoonCubeCluster.h"
 
 namespace
 {
@@ -123,6 +124,7 @@ void AJTSMoonSurfaceController::ShutdownSurfaceGameplay()
 	if (HasAuthority())
 	{
 		ClearGeneratedMoonAntNests();
+		if (IsValid(MoonCubeCluster)) MoonCubeCluster->Deactivate();
 	}
 	bSurfaceGameplayInitialized = false;
 	bMissingSpacecraftLogged = false;
@@ -402,6 +404,7 @@ bool AJTSMoonSurfaceController::InitializeConfiguredSurfaceGameplay()
 	// Landmarks must exist before procedural nests and resources derive their exclusion zones.
 	InitializeMoonLandmarksAndMoonAntNests();
 	InitializeMoonResources();
+	if (IsValid(MoonCubeCluster)) MoonCubeCluster->Activate(Planet, this);
 
 	World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
 	const float ConsumptionInterval = MoonSettings->GetConsumptionTickInterval();

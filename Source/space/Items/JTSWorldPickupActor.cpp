@@ -573,7 +573,9 @@ FText AJTSWorldPickupActor::GetItemDisplayName() const
 {
 	return ItemInstance.IsEmpty()
 		? FText::FromString(ItemTypeToString(ItemType))
-		: UJTSItemDefinitionLibrary::GetItemDisplayName(ItemInstance.ItemId);
+		: ItemInstance.CustomDisplayName.IsEmpty()
+			? UJTSItemDefinitionLibrary::GetItemDisplayName(ItemInstance.ItemId)
+			: ItemInstance.CustomDisplayName;
 }
 
 FJTSItemInstance AJTSWorldPickupActor::GetItemInstance() const

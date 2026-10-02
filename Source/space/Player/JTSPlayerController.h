@@ -81,6 +81,37 @@ public:
 	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);
 
 	UFUNCTION(Server, Reliable)
+	void ServerRequestStellarRoll(AJTSSpacecraftActor* Spacecraft);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDeleteShipLockerSlot(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken);
+
+	UFUNCTION(Server, Reliable)
+	void ServerTakeShipLockerSlot(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken);
+
+	UFUNCTION(Server, Reliable)
+	void ServerExchangeShipLockerWithCarriedSlot(AJTSSpacecraftActor* Spacecraft, int32 LockerSlotIndex,
+		FGuid ExpectedLockerToken, int32 CarriedSlotIndex, FGuid ExpectedCarriedInstanceId);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShipLockerExchangeResult(bool bSucceeded);
+
+	UFUNCTION(Server, Reliable)
+	void ServerStoreCarriedItemInShipLocker(AJTSSpacecraftActor* Spacecraft, int32 CarriedSlotIndex, FGuid ExpectedInstanceId, int32 LockerSlotIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDestroyCarriedItemAtShip(AJTSSpacecraftActor* Spacecraft, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveCarriedShipActionResult(bool bSucceeded, bool bStored);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShipLockerActionResult(bool bSucceeded, bool bTakeAction);
+
+	UFUNCTION(Server, Reliable)
 	void ServerRequestShopDebugResources(AJTSSpacecraftActor* Spacecraft);
 
 	UFUNCTION(Server, Reliable)
@@ -139,6 +170,10 @@ public:
 	void OpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
 	void CloseSpaceShop();
 	bool IsSpaceShopOpen() const;
+	void UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible);
+	void DropCarriedItemInSpaceShop(const FVector2D& ScreenPosition, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
+	bool IsOverCarriedQuickbar(const FVector2D& ScreenPosition) const;
+	int32 GetCarriedQuickbarSlotAtPosition(const FVector2D& ScreenPosition) const;
 
 	/** Opens a keyboard-and-wheel quantity selector for the currently owned item stack. */
 	void OpenInventoryQuantityDialog(int32 SlotIndex, bool bDestroy);

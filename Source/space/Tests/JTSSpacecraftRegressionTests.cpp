@@ -21,8 +21,11 @@
 #include "InputMappingContext.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "UObject/UnrealType.h"
+#include "UObject/UObjectGlobals.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSStellarLootTable.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -153,6 +156,183 @@ bool FJTSInventorySelectedQuickbarRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Holdable is placed in the selected empty quickbar slot"), Inventory->GetItemAtSlot(1).ItemId == EJTSItemId::Pistol);
 	TestTrue(TEXT("Placed holdable becomes the active item"), Inventory->GetActiveItemId() == EJTSItemId::Pistol);
 	TestTrue(TEXT("Unselected empty quickbar slot remains untouched"), Inventory->GetItemAtSlot(0).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSItemDefinitionCacheGcRegression, "JTS.Inventory.ItemDefinitionSurvivesGarbageCollection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSItemDefinitionCacheGcRegression::RunTest(const FString& Parameters)
+{
+	const FString Before = UJTSItemDefinitionLibrary::GetItemDisplayName(EJTSItemId::Pistol).ToString();
+	CollectGarbage(RF_NoFlags);
+	const FString After = UJTSItemDefinitionLibrary::GetItemDisplayName(EJTSItemId::Pistol).ToString();
+	TestEqual(TEXT("Cached definition survives garbage collection"), After, Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSShipLockerRegression, "JTS.Spacecraft.ShipLockerAndStellarLoot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	AJTSCharacter* Character = nullptr;
+	APlayerController* const Controller = Fixture.AddPlayer(Character);
+	AJTSPlayerState* const LockerState = Controller->GetPlayerState<AJTSPlayerState>();
+	UJTSInventoryComponent* const CarriedInventory = Character->GetInventoryComponent();
+	if (!TestNotNull(TEXT("Player has locker state"), LockerState)
+		|| !TestNotNull(TEXT("Player has carried inventory"), CarriedInventory)) return false;
+	const UJTSStellarLootTable* const Table = Fixture.Ship->GetStellarLootTable();
+	if (!TestNotNull(TEXT("Blueprint supplies the stellar loot data asset"), Table)) return false;
+
+	for (int32 Index = 0; Index < AJTSPlayerState::ShipLockerCapacity; ++Index)
+	{
+		TestTrue(TEXT("Purchase fills a distinct terminal slot"),
+			LockerState->TryStorePurchasedItem(UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::Pistol)));
+	}
+	TestFalse(TEXT("Thirty-slot locker rejects overflow"), LockerState->HasFreeShipLockerSlot());
+	TestFalse(TEXT("Overflow purchase stays rejected"),
+		LockerState->TryStorePurchasedItem(UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::Pistol)));
+	TestEqual(TEXT("Purchases do not enter carried inventory"), CarriedInventory->GetItemCount(EJTSItemId::Pistol), 0);
+
+	const FJTSShipLockerSlot First = LockerState->GetShipLockerSlot(0);
+	TestFalse(TEXT("Stale drag token cannot delete"), LockerState->TryDeleteShipLockerSlot(0, FGuid::NewGuid()));
+	TestTrue(TEXT("Matching drag token deletes one slot"), LockerState->TryDeleteShipLockerSlot(0, First.SlotToken));
+	TestTrue(TEXT("Deletion frees a slot"), LockerState->HasFreeShipLockerSlot());
+	const FJTSShipLockerSlot Second = LockerState->GetShipLockerSlot(1);
+	TestTrue(TEXT("A standard item can be taken deliberately"),
+		LockerState->TryTakeShipLockerItem(1, Second.SlotToken, CarriedInventory, Table));
+	TestEqual(TEXT("Taking adds to carried inventory"), CarriedInventory->GetItemCount(EJTSItemId::Pistol), 1);
+	int32 CarriedPistolSlot = INDEX_NONE;
+	for (int32 Index = 0; Index < CarriedInventory->GetItemSlots().Num(); ++Index)
+	{
+		if (CarriedInventory->GetItemAtSlot(Index).ItemId == EJTSItemId::Pistol)
+		{
+			CarriedPistolSlot = Index;
+			break;
+		}
+	}
+	TestTrue(TEXT("Purchase fills an empty locker slot for exchange"),
+		LockerState->TryStorePurchasedItem(UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::Pickaxe)));
+	const FJTSShipLockerSlot BeforeSwap = LockerState->GetShipLockerSlot(0);
+	const FGuid OriginalCarriedId = CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId;
+	TestFalse(TEXT("Exchange rejects stale carried instance"),
+		LockerState->TryExchangeShipLockerItemWithCarriedSlot(0, BeforeSwap.SlotToken,
+			CarriedInventory, CarriedPistolSlot, FGuid::NewGuid(), Table));
+	TestTrue(TEXT("Occupied carried slot exchanges exact item payloads"),
+		LockerState->TryExchangeShipLockerItemWithCarriedSlot(0, BeforeSwap.SlotToken,
+			CarriedInventory, CarriedPistolSlot, OriginalCarriedId, Table));
+	TestEqual(TEXT("Locker receives replaced carried item"),
+		LockerState->GetShipLockerSlot(0).StandardItem.ItemId, EJTSItemId::Pistol);
+	TestEqual(TEXT("Carried target receives locker item"),
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).ItemId, EJTSItemId::Pickaxe);
+	TestFalse(TEXT("Exchange invalidates the old locker token"),
+		LockerState->TryExchangeShipLockerItemWithCarriedSlot(0, BeforeSwap.SlotToken,
+			CarriedInventory, CarriedPistolSlot,
+			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId, Table));
+	TestTrue(TEXT("Replaced locker item can be discarded"), LockerState->TryDeleteShipLockerSlot(0,
+		LockerState->GetShipLockerSlot(0).SlotToken));
+	TestFalse(TEXT("Stale carried item cannot be stored"),
+		LockerState->TryStoreCarriedItemAtSlot(0, CarriedInventory, CarriedPistolSlot, FGuid::NewGuid()));
+	TestTrue(TEXT("Carried item moves into the chosen locker slot"),
+		LockerState->TryStoreCarriedItemAtSlot(0, CarriedInventory, CarriedPistolSlot,
+			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId));
+	TestEqual(TEXT("Transfer removes the carried copy"), CarriedInventory->GetItemCount(EJTSItemId::Pickaxe), 0);
+	TestTrue(TEXT("Transfer preserves the item in the locker"),
+		LockerState->GetShipLockerSlot(0).StandardItem.ItemId == EJTSItemId::Pickaxe);
+	TestTrue(TEXT("Dropping locker item on an empty carried slot fills that exact slot"),
+		LockerState->TryExchangeShipLockerItemWithCarriedSlot(0,
+			LockerState->GetShipLockerSlot(0).SlotToken, CarriedInventory, CarriedPistolSlot, FGuid(), Table));
+	TestTrue(TEXT("Locker slot becomes empty after direct placement"), LockerState->GetShipLockerSlot(0).IsEmpty());
+	TestEqual(TEXT("Direct placement keeps the chosen carried slot"),
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).ItemId, EJTSItemId::Pickaxe);
+	TestTrue(TEXT("Carried item can return to the locker"),
+		LockerState->TryStoreCarriedItemAtSlot(0, CarriedInventory, CarriedPistolSlot,
+			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId));
+	TestTrue(TEXT("Transferred item can be discarded"), LockerState->TryDeleteShipLockerSlot(0,
+		LockerState->GetShipLockerSlot(0).SlotToken));
+	TestTrue(TEXT("Stellar text item uses the terminal slot"), LockerState->TryStoreStellarItem(TEXT("SolidCore")));
+	TestTrue(TEXT("A standard item occupies the carried target before a stellar swap"),
+		CarriedInventory->TryAddItemById(EJTSItemId::Pistol, 1));
+	const FGuid CarriedBeforeStellarSwap = CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId;
+	TestTrue(TEXT("Stellar text item exchanges with an occupied carried slot"),
+		LockerState->TryExchangeShipLockerItemWithCarriedSlot(0,
+			LockerState->GetShipLockerSlot(0).SlotToken, CarriedInventory,
+			CarriedPistolSlot, CarriedBeforeStellarSwap, Table));
+	TestEqual(TEXT("Carried target keeps the stellar identity"),
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("SolidCore")));
+	TestEqual(TEXT("Locker receives the displaced carried item"),
+		LockerState->GetShipLockerSlot(0).StandardItem.ItemId, EJTSItemId::Pistol);
+	TestTrue(TEXT("Stellar text survives a round trip back to the locker"),
+		LockerState->TryDeleteShipLockerSlot(0, LockerState->GetShipLockerSlot(0).SlotToken)
+		&& LockerState->TryStoreCarriedItemAtSlot(0, CarriedInventory, CarriedPistolSlot,
+			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId)
+		&& LockerState->GetShipLockerSlot(0).StellarItemId == FName(TEXT("SolidCore")));
+	TestTrue(TEXT("Stellar text can be taken into the carried inventory"),
+		LockerState->TryTakeShipLockerItem(0, LockerState->GetShipLockerSlot(0).SlotToken,
+			CarriedInventory, Table));
+	TestEqual(TEXT("Taken stellar text remains identifiable"),
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("SolidCore")));
+
+	TestEqual(TEXT("Document pool has seventeen unique entries"), Table->Entries.Num(), 17);
+	TArray<double> BaseProbabilities;
+	TestTrue(TEXT("Empty locker has a valid roll distribution"),
+		Table->GetRollProbabilities({}, BaseProbabilities));
+	double ProbabilityTotal = 0.0;
+	for (const double Probability : BaseProbabilities) ProbabilityTotal += Probability;
+	TestTrue(TEXT("Displayed roll probabilities add up to one"),
+		FMath::IsNearlyEqual(ProbabilityTotal, 1.0, 0.000001));
+	const int32 SolidCoreIndex = Table->Entries.IndexOfByPredicate([](const FJTSStellarLootEntry& Entry)
+	{
+		return Entry.ItemId == FName(TEXT("SolidCore"));
+	});
+	if (!TestTrue(TEXT("Solid core is in the configured pool"), SolidCoreIndex != INDEX_NONE)) return false;
+	TArray<double> CarriedCoreProbabilities;
+	TestTrue(TEXT("Carried core contributes to next-roll probability"),
+		Table->GetRollProbabilities({}, CarriedCoreProbabilities, CarriedInventory->GetItemSlots()));
+	TestTrue(TEXT("Carrying a core lowers its next-roll probability"),
+		CarriedCoreProbabilities[SolidCoreIndex] < BaseProbabilities[SolidCoreIndex]);
+	const int32 FirstCoreIndex = Table->Entries.IndexOfByPredicate([](const FJTSStellarLootEntry& Entry)
+	{
+		return Entry.bCore;
+	});
+	if (!TestTrue(TEXT("Configured pool contains a core"), FirstCoreIndex != INDEX_NONE)) return false;
+	TArray<FJTSShipLockerSlot> OwnedCoreSlots;
+	OwnedCoreSlots.AddDefaulted_GetRef().StellarItemId = Table->Entries[FirstCoreIndex].ItemId;
+	TArray<double> AdjustedProbabilities;
+	TestTrue(TEXT("Owning a core produces a valid adjusted distribution"),
+		Table->GetRollProbabilities(OwnedCoreSlots, AdjustedProbabilities));
+	TestTrue(TEXT("Owning a core lowers its next-roll probability"),
+		AdjustedProbabilities.IsValidIndex(FirstCoreIndex)
+		&& BaseProbabilities.IsValidIndex(FirstCoreIndex)
+		&& AdjustedProbabilities[FirstCoreIndex] < BaseProbabilities[FirstCoreIndex]);
+	FName Result;
+	TestTrue(TEXT("Configured pool rolls a known item"), Table->Roll(LockerState->GetShipLockerSlots(), Result));
+	TestTrue(TEXT("Rolled item exists in the configured pool"), Table->FindEntry(Result) != nullptr);
+
+	LockerState->RestoreShipLockerSlots({});
+	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	if (!TestTrue(TEXT("Fixture player can use the parked ship terminal"), Fixture.Ship->CanUseShipTerminal(Character))) return false;
+	TestTrue(TEXT("Ship accepts shop materials"), Fixture.Ship->DepositResourceAmounts({ { EJTSResourceType::Rock, 20 }, { EJTSResourceType::Ore, 20 } }));
+	TestEqual(TEXT("Purchase succeeds into locker"), Fixture.Ship->TryPurchase(Character, EJTSItemId::Pickaxe), EJTSShopPurchaseResult::Succeeded);
+	TestEqual(TEXT("Purchase remains out of carried inventory"), CarriedInventory->GetItemCount(EJTSItemId::Pickaxe), 0);
+	FName AwardedItem;
+	int32 AwardedSlot = INDEX_NONE;
+	TestEqual(TEXT("Server roll succeeds"), Fixture.Ship->TryRollStellarItem(Character, AwardedItem, AwardedSlot), EJTSStellarRollResult::Succeeded);
+	const FJTSShipLockerSlot Reserved = LockerState->GetShipLockerSlot(AwardedSlot);
+	TestTrue(TEXT("Roll reserves one locked slot before reveal"), AwardedSlot == 1 && Reserved.bPendingStellarReveal);
+	TestFalse(TEXT("Pending award cannot be deleted"), LockerState->TryDeleteShipLockerSlot(AwardedSlot, Reserved.SlotToken));
+	TestTrue(TEXT("Award can be revealed"), LockerState->TryRevealStellarItem(AwardedSlot, Reserved.SlotToken));
+	TestTrue(TEXT("Revealed award is stored"), !AwardedItem.IsNone()
+		&& LockerState->GetShipLockerSlot(AwardedSlot).StellarItemId == AwardedItem
+		&& !LockerState->GetShipLockerSlot(AwardedSlot).bPendingStellarReveal);
+	for (int32 Index = 2; Index < AJTSPlayerState::ShipLockerCapacity; ++Index)
+	{
+		LockerState->TryStoreStellarItem(TEXT("SolidCore"));
+	}
+	TestEqual(TEXT("Full locker blocks purchase before spending"), Fixture.Ship->TryPurchase(Character, EJTSItemId::Pickaxe), EJTSShopPurchaseResult::InventoryFull);
+	TestEqual(TEXT("Full locker blocks a roll"), Fixture.Ship->TryRollStellarItem(Character, AwardedItem, AwardedSlot), EJTSStellarRollResult::InventoryFull);
 	return true;
 }
 

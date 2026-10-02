@@ -14,6 +14,7 @@ namespace
 	constexpr int32 StackLimits[] = { 1, 2, 4, 7, 11, 16 };
 	constexpr int32 RunSpeedBonusPercents[] = { 0, 4, 8, 12, 16, 20 };
 	constexpr float StaminaCapacities[] = { 100.0f, 120.0f, 140.0f, 165.0f, 190.0f, 220.0f };
+	constexpr int32 CriticalChancePercents[] = { 0, 5, 10, 15, 20, 25 };
 
 	int32 ClampRank(const int32 Rank)
 	{
@@ -52,4 +53,9 @@ float FJTSPlayerProgressionRules::GetRunSpeedMultiplier(const int32 AbilityRank)
 float FJTSPlayerProgressionRules::GetMaxStamina(const int32 AbilityRank)
 {
 	return StaminaCapacities[ClampRank(AbilityRank)];
+}
+
+int32 FJTSPlayerProgressionRules::GetCriticalChancePercent(const int32 AbilityRank)
+{
+	return CriticalChancePercents[ClampRank(AbilityRank)];
 }

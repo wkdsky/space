@@ -13,10 +13,13 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSCriticalDamageType.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSMoonAntActor.h"
@@ -46,6 +49,7 @@ UJTSMeleeComponent::UJTSMeleeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+	PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 	SetIsReplicatedByDefault(true);
 }
 
@@ -55,6 +59,10 @@ void UJTSMeleeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	if (bMeleeSwingClockActive)
 	{
 		MeleeSwingClockElapsed += DeltaTime;
+		if (GetOwner() != nullptr && GetOwner()->HasAuthority() && CurrentAttackType != EJTSAttackType::Punch)
+		{
+			SweepHeldWeaponTip();
+		}
 		if (MeleeSwingClockElapsed >= FMath::Max(0.15f, HeldWeaponRecoveryDelay))
 		{
 			bMeleeSwingClockActive = false;
@@ -93,6 +101,10 @@ void UJTSMeleeComponent::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("JTSMeleeComponent on '%s' requires a pawn owner."), *GetNameSafe(GetOwner()));
 		return;
 	}
+	if (UJTSWeaponVisualComponent* Visual = GetOwner()->FindComponentByClass<UJTSWeaponVisualComponent>())
+	{
+		AddTickPrerequisiteComponent(Visual);
+	}
 
 	RefreshMeleeTarget();
 	if (UWorld* const World = GetWorld(); World != nullptr && TargetRefreshInterval > 0.0f)
@@ -117,8 +129,9 @@ void UJTSMeleeComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ClearHeldWeaponTimers();
 
 	CurrentMeleeTarget = nullptr;
-	CachedMeleeTarget.Reset();
 	HitActorsThisSwing.Reset();
+	bHasPreviousPunchSample = false;
+	bHasPreviousWeaponTip = false;
 	bAttackHeld = false;
 	bAttackBuffered = false;
 	bIsAttacking = false;
@@ -251,57 +264,13 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 
 	// Every montage segment is one new swing. Repeated hit requests can never re-hit this set.
 	HitActorsThisSwing.Reset();
-	CachedMeleeTarget.Reset();
+	bHasPreviousPunchSample = false;
+	bHasPreviousWeaponTip = false;
 	CurrentAttackType = AttackType;
 	bIsAttacking = true;
 	bCurrentPunchIsComboContinuation = bIsComboContinuation;
 
-	if (CurrentAttackType == EJTSAttackType::Punch)
-	{
-		bCurrentPunchUsesLeft = !bCurrentPunchUsesLeft;
-		APawn* const AttackingPawn = Cast<APawn>(GetOwner());
-		AActor* Candidate = nullptr;
-		FVector CandidateLocation = FVector::ZeroVector;
-		if (FindBestPunchCandidate(
-			AttackingPawn,
-			Candidate,
-			CandidateLocation,
-			false,
-			true,
-			PunchTargetAcquireRadius))
-		{
-			CachedMeleeTarget = Candidate;
-		}
-
-		if (bDebugMeleeAim && IsValid(AttackingPawn))
-		{
-			if (UWorld* const World = GetWorld())
-			{
-				DrawDebugSphere(
-					World,
-					AttackingPawn->GetActorLocation(),
-					FMath::Max(1.0f, PunchTargetAcquireRadius),
-					24,
-					FColor::Cyan,
-					false,
-					0.8f,
-					0,
-					0.75f);
-				if (IsValid(Candidate))
-				{
-					DrawDebugSphere(World, CandidateLocation, 18.0f, 12, FColor::Yellow, false, 0.8f, 0, 1.0f);
-					DrawDebugString(
-						World,
-						CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
-						FString::Printf(TEXT("Cached: %s"), *GetNameSafe(Candidate)),
-						nullptr,
-						FColor::Yellow,
-						0.8f,
-						true);
-				}
-			}
-		}
-	}
+	if (CurrentAttackType == EJTSAttackType::Punch) bCurrentPunchUsesLeft = !bCurrentPunchUsesLeft;
 
 	if (CurrentAttackType == EJTSAttackType::Punch)
 	{
@@ -474,7 +443,8 @@ void UJTSMeleeComponent::EndAttackState()
 	bCurrentPunchUsesLeft = false;
 	bCurrentPunchIsComboContinuation = false;
 	HitActorsThisSwing.Reset();
-	CachedMeleeTarget.Reset();
+	bHasPreviousPunchSample = false;
+	bHasPreviousWeaponTip = false;
 	if (bWasAttacking && GetOwner() != nullptr && GetOwner()->HasAuthority())
 	{
 		MulticastEndAttackPresentation(FinishedAttackType);
@@ -488,137 +458,10 @@ void UJTSMeleeComponent::PerformHitCheck()
 		ServerPerformHitCheck();
 		return;
 	}
-	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
-	UWorld* const World = GetWorld();
-	if (!bIsAttacking || !IsValid(AttackingPawn) || !IsValid(World) || PunchMaxTargets < 1)
-	{
-		return;
-	}
-	if (HitActorsThisSwing.Num() >= PunchMaxTargets)
-	{
-		return;
-	}
-
-	if (CurrentAttackType == EJTSAttackType::Punch)
-	{
-		AActor* Candidate = CachedMeleeTarget.Get();
-		FVector CandidateLocation = FVector::ZeroVector;
-		bool bUsingCachedTarget = false;
-		if (IsValidDamageTarget(Candidate, AttackingPawn) && !HitActorsThisSwing.Contains(Candidate))
-		{
-			CandidateLocation = GetMeleeTargetAimPoint(Candidate);
-			const float AllowedRange = Candidate->IsA<AJTSMoonAntActor>()
-				? FMath::Min(205.0f, FMath::Max(PunchRange, CachedTargetGraceRange))
-				: PunchRange;
-			bUsingCachedTarget = IsWithinMeleeRange(AttackingPawn, Candidate->GetActorLocation(), AllowedRange)
-				&& HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation);
-		}
-
-		if (!bUsingCachedTarget)
-		{
-			CachedMeleeTarget.Reset();
-			Candidate = nullptr;
-			CandidateLocation = FVector::ZeroVector;
-			if (!FindBestPunchCandidate(
-				AttackingPawn,
-				Candidate,
-				CandidateLocation,
-				false,
-				true,
-				PunchTargetAcquireRadius)
-				|| !IsWithinPunchRange(AttackingPawn, Candidate != nullptr ? Candidate->GetActorLocation() : FVector::ZeroVector)
-				|| HitActorsThisSwing.Contains(Candidate))
-			{
-				return;
-			}
-		}
-
-		const bool bApplied = ApplyAttackToTarget(Candidate, AttackingPawn, EJTSMeleeAttackType::Punch);
-		if (bApplied)
-		{
-			// PunchMaxTargets is intentionally clamped to one. This set also protects duplicate AttackHit notifies.
-			HitActorsThisSwing.Add(Candidate);
-			ClientConfirmPunchHit();
-			MulticastPunchImpact(CandidateLocation);
-		}
-
-		if (bDebugMeleeAim)
-		{
-			const FColor FinalColor = bApplied ? FColor::Green : FColor::Red;
-			DrawDebugSphere(World, CandidateLocation, 24.0f, 12, FinalColor, false, 1.5f, 0, 2.0f);
-			DrawDebugLine(World, AttackingPawn->GetActorLocation(), CandidateLocation, FinalColor, false, 1.5f, 0, 1.5f);
-			DrawDebugString(
-				World,
-				CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
-				FString::Printf(TEXT("%s %s Damage %.1f"), bUsingCachedTarget ? TEXT("Cached") : TEXT("Reacquired"), *GetNameSafe(Candidate), PunchDamage),
-				nullptr,
-				FinalColor,
-				1.5f,
-				true);
-		}
-		return;
-	}
-
-	FVector CameraLocation;
-	FVector AimDirection;
-	if (!GetHeldItemAimView(AttackingPawn, CameraLocation, AimDirection))
-	{
-		return;
-	}
-
-	const FVector AimTraceEnd = CameraLocation + AimDirection * FMath::Max(0.0f, MeleeAimTraceDistance);
-	if (bDebugMeleeAim)
-	{
-		DrawDebugLine(World, CameraLocation, AimTraceEnd, FColor::Cyan, false, 1.5f, 0, 1.5f);
-		DrawDebugSphere(World, AimTraceEnd, FMath::Max(1.0f, MeleeAimAssistRadius), 12, FColor::Cyan, false, 1.5f, 0, 0.75f);
-		DrawDebugSphere(World, AttackingPawn->GetActorLocation(), PunchRange, 24, FColor(255, 180, 0), false, 1.5f, 0, 0.5f);
-	}
-
-	AActor* Candidate = nullptr;
-	FVector CandidateLocation = FVector::ZeroVector;
-	if (!FindBestAimCandidate(AttackingPawn, Candidate, CandidateLocation, false))
-	{
-		return;
-	}
-
-	const FVector TargetLogicalLocation = Candidate->GetActorLocation();
-	const bool bWithinRange = IsWithinPunchRange(AttackingPawn, TargetLogicalLocation);
-	const bool bHasLineOfSight = bWithinRange && HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation);
-	if (bDebugMeleeAim)
-	{
-		const FColor CandidateColor = bWithinRange && bHasLineOfSight ? FColor::Yellow : FColor::Red;
-		DrawDebugSphere(World, CandidateLocation, 18.0f, 12, CandidateColor, false, 1.5f, 0, 1.5f);
-		DrawDebugLine(World, AttackingPawn->GetActorLocation(), TargetLogicalLocation, CandidateColor, false, 1.5f, 0, 1.5f);
-	}
-
-	if (!bWithinRange || !bHasLineOfSight || HitActorsThisSwing.Contains(Candidate))
-	{
-		return;
-	}
-
-	const EJTSMeleeAttackType AttackType = GetCurrentAttackType();
-	const float Damage = GetDamageForAttackType(AttackType);
-	const bool bApplied = ApplyAttackToTarget(Candidate, AttackingPawn, AttackType);
-	if (bApplied)
-	{
-		HitActorsThisSwing.Add(Candidate);
-	}
-
-	if (bDebugMeleeAim)
-	{
-		const FColor FinalColor = bApplied ? FColor::Green : FColor::Red;
-		DrawDebugSphere(World, CandidateLocation, 24.0f, 12, FinalColor, false, 1.5f, 0, 2.0f);
-		DrawDebugString(
-			World,
-			CandidateLocation + FVector(0.0f, 0.0f, 28.0f),
-			FString::Printf(TEXT("%s  Damage %.1f"), *GetNameSafe(Candidate), Damage),
-			nullptr,
-			FinalColor,
-			1.5f,
-			true);
-	}
+	if (!bIsAttacking || HitActorsThisSwing.Num() >= PunchMaxTargets) return;
+	if (CurrentAttackType == EJTSAttackType::Punch) SweepPunchFist();
+	else SweepHeldWeaponTip();
 }
-
 bool UJTSMeleeComponent::TryAttack()
 {
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
@@ -630,7 +473,7 @@ bool UJTSMeleeComponent::TryAttack()
 	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
 	const AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(this);
 	const IJTSMoonSurfaceGameplaySettings* const MoonSettings = IsValid(SurfaceController) ? SurfaceController->GetMoonSettings() : nullptr;
-	if (!IsValid(AttackingPawn) || MoonSettings == nullptr || !IsMoonMeleeAvailable())
+	if (!IsValid(World) || !IsValid(AttackingPawn) || MoonSettings == nullptr || !IsMoonMeleeAvailable())
 	{
 		return false;
 	}
@@ -641,23 +484,9 @@ bool UJTSMeleeComponent::TryAttack()
 		return false;
 	}
 
-	RefreshMeleeTarget();
-	AActor* const Target = CurrentMeleeTarget.Get();
-	if (!IsValidMeleeTarget(Target, AttackingPawn)
-		|| (bIsAttacking && HitActorsThisSwing.Contains(Target)))
-	{
-		return false;
-	}
-
-	const EJTSMeleeAttackType AttackType = GetCurrentAttackType();
-	if (!ApplyAttackToTarget(Target, AttackingPawn, AttackType))
-	{
-		return false;
-	}
-	if (bIsAttacking)
-	{
-		HitActorsThisSwing.Add(Target);
-	}
+	if (bIsAttacking) return false;
+	StartAttack();
+	if (!bIsAttacking) return false;
 
 	float AttackInterval = MoonSettings->GetAttackCooldown();
 	if (const UJTSInventoryComponent* const Inventory = AttackingPawn->FindComponentByClass<UJTSInventoryComponent>())
@@ -671,7 +500,6 @@ bool UJTSMeleeComponent::TryAttack()
 		}
 	}
 	NextAttackTime = CurrentTime + static_cast<double>(FMath::Max(0.08f, AttackInterval));
-	RefreshMeleeTarget();
 	return true;
 }
 
@@ -1053,10 +881,8 @@ void UJTSMeleeComponent::SweepPunchFist()
 		? 0.0f : FMath::Min(0.035f, HitDelay * 0.32f);
 	const float Travel = FMath::Pow(FMath::Clamp(
 		(PunchVisualElapsed - GuardTime) / FMath::Max(0.01f, HitDelay - GuardTime),
-		0.0f,
-		1.0f), 1.45f);
+		0.0f, 1.0f), 1.45f);
 	FVector Sample = FMath::Lerp(FistStart, FistEnd, Travel);
-	// Once this frame's pose has been evaluated, follow the wrist instead of the analytic lane.
 	if (const USkeletalMeshComponent* const Mesh = AttackingPawn->FindComponentByClass<USkeletalMeshComponent>())
 	{
 		const FName WristName = bCurrentPunchUsesLeft ? TEXT("Wrist_L") : TEXT("Wrist_R");
@@ -1065,72 +891,82 @@ void UJTSMeleeComponent::SweepPunchFist()
 			Sample = Mesh->GetBoneLocation(WristName, EBoneSpaces::WorldSpace);
 		}
 	}
+	const FVector SweepStart = bHasPreviousPunchSample ? PreviousPunchSample : Sample;
+	PreviousPunchSample = Sample;
+	bHasPreviousPunchSample = true;
+
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSPunchFistSweep), false, AttackingPawn);
 	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
-	TArray<FOverlapResult> OverlapResults;
-	if (!World->OverlapMultiByObjectType(
-		OverlapResults,
-		Sample,
-		FQuat::Identity,
-		FCollisionObjectQueryParams(FCollisionObjectQueryParams::AllObjects),
-		FCollisionShape::MakeSphere(14.0f),
-		QueryParams))
+	FHitResult Hit;
+	const bool bBlockingHit = World->SweepSingleByChannel(Hit, SweepStart, Sample, FQuat::Identity,
+		ECC_Visibility, FCollisionShape::MakeSphere(18.0f), QueryParams);
+	AActor* const Candidate = bBlockingHit ? Hit.GetActor() : nullptr;
+	const bool bValidContact = IsValidDamageTarget(Candidate, AttackingPawn)
+		&& !HitActorsThisSwing.Contains(Candidate)
+		&& IsWithinPunchRange(AttackingPawn, Hit.ImpactPoint)
+		&& HasMeleeLineOfSight(AttackingPawn, Candidate, Hit.ImpactPoint);
+	if (bValidContact && ApplyAttackToTarget(Candidate, AttackingPawn, EJTSMeleeAttackType::Punch))
 	{
-		return;
-	}
-
-	AActor* BestTarget = nullptr;
-	FVector BestLocation = FVector::ZeroVector;
-	float BestDistanceSquared = TNumericLimits<float>::Max();
-	TSet<AActor*> SeenActors;
-	for (const FOverlapResult& OverlapResult : OverlapResults)
-	{
-		AActor* const Candidate = OverlapResult.GetActor();
-		if (!IsValid(Candidate) || SeenActors.Contains(Candidate) || HitActorsThisSwing.Contains(Candidate))
-		{
-			continue;
-		}
-		SeenActors.Add(Candidate);
-		if (!IsValidDamageTarget(Candidate, AttackingPawn)
-			|| !IsWithinPunchRange(AttackingPawn, Candidate->GetActorLocation()))
-		{
-			continue;
-		}
-		const FVector CandidateLocation = GetMeleeTargetAimPoint(Candidate);
-		if (!HasMeleeLineOfSight(AttackingPawn, Candidate, CandidateLocation))
-		{
-			continue;
-		}
-		const float DistanceSquared = FVector::DistSquared(Sample, CandidateLocation);
-		if (DistanceSquared < BestDistanceSquared)
-		{
-			BestDistanceSquared = DistanceSquared;
-			BestTarget = Candidate;
-			BestLocation = CandidateLocation;
-		}
-	}
-
-	if (!IsValid(BestTarget))
-	{
-		return;
-	}
-
-	const bool bApplied = ApplyAttackToTarget(BestTarget, AttackingPawn, EJTSMeleeAttackType::Punch);
-	if (bApplied)
-	{
-		HitActorsThisSwing.Add(BestTarget);
+		HitActorsThisSwing.Add(Candidate);
 		ClientConfirmPunchHit();
-		MulticastPunchImpact(BestLocation);
+		MulticastPunchImpact(Hit.ImpactPoint);
 	}
 	if (bDebugMeleeAim)
 	{
-		const FColor SweepColor = bApplied ? FColor::Green : FColor::Orange;
-		DrawDebugLine(World, FistStart, FistEnd, SweepColor, false, 0.6f, 0, 1.25f);
-		DrawDebugSphere(World, Sample, 14.0f, 10, SweepColor, false, 0.6f, 0, 1.0f);
-		DrawDebugSphere(World, BestLocation, 16.0f, 10, SweepColor, false, 0.6f, 0, 1.0f);
+		const FColor Color = bValidContact ? FColor::Green : FColor::Orange;
+		DrawDebugLine(World, SweepStart, Sample, Color, false, 0.6f, 0, 1.25f);
+		DrawDebugSphere(World, Sample, 18.0f, 10, Color, false, 0.6f, 0, 1.0f);
 	}
 }
 
+void UJTSMeleeComponent::SweepHeldWeaponTip()
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !bIsAttacking
+		|| CurrentAttackType == EJTSAttackType::Punch || HitActorsThisSwing.Num() >= PunchMaxTargets)
+	{
+		return;
+	}
+	APawn* const AttackingPawn = Cast<APawn>(GetOwner());
+	const UJTSWeaponVisualComponent* const Visual = IsValid(AttackingPawn)
+		? AttackingPawn->FindComponentByClass<UJTSWeaponVisualComponent>() : nullptr;
+	UWorld* const World = GetWorld();
+	FVector Tip = FVector::ZeroVector;
+	if (!IsValid(World) || !IsValid(Visual) || !Visual->GetHeldItemTipWorldLocation(Tip)
+		|| FVector::DistSquared(Tip, AttackingPawn->GetActorLocation()) > FMath::Square(PunchRange + 100.0f))
+	{
+		bHasPreviousWeaponTip = false;
+		return;
+	}
+	const FVector SweepStart = bHasPreviousWeaponTip ? PreviousWeaponTip : Tip;
+	PreviousWeaponTip = Tip;
+	bHasPreviousWeaponTip = true;
+	if (MeleeSwingClockElapsed < FMath::Max(0.0f, HeldWeaponHitDelay - 0.14f)
+		|| MeleeSwingClockElapsed > HeldWeaponHitDelay + 0.08f)
+	{
+		return;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSHeldWeaponSweep), false, AttackingPawn);
+	AddOwnerAndAttachedActorsToIgnoreList(QueryParams, AttackingPawn);
+	FHitResult Hit;
+	const bool bBlockingHit = World->SweepSingleByChannel(Hit, SweepStart, Tip, FQuat::Identity,
+		ECC_Visibility, FCollisionShape::MakeSphere(FMath::Max(1.0f, MeleeAimAssistRadius)), QueryParams);
+	AActor* const Candidate = bBlockingHit ? Hit.GetActor() : nullptr;
+	const bool bValidContact = IsValidDamageTarget(Candidate, AttackingPawn)
+		&& !HitActorsThisSwing.Contains(Candidate)
+		&& IsWithinPunchRange(AttackingPawn, Hit.ImpactPoint)
+		&& HasMeleeLineOfSight(AttackingPawn, Candidate, Hit.ImpactPoint);
+	if (bValidContact && ApplyAttackToTarget(Candidate, AttackingPawn, GetCurrentAttackType()))
+	{
+		HitActorsThisSwing.Add(Candidate);
+	}
+	if (bDebugMeleeAim)
+	{
+		const FColor Color = bValidContact ? FColor::Green : FColor::Orange;
+		DrawDebugLine(World, SweepStart, Tip, Color, false, 0.6f, 0, 1.25f);
+		DrawDebugSphere(World, Tip, FMath::Max(1.0f, MeleeAimAssistRadius), 10, Color, false, 0.6f, 0, 1.0f);
+	}
+}
 FVector UJTSMeleeComponent::GetMeleeTargetAimPoint(AActor* Candidate) const
 {
 	if (!IsValid(Candidate))
@@ -1284,9 +1120,14 @@ bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPaw
 
 	if (Target->FindComponentByClass<UJTSHealthComponent>() != nullptr)
 	{
-		const float Damage = GetDamageForAttackType(AttackType);
+		float Damage = GetDamageForAttackType(AttackType);
+		const AJTSPlayerState* const PlayerState = AttackingPawn->GetPlayerState<AJTSPlayerState>();
+		const bool bCritical = Damage > KINDA_SMALL_NUMBER && IsValid(PlayerState)
+			&& FMath::FRandRange(0.0f, 100.0f) < PlayerState->GetCriticalChancePercent();
+		if (bCritical) Damage *= FJTSPlayerProgressionRules::CriticalDamageMultiplier;
 		return Damage > KINDA_SMALL_NUMBER
-			&& UGameplayStatics::ApplyDamage(Target, Damage, AttackingPawn->GetController(), AttackingPawn, UDamageType::StaticClass()) > 0.0f;
+			&& UGameplayStatics::ApplyDamage(Target, Damage, AttackingPawn->GetController(), AttackingPawn,
+				bCritical ? UJTSCriticalDamageType::StaticClass() : UDamageType::StaticClass()) > 0.0f;
 	}
 
 	// Legacy Moon targets (for example resource/tool interactions) keep their existing interface path.

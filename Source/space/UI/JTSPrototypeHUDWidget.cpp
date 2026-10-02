@@ -267,6 +267,113 @@ FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometr
 	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
 
+bool UJTSPrototypeHUDWidget::IsOverInventorySlot(const FVector2D& ScreenPosition) const
+{
+	return GetInventorySlotAtScreenPosition(ScreenPosition) != INDEX_NONE;
+}
+
+int32 UJTSPrototypeHUDWidget::GetInventorySlotAtScreenPosition(const FVector2D& ScreenPosition) const
+{
+	if (!IsValid(InventoryPanel) || !InventoryPanel->IsVisible()) return INDEX_NONE;
+	const AJTSCharacter* const Character = GetOwningPlayer() ? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
+	const UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+	if (!IsValid(Inventory)) return INDEX_NONE;
+	for (int32 VisualIndex = 0; VisualIndex < InventorySlotBorders.Num(); ++VisualIndex)
+	{
+		const UBorder* const Border = InventorySlotBorders[VisualIndex];
+		if (IsValid(Border) && Border->IsVisible()
+			&& Border->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+		{
+			return Inventory->GetQuickbarPageStart() + VisualIndex;
+		}
+	}
+	return INDEX_NONE;
+}
+
+FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
+	AJTSCharacter* const Character = Controller ? Cast<AJTSCharacter>(Controller->GetPawn()) : nullptr;
+	UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+	if (IsValid(Controller) && Controller->IsSpaceShopOpen() && IsValid(Inventory)
+		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		for (int32 VisualIndex = 0; VisualIndex < InventorySlotBorders.Num(); ++VisualIndex)
+		{
+			const UBorder* const Border = InventorySlotBorders[VisualIndex];
+			if (!IsValid(Border) || !Border->IsVisible()
+				|| !Border->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition())) continue;
+			const int32 SlotIndex = Inventory->GetQuickbarPageStart() + VisualIndex;
+			Inventory->SelectQuickbarSlot(SlotIndex);
+			const FJTSItemInstance Item = Inventory->GetItemAtSlot(SlotIndex);
+			if (Item.IsEmpty()) return FReply::Handled();
+			DraggedCarriedSlot = SlotIndex;
+			DraggedCarriedInstanceId = Item.InstanceId;
+			DraggedCarriedLabel = Item.CustomDisplayName.IsEmpty()
+				? UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString()
+				: Item.CustomDisplayName.ToString();
+			DragStartPosition = InMouseEvent.GetScreenSpacePosition();
+			bCarriedDragPreviewVisible = false;
+			return FReply::Handled().CaptureMouse(TakeWidget());
+		}
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply UJTSPrototypeHUDWidget::NativeOnMouseMove(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	if (DraggedCarriedSlot != INDEX_NONE)
+	{
+		bCarriedDragPreviewVisible |= FVector2D::Distance(
+			DragStartPosition, InMouseEvent.GetScreenSpacePosition()) >= 6.0f;
+		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+		{
+			Controller->UpdateShipCarriedDragPreview(InMouseEvent.GetScreenSpacePosition(),
+				DraggedCarriedLabel, bCarriedDragPreviewVisible);
+		}
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+}
+
+FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	if (DraggedCarriedSlot != INDEX_NONE && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+		{
+			Controller->UpdateShipCarriedDragPreview(InMouseEvent.GetScreenSpacePosition(), FString(), false);
+			if (bCarriedDragPreviewVisible)
+			{
+				Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(),
+					DraggedCarriedSlot, DraggedCarriedInstanceId);
+			}
+		}
+		DraggedCarriedSlot = INDEX_NONE;
+		DraggedCarriedInstanceId.Invalidate();
+		DraggedCarriedLabel.Reset();
+		bCarriedDragPreviewVisible = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+void UJTSPrototypeHUDWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		Controller->UpdateShipCarriedDragPreview(FVector2D::ZeroVector, FString(), false);
+	}
+	DraggedCarriedSlot = INDEX_NONE;
+	DraggedCarriedInstanceId.Invalidate();
+	DraggedCarriedLabel.Reset();
+	bCarriedDragPreviewVisible = false;
+}
+
 void UJTSPrototypeHUDWidget::NativeDestruct()
 {
 	UnbindPlayerHealth();
@@ -1676,9 +1783,12 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 			? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
 		const bool bEquippedRanged = IsValid(Ranged) && Ranged->HasActiveRangedWeapon();
 		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : PunchHitFeedback;
-		CrosshairText->SetRenderScale(FVector2D(1.0f + 0.22f * ReticleKick));
-		CrosshairText->SetColorAndOpacity(FSlateColor(bShowPunchHit || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
-			? FLinearColor(1.0f, 0.56f, 0.24f) : FLinearColor::White));
+		const bool bCriticalHit = bEquippedRanged && Ranged->HasRecentConfirmedCriticalHit();
+		CrosshairText->SetRenderScale(FVector2D(1.0f + 0.22f * ReticleKick + (bCriticalHit ? 0.20f : 0.0f)));
+		CrosshairText->SetColorAndOpacity(FSlateColor(bCriticalHit
+			? FLinearColor(1.0f, 0.78f, 0.20f)
+			: (bShowPunchHit || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
+				? FLinearColor(1.0f, 0.56f, 0.24f) : FLinearColor::White)));
 	}
 	// The quickbar and contextual interaction prompt already teach surface actions. A second
 	// persistent help line competes with the quickbar at narrower viewport sizes.
@@ -1860,7 +1970,9 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 				: FJTSItemInstance();
 			FString SlotLabel = Item.IsEmpty()
 				? TEXT("EMPTY")
-				: UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString().ToUpper();
+				: (Item.CustomDisplayName.IsEmpty()
+					? UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString()
+					: Item.CustomDisplayName.ToString()).ToUpper();
 			if (!Item.IsEmpty() && Item.StackCount > 1)
 			{
 				SlotLabel += FString::Printf(TEXT(" x%d"), Item.StackCount);

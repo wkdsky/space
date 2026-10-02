@@ -108,6 +108,11 @@ public:
 	int32 GetEffectiveStackLimit(EJTSItemId ItemId) const;
 
 	bool TryRemoveItem(EJTSItemId ItemId, int32 Count);
+	/** Server-only exact-slot transfer; preserves the instance payload for ship storage. */
+	bool TryExtractItemAtSlot(int32 SlotIndex, FGuid ExpectedInstanceId, FJTSItemInstance& OutItem);
+	/** Server-only exact-slot replacement used by an atomic ship locker exchange. */
+	bool TryExchangeItemAtSlot(int32 SlotIndex, FGuid ExpectedInstanceId,
+		const FJTSItemInstance& IncomingItem, FJTSItemInstance& OutReplacedItem);
 	bool TryTakeAllResources(TMap<EJTSResourceType, int32>& OutResources);
 	bool TryAddResources(const TMap<EJTSResourceType, int32>& Resources);
 	int32 GetResourceAmount(EJTSResourceType ResourceType) const;

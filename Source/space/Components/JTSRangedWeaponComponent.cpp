@@ -14,12 +14,15 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSCriticalDamageType.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Interaction/JTSCriticalHitTarget.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Player/JTSPlayerState.h"
 #include "space/Weapons/JTSProjectileActor.h"
 #include "space/Weapons/JTSProjectileImpactActor.h"
 #include "space/World/JTSMoonResourceActor.h"
@@ -148,93 +151,78 @@ void UJTSRangedWeaponComponent::ServerStopAim_Implementation()
 	bIsAiming = false;
 }
 
-bool UJTSRangedWeaponComponent::GetAim(FVector& OutOrigin, FVector& OutDirection) const
-{
-	const APawn* Pawn = Cast<APawn>(GetOwner());
-	if (!IsValid(Pawn)) return false;
-	FRotator ViewRotation;
-	if (const APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
-	{
-		Controller->GetPlayerViewPoint(OutOrigin, ViewRotation);
-	}
-	else
-	{
-		OutOrigin = Pawn->GetPawnViewLocation();
-		ViewRotation = Pawn->GetViewRotation();
-	}
-	OutDirection = ViewRotation.Vector().GetSafeNormal();
-	return !OutDirection.IsNearlyZero();
-}
-
 bool UJTSRangedWeaponComponent::FireOnce()
 {
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || GetWorld() == nullptr || !CanUseWeapon()) return false;
 	const UJTSInventoryComponent* Inventory = GetOwner()->FindComponentByClass<UJTSInventoryComponent>();
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
 	APawn* Pawn = Cast<APawn>(GetOwner());
-	FVector CameraStart = FVector::ZeroVector;
-	FVector Direction = FVector::ZeroVector;
-	if (!IsValid(Inventory) || !IsValid(Definition) || !IsValid(Pawn)
-		|| !GetAim(CameraStart, Direction)) return false;
+	const UJTSWeaponVisualComponent* Visual = IsValid(Pawn)
+		? Pawn->FindComponentByClass<UJTSWeaponVisualComponent>() : nullptr;
+	if (!IsValid(Inventory) || !IsValid(Definition) || !IsValid(Pawn) || !IsValid(Visual)) return false;
 
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Now + KINDA_SMALL_NUMBER < NextFireTimeSeconds) return false;
-	NextFireTimeSeconds = Now + FMath::Max(0.05f, Definition->RangedFireInterval);
 	const bool bLeftShot = Definition->ItemId == EJTSItemId::IceAxe && bNextLeftServerShot;
+	FTransform MuzzleTransform;
+	if (!Visual->GetMuzzleWorldTransform(MuzzleTransform, bLeftShot)
+		|| FVector::DistSquared(MuzzleTransform.GetLocation(), Pawn->GetActorLocation()) > FMath::Square(350.0f))
+	{
+		return false;
+	}
+	NextFireTimeSeconds = Now + FMath::Max(0.05f, Definition->RangedFireInterval);
 	if (Definition->ItemId == EJTSItemId::IceAxe) bNextLeftServerShot = !bNextLeftServerShot;
 
 	const float SpreadDegrees = bIsAiming ? Definition->RangedAimSpreadDegrees : Definition->RangedHipSpreadDegrees;
-	Direction = FMath::VRandCone(Direction, FMath::DegreesToRadians(FMath::Clamp(SpreadDegrees, 0.0f, 12.0f)));
-	const FVector CameraEnd = CameraStart + Direction * FMath::Max(100.0f, Definition->RangedRange);
+	const FVector Direction = FMath::VRandCone(MuzzleTransform.GetUnitAxis(EAxis::X).GetSafeNormal(),
+		FMath::DegreesToRadians(FMath::Clamp(SpreadDegrees, 0.0f, 12.0f)));
+	const FVector MuzzleStart = MuzzleTransform.GetLocation();
+	const FVector TraceEnd = MuzzleStart + Direction * FMath::Max(100.0f, Definition->RangedRange);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSRangedShot), false, Pawn);
 	QueryParams.AddIgnoredActor(Pawn);
 	TArray<AActor*> AttachedActors;
 	Pawn->GetAttachedActors(AttachedActors, true, true);
 	for (AActor* AttachedActor : AttachedActors) QueryParams.AddIgnoredActor(AttachedActor);
 
-	FHitResult CameraHit;
-	GetWorld()->LineTraceSingleByChannel(CameraHit, CameraStart, CameraEnd, ECC_Visibility, QueryParams);
-	const FVector AimPoint = CameraHit.bBlockingHit ? CameraHit.ImpactPoint : CameraEnd;
-	FVector MuzzleStart = CameraStart + Direction * 70.0f;
-	if (const UJTSWeaponVisualComponent* Visual = Pawn->FindComponentByClass<UJTSWeaponVisualComponent>())
-	{
-		FVector Candidate;
-		if (Visual->GetMuzzleWorldLocation(Candidate, bLeftShot)
-			&& FVector::DistSquared(Candidate, Pawn->GetActorLocation()) < FMath::Square(350.0f))
-		{
-			MuzzleStart = Candidate;
-		}
-	}
-
-	// A short muzzle check prevents a third-person camera from shooting through cover beside the gun.
-	FHitResult MuzzleHit;
-	GetWorld()->LineTraceSingleByChannel(MuzzleHit, MuzzleStart, AimPoint, ECC_Visibility, QueryParams);
-	FHitResult Hit = CameraHit;
-	if (MuzzleHit.bBlockingHit && (!CameraHit.bBlockingHit
-		|| FVector::DistSquared(MuzzleStart, MuzzleHit.ImpactPoint)
-			< FVector::DistSquared(MuzzleStart, CameraHit.ImpactPoint) - FMath::Square(2.0f)))
-	{
-		Hit = MuzzleHit;
-	}
+	FHitResult Hit;
+	GetWorld()->LineTraceSingleByChannel(Hit, MuzzleStart, TraceEnd, ECC_Visibility, QueryParams);
 	const bool bHitSomething = Hit.bBlockingHit;
-	const FVector PresentationEnd = bHitSomething ? Hit.ImpactPoint : AimPoint;
+	const FVector PresentationEnd = bHitSomething ? Hit.ImpactPoint : TraceEnd;
 	const FVector ImpactNormal = bHitSomething && !Hit.ImpactNormal.IsNearlyZero()
 		? Hit.ImpactNormal.GetSafeNormal() : -Direction;
 	AActor* HitActor = bHitSomething ? Hit.GetActor() : nullptr;
 	bool bDamageableHit = false;
+	bool bCriticalHit = false;
 	if (AJTSMoonResourceActor* Resource = Cast<AJTSMoonResourceActor>(HitActor))
 	{
 		Resource->ApplyMiningWork(Pawn, Inventory->GetActiveItemId(), Definition->MiningWork);
 	}
 	else if (IsValid(HitActor) && HitActor->FindComponentByClass<UJTSHealthComponent>() != nullptr)
 	{
-		bDamageableHit = Definition->RangedDamage > 0.0f;
-		UGameplayStatics::ApplyDamage(HitActor, FMath::Max(0.0f, Definition->RangedDamage),
-			Pawn->GetController(), Pawn, UDamageType::StaticClass());
-		if (bDamageableHit) ClientConfirmRangedHit();
+		float CriticalMultiplier = 1.0f;
+		if (const IJTSCriticalHitTarget* const CriticalTarget = Cast<IJTSCriticalHitTarget>(HitActor))
+		{
+			CriticalMultiplier = FMath::Clamp(CriticalTarget->GetCriticalHitMultiplier(Hit), 1.0f, 5.0f);
+		}
+		if (CriticalMultiplier <= 1.0f + KINDA_SMALL_NUMBER)
+		{
+			const AJTSPlayerState* const PlayerState = Pawn->GetPlayerState<AJTSPlayerState>();
+			if (IsValid(PlayerState) && FMath::FRandRange(0.0f, 100.0f) < PlayerState->GetCriticalChancePercent())
+			{
+				CriticalMultiplier = FJTSPlayerProgressionRules::CriticalDamageMultiplier;
+			}
+		}
+		const bool bCritical = CriticalMultiplier > 1.0f + KINDA_SMALL_NUMBER;
+		const float Damage = FMath::Max(0.0f, Definition->RangedDamage) * CriticalMultiplier;
+		bDamageableHit = Damage > 0.0f;
+		bCriticalHit = bCritical && bDamageableHit;
+		UGameplayStatics::ApplyPointDamage(HitActor, Damage, Direction, Hit,
+			Pawn->GetController(), Pawn,
+			bCritical ? UJTSCriticalDamageType::StaticClass() : UDamageType::StaticClass());
+		if (bDamageableHit) ClientConfirmRangedHit(bCritical);
 	}
 	MulticastShotTrace(MuzzleStart, PresentationEnd, ImpactNormal, Definition->ItemId,
-		bHitSomething, bDamageableHit);
+		bHitSomething, bDamageableHit, bCriticalHit);
 	return true;
 }
 
@@ -297,7 +285,7 @@ void UJTSRangedWeaponComponent::PlayLocalShotFeedback(const UJTSItemDefinition* 
 
 void UJTSRangedWeaponComponent::MulticastShotTrace_Implementation(FVector_NetQuantize MuzzleStart,
 	FVector_NetQuantize TraceEnd, FVector_NetQuantizeNormal ImpactNormal, EJTSItemId ShotItem,
-	bool bHitSomething, bool bDamageableHit)
+	bool bHitSomething, bool bDamageableHit, bool bCritical)
 {
 	if (GetWorld() == nullptr) return;
 	APawn* Pawn = Cast<APawn>(GetOwner());
@@ -323,14 +311,16 @@ void UJTSRangedWeaponComponent::MulticastShotTrace_Implementation(FVector_NetQua
 		if (AJTSProjectileImpactActor* Impact = GetWorld()->SpawnActor<AJTSProjectileImpactActor>(
 			AJTSProjectileImpactActor::StaticClass(), FTransform(FRotator::ZeroRotator, TraceEnd + FVector(ImpactNormal) * 0.5f), SpawnParameters))
 		{
-			Impact->InitializeImpact(ImpactNormal, Glow, ShotColor, !bDamageableHit);
+			Impact->InitializeImpact(ImpactNormal, Glow,
+				bCritical ? FLinearColor(1.0f, 0.58f, 0.08f) : ShotColor, !bDamageableHit);
+			if (bCritical) Impact->SetActorScale3D(FVector(1.55f));
 		}
 		if (IsValid(Definition))
 		{
 			if (USoundBase* ImpactSound = Definition->RangedImpactSound.LoadSynchronous())
 			{
-				UGameplayStatics::PlaySoundAtLocation(this, ImpactSound, TraceEnd, 0.6f,
-					FMath::FRandRange(0.94f, 1.06f));
+				UGameplayStatics::PlaySoundAtLocation(this, ImpactSound, TraceEnd, bCritical ? 0.88f : 0.6f,
+					bCritical ? FMath::FRandRange(1.12f, 1.19f) : FMath::FRandRange(0.94f, 1.06f));
 			}
 		}
 	}
@@ -340,9 +330,13 @@ void UJTSRangedWeaponComponent::MulticastShotTrace_Implementation(FVector_NetQua
 	}
 }
 
-void UJTSRangedWeaponComponent::ClientConfirmRangedHit_Implementation()
+void UJTSRangedWeaponComponent::ClientConfirmRangedHit_Implementation(bool bCritical)
 {
-	if (GetWorld() != nullptr) LastConfirmedHitSeconds = GetWorld()->GetTimeSeconds();
+	if (GetWorld() != nullptr)
+	{
+		LastConfirmedHitSeconds = GetWorld()->GetTimeSeconds();
+		LastConfirmedCriticalHitSeconds = bCritical ? LastConfirmedHitSeconds : -100.0;
+	}
 }
 
 float UJTSRangedWeaponComponent::GetReticleKickAlpha() const
@@ -355,6 +349,11 @@ float UJTSRangedWeaponComponent::GetReticleKickAlpha() const
 bool UJTSRangedWeaponComponent::HasRecentConfirmedHit() const
 {
 	return GetWorld() != nullptr && GetWorld()->GetTimeSeconds() - LastConfirmedHitSeconds < 0.16;
+}
+
+bool UJTSRangedWeaponComponent::HasRecentConfirmedCriticalHit() const
+{
+	return GetWorld() != nullptr && GetWorld()->GetTimeSeconds() - LastConfirmedCriticalHitSeconds < 0.24;
 }
 
 void UJTSRangedWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

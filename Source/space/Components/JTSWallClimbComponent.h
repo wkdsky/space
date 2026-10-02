@@ -50,13 +50,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Climb")
 	FVector GetStepDirection() const { return StepDirection; }
 	float GetStepStartWorldTime() const { return StepStartWorldTime; }
+	FVector GetStepStart() const { return StepStart; }
+	FVector GetStepTarget() const { return StepTarget; }
+	/** Cosmetic hand/foot contact query on the same surface used for gameplay. */
+	bool FindPoseContact(const FVector& DesiredWorld, FVector& OutPoint, FVector& OutNormal) const;
 
 	/** Owner-only intent; the server validates geometry, stamina, and collision. */
 	void ToggleAttach();
 	/** Explicit W+Space grab at the foot of a climbable surface. */
 	bool TryAutoAttach();
-	/** A jump can catch a nearby steep slope on its descending approach. */
+	/** Arm a server-validated grip for this jump's approach or impact. */
 	void ArmJumpGrab();
+	/** Called by CharacterMovement when an airborne capsule hits an unwalkable surface. */
+	void TryJumpImpactGrip(const FHitResult& Impact);
 	/** Server collision callback for jump landings on slopes UE would otherwise walk on. */
 	void TryJumpLandingGrip(const FHitResult& LandingHit);
 	void SubmitClimbIntent(const FVector& WishDirection);
@@ -120,7 +126,9 @@ private:
 	bool bStepActive = false;
 	bool bHasPendingLeap = false;
 	FVector PendingLeapDirection = FVector::ZeroVector;
+	UPROPERTY(Replicated)
 	FVector StepStart = FVector::ZeroVector;
+	UPROPERTY(Replicated)
 	FVector StepTarget = FVector::ZeroVector;
 	FVector StepTargetNormal = FVector::ForwardVector;
 	FVector MantleStart = FVector::ZeroVector;
@@ -154,16 +162,16 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "20"))
 	float StepDistance = 70.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "0.1"))
-	float StepSeconds = 0.36f;
+	float StepSeconds = 0.40f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "20"))
 	float LeapDistance = 150.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "0.1"))
-	float LeapSeconds = 0.47f;
+	float LeapSeconds = 0.50f;
 	/** S lowers through longer, quicker holds while remaining attached. */
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "20"))
 	float DescendDistance = 100.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "0.1"))
-	float DescendSeconds = 0.32f;
+	float DescendSeconds = 0.35f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "0.1"))
 	float MantleSeconds = 0.72f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Stamina", meta = (ClampMin = "0"))

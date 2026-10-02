@@ -82,7 +82,11 @@ protected:
 	float ShuffleRightLift = 0.0f;
 
 	float ShufflePhase = 0.0f;
-	float RawAimYaw = 0.0f;
+
+	/** A small visual bank during a moving pivot; collision and movement stay upright. */
+	float TurnLeanDegrees = 0.0f;
+	FVector PreviousFacingForward = FVector::ForwardVector;
+	bool bHasPreviousFacing = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Aim", meta = (AllowPrivateAccess = "true"))
 	bool bWeaponAiming = false;
@@ -122,9 +126,43 @@ protected:
 	bool bWasClimbing = false;
 	FVector LastClimbSurfaceNormal = FVector::ForwardVector;
 	FVector LastClimbStepDirection = FVector::UpVector;
+	/** World-space contact anchors keep planted wrists and ankles still as the capsule travels. */
+	FVector ClimbHandContactsWorld[2] = {};
+	FVector ClimbFootContactsWorld[2] = {};
+	FVector ClimbHandStepStartWorld[2] = {};
+	FVector ClimbFootStepStartWorld[2] = {};
+	FVector ClimbHandStepEndWorld[2] = {};
+	FVector ClimbFootStepEndWorld[2] = {};
+	FVector ClimbPreviousStepTargetWorld = FVector::ZeroVector;
+	float ClimbContactStepStartTime = -1.0f;
+	bool bClimbContactsValid = false;
+
+	/** Hip-to-foothold spacing for this skeleton. A low foothold lets the legs press into the wall. */
+	UPROPERTY(EditDefaultsOnly, Category = "Climb|Style", meta = (ClampMin = "60.0", ClampMax = "95.0"))
+	float ClimbFootDropCm = 79.0f;
+
+	/** A moving foot may release a hold, but must not tuck up against the pelvis. */
+	UPROPERTY(EditDefaultsOnly, Category = "Climb|Style", meta = (ClampMin = "55.0", ClampMax = "90.0"))
+	float ClimbMovingFootMinDropCm = 67.0f;
+
+	/** Knee bends toward the wall, with room for the knee to stay outside its collision surface. */
+	UPROPERTY(EditDefaultsOnly, Category = "Climb|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ClimbKneeWallwardWeight = 0.35f;
+
+	/** Small lateral knee separation avoids driving both knees through the same wall patch. */
+	UPROPERTY(EditDefaultsOnly, Category = "Climb|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ClimbKneeSideWeight = 0.50f;
 
 	/** 0 on the ground, rises while airborne so the jump tuck can play out and then release. */
 	float JumpTuckAlpha = 0.0f;
+
+	/** Keeps the thighs hanging below the pelvis during a jump. */
+	UPROPERTY(EditDefaultsOnly, Category = "Jump|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float JumpThighDownBias = 0.90f;
+
+	/** A modest knee bend; the shin must never fold back above the pelvis. */
+	UPROPERTY(EditDefaultsOnly, Category = "Jump|Style", meta = (ClampMin = "20.0", ClampMax = "90.0"))
+	float JumpShinFoldDegrees = 55.0f;
 
 	/** Seconds spent in the current fall, used to fold the legs and then open them again. */
 	float AirTime = 0.0f;

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Core/JTSExpeditionTypes.h"
@@ -16,6 +17,7 @@
 
 class AJTSCharacter;
 class AJTSPlayerState;
+class UJTSStellarLootTable;
 class AJTSPlanetAnchor;
 class AJTSPlanetLandingSite;
 class AJTSPlanetSurfaceAnchor;
@@ -57,6 +59,8 @@ public:
 
 	/** Server-authoritative purchase backed by this ship's shared material storage. */
 	EJTSShopPurchaseResult TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId);
+	EJTSStellarRollResult TryRollStellarItem(AJTSCharacter* Player, FName& OutItemId, int32& OutSlotIndex);
+	const UJTSStellarLootTable* GetStellarLootTable() const;
 	/** Prototype terminal control: grant 100 of each ship resource after the normal server interaction check. */
 	bool TryGrantDebugResources(AJTSCharacter* Player);
 
@@ -465,7 +469,7 @@ private:
 	bool DepositPlayerResources(AJTSCharacter* Player);
 	bool TryDepositPlayerMaterials(AJTSCharacter* Player);
 	bool BuildShopCosts(EJTSItemId ItemId, TMap<EJTSResourceType, int32>& OutCosts) const;
-	bool DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item, bool& bOutDropped);
+	bool DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item);
 	void DepositResourcesFromOverlappingPlayers();
 	/** Reconciles occupants once after all startup BeginPlay calls have completed. */
 	void ReconcileInitialBoardingOverlaps();
@@ -606,6 +610,21 @@ private:
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TMap<EJTSResourceType, int32> Storage;
+
+	/** Assign the project-specific stellar catalog in BP_Spacecraft. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Shop", meta = (AllowPrivateAccess = "true"))
+	TSoftObjectPtr<UJTSStellarLootTable> StellarLootTable;
+
+	TMap<TWeakObjectPtr<AJTSPlayerState>, double> LastStellarRollTime;
+	struct FPendingStellarReveal
+	{
+		TWeakObjectPtr<AJTSPlayerState> PlayerState;
+		int32 SlotIndex = INDEX_NONE;
+		FGuid SlotToken;
+		FTimerHandle TimerHandle;
+	};
+	TArray<FPendingStellarReveal> PendingStellarReveals;
+	void CompletePendingStellarReveal(FGuid SlotToken);
 
 	UPROPERTY(ReplicatedUsing = OnRep_Storage, VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TArray<FJTSResourceAmount> ReplicatedStorage;

@@ -56,6 +56,10 @@ public:
 
 	/** Returns the visible muzzle point used to start a replicated projectile tracer. */
 	bool GetMuzzleWorldLocation(FVector& OutLocation, bool bLeftHand = false) const;
+	/** +X of this transform is the visible barrel's firing direction. */
+	bool GetMuzzleWorldTransform(FTransform& OutTransform, bool bLeftHand = false) const;
+	/** Strike tip on a held knife, axe or tool, following the posed hand. */
+	bool GetHeldItemTipWorldLocation(FVector& OutLocation) const;
 
 private:
 	UFUNCTION()

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Items/JTSShipLockerTypes.h"
 #include "space/Items/JTSResourceTypes.h"
 
 #include "JTSExpeditionTypes.generated.h"
@@ -164,6 +165,10 @@ struct SPACE_API FJTSPlayerSnapshot
 	UPROPERTY()
 	TArray<FJTSItemInstance> ItemInventory;
 
+	/** Thirty terminal slots per player; separate from the character's carried inventory. */
+	UPROPERTY()
+	TArray<FJTSShipLockerSlot> ShipLockerSlots;
+
 	/** Legacy v3 migration input only. New captures never write equipment into a separate container. */
 	UPROPERTY()
 	TArray<FJTSItemInstance> Wearables;
@@ -191,6 +196,9 @@ struct SPACE_API FJTSPlayerSnapshot
 
 	UPROPERTY()
 	int32 StaminaAbilityRank = 0;
+
+	UPROPERTY()
+	int32 CriticalChanceAbilityRank = 0;
 };
 
 /** Cross-level snapshot owned by the authoritative expedition subsystem, never by a client GameInstance. */

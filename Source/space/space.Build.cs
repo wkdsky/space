@@ -8,7 +8,7 @@ public class space : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "RenderCore", "ProceduralMeshComponent", "OnlineSubsystem", "VoiceChat" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "RenderCore", "ProceduralMeshComponent", "OnlineSubsystem", "VoiceChat", "MassCore", "MassEntity" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "EngineSettings", "OnlineSubsystemUtils" });
 

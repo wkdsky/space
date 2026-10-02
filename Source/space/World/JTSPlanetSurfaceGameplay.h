@@ -80,6 +80,8 @@ public:
 	virtual bool InitializeSurfaceGameplay(const FJTSSurfaceGameplayContext& Context) = 0;
 	/** Called for later arrivals after one shared controller has initialized planet-wide runtime state. */
 	virtual void RegisterSurfacePlayer(AJTSCharacter* Player) {}
+	/** Lets generic surface systems attach spawned Actors to a planet controller's lifetime. */
+	virtual void RegisterSurfaceRuntimeActor(AActor* RuntimeActor) {}
 	virtual void ShutdownSurfaceGameplay() = 0;
 	virtual bool IsSurfaceGameplayReady() const = 0;
 };

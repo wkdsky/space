@@ -13,7 +13,8 @@ enum class EJTSPlayerAbility : uint8
 	InventorySlots UMETA(DisplayName = "Cargo Bays"),
 	StackLimit UMETA(DisplayName = "Stack Compression"),
 	RunSpeed UMETA(DisplayName = "Running Thrusters"),
-	Stamina UMETA(DisplayName = "Endurance")
+	Stamina UMETA(DisplayName = "Endurance"),
+	CriticalChance UMETA(DisplayName = "Critical Chance")
 };
 
 /** Client-submitted, server-validated pending allocation. Every rank costs one ability point. */
@@ -34,12 +35,16 @@ struct SPACE_API FJTSAbilityAllocation
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progression", meta = (ClampMin = "0"))
 	int32 StaminaRanks = 0;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progression", meta = (ClampMin = "0"))
+	int32 CriticalChanceRanks = 0;
+
 	int32 GetTotalPointCost() const
 	{
 		return FMath::Max(0, InventorySlotRanks)
 			+ FMath::Max(0, StackLimitRanks)
 			+ FMath::Max(0, RunSpeedRanks)
-			+ FMath::Max(0, StaminaRanks);
+			+ FMath::Max(0, StaminaRanks)
+			+ FMath::Max(0, CriticalChanceRanks);
 	}
 };
 
@@ -59,4 +64,7 @@ struct SPACE_API FJTSPlayerProgressionRules
 	static int32 GetRunSpeedBonusPercent(int32 AbilityRank);
 	static float GetRunSpeedMultiplier(int32 AbilityRank);
 	static float GetMaxStamina(int32 AbilityRank);
+	/** Percent chance on ordinary weapon hits. Authored weak-point hits always crit. */
+	static int32 GetCriticalChancePercent(int32 AbilityRank);
+	static constexpr float CriticalDamageMultiplier = 1.75f;
 };

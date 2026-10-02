@@ -12,6 +12,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/LocalPlayer.h"
@@ -185,8 +186,10 @@ void AJTSCharacter::RefreshClimbEquipmentPresentation()
 	if (bClimbing)
 	{
 		bWantsViewFacing = false;
+		bFinishingViewTurn = false;
 		PendingViewFacingForward = FVector::ZeroVector;
 		TurnShuffleAlpha = 0.0f;
+		TurnVelocityDegreesPerSecond = 0.0f;
 		AimCameraAlpha = 0.0f;
 		if (IsValid(RangedWeaponComponent)) RangedWeaponComponent->CancelForClimb();
 		if (IsValid(MeleeComponent))
@@ -714,6 +717,11 @@ void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
 void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	// Server hit checks use the posed wrists and held-item muzzle even on a dedicated server.
+	if (HasAuthority() && IsValid(GetMesh()))
+	{
+		GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	}
 	ApplySurfaceMovementSettings();
 	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 
@@ -809,6 +817,12 @@ void AJTSCharacter::Landed(const FHitResult& Hit)
 {
 	Super::Landed(Hit);
 	if (IsValid(WallClimbComponent)) WallClimbComponent->TryJumpLandingGrip(Hit);
+}
+
+void AJTSCharacter::MoveBlockedBy(const FHitResult& Impact)
+{
+	Super::MoveBlockedBy(Impact);
+	if (IsValid(WallClimbComponent)) WallClimbComponent->TryJumpImpactGrip(Impact);
 }
 
 void AJTSCharacter::FaceRotation(FRotator NewControlRotation, float DeltaTime)
@@ -1556,16 +1570,16 @@ bool AJTSCharacter::IsMovingOnFoot() const
 
 bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 {
-	// First person, aim, and the single frame of a grounded click face the camera.
-	// After that click, grounded ordinary third person falls through to the walk
+	// First person and aim follow the camera. A grounded click keeps its captured
+	// heading until the short body turn finishes; ordinary third person follows walk
 	// direction. In the air it keeps following travel velocity, not camera yaw.
-	if (bWantsViewFacing || WantsContinuousViewFacing())
+	if (bWantsViewFacing || bFinishingViewTurn || WantsContinuousViewFacing())
 	{
-		if (IsLocallyControlled() && GetViewTangentForward(OutForward))
+		if (WantsContinuousViewFacing() && IsLocallyControlled() && GetViewTangentForward(OutForward))
 		{
 			return true;
 		}
-		if (bWantsViewFacing && !PendingViewFacingForward.IsNearlyZero())
+		if ((bWantsViewFacing || bFinishingViewTurn) && !PendingViewFacingForward.IsNearlyZero())
 		{
 			OutForward = PendingViewFacingForward.GetSafeNormal();
 			return true;
@@ -1593,6 +1607,30 @@ bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 	const FVector Up = IsRealPlanetGameplayActive()
 		? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
 		: FVector::UpVector;
+	// Face the requested direction as soon as a grounded turn begins. Waiting for
+	// velocity to swing around made a reversal feel delayed by braking and then by
+	// a second body rotation. Remote pawns use CharacterMovement's server input.
+	if (IsSupportedByFloor())
+	{
+		FVector MoveIntent = FVector::ZeroVector;
+		if (IsLocallyControlled())
+		{
+			FVector InputForward;
+			FVector InputRight;
+			GetMovementInputDirections(InputForward, InputRight);
+			MoveIntent = InputForward * ClimbForwardInput + InputRight * ClimbRightInput;
+		}
+		else
+		{
+			MoveIntent = Movement->GetCurrentAcceleration();
+		}
+		const FVector TangentIntent = FVector::VectorPlaneProject(MoveIntent, Up);
+		if (TangentIntent.SizeSquared() > FMath::Square(0.1f))
+		{
+			OutForward = TangentIntent.GetSafeNormal();
+			return true;
+		}
+	}
 	const FVector TangentVelocity = FVector::VectorPlaneProject(Movement->Velocity, Up);
 	if (TangentVelocity.SizeSquared() <= FMath::Square(40.0f))
 	{
@@ -1641,6 +1679,7 @@ void AJTSCharacter::ServerRequestViewFacing_Implementation(FVector_NetQuantizeNo
 	}
 
 	bWantsViewFacing = true;
+	bFinishingViewTurn = true;
 	PendingViewFacingForward = ViewForward.GetSafeNormal();
 }
 
@@ -1651,37 +1690,60 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
 	const bool bAirborne = bPressedJump || (IsValid(Movement) && Movement->IsFalling() && !IsSupportedByFloor());
 	const bool bLockedToView = WantsContinuousViewFacing();
-	// The click flag is consumed here. Later ticks must not treat it as a held follow.
-	const bool bClickAlign = bWantsViewFacing;
+	// The click input is consumed here; the saved heading lasts until the turn settles.
+	const bool bClickAlign = bWantsViewFacing || bFinishingViewTurn;
 	bWantsViewFacing = false;
 	// Ordinary third person uses travel velocity in the air and never shuffles
 	// while airborne. Aim and first person continue to follow the camera.
-	const bool bPlayShuffle = !bAirborne && !bLockedToView && (IsMovingOnFoot() || bClickAlign);
+	const bool bHasMoveIntent = FMath::Square(ClimbForwardInput) + FMath::Square(ClimbRightInput) > 0.01f
+		|| (IsValid(Movement) && Movement->GetCurrentAcceleration().SizeSquared() > FMath::Square(1.0f));
+	const bool bPlayShuffle = !bAirborne && (IsMovingOnFoot() || bHasMoveIntent || bClickAlign
+		|| (bLockedToView && AbsYaw > 24.0f));
 	const bool bTurnBody = bPlayShuffle || bAirborne || bLockedToView;
-	const float TargetShuffle = bPlayShuffle && AbsYaw > 4.0f ? 1.0f : 0.0f;
+	const float TargetShuffle = bPlayShuffle && AbsYaw > 6.0f
+		? FMath::Clamp((AbsYaw - 6.0f) / 54.0f, 0.0f, 1.0f) : 0.0f;
 	TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, TargetShuffle, DeltaSeconds, bPlayShuffle ? 10.0f : 6.0f);
 	if (!bTurnBody)
 	{
+		TurnVelocityDegreesPerSecond = FMath::FInterpConstantTo(TurnVelocityDegreesPerSecond,
+			0.0f, DeltaSeconds, BodyTurnBrakingDegreesPerSecondSquared);
 		return;
 	}
 
-	// A grounded click catches the whole remaining yaw on that press.
-	// Aim and first person snap the whole body onto the camera this frame.
-	// An ordinary jump can turn only at the same limited rate as a running turn.
-	// The upper body is not left twisted behind a slower capsule turn.
-	const float DegreesPerSecond = FMath::Max(60.0f, FootShuffleDegreesPerSecond);
-	const float StepDegrees = (bClickAlign || bLockedToView)
-		? AbsYaw
-		: FMath::Min(AbsYaw, DegreesPerSecond * DeltaSeconds);
-	if (StepDegrees <= KINDA_SMALL_NUMBER)
+	// Build speed for a few frames, then brake into the target. A click remembers
+	// its captured heading; moving the camera afterward does not redirect it.
+	const float MaxSpeed = FMath::Max(60.0f, FootShuffleDegreesPerSecond);
+	const float Acceleration = FMath::Max(100.0f, BodyTurnAccelerationDegreesPerSecondSquared);
+	const float Braking = FMath::Max(100.0f, BodyTurnBrakingDegreesPerSecondSquared);
+	const float DesiredSpeed = FMath::Sign(YawDelta)
+		* FMath::Min(MaxSpeed, FMath::Sqrt(2.0f * Braking * AbsYaw));
+	const float StartingSpeed = TurnVelocityDegreesPerSecond;
+	TurnVelocityDegreesPerSecond = FMath::FInterpConstantTo(StartingSpeed, DesiredSpeed,
+		DeltaSeconds, Acceleration * (StartingSpeed * DesiredSpeed < 0.0f ? 1.5f : 1.0f));
+	const float TurnAmount = (StartingSpeed + TurnVelocityDegreesPerSecond) * 0.5f * DeltaSeconds;
+	const float StepDegrees = FMath::Sign(YawDelta) * FMath::Clamp(
+		TurnAmount * FMath::Sign(YawDelta), 0.0f, AbsYaw);
+	if (AbsYaw < 0.75f)
+	{
+		TurnVelocityDegreesPerSecond = 0.0f;
+		bFinishingViewTurn = false;
+		return;
+	}
+	if (FMath::IsNearlyZero(StepDegrees))
 	{
 		return;
+	}
+	TurnDirectionSign = FMath::Sign(StepDegrees);
+	if (FMath::Abs(StepDegrees) >= AbsYaw - KINDA_SMALL_NUMBER)
+	{
+		TurnVelocityDegreesPerSecond = 0.0f;
+		bFinishingViewTurn = false;
 	}
 
 	const FVector Up = bUsePlanetFrame
 		? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
 		: FVector::UpVector;
-	const FQuat Turn(Up, FMath::DegreesToRadians(FMath::Sign(YawDelta) * StepDegrees));
+	const FQuat Turn(Up, FMath::DegreesToRadians(StepDegrees));
 	if (bUsePlanetFrame)
 	{
 		PlanetBodyForward = GetStablePlanetTangent(Up, Turn.RotateVector(PlanetBodyForward));
@@ -1698,14 +1760,16 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 	if (IsBoarded() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()))
 	{
 		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
+		TurnVelocityDegreesPerSecond = 0.0f;
+		bFinishingViewTurn = false;
 		return;
 	}
 
-	// A click is consumed inside StepBodyTowardView on this same frame.
-	// Nothing here may keep the body following the camera after that swing.
+	// A click captures one heading. Later camera motion cannot retarget that swing.
 	if (WantsContinuousViewFacing())
 	{
 		bWantsViewFacing = false;
+		bFinishingViewTurn = false;
 	}
 	// Keep CharacterMovement from turning toward camera-relative input during a
 	// jump. The presentation turn below follows planar velocity at a limited rate.
@@ -1713,7 +1777,11 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
 		const bool bAirborne = bPressedJump || (Movement->IsFalling() && !IsSupportedByFloor());
-		const bool bFeetCatching = IsMovingOnFoot() || bWantsViewFacing || WantsContinuousViewFacing() || bAirborne;
+		const bool bHasMoveIntent = FMath::Square(ClimbForwardInput) + FMath::Square(ClimbRightInput) > 0.01f
+			|| Movement->GetCurrentAcceleration().SizeSquared() > FMath::Square(1.0f);
+		if (bHasMoveIntent) bFinishingViewTurn = false;
+		const bool bFeetCatching = IsMovingOnFoot() || bHasMoveIntent || bWantsViewFacing
+			|| bFinishingViewTurn || WantsContinuousViewFacing() || bAirborne;
 		Movement->bOrientRotationToMovement = !bFeetCatching;
 	}
 
@@ -1721,6 +1789,8 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 	if (!GetDesiredFeetForward(FeetForward))
 	{
 		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
+		TurnVelocityDegreesPerSecond = FMath::FInterpConstantTo(TurnVelocityDegreesPerSecond,
+			0.0f, DeltaSeconds, BodyTurnBrakingDegreesPerSecondSquared);
 		return;
 	}
 

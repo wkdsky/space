@@ -11,6 +11,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "UObject/UnrealType.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
@@ -249,6 +250,9 @@ bool FJTSJumpLandingClimbRegression::RunTest(const FString& Parameters)
 	Climb->ArmJumpGrab();
 	static_cast<UActorComponent*>(Climb)->TickComponent(0.05f, LEVELTICK_All, nullptr);
 	TestFalse(TEXT("Jump ascent near a wall does not grab early"), Climb->IsClimbing());
+	Movement->Velocity = FVector(-300.0f, 0.0f, -300.0f);
+	static_cast<UActorComponent*>(Climb)->TickComponent(0.05f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Jumping away from a wall does not auto-grab"), Climb->IsClimbing());
 	Movement->Velocity = FVector(0.0f, 0.0f, -300.0f);
 	static_cast<UActorComponent*>(Climb)->TickComponent(0.05f, LEVELTICK_All, nullptr);
 	TestTrue(TEXT("Jump descent close to a climbable slope grabs automatically"), Climb->IsClimbing());
@@ -275,6 +279,54 @@ bool FJTSJumpLandingClimbRegression::RunTest(const FString& Parameters)
 	SlopeFixture.World->Tick(LEVELTICK_TimeOnly, 3.0f);
 	SlopeClimb->TryJumpLandingGrip(LandingHit);
 	TestTrue(TEXT("A long low-gravity jump still grips a climbable landing slope"), SlopeClimb->IsClimbing());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSFarJumpSlopeGrip,
+	"JTS.Character.FarJumpSlopeGrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSFarJumpSlopeGrip::RunTest(const FString& Parameters)
+{
+	FClimbTestWorld Fixture;
+	Fixture.Wall->SetActorRotation(FRotationMatrix::MakeFromX(
+		FVector(0.8660254f, 0.0f, -0.5f)).Rotator());
+	Fixture.Character->SetActorLocation(FVector(-120.0f, 0.0f, 110.0f));
+	UJTSWallClimbComponent* Climb = Fixture.Character->FindComponentByClass<UJTSWallClimbComponent>();
+	UCharacterMovementComponent* Movement = Fixture.Character->GetCharacterMovement();
+	if (!TestNotNull(TEXT("Climb component exists"), Climb)
+		|| !TestNotNull(TEXT("Movement component exists"), Movement)) return false;
+	FHitResult DistantSlope;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSFarJumpSlope), false, Fixture.Character);
+	const FVector SightStart = Fixture.Character->GetActorLocation();
+	if (!TestTrue(TEXT("The approach has real slope collision beyond normal grip range"),
+		Fixture.World->LineTraceSingleByChannel(DistantSlope, SightStart,
+			SightStart + FVector::ForwardVector * 400.0f, ECC_Visibility, Params)
+			&& DistantSlope.Distance > 150.0f)) return false;
+	Movement->bRunPhysicsWithNoController = true;
+	Movement->SetMovementMode(MOVE_Falling);
+	Movement->Velocity = FVector(800.0f, 0.0f, 420.0f);
+	Climb->ArmJumpGrab();
+	bool bCaughtWhileRising = false;
+	float LargestFrameTravel = 0.0f;
+	for (int32 Frame = 0; Frame < 15 && !Climb->IsClimbing(); ++Frame)
+	{
+		const bool bRising = Movement->Velocity.Z > 0.0f;
+		const FVector BeforeFrame = Fixture.Character->GetActorLocation();
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		Fixture.Advance(0.05f);
+		LargestFrameTravel = FMath::Max(LargestFrameTravel,
+			FVector::Distance(BeforeFrame, Fixture.Character->GetActorLocation()));
+		bCaughtWhileRising = Climb->IsClimbing() && bRising;
+	}
+	TestTrue(TEXT("A distant jump catches the steep slope on approach or first impact"), Climb->IsClimbing());
+	TestTrue(TEXT("The slope can be gripped before the jump apex"), bCaughtWhileRising);
+	TestTrue(FString::Printf(TEXT("The grip has no large one-frame position pop: %.1f cm"),
+		LargestFrameTravel), LargestFrameTravel < 80.0f);
+	if (Climb->IsClimbing())
+	{
+		Fixture.Advance(0.20f);
+		TestTrue(TEXT("The new grip stays attached instead of sliding down"), Climb->IsClimbing());
+	}
 	return true;
 }
 
@@ -483,6 +535,237 @@ bool FJTSClimbPoseKinematics::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSClimbContactWeightTransfer,
+	"JTS.Character.ClimbContactWeightTransfer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
+{
+	UClass* PlayerBlueprint = LoadClass<AJTSCharacter>(nullptr,
+		TEXT("/Game/Space/Blueprints/Player/BP_JTSPlayer_Casual_2.BP_JTSPlayer_Casual_2_C"));
+	if (!TestNotNull(TEXT("Playable Casual_2 Blueprint loads"), PlayerBlueprint)) return false;
+	FClimbTestWorld Fixture(PlayerBlueprint);
+	Fixture.Wall->SetActorScale3D(FVector(0.5f, 4.0f, 8.0f));
+	Fixture.Character->SetActorLocation(FVector(0.0f, 0.0f, 260.0f));
+	USkeletalMeshComponent* Mesh = Fixture.Character->GetMesh();
+	UJTSWallClimbComponent* Climb = Fixture.Character->FindComponentByClass<UJTSWallClimbComponent>();
+	if (!TestNotNull(TEXT("Playable mesh exists"), Mesh)
+		|| !TestNotNull(TEXT("Climb component exists"), Climb)) return false;
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	Mesh->TickAnimation(0.016f, false);
+	Mesh->RefreshBoneTransforms();
+	const FQuat RestShoes[2] = {
+		Mesh->GetBoneQuaternion(TEXT("Foot_L")), Mesh->GetBoneQuaternion(TEXT("Foot_R"))
+	};
+	auto DescribeLegs = [&](const TCHAR* Phase)
+	{
+		const FVector Normal = Climb->GetSurfaceNormal().GetSafeNormal();
+		const FVector Up = Fixture.Character->GetActorUpVector();
+		for (const TCHAR* Suffix : { TEXT("_L"), TEXT("_R") })
+		{
+			const FVector Hip = Mesh->GetBoneLocation(*FString::Printf(TEXT("UpperLeg%s"), Suffix));
+			const FVector Knee = Mesh->GetBoneLocation(*FString::Printf(TEXT("LowerLeg%s"), Suffix));
+			const FVector Ankle = Mesh->GetBoneLocation(*FString::Printf(TEXT("LowerLeg%s_end"), Suffix));
+			AddInfo(FString::Printf(TEXT("%s%s hip %s knee %s ankle %s knee outward %.1f knee drop %.1f ankle drop %.1f"),
+				Phase, Suffix, *Hip.ToCompactString(), *Knee.ToCompactString(), *Ankle.ToCompactString(),
+				FVector::DotProduct(Knee - Hip, Normal), FVector::DotProduct(Hip - Knee, Up),
+				FVector::DotProduct(Hip - Ankle, Up)));
+			TestTrue(FString::Printf(TEXT("%s%s knee bends toward the wall"), Phase, Suffix),
+				FVector::DotProduct(Knee - Hip, Normal) < -4.0f);
+			TestTrue(FString::Printf(TEXT("%s%s knee does not pass through the foothold plane"), Phase, Suffix),
+				FVector::DotProduct(Knee - Ankle, Normal) > -10.0f);
+			TestTrue(FString::Printf(TEXT("%s%s thigh keeps descending from the pelvis"), Phase, Suffix),
+				FVector::DotProduct(Hip - Knee, Up) > 15.0f);
+			TestTrue(FString::Printf(TEXT("%s%s foot stays below the pelvis"), Phase, Suffix),
+				FVector::DotProduct(Hip - Ankle, Up) > 63.0f);
+		}
+	};
+	auto AdvancePose = [&](int32 Frames)
+	{
+		for (int32 Frame = 0; Frame < Frames; ++Frame)
+		{
+			Fixture.Advance(0.05f);
+			Mesh->TickAnimation(0.05f, false);
+			Mesh->RefreshBoneTransforms();
+		}
+	};
+	Climb->TryAutoAttach();
+	if (!TestTrue(TEXT("Playable mesh attaches before a weight-transfer step"), Climb->IsClimbing())) return false;
+	AdvancePose(5);
+	DescribeLegs(TEXT("Hold"));
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		const FName Foot = Index == 0 ? TEXT("Foot_L") : TEXT("Foot_R");
+		const FName Ankle = Index == 0 ? TEXT("LowerLeg_L_end") : TEXT("LowerLeg_R_end");
+		const float ShoeRoll = FMath::RadiansToDegrees(RestShoes[Index].AngularDistance(Mesh->GetBoneQuaternion(Foot)));
+		TestTrue(FString::Printf(TEXT("%s does not roll onto its edge on first grip: %.1f deg"),
+			*Foot.ToString(), ShoeRoll), ShoeRoll < 50.0f);
+		TestTrue(FString::Printf(TEXT("%s stays by its ankle on first grip"), *Foot.ToString()),
+			FVector::Distance(Mesh->GetBoneLocation(Foot), Mesh->GetBoneLocation(Ankle)) < 27.0f);
+	}
+	Climb->SubmitClimbIntent(FVector::UpVector);
+	const FName LeadWrist = Climb->IsLeadHandLeft() ? TEXT("Wrist_L") : TEXT("Wrist_R");
+	const FName SupportWrist = Climb->IsLeadHandLeft() ? TEXT("Wrist_R") : TEXT("Wrist_L");
+	const FName SupportAnkle = Climb->IsLeadHandLeft() ? TEXT("LowerLeg_L_end") : TEXT("LowerLeg_R_end");
+	const FVector LeadStart = Mesh->GetBoneLocation(LeadWrist);
+	const FVector SupportStart = Mesh->GetBoneLocation(SupportWrist);
+	const FVector AnkleStart = Mesh->GetBoneLocation(SupportAnkle);
+	const FVector LeftKneeStart = Mesh->GetBoneLocation(TEXT("LowerLeg_L"));
+	const FVector LeftAnkleStart = Mesh->GetBoneLocation(TEXT("LowerLeg_L_end"));
+	const FVector CapsuleStart = Fixture.Character->GetActorLocation();
+	AddInfo(FString::Printf(TEXT("Rest contact: actor X %.1f, lead wrist X %.1f, support wrist X %.1f, left knee X %.1f, ankle X %.1f"),
+		CapsuleStart.X, LeadStart.X, SupportStart.X, LeftKneeStart.X, LeftAnkleStart.X));
+	AdvancePose(2);
+	const float LeadTravel = FVector::Distance(LeadStart, Mesh->GetBoneLocation(LeadWrist));
+	const float SupportSlip = FVector::Distance(SupportStart, Mesh->GetBoneLocation(SupportWrist));
+	const float AnkleSlip = FVector::Distance(AnkleStart, Mesh->GetBoneLocation(SupportAnkle));
+	const float CapsuleTravel = FVector::Distance(CapsuleStart, Fixture.Character->GetActorLocation());
+	AddInfo(FString::Printf(TEXT("Early transfer: lead %.1f cm, support %.1f cm, ankle %.1f cm, capsule %.1f cm"),
+		LeadTravel, SupportSlip, AnkleSlip, CapsuleTravel));
+	TestTrue(FString::Printf(TEXT("Searching hand moves before the body pull: %.1f cm"), LeadTravel),
+		LeadTravel > 5.0f);
+	TestTrue(FString::Printf(TEXT("Supporting hand remains on its hold: %.1f cm slip"), SupportSlip),
+		SupportSlip < 9.0f);
+	TestTrue(FString::Printf(TEXT("Pressing foot remains on its hold: %.1f cm slip"), AnkleSlip),
+		AnkleSlip < 9.0f);
+	TestTrue(FString::Printf(TEXT("Capsule waits for a foothold before traveling: %.1f cm"), CapsuleTravel),
+		CapsuleTravel < 15.0f);
+	AdvancePose(3);
+	DescribeLegs(TEXT("Pull"));
+	const float WallFaceX = Fixture.Wall->GetActorLocation().X
+		- Fixture.Wall->GetStaticMeshComponent()->Bounds.BoxExtent.X;
+	const float LeadWallGap = WallFaceX - Mesh->GetBoneLocation(LeadWrist).X;
+	const float SupportWallGap = WallFaceX - Mesh->GetBoneLocation(SupportWrist).X;
+	const float AnkleWallGap = WallFaceX - Mesh->GetBoneLocation(SupportAnkle).X;
+	const float AnkleRise = Mesh->GetBoneLocation(SupportAnkle).Z - AnkleStart.Z;
+	AddInfo(FString::Printf(TEXT("Mid pull: capsule Z %.1f, lead wall gap %.1f, support wall gap %.1f, ankle wall gap %.1f, ankle rise %.1f"),
+		Fixture.Character->GetActorLocation().Z, LeadWallGap, SupportWallGap, AnkleWallGap, AnkleRise));
+	TestTrue(TEXT("Reaching hand stays close to the rock through the pull"), LeadWallGap < 25.0f);
+	TestTrue(TEXT("Following hand stays close to the rock through the pull"), SupportWallGap < 25.0f);
+	TestTrue(TEXT("Following ankle clears the wall without peeling far away"), AnkleWallGap < 18.0f);
+	AdvancePose(3);
+	TestTrue(TEXT("Body completes the pull after the contact sequence"),
+		Fixture.Character->GetActorLocation().Z > CapsuleStart.Z + 55.0f);
+	Climb->SubmitClimbLeap(FVector::UpVector);
+	if (!TestTrue(TEXT("Upward leap starts after the planted step"), Climb->IsLeaping())) return false;
+	for (int32 Frame = 0; Frame < 10; ++Frame)
+	{
+		AdvancePose(1);
+		if (Frame == 3 || Frame == 6)
+		{
+			DescribeLegs(Frame == 3 ? TEXT("LeapEarly") : TEXT("LeapLate"));
+			const float LeftGap = WallFaceX - Mesh->GetBoneLocation(TEXT("Wrist_L")).X;
+			const float RightGap = WallFaceX - Mesh->GetBoneLocation(TEXT("Wrist_R")).X;
+			TestTrue(FString::Printf(TEXT("Leap wrists stay near the wall at frame %d: %.1f / %.1f cm"),
+				Frame, LeftGap, RightGap), LeftGap < 30.0f && RightGap < 30.0f);
+			for (int32 Index = 0; Index < 2; ++Index)
+			{
+				const FName Foot = Index == 0 ? TEXT("Foot_L") : TEXT("Foot_R");
+				const float ShoeRoll = FMath::RadiansToDegrees(
+					RestShoes[Index].AngularDistance(Mesh->GetBoneQuaternion(Foot)));
+				TestTrue(FString::Printf(TEXT("%s stays level during the wall leap: %.1f deg"),
+					*Foot.ToString(), ShoeRoll), ShoeRoll < 50.0f);
+			}
+		}
+	}
+	TestTrue(TEXT("Leap completes on a higher hold"),
+		Fixture.Character->GetActorLocation().Z > CapsuleStart.Z + 170.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSJumpShoeClearance,
+	"JTS.Character.JumpShoeClearance", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSJumpShoeClearance::RunTest(const FString& Parameters)
+{
+	UClass* PlayerBlueprint = LoadClass<AJTSCharacter>(nullptr,
+		TEXT("/Game/Space/Blueprints/Player/BP_JTSPlayer_Casual_2.BP_JTSPlayer_Casual_2_C"));
+	if (!TestNotNull(TEXT("Playable Casual_2 Blueprint loads"), PlayerBlueprint)) return false;
+	FClimbTestWorld Fixture(PlayerBlueprint);
+	USkeletalMeshComponent* Mesh = Fixture.Character->GetMesh();
+	if (!TestNotNull(TEXT("Playable mesh exists"), Mesh)) return false;
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	Mesh->TickAnimation(0.016f, false);
+	Mesh->RefreshBoneTransforms();
+	const FQuat RestShoes[2] = {
+		Mesh->GetBoneQuaternion(TEXT("Foot_L")), Mesh->GetBoneQuaternion(TEXT("Foot_R"))
+	};
+	Fixture.Character->bPressedJump = true;
+	for (int32 Frame = 0; Frame < 5; ++Frame)
+	{
+		Fixture.Advance(0.05f);
+		Mesh->TickAnimation(0.05f, false);
+		Mesh->RefreshBoneTransforms();
+	}
+	const FVector Up = Fixture.Character->GetActorUpVector();
+	const FVector Hips = Mesh->GetBoneLocation(TEXT("Hips"));
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		const FName FootName = Index == 0 ? TEXT("Foot_L") : TEXT("Foot_R");
+		const FName KneeName = Index == 0 ? TEXT("LowerLeg_L") : TEXT("LowerLeg_R");
+		const FName AnkleName = Index == 0 ? TEXT("LowerLeg_L_end") : TEXT("LowerLeg_R_end");
+		const float Clearance = FVector::DotProduct(Hips - Mesh->GetBoneLocation(FootName), Up);
+		const float KneeDrop = FVector::DotProduct(Hips - Mesh->GetBoneLocation(KneeName), Up);
+		const float ShinDrop = FVector::DotProduct(
+			Mesh->GetBoneLocation(KneeName) - Mesh->GetBoneLocation(AnkleName), Up);
+		const float ShoeRoll = FMath::RadiansToDegrees(
+			RestShoes[Index].AngularDistance(Mesh->GetBoneQuaternion(FootName)));
+		TestTrue(FString::Printf(TEXT("%s hangs below the hips in the jump: %.1f cm"),
+			*FootName.ToString(), Clearance), Clearance > 35.0f);
+		TestTrue(FString::Printf(TEXT("%s knee stays below the pelvis: %.1f cm"),
+			*FootName.ToString(), KneeDrop), KneeDrop > 18.0f);
+		TestTrue(FString::Printf(TEXT("%s shin points down from the knee: %.1f cm"),
+			*FootName.ToString(), ShinDrop), ShinDrop > 10.0f);
+		TestTrue(FString::Printf(TEXT("%s shoe avoids the upright sole: %.1f deg"),
+			*FootName.ToString(), ShoeRoll), ShoeRoll < 50.0f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSGroundTurnResponsiveness,
+	"JTS.Character.GroundTurnResponsiveness", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSGroundTurnResponsiveness::RunTest(const FString& Parameters)
+{
+	FClimbTestWorld Fixture;
+	UCharacterMovementComponent* Movement = Fixture.Character->GetCharacterMovement();
+	if (!TestNotNull(TEXT("Character movement exists"), Movement)) return false;
+	Movement->SetMovementMode(MOVE_Walking);
+	Fixture.Character->SetActorRotation(FRotator::ZeroRotator);
+	Movement->Velocity = FVector::RightVector * 500.0f;
+	static_cast<AActor*>(Fixture.Character)->Tick(1.0f / 60.0f);
+	const float FirstFrameRight = FVector::DotProduct(
+		Fixture.Character->GetActorForwardVector(), FVector::RightVector);
+	TestTrue(TEXT("90 degree turn begins without a one-frame body snap"),
+		FirstFrameRight > 0.01f && FirstFrameRight < 0.25f);
+	for (int32 Frame = 1; Frame < 6; ++Frame)
+	{
+		static_cast<AActor*>(Fixture.Character)->Tick(1.0f / 60.0f);
+	}
+	const float FacingRight = FVector::DotProduct(
+		Fixture.Character->GetActorForwardVector(), FVector::RightVector);
+	TestTrue(FString::Printf(TEXT("90 degree travel turn reacts within 0.1 seconds: dot %.2f"), FacingRight),
+		FacingRight > 0.8f);
+	TestTrue(TEXT("Ground turn still moves through intermediate orientations"), FacingRight < 0.999f);
+	for (int32 Frame = 0; Frame < 8; ++Frame)
+	{
+		static_cast<AActor*>(Fixture.Character)->Tick(1.0f / 60.0f);
+	}
+	TestTrue(TEXT("Quick body turn settles within a quarter second"),
+		FVector::DotProduct(Fixture.Character->GetActorForwardVector(), FVector::RightVector) > 0.995f);
+	const FVector BeforeReverse = Fixture.Character->GetActorForwardVector();
+	Movement->Velocity = -BeforeReverse * 500.0f;
+	static_cast<AActor*>(Fixture.Character)->Tick(1.0f / 60.0f);
+	TestTrue(TEXT("180 degree reversal keeps a visible first-frame turn"),
+		FVector::DotProduct(Fixture.Character->GetActorForwardVector(), BeforeReverse) > 0.95f);
+	for (int32 Frame = 0; Frame < 18; ++Frame)
+	{
+		static_cast<AActor*>(Fixture.Character)->Tick(1.0f / 60.0f);
+	}
+	TestTrue(TEXT("180 degree reversal reaches its heading promptly"),
+		FVector::DotProduct(Fixture.Character->GetActorForwardVector(), -BeforeReverse) > 0.98f);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPlanetSlopeClimbRegression, "JTS.Character.PlanetSlopeClimbWithHeldItem",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -632,6 +915,10 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 	Fixture.Wall->SetActorLocation(FVector::ZeroVector);
 	Fixture.Wall->SetActorRotation(FRotator(-34.0f, 0.0f, 0.0f));
 	Fixture.Wall->SetActorScale3D(FVector(82.0f));
+	if (!TestTrue(TEXT("Moon asset provides collision triangles"),
+		PlanetMesh->ContainsPhysicsTriMeshData(true))) return false;
+	if (UBodySetup* Body = PlanetMesh->GetBodySetup()) Body->CreatePhysicsMeshes();
+	Fixture.Wall->GetStaticMeshComponent()->RecreatePhysicsState();
 
 	AJTSPlanetAnchor* Planet = Fixture.World->SpawnActor<AJTSPlanetAnchor>(AJTSPlanetAnchor::StaticClass(),
 		FVector::ZeroVector, FRotator::ZeroRotator);
@@ -646,6 +933,8 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 	FHitResult SlopeHit;
 	FVector SlopeUp = FVector::UpVector;
 	bool bFoundSlope = false;
+	float LowestUpDot = 1.0f;
+	int32 SurfaceSamples = 0;
 	constexpr int32 Samples = 1024;
 	for (int32 Index = 0; Index < Samples; ++Index)
 	{
@@ -657,13 +946,16 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 		if (!Planet->TraceGameplaySurfaceSegment(Ray * 25000.0f, FVector::ZeroVector, Candidate)) continue;
 		const FVector Up = Candidate.ImpactPoint.GetSafeNormal();
 		const float UpDot = FVector::DotProduct(Candidate.ImpactNormal.GetSafeNormal(), Up);
+		LowestUpDot = FMath::Min(LowestUpDot, UpDot);
+		++SurfaceSamples;
 		if (UpDot < 0.20f || UpDot > 0.68f) continue;
 		SlopeHit = Candidate;
 		SlopeUp = Up;
 		bFoundSlope = true;
 		break;
 	}
-	if (!TestTrue(TEXT("Real Moon mesh has a 40-95 degree climbable patch"), bFoundSlope)) return false;
+	if (!TestTrue(FString::Printf(TEXT("Real Moon mesh has a climbable patch: %d hits, lowest up dot %.3f"),
+		SurfaceSamples, LowestUpDot), bFoundSlope)) return false;
 
 	const FVector Normal = SlopeHit.ImpactNormal.GetSafeNormal();
 	const UCapsuleComponent* Capsule = Fixture.Character->GetCapsuleComponent();
@@ -710,6 +1002,39 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 		HeldPieces.ContainsByPredicate([](const UStaticMeshComponent* Piece) { return Piece->IsVisible(); }))) return false;
 	Climb->TryAutoAttach();
 	if (!TestTrue(TEXT("Real spherical terrain accepts the grip"), Climb->IsClimbing())) return false;
+	USkeletalMeshComponent* PoseMesh = Fixture.Character->GetMesh();
+	if (!TestNotNull(TEXT("Real-sphere playable pose mesh exists"), PoseMesh)) return false;
+	PoseMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	for (int32 Frame = 0; Frame < 5; ++Frame)
+	{
+		PoseMesh->TickAnimation(0.05f, false);
+		PoseMesh->RefreshBoneTransforms();
+	}
+	for (const TCHAR* Suffix : { TEXT("_L"), TEXT("_R") })
+	{
+		const FVector Hip = PoseMesh->GetBoneLocation(*FString::Printf(TEXT("UpperLeg%s"), Suffix));
+		const FVector Knee = PoseMesh->GetBoneLocation(*FString::Printf(TEXT("LowerLeg%s"), Suffix));
+		const FVector Ankle = PoseMesh->GetBoneLocation(*FString::Printf(TEXT("LowerLeg%s_end"), Suffix));
+		FVector FootSurface;
+		FVector FootNormal;
+		const bool bFoundFoothold = Climb->FindPoseContact(Ankle, FootSurface, FootNormal);
+		AddInfo(FString::Printf(TEXT("RealSlope%s knee outward %.1f beyond ankle %.1f knee drop %.1f ankle drop %.1f contact %d gap %.1f"), Suffix,
+			FVector::DotProduct(Knee - Hip, Climb->GetSurfaceNormal()),
+			FVector::DotProduct(Knee - Ankle, Climb->GetSurfaceNormal()),
+			FVector::DotProduct(Hip - Knee, SlopeUp), FVector::DotProduct(Hip - Ankle, SlopeUp),
+			bFoundFoothold, bFoundFoothold ? FVector::DotProduct(Ankle - FootSurface, FootNormal) : -999.0f));
+		TestTrue(FString::Printf(TEXT("RealSlope%s knee bends toward the slope"), Suffix),
+			FVector::DotProduct(Knee - Hip, Climb->GetSurfaceNormal()) < -5.0f);
+		TestTrue(FString::Printf(TEXT("RealSlope%s foot stays below the pelvis"), Suffix),
+			FVector::DotProduct(Hip - Ankle, SlopeUp) > 60.0f);
+		TestTrue(FString::Printf(TEXT("RealSlope%s shoe finds the actual mesh"), Suffix), bFoundFoothold);
+		if (bFoundFoothold)
+		{
+			const float ContactGap = FVector::DotProduct(Ankle - FootSurface, FootNormal);
+			TestTrue(FString::Printf(TEXT("RealSlope%s shoe stays at its foothold"), Suffix),
+				ContactGap > 4.0f && ContactGap < 17.0f);
+		}
+	}
 	TestFalse(TEXT("Real sphere grip cancels weapon aiming"), Ranged->IsAiming());
 	for (const UStaticMeshComponent* Piece : HeldPieces)
 	{
@@ -769,6 +1094,13 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 		LeapTravel > 75.0f);
 	TestTrue(TEXT("Real planet mesh keeps the grip after the sideways leap"), Climb->IsClimbing());
 	Climb->ToggleAttach();
+	for (int32 Frame = 0; Frame < 10; ++Frame)
+	{
+		PoseMesh->TickAnimation(0.05f, false);
+		PoseMesh->RefreshBoneTransforms();
+	}
+	// This isolated world advances components manually; refresh the actor's presentation after its pose blend.
+	Fixture.Character->RefreshClimbEquipmentPresentation();
 	TestTrue(TEXT("Pistols return after the real-sphere climb ends"),
 		HeldPieces.ContainsByPredicate([](const UStaticMeshComponent* Piece) { return Piece->IsVisible(); }));
 	return true;

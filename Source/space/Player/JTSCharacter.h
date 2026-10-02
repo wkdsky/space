@@ -121,6 +121,7 @@ public:
 	/** 0 while the feet stay planted, 1 while a large turn plays the shuffle. */
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
 	float GetTurnShuffleAlpha() const { return TurnShuffleAlpha; }
+	float GetTurnDirectionSign() const { return TurnDirectionSign; }
 
 	/** Local camera response to a shot; gameplay hit traces remain server-owned. */
 	void ApplyWeaponViewKick(float PitchDegrees);
@@ -174,6 +175,7 @@ public:
 protected:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void Landed(const FHitResult& Hit) override;
+	virtual void MoveBlockedBy(const FHitResult& Impact) override;
 	virtual void FaceRotation(FRotator NewControlRotation, float DeltaTime = 0.0f) override;
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -434,13 +436,20 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "10.0", ClampMax = "80.0"))
 	float UpperBodyYawLimitDegrees = 48.0f;
 
-	/** How fast the feet catch a large click or a running turn, in degrees per second. */
+	/** Maximum body turn speed. Acceleration and braking keep short turns from snapping. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "60.0"))
-	float FootShuffleDegreesPerSecond = 260.0f;
+	float FootShuffleDegreesPerSecond = 1000.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "100.0"))
+	float BodyTurnAccelerationDegreesPerSecondSquared = 12000.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "100.0"))
+	float BodyTurnBrakingDegreesPerSecondSquared = 14000.0f;
 
 	float TurnShuffleAlpha = 0.0f;
-	/** One click in grounded ordinary third person. Cleared the same frame the swing starts. */
+	float TurnVelocityDegreesPerSecond = 0.0f;
+	float TurnDirectionSign = 1.0f;
+	/** Captured view-facing request, completed over a short accelerated body turn. */
 	bool bWantsViewFacing = false;
+	bool bFinishingViewTurn = false;
 	FVector PendingViewFacingForward = FVector::ForwardVector;
 
 	/**

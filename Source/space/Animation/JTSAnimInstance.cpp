@@ -4,7 +4,6 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "GameFramework/Controller.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
@@ -116,6 +115,23 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		const FVector GroundUp = Character->GetActorUpVector();
 		const FVector GroundPlanar = FVector::VectorPlaneProject(GroundVelocity, GroundUp);
 		const float GroundSpeed = GroundPlanar.Size();
+		const FVector CurrentFacing = FVector::VectorPlaneProject(
+			Character->GetActorForwardVector(), GroundUp).GetSafeNormal();
+		float TurnRate = 0.0f;
+		if (bHasPreviousFacing && DeltaSeconds > KINDA_SMALL_NUMBER && !CurrentFacing.IsNearlyZero())
+		{
+			const FVector PreviousFacing = FVector::VectorPlaneProject(
+				PreviousFacingForward, GroundUp).GetSafeNormal();
+			const float TurnDegrees = FMath::RadiansToDegrees(FMath::Atan2(
+				FVector::DotProduct(FVector::CrossProduct(PreviousFacing, CurrentFacing), GroundUp),
+				FVector::DotProduct(PreviousFacing, CurrentFacing)));
+			if (FMath::Abs(TurnDegrees) < 45.0f) TurnRate = TurnDegrees / DeltaSeconds;
+		}
+		PreviousFacingForward = CurrentFacing;
+		bHasPreviousFacing = !CurrentFacing.IsNearlyZero();
+		const float TargetLean = bGroundEligible && GroundSpeed > 60.0f
+			? -FMath::Clamp(TurnRate / 520.0f, -1.0f, 1.0f) * 7.0f : 0.0f;
+		TurnLeanDegrees = FMath::FInterpTo(TurnLeanDegrees, TargetLean, DeltaSeconds, 11.0f);
 		// A new step starts at the selected walk/run stride, rather than spending
 		// its first few frames interpolating through tiny idle strides. The pose's
 		// running phase still follows the blend space player after evaluation.
@@ -246,12 +262,13 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 				ClimbSwayVelocity = 0.0f;
 			}
 			const float StepStartTime = Climb->GetStepStartWorldTime();
+			const float SideIntent = FVector::DotProduct(Climb->GetStepDirection(), Character->GetActorRightVector());
+			const float SupportSideSign = FMath::Abs(SideIntent) > 0.2f
+				? -FMath::Sign(SideIntent) : (bClimbLeadLeft ? 1.0f : -1.0f);
 			if (StepStartTime >= 0.0f && StepStartTime != LastClimbStepStartTime)
 			{
-				const float SideIntent = FVector::DotProduct(Climb->GetStepDirection(), Character->GetActorRightVector());
-				const float SideSign = FMath::Abs(SideIntent) > 0.2f ? FMath::Sign(SideIntent)
-					: (bClimbLeadLeft ? -0.45f : 0.45f);
-				ClimbSwayVelocity += SideSign * (bClimbLeaping ? 85.0f : 48.0f);
+				// Load the hand and foot that stay planted before the searching side leaves.
+				ClimbSwayVelocity += SupportSideSign * (bClimbLeaping ? 62.0f : 42.0f);
 				LastClimbStepStartTime = StepStartTime;
 				PreviousClimbStepAlpha = 0.0f;
 			}
@@ -264,6 +281,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			{
 				// Fingers catch first; the shoulders then absorb the hanging weight.
 				ClimbSagVelocity += bClimbLeaping ? 100.0f : bDescending ? 72.0f : 48.0f;
+				ClimbSwayVelocity -= SupportSideSign * (bClimbLeaping ? 80.0f : 52.0f);
 			}
 			PreviousClimbStepAlpha = ClimbStepAlpha;
 			const float Steepness = FMath::Clamp(1.0f - FVector::DotProduct(
@@ -291,6 +309,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			bClimbMantling = false;
 			LastClimbStepStartTime = -1.0f;
 			PreviousClimbStepAlpha = 0.0f;
+			bClimbContactsValid = false;
+			ClimbContactStepStartTime = -1.0f;
 		}
 		bWasClimbing = bClimbing;
 		const bool bClimbPoseActive = bClimbing || ClimbBlendAlpha > 0.02f;
@@ -299,11 +319,6 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const float HeadPitchTarget = bClimbPoseActive ? 0.0f
 				: FMath::Clamp(Character->GetAimPitch(), -55.0f, 55.0f);
 			AimPitch = bClimbPoseActive ? 0.0f : FMath::FInterpTo(AimPitch, HeadPitchTarget, DeltaSeconds, 14.0f);
-		}
-		if (const AController* const CharacterController = Character->GetController())
-		{
-			const FRotator RelativeAim = (CharacterController->GetControlRotation() - Character->GetActorRotation()).GetNormalized();
-			RawAimYaw = bClimbPoseActive ? 0.0f : FRotator::NormalizeAxis(RelativeAim.Yaw);
 		}
 		// Ordinary grounded third person keeps the player's facing. The arms only cover
 		// the view while it is already close to the body. Past that cone the arms
@@ -322,13 +337,12 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			DeltaSeconds,
 			bWholeBodyOnView ? 24.0f : 9.0f);
 
-		// Fast alternating steps. One foot plants while the other pops up, which reads as a
-		// cartoon shuffle instead of a smooth combat turn.
-		ShufflePhase += DeltaSeconds * (TurnShuffleAlpha > 0.05f ? 11.0f : 0.0f);
+		// Small alternating weight transfers accompany the capsule turn.
+		ShufflePhase += DeltaSeconds * (TurnShuffleAlpha > 0.05f ? 17.0f : 0.0f);
 		const float Step = FMath::Max(0.0f, FMath::Sin(ShufflePhase));
 		const float Other = FMath::Max(0.0f, FMath::Sin(ShufflePhase + PI));
-		ShuffleLeftLift = 34.0f * TurnShuffleAlpha * Step;
-		ShuffleRightLift = 34.0f * TurnShuffleAlpha * Other;
+		ShuffleLeftLift = 13.0f * TurnShuffleAlpha * Step;
+		ShuffleRightLift = 13.0f * TurnShuffleAlpha * Other;
 	}
 	bHasRangedWeapon = bActiveRangedWeapon;
 }
@@ -554,6 +568,8 @@ void UJTSAnimInstance::ApplyFacingPose()
 	const float BodyYaw = FMath::Clamp(UpperBodyYaw, -48.0f, 48.0f);
 	TurnBone(TEXT("Abdomen"), FVector::UpVector, BodyYaw * 0.28f);
 	TurnBone(TEXT("Chest"), FVector::UpVector, BodyYaw * 0.32f);
+	TurnBone(TEXT("Abdomen"), FVector::ForwardVector, TurnLeanDegrees * 0.65f);
+	TurnBone(TEXT("Chest"), FVector::ForwardVector, TurnLeanDegrees * 0.35f);
 	TurnBone(TEXT("Neck"), FVector::UpVector, BodyYaw * 0.22f);
 	TurnBone(TEXT("Head"), FVector::UpVector, BodyYaw * 0.18f);
 	TurnBone(TEXT("Head"), FVector::RightVector, -AimPitch * 0.85f);
@@ -579,23 +595,19 @@ void UJTSAnimInstance::ApplyFacingPose()
 		const EJTSClimbMotion Motion = bLeap ? EJTSClimbMotion::Leap
 			: bDescending ? EJTSClimbMotion::Descend : EJTSClimbMotion::Step;
 		const FJTSClimbMotionSample Phase = FJTSClimbMotionSample::Evaluate(Alpha, Motion);
-		const float Arc = FMath::Sin(PI * Phase.Travel);
 		const FVector Front = WallForward.IsNearlyZero() ? PoseForward : WallForward;
 		const FVector Side = WallRight.IsNearlyZero() ? PoseRight : WallRight;
 		const float Steepness = FMath::Clamp(1.0f - FVector::DotProduct(WallNormal, PoseUp) / 0.77f,
 			0.0f, 1.0f);
 
-		// Casual_2's foot and toe bones are root siblings, so save their offsets
-		// from the ankle before shifting the hips and solving the legs.
+		// Casual_2's foot bones are root siblings, so save their offsets from
+		// the ankles before shifting the hips and solving the legs.
 		struct FClimbShoeRest
 		{
 			int32 Ankle;
 			int32 Foot;
-			int32 Toe;
 			FVector AnklePosition;
 			FVector FootOffset;
-			FVector ToeOffset;
-			FQuat AnkleRotation;
 		};
 		FClimbShoeRest Shoes[2];
 		for (int32 Index = 0; Index < 2; ++Index)
@@ -604,11 +616,8 @@ void UJTSAnimInstance::ApplyFacingPose()
 			FClimbShoeRest& Shoe = Shoes[Index];
 			Shoe.Ankle = Mesh->GetBoneIndex(*FString::Printf(TEXT("LowerLeg%s_end"), Suffix));
 			Shoe.Foot = Mesh->GetBoneIndex(*FString::Printf(TEXT("Foot%s"), Suffix));
-			Shoe.Toe = Mesh->GetBoneIndex(*FString::Printf(TEXT("PT%s"), Suffix));
 			Shoe.AnklePosition = Pose.IsValidIndex(Shoe.Ankle) ? Pose[Shoe.Ankle].GetLocation() : FVector::ZeroVector;
 			Shoe.FootOffset = Pose.IsValidIndex(Shoe.Foot) ? Pose[Shoe.Foot].GetLocation() - Shoe.AnklePosition : FVector::ZeroVector;
-			Shoe.ToeOffset = Pose.IsValidIndex(Shoe.Toe) ? Pose[Shoe.Toe].GetLocation() - Shoe.AnklePosition : FVector::ZeroVector;
-			Shoe.AnkleRotation = Pose.IsValidIndex(Shoe.Ankle) ? Pose[Shoe.Ankle].GetRotation() : FQuat::Identity;
 		}
 		FVector BaseShoulders[2];
 		FVector BaseHips[2];
@@ -625,8 +634,8 @@ void UJTSAnimInstance::ApplyFacingPose()
 		const int32 Body = Mesh->GetBoneIndex(TEXT("Body"));
 		if (Pose.IsValidIndex(Body))
 		{
-			const FVector BodyOffset = Front * (7.0f - Steepness * 12.0f - (bLeap ? 8.0f * Arc : 0.0f))
-				- PoseUp * (3.0f + ClimbSagCm + (bLeap ? 10.0f * Phase.Load + 14.0f * Phase.Reach : 0.0f)
+			const FVector BodyOffset = Front * (9.0f - Steepness * 2.0f - (bLeap ? 4.0f * Phase.Load : 0.0f))
+				- PoseUp * (3.0f + ClimbSagCm + (bLeap ? 6.0f * Phase.Load + 3.0f * Phase.Catch : 0.0f)
 					+ (bDescending ? 5.0f * Phase.Travel : 0.0f))
 				+ PoseUp * (bClimbMantling ? 14.0f * FMath::SmoothStep(0.25f, 0.70f, Alpha) : 0.0f)
 				+ Side * ClimbSwayCm;
@@ -663,20 +672,87 @@ void UJTSAnimInstance::ApplyFacingPose()
 			AimSegment(RootName, MidName, Elbow - Origin);
 			AimSegment(MidName, EndName, Origin + Along * Distance - Pose[Mid].GetLocation());
 		};
-		auto SeatShoeBranch = [&](const int32 Root, const FVector& NewRoot, const FQuat& Turn)
+		auto SeatShoeBranch = [&](const int32 Root, const FVector& NewRoot)
 		{
 			if (!Pose.IsValidIndex(Root)) return;
-			const FVector OldRoot = Pose[Root].GetLocation();
+			const FVector Translation = NewRoot - Pose[Root].GetLocation();
 			for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
 			{
 				int32 Parent = Bone;
 				while (Parent >= 0 && Parent != Root) Parent = Skeleton->GetParentIndex(Parent);
 				if (Parent != Root) continue;
-				Pose[Bone].SetLocation(NewRoot + Turn.RotateVector(Pose[Bone].GetLocation() - OldRoot));
-				Pose[Bone].SetRotation(Turn * Pose[Bone].GetRotation());
-				Pose[Bone].NormalizeRotation();
+				Pose[Bone].AddToTranslation(Translation);
 			}
 		};
+		const auto HasPoseBone = [&](const FName BoneName)
+		{
+			return Pose.IsValidIndex(Mesh->GetBoneIndex(BoneName));
+		};
+		const bool bAnchoredClimb = Climb->IsClimbing() && !bClimbMantling
+			&& HasPoseBone(TEXT("UpperArm_L")) && HasPoseBone(TEXT("UpperArm_R"))
+			&& HasPoseBone(TEXT("Wrist_L")) && HasPoseBone(TEXT("Wrist_R"))
+			&& HasPoseBone(TEXT("UpperLeg_L")) && HasPoseBone(TEXT("UpperLeg_R"))
+			&& HasPoseBone(TEXT("LowerLeg_L_end")) && HasPoseBone(TEXT("LowerLeg_R_end"));
+		const FTransform MeshToWorld = Mesh->GetComponentTransform();
+		const FVector ContactNormal = Climb->GetSurfaceNormal().GetSafeNormal();
+		auto SampleContact = [&](const FVector& DesiredWorld, const float Clearance)
+		{
+			FVector SurfacePoint;
+			FVector SurfaceNormal;
+			return Climb->FindPoseContact(DesiredWorld, SurfacePoint, SurfaceNormal)
+				? SurfacePoint + SurfaceNormal * Clearance : DesiredWorld;
+		};
+		if (bAnchoredClimb && !bClimbContactsValid)
+		{
+			for (int32 Index = 0; Index < 2; ++Index)
+			{
+				const float Sign = Index == 0 ? -1.0f : 1.0f;
+				const TCHAR* Suffix = Index == 0 ? TEXT("_L") : TEXT("_R");
+				const int32 Shoulder = Mesh->GetBoneIndex(*FString::Printf(TEXT("UpperArm%s"), Suffix));
+				const int32 Hip = Mesh->GetBoneIndex(*FString::Printf(TEXT("UpperLeg%s"), Suffix));
+				const FVector HandRest = Pose[Shoulder].GetLocation() + Front * 25.0f
+					+ PoseUp * (17.0f - Sign * 3.0f) + Side * (Sign * 5.0f);
+				const FVector FootRest = Pose[Hip].GetLocation() + Front * 24.0f
+					- PoseUp * (ClimbFootDropCm - Sign * 3.0f) + Side * (Sign * 6.0f);
+				ClimbHandContactsWorld[Index] = SampleContact(MeshToWorld.TransformPosition(HandRest), 6.0f);
+				ClimbFootContactsWorld[Index] = SampleContact(MeshToWorld.TransformPosition(FootRest), 9.0f);
+			}
+			bClimbContactsValid = true;
+		}
+		if (bAnchoredClimb)
+		{
+			auto FinishPreviousStep = [&]()
+			{
+				const bool bReached = FVector::DistSquared(PoseCharacter->GetActorLocation(),
+					ClimbPreviousStepTargetWorld) < FMath::Square(28.0f);
+				for (int32 Index = 0; Index < 2; ++Index)
+				{
+					ClimbHandContactsWorld[Index] = bReached ? ClimbHandStepEndWorld[Index] : ClimbHandStepStartWorld[Index];
+					ClimbFootContactsWorld[Index] = bReached ? ClimbFootStepEndWorld[Index] : ClimbFootStepStartWorld[Index];
+				}
+			};
+			const float StepTime = Climb->GetStepStartWorldTime();
+			if (StepTime < 0.0f && ClimbContactStepStartTime >= 0.0f)
+			{
+				FinishPreviousStep();
+				ClimbContactStepStartTime = -1.0f;
+			}
+			else if (StepTime >= 0.0f && StepTime != ClimbContactStepStartTime)
+			{
+				if (ClimbContactStepStartTime >= 0.0f) FinishPreviousStep();
+				const FVector Displacement = Climb->GetStepTarget() - Climb->GetStepStart();
+				for (int32 Index = 0; Index < 2; ++Index)
+				{
+					ClimbHandStepStartWorld[Index] = ClimbHandContactsWorld[Index];
+					ClimbFootStepStartWorld[Index] = ClimbFootContactsWorld[Index];
+					ClimbHandStepEndWorld[Index] = SampleContact(ClimbHandContactsWorld[Index] + Displacement, 6.0f);
+					ClimbFootStepEndWorld[Index] = SampleContact(ClimbFootContactsWorld[Index] + Displacement, 9.0f);
+				}
+				ClimbPreviousStepTargetWorld = Climb->GetStepTarget();
+				ClimbContactStepStartTime = StepTime;
+			}
+		}
+		float HandGrip[2] = { 1.0f, 1.0f };
 
 		for (int32 Index = 0; Index < 2; ++Index)
 		{
@@ -693,51 +769,70 @@ void UJTSAnimInstance::ApplyFacingPose()
 			const int32 Shoulder = Mesh->GetBoneIndex(ShoulderName);
 			const int32 Hip = Mesh->GetBoneIndex(HipName);
 			if (!Pose.IsValidIndex(Shoulder) || !Pose.IsValidIndex(Hip)) continue;
-			// Grip targets are measured from the unmoved shoulders. As the pelvis sags
-			// or sways, the hands remain on their holds instead of following the body.
-			const float HandReach = (bLeap ? (bLead ? 39.0f : 30.0f)
-				: bDescending ? (bLead ? 27.0f : -12.0f)
-				: (bLead ? 30.0f : -11.0f)) * Phase.Reach;
-			const float HandDrag = (bLeap ? 16.0f : bDescending ? 12.0f : 9.0f)
-				* Phase.Travel * Phase.Reach;
-			// Bring the leap's search hand within the arm's reach as the torso drops.
-			// The regular grip stays farther forward against the wall.
-			const float HandDepth = bLeap ? 24.0f - 2.0f * Phase.Reach
-				: 33.0f + 7.0f * Phase.Reach;
-			const FVector HandTarget = BaseShoulders[Index] + Front * HandDepth
-				+ PoseUp * (18.0f + 4.0f * Steepness) + Side * (Sign * 12.0f)
-				+ Step * (HandReach - HandDrag);
-			PlaceLimb(ShoulderName, ElbowName, WristName, HandTarget, -PoseUp + Side * (Sign * 0.25f));
-
-			const bool bFootLeads = bLeap || (bDescending ? bLead : !bLead);
-			const float FootPhase = bDescending
-				? FMath::SmoothStep(0.02f, 0.35f, Alpha)
-					* (1.0f - FMath::SmoothStep(0.78f, 1.0f, Alpha))
-				: Phase.Reach;
-			const float FootReach = (bLeap ? 24.0f : bDescending ? (bFootLeads ? 31.0f : -6.0f)
-				: (bFootLeads ? 21.0f : -8.0f)) * FootPhase;
-			const float FootLift = (bLeap ? 30.0f * Arc : bDescending ? 6.0f * FootPhase
-				: (bFootLeads ? 13.0f : 2.0f) * Phase.Reach)
-				+ (bClimbMantling ? 28.0f * FMath::SmoothStep(0.24f, 0.68f, Alpha) : 0.0f);
-			const FVector FootTarget = BaseHips[Index] + Front * (24.0f - 7.0f * Arc)
-				- PoseUp * (54.0f - FootLift) + Side * (Sign * 15.0f) + Step * FootReach;
-			PlaceLimb(HipName, KneeName, AnkleName, FootTarget, Front + Side * (Sign * 0.15f));
+			FVector HandTarget;
+			FVector FootTarget;
+			if (bAnchoredClimb)
+			{
+				const bool bActiveStep = ClimbContactStepStartTime >= 0.0f;
+				const float HandBegin = bLeap ? (bLead ? 0.16f : 0.29f)
+					: bLead ? (bDescending ? 0.22f : 0.10f) : 0.42f;
+				const float HandEnd = bLeap ? (bLead ? 0.68f : 0.84f)
+					: bLead ? (bDescending ? 0.65f : 0.47f) : 0.84f;
+				const bool bFootLeads = bDescending ? bLead : !bLead;
+				const float FootBegin = bLeap ? (bFootLeads ? 0.08f : 0.18f)
+					: bFootLeads ? 0.04f : 0.38f;
+				const float FootEnd = bLeap ? (bFootLeads ? 0.85f : 0.93f)
+					: bFootLeads ? (bDescending ? 0.37f : 0.32f) : 0.82f;
+				const float HandSwing = bActiveStep ? FMath::SmoothStep(HandBegin, HandEnd, Alpha) : 0.0f;
+				const float FootSwing = bActiveStep ? FMath::SmoothStep(FootBegin, FootEnd, Alpha) : 0.0f;
+				const FVector HandWorld = bActiveStep
+					? FMath::Lerp(ClimbHandStepStartWorld[Index], ClimbHandStepEndWorld[Index], HandSwing)
+						+ ContactNormal * (bLeap ? 11.0f : 7.0f) * FMath::Sin(PI * HandSwing)
+					: ClimbHandContactsWorld[Index];
+				const FVector FootWorld = bActiveStep
+					? FMath::Lerp(ClimbFootStepStartWorld[Index], ClimbFootStepEndWorld[Index], FootSwing)
+						+ ContactNormal * (bLeap ? 12.0f : 6.0f) * FMath::Sin(PI * FootSwing)
+						+ PoseCharacter->GetActorUpVector() * (bDescending ? 2.0f : 5.0f) * FMath::Sin(PI * FootSwing)
+					: ClimbFootContactsWorld[Index];
+				HandTarget = MeshToWorld.InverseTransformPosition(HandWorld);
+				FootTarget = MeshToWorld.InverseTransformPosition(FootWorld);
+				if (bActiveStep && FootSwing > KINDA_SMALL_NUMBER)
+				{
+					// Once a foot leaves its hold, keep it below the pelvis as the body pulls up.
+					// Otherwise the knee folds into the torso during a fast leap.
+					const float FootDrop = FVector::DotProduct(Pose[Hip].GetLocation() - FootTarget, PoseUp);
+					FootTarget -= PoseUp * FMath::Max(0.0f, ClimbMovingFootMinDropCm - FootDrop);
+				}
+				HandGrip[Index] = 1.0f - 0.72f * FMath::Sin(PI * HandSwing);
+			}
+			else
+			{
+				// Mantle and release use a short procedural transition toward the floor pose.
+				HandTarget = BaseShoulders[Index] + Front * 27.0f
+					+ PoseUp * (18.0f + (bLeft ? 3.0f : -3.0f))
+					+ Side * (Sign * 7.0f) + Step * (bLead ? 18.0f : -5.0f) * Phase.Reach;
+				FootTarget = BaseHips[Index] + Front * 24.0f
+					- PoseUp * (ClimbFootDropCm - (bClimbMantling ? 20.0f * FMath::SmoothStep(0.24f, 0.68f, Alpha) : 0.0f))
+					+ Side * (Sign * 8.0f);
+				HandGrip[Index] = 1.0f - 0.5f * Phase.Reach;
+			}
+			PlaceLimb(ShoulderName, ElbowName, WristName, HandTarget,
+				-PoseUp * 0.50f + Side * (Sign * 0.82f) + WallNormal * 0.16f);
+			PlaceLimb(HipName, KneeName, AnkleName, FootTarget,
+				-WallNormal * ClimbKneeWallwardWeight + Side * (Sign * ClimbKneeSideWeight) - PoseUp * 0.12f);
 			const FClimbShoeRest& Shoe = Shoes[Index];
 			if (Pose.IsValidIndex(Shoe.Ankle))
 			{
 				const FVector AnkleNow = Pose[Shoe.Ankle].GetLocation();
-				const FQuat ShoeTurn = Pose[Shoe.Ankle].GetRotation() * Shoe.AnkleRotation.Inverse();
-				SeatShoeBranch(Shoe.Foot, AnkleNow + ShoeTurn.RotateVector(Shoe.FootOffset), ShoeTurn);
-				SeatShoeBranch(Shoe.Toe, AnkleNow + ShoeTurn.RotateVector(Shoe.ToeOffset), ShoeTurn);
+				// Casual_2 shoes are root siblings. Carry their position with the ankle,
+				// but not the shin's IK rotation: that turns a planted shoe on its edge.
+				SeatShoeBranch(Shoe.Foot, AnkleNow + Shoe.FootOffset);
 			}
 		}
-		// The supporting hand stays closed. The searching hand opens, then clamps
-		// down at the catch; a leap briefly opens both palms before they re-grip.
-		GripAmount = FMath::Clamp(1.0f - Phase.Reach * (bClimbLeadLeft ? (bLeap ? 0.32f : 0.08f)
-			: 0.72f), 0.2f, 1.0f);
+		// Planted fingers hold. Each searching hand opens only while it moves.
+		GripAmount = HandGrip[1];
 		CloseGrip(true);
-		GripAmount = FMath::Clamp(1.0f - Phase.Reach * (bClimbLeadLeft ? 0.72f
-			: (bLeap ? 0.32f : 0.08f)), 0.2f, 1.0f);
+		GripAmount = HandGrip[0];
 		CloseGrip(false);
 		GripAmount = 1.0f;
 		for (int32 Bone = 0; Bone < Pose.Num(); ++Bone)
@@ -817,30 +912,25 @@ void UJTSAnimInstance::ApplyFacingPose()
 	{
 		// Kneeling tuck for the whole jump. A turn in the air must not swap this
 		// for the shuffle, or the legs snap open before the landing.
-		// Foot_L/R and the toe bones PT_L/R hang off Root, so the shoe mesh is
-		// skinned between a folded ankle and a foot that never left the ground.
-		// Each shoe bone is moved onto its ankle and rotated with the same fold.
+		// Foot_L/R are root siblings, so translate each shoe with its ankle.
+		// PT_L/R sit far from the ankles on this skeleton and are not toe bones.
 		const float Bend = JumpTuckAlpha;
 		const int32 FootR = Mesh->GetBoneIndex(TEXT("Foot_R"));
 		const int32 FootL = Mesh->GetBoneIndex(TEXT("Foot_L"));
-		const int32 ToeR = Mesh->GetBoneIndex(TEXT("PT_R"));
-		const int32 ToeL = Mesh->GetBoneIndex(TEXT("PT_L"));
 		const int32 AnkleR = Mesh->GetBoneIndex(TEXT("LowerLeg_R_end"));
 		const int32 AnkleL = Mesh->GetBoneIndex(TEXT("LowerLeg_L_end"));
 		const FVector RestFootR = Pose.IsValidIndex(FootR) ? Pose[FootR].GetLocation() : FVector::ZeroVector;
 		const FVector RestFootL = Pose.IsValidIndex(FootL) ? Pose[FootL].GetLocation() : FVector::ZeroVector;
-		const FVector RestToeR = Pose.IsValidIndex(ToeR) ? Pose[ToeR].GetLocation() : FVector::ZeroVector;
-		const FVector RestToeL = Pose.IsValidIndex(ToeL) ? Pose[ToeL].GetLocation() : FVector::ZeroVector;
 		const FVector RestAnkleR = Pose.IsValidIndex(AnkleR) ? Pose[AnkleR].GetLocation() : FVector::ZeroVector;
 		const FVector RestAnkleL = Pose.IsValidIndex(AnkleL) ? Pose[AnkleL].GetLocation() : FVector::ZeroVector;
 
-		const FVector ThighAim = (ActorForward * Bend - ActorUp * (1.0f - Bend)).GetSafeNormal();
+		const FVector ThighAim = (ActorForward * Bend
+			- ActorUp * (1.0f - Bend * (1.0f - JumpThighDownBias))).GetSafeNormal();
 		AimSegment(TEXT("UpperLeg_R"), TEXT("LowerLeg_R"), ThighAim);
 		AimSegment(TEXT("UpperLeg_L"), TEXT("LowerLeg_L"), ThighAim);
 
-		auto FoldShin = [&](const FName ShinName, const FName AnkleName, FQuat& OutFold)
+		auto FoldShin = [&](const FName ShinName, const FName AnkleName)
 		{
-			OutFold = FQuat::Identity;
 			const int32 ShinIndex = Mesh->GetBoneIndex(ShinName);
 			const int32 AnkleIndex = Mesh->GetBoneIndex(AnkleName);
 			if (!Pose.IsValidIndex(ShinIndex) || !Pose.IsValidIndex(AnkleIndex))
@@ -853,45 +943,39 @@ void UJTSAnimInstance::ApplyFacingPose()
 			{
 				return;
 			}
-			const FQuat Fold = FQuat(ActorRight, FMath::DegreesToRadians(165.0f * Bend));
+			const FQuat Fold = FQuat(ActorRight, FMath::DegreesToRadians(JumpShinFoldDegrees * Bend));
 			const FVector Folded = Fold.RotateVector(ShinDir);
-			OutFold = FQuat::FindBetweenNormals(ShinDir, Folded);
-			Pose[AnkleIndex].SetLocation(Knee + OutFold.RotateVector(Pose[AnkleIndex].GetLocation() - Knee));
-			Pose[AnkleIndex].SetRotation(OutFold * Pose[AnkleIndex].GetRotation());
+			const FQuat Delta = FQuat::FindBetweenNormals(ShinDir, Folded);
+			Pose[AnkleIndex].SetLocation(Knee + Delta.RotateVector(Pose[AnkleIndex].GetLocation() - Knee));
+			Pose[AnkleIndex].SetRotation(Delta * Pose[AnkleIndex].GetRotation());
 			Pose[AnkleIndex].NormalizeRotation();
-			Pose[ShinIndex].SetRotation(OutFold * Pose[ShinIndex].GetRotation());
+			Pose[ShinIndex].SetRotation(Delta * Pose[ShinIndex].GetRotation());
 			Pose[ShinIndex].NormalizeRotation();
 		};
-		FQuat FoldR = FQuat::Identity;
-		FQuat FoldL = FQuat::Identity;
-		FoldShin(TEXT("LowerLeg_R"), TEXT("LowerLeg_R_end"), FoldR);
-		FoldShin(TEXT("LowerLeg_L"), TEXT("LowerLeg_L_end"), FoldL);
+		FoldShin(TEXT("LowerLeg_R"), TEXT("LowerLeg_R_end"));
+		FoldShin(TEXT("LowerLeg_L"), TEXT("LowerLeg_L_end"));
 
-		// The shoe bones were recorded before the shin folded. Reattach each one
-		// with the same delta the ankle just received, so the shoe keeps its shape.
-		auto SeatShoe = [&](const int32 ShoeIndex, const int32 AnkleIndex, const FVector& RestShoe, const FVector& RestAnkle, const FQuat& Fold)
+		// Keep the original shoe orientation instead of rolling it up with the shin.
+		auto SeatShoe = [&](const int32 ShoeIndex, const int32 AnkleIndex, const FVector& RestShoe, const FVector& RestAnkle)
 		{
 			if (!Pose.IsValidIndex(ShoeIndex) || !Pose.IsValidIndex(AnkleIndex))
 			{
 				return;
 			}
-			Pose[ShoeIndex].SetLocation(Pose[AnkleIndex].GetLocation() + Fold.RotateVector(RestShoe - RestAnkle));
-			Pose[ShoeIndex].SetRotation(Fold * Pose[ShoeIndex].GetRotation());
-			Pose[ShoeIndex].NormalizeRotation();
+			Pose[ShoeIndex].SetLocation(Pose[AnkleIndex].GetLocation() + RestShoe - RestAnkle);
 		};
-		SeatShoe(FootR, AnkleR, RestFootR, RestAnkleR, FoldR);
-		SeatShoe(FootL, AnkleL, RestFootL, RestAnkleL, FoldL);
-		SeatShoe(ToeR, AnkleR, RestToeR, RestAnkleR, FoldR);
-		SeatShoe(ToeL, AnkleL, RestToeL, RestAnkleL, FoldL);
+		SeatShoe(FootR, AnkleR, RestFootR, RestAnkleR);
+		SeatShoe(FootL, AnkleL, RestFootL, RestAnkleL);
 	}
 	else if (TurnShuffleAlpha >= 0.02f && GaitBlend <= 0.02f)
 	{
-		const float TurnSign = RawAimYaw >= 0.0f ? 1.0f : -1.0f;
+		const AJTSCharacter* const TurningCharacter = Cast<AJTSCharacter>(Mesh->GetOwner());
+		const float TurnSign = IsValid(TurningCharacter) ? TurningCharacter->GetTurnDirectionSign() : 1.0f;
 		const auto StepLeg = [&TurnBone, TurnSign, this](const FName Thigh, const FName Shin, float LiftDegrees, float SideSign)
 		{
 			TurnBone(Thigh, FVector::RightVector, -LiftDegrees);
 			TurnBone(Thigh, FVector::UpVector, SideSign * LiftDegrees * 0.35f * TurnSign);
-			TurnBone(Thigh, FVector::ForwardVector, SideSign * 10.0f * TurnShuffleAlpha);
+			TurnBone(Thigh, FVector::ForwardVector, SideSign * 4.0f * TurnShuffleAlpha);
 			TurnBone(Shin, FVector::RightVector, LiftDegrees * 0.85f);
 		};
 		StepLeg(TEXT("UpperLeg_L"), TEXT("LowerLeg_L"), ShuffleLeftLift, -1.0f);

@@ -3,12 +3,14 @@
 #include "space/Items/JTSItemDefinitionLibrary.h"
 
 #include "UObject/UObjectGlobals.h"
+#include "UObject/StrongObjectPtr.h"
 #include "space/Items/JTSItemDefinition.h"
 
 namespace
 {
 	TMap<EJTSItemId, TObjectPtr<UJTSItemDefinition>> GFallbackDefinitions;
-	TMap<EJTSItemId, TObjectPtr<UJTSItemDefinition>> GLoadedDefinitions;
+	// This cache is outside a UObject, so TObjectPtr alone does not keep loaded assets alive for GC.
+	TMap<EJTSItemId, TStrongObjectPtr<UJTSItemDefinition>> GLoadedDefinitions;
 
 	int32 CapabilityMask(std::initializer_list<EJTSItemCapability> Capabilities)
 	{
@@ -232,6 +234,14 @@ namespace
 			Definition->ShopCosts = { Cost(EJTSResourceType::Rock, 6), Cost(EJTSResourceType::Ore, 4) };
 			Definition->AccentColor = FLinearColor(0.35f, 0.72f, 0.95f, 1.0f);
 			break;
+		case EJTSItemId::StellarText:
+			Definition->DisplayName = FText::FromString(TEXT("星际道具"));
+			Definition->Description = FText::FromString(TEXT("星际联盟遥感获得的文字版道具。"));
+			Definition->PrimaryCategory = EJTSItemCategory::Utility;
+			Definition->CapabilityMask = 0;
+			Definition->CombatDamage = 0.0f;
+			Definition->AccentColor = FLinearColor(0.40f, 0.84f, 0.92f, 1.0f);
+			break;
 		default:
 			break;
 		}
@@ -247,9 +257,10 @@ UJTSItemDefinition* UJTSItemDefinitionLibrary::GetItemDefinition(const UObject* 
 	{
 		return nullptr;
 	}
-	if (const TObjectPtr<UJTSItemDefinition>* Existing = GLoadedDefinitions.Find(ItemId))
+	if (const TStrongObjectPtr<UJTSItemDefinition>* Existing = GLoadedDefinitions.Find(ItemId))
 	{
-		return Existing->Get();
+		if (IsValid(Existing->Get())) return Existing->Get();
+		GLoadedDefinitions.Remove(ItemId);
 	}
 
 	const FString AssetPath = AssetPathFor(ItemId);
@@ -258,13 +269,13 @@ UJTSItemDefinition* UJTSItemDefinitionLibrary::GetItemDefinition(const UObject* 
 		if (UJTSItemDefinition* const Loaded = LoadObject<UJTSItemDefinition>(nullptr, *AssetPath);
 			IsValid(Loaded) && Loaded->ItemId == ItemId)
 		{
-			GLoadedDefinitions.Add(ItemId, Loaded);
+			GLoadedDefinitions.Add(ItemId, TStrongObjectPtr<UJTSItemDefinition>(Loaded));
 			return Loaded;
 		}
 	}
 
 	UJTSItemDefinition* const Fallback = MakeFallback(ItemId);
-	GLoadedDefinitions.Add(ItemId, Fallback);
+	GLoadedDefinitions.Add(ItemId, TStrongObjectPtr<UJTSItemDefinition>(Fallback));
 	return Fallback;
 }
 

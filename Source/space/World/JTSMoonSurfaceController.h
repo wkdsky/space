@@ -17,6 +17,7 @@ class AJTSPlanetAnchor;
 class AJTSPlanetSurfaceAnchor;
 class AJTSMoonAntActor;
 class AJTSMoonAntNestActor;
+class AJTSMoonCubeCluster;
 class AJTSSpacecraftActor;
 class IJTSMoonSurfaceGameplaySettings;
 class UJTSMoonSurfaceGameplayData;
@@ -68,7 +69,7 @@ public:
 	void SetSurfaceSpacecraft(AJTSSpacecraftActor* InSpacecraft);
 	/** Registers the persistent player/ship owned by SpaceWorldGameMode as part of this active surface. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Surface")
-	void RegisterSurfaceRuntimeActor(AActor* RuntimeActor);
+	virtual void RegisterSurfaceRuntimeActor(AActor* RuntimeActor) override;
 	TArray<AJTSCharacter*> GetActivePlayers() const;
 
 	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes MoonAnts or resources. */
@@ -143,6 +144,10 @@ private:
 	/** Explicit generator binding for this real Moon surface. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSMoonResourceSpawner> MoonResourceSpawner;
+
+	/** Authored sunlit encounter marker in the Moon level. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSMoonCubeCluster> MoonCubeCluster;
 
 	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
 	TArray<TWeakObjectPtr<AJTSCharacter>> ActivePlayers;

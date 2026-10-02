@@ -252,6 +252,7 @@ bool UJTSInventoryComponent::CanAddItem(EJTSItemId ItemId, int32 Count) const
 	{
 		return false;
 	}
+	if (ItemId == EJTSItemId::StellarText) return Count == 1 && HasAvailableSlot();
 	TArray<FJTSItemInstance> SimulatedSlots = ItemSlots;
 	SimulatedSlots.SetNum(FMath::Max(SimulatedSlots.Num(), GetInventoryCapacity()));
 	int32 Remaining = Count;
@@ -387,6 +388,39 @@ TMap<EJTSResourceType, int32> UJTSInventoryComponent::GetResourceAmounts() const
 		}
 	}
 	return Result;
+}
+
+bool UJTSInventoryComponent::TryExtractItemAtSlot(int32 SlotIndex, FGuid ExpectedInstanceId,
+	FJTSItemInstance& OutItem)
+{
+	OutItem.Clear();
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !ItemSlots.IsValidIndex(SlotIndex)
+		|| ItemSlots[SlotIndex].IsEmpty() || !ExpectedInstanceId.IsValid()
+		|| ItemSlots[SlotIndex].InstanceId != ExpectedInstanceId) return false;
+	OutItem = ItemSlots[SlotIndex];
+	ItemSlots[SlotIndex].Clear();
+	ClearWaistLampIfAbsent();
+	NotifyInventoryChanged();
+	return true;
+}
+
+bool UJTSInventoryComponent::TryExchangeItemAtSlot(int32 SlotIndex, FGuid ExpectedInstanceId,
+	const FJTSItemInstance& IncomingItem, FJTSItemInstance& OutReplacedItem)
+{
+	OutReplacedItem.Clear();
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority()
+		|| SlotIndex < 0 || SlotIndex >= GetInventoryCapacity() || !ItemSlots.IsValidIndex(SlotIndex)
+		|| IncomingItem.IsEmpty() || !IncomingItem.InstanceId.IsValid()
+		|| !UJTSItemDefinitionLibrary::IsGameplayItemAvailable(IncomingItem.ItemId)
+		|| IncomingItem.StackCount > GetEffectiveStackLimit(IncomingItem.ItemId)) return false;
+	const FJTSItemInstance& CurrentItem = ItemSlots[SlotIndex];
+	if (CurrentItem.IsEmpty() ? ExpectedInstanceId.IsValid()
+		: !ExpectedInstanceId.IsValid() || CurrentItem.InstanceId != ExpectedInstanceId) return false;
+	OutReplacedItem = CurrentItem;
+	ItemSlots[SlotIndex] = IncomingItem;
+	ClearWaistLampIfAbsent();
+	NotifyInventoryChanged();
+	return true;
 }
 
 bool UJTSInventoryComponent::DropItemAtSlot(int32 SlotIndex)

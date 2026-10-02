@@ -4,10 +4,219 @@
 
 #include "GameFramework/OnlineReplStructs.h"
 #include "Net/UnrealNetwork.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSStellarLootTable.h"
+
+namespace
+{
+	FJTSItemInstance MakeLockerCarriedItem(const FJTSShipLockerSlot& Slot,
+		const UJTSStellarLootTable* LootTable)
+	{
+		if (!Slot.StandardItem.IsEmpty()) return Slot.StandardItem;
+		return !Slot.StellarItemId.IsNone() && IsValid(LootTable)
+			? LootTable->MakeTextItem(Slot.StellarItemId) : FJTSItemInstance();
+	}
+}
 
 AJTSPlayerState::AJTSPlayerState()
 {
 	bReplicates = true;
+	ShipLockerSlots.SetNum(ShipLockerCapacity);
+}
+
+FJTSShipLockerSlot AJTSPlayerState::GetShipLockerSlot(int32 SlotIndex) const
+{
+	return ShipLockerSlots.IsValidIndex(SlotIndex) ? ShipLockerSlots[SlotIndex] : FJTSShipLockerSlot();
+}
+
+bool AJTSPlayerState::HasFreeShipLockerSlot() const
+{
+	for (int32 Index = 0; Index < ShipLockerCapacity; ++Index)
+	{
+		if (!ShipLockerSlots.IsValidIndex(Index) || ShipLockerSlots[Index].IsEmpty()) return true;
+	}
+	return false;
+}
+
+bool AJTSPlayerState::HasPendingStellarReveal() const
+{
+	return ShipLockerSlots.ContainsByPredicate([](const FJTSShipLockerSlot& Slot)
+	{
+		return Slot.bPendingStellarReveal;
+	});
+}
+
+bool AJTSPlayerState::TryStorePurchasedItem(const FJTSItemInstance& Item)
+{
+	if (!HasAuthority() || Item.IsEmpty()) return false;
+	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	for (FJTSShipLockerSlot& Slot : ShipLockerSlots)
+	{
+		if (!Slot.IsEmpty()) continue;
+		Slot.StandardItem = Item;
+		Slot.StellarItemId = NAME_None;
+		Slot.bPendingStellarReveal = false;
+		Slot.SlotToken = FGuid::NewGuid();
+		OnRep_ShipLockerSlots();
+		ForceNetUpdate();
+		return true;
+	}
+	return false;
+}
+
+bool AJTSPlayerState::TryStoreStellarItem(FName ItemId)
+{
+	if (!HasAuthority() || ItemId.IsNone()) return false;
+	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	for (FJTSShipLockerSlot& Slot : ShipLockerSlots)
+	{
+		if (!Slot.IsEmpty()) continue;
+		Slot.StandardItem.Clear();
+		Slot.StellarItemId = ItemId;
+		Slot.bPendingStellarReveal = false;
+		Slot.SlotToken = FGuid::NewGuid();
+		OnRep_ShipLockerSlots();
+		ForceNetUpdate();
+		return true;
+	}
+	return false;
+}
+
+bool AJTSPlayerState::TryStorePendingStellarItem(FName ItemId, int32& OutSlotIndex, FGuid& OutSlotToken)
+{
+	OutSlotIndex = INDEX_NONE;
+	OutSlotToken.Invalidate();
+	if (!HasAuthority() || ItemId.IsNone()) return false;
+	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	for (int32 Index = 0; Index < ShipLockerCapacity; ++Index)
+	{
+		FJTSShipLockerSlot& Slot = ShipLockerSlots[Index];
+		if (!Slot.IsEmpty()) continue;
+		Slot.StandardItem.Clear();
+		Slot.StellarItemId = ItemId;
+		Slot.bPendingStellarReveal = true;
+		Slot.SlotToken = FGuid::NewGuid();
+		OutSlotIndex = Index;
+		OutSlotToken = Slot.SlotToken;
+		OnRep_ShipLockerSlots();
+		ForceNetUpdate();
+		return true;
+	}
+	return false;
+}
+
+bool AJTSPlayerState::TryRevealStellarItem(int32 SlotIndex, FGuid ExpectedToken)
+{
+	if (!HasAuthority() || !ShipLockerSlots.IsValidIndex(SlotIndex)) return false;
+	FJTSShipLockerSlot& Slot = ShipLockerSlots[SlotIndex];
+	if (!Slot.bPendingStellarReveal || Slot.StellarItemId.IsNone() || !ExpectedToken.IsValid()
+		|| Slot.SlotToken != ExpectedToken) return false;
+	Slot.bPendingStellarReveal = false;
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+bool AJTSPlayerState::TryStoreCarriedItemAtSlot(int32 LockerSlotIndex, UJTSInventoryComponent* Inventory,
+	int32 CarriedSlotIndex, FGuid ExpectedItemId)
+{
+	if (!HasAuthority() || !IsValid(Inventory) || !ShipLockerSlots.IsValidIndex(LockerSlotIndex)
+		|| !ShipLockerSlots[LockerSlotIndex].IsEmpty()) return false;
+	FJTSItemInstance MovedItem;
+	if (!Inventory->TryExtractItemAtSlot(CarriedSlotIndex, ExpectedItemId, MovedItem)) return false;
+	FJTSShipLockerSlot& Slot = ShipLockerSlots[LockerSlotIndex];
+	Slot.StandardItem = MovedItem.ItemId == EJTSItemId::StellarText ? FJTSItemInstance() : MovedItem;
+	Slot.StellarItemId = MovedItem.ItemId == EJTSItemId::StellarText
+		? MovedItem.StellarItemId : NAME_None;
+	Slot.bPendingStellarReveal = false;
+	Slot.SlotToken = FGuid::NewGuid();
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+bool AJTSPlayerState::TryExchangeShipLockerItemWithCarriedSlot(int32 LockerSlotIndex,
+	FGuid ExpectedLockerToken, UJTSInventoryComponent* Inventory, int32 CarriedSlotIndex,
+	FGuid ExpectedCarriedItemId, const UJTSStellarLootTable* LootTable)
+{
+	if (!HasAuthority() || !IsValid(Inventory) || !ShipLockerSlots.IsValidIndex(LockerSlotIndex)
+		|| !ExpectedLockerToken.IsValid()) return false;
+	FJTSShipLockerSlot& LockerEntry = ShipLockerSlots[LockerSlotIndex];
+	if (LockerEntry.bPendingStellarReveal || LockerEntry.SlotToken != ExpectedLockerToken
+		|| LockerEntry.IsEmpty()) return false;
+	const FJTSItemInstance IncomingItem = MakeLockerCarriedItem(LockerEntry, LootTable);
+	if (IncomingItem.IsEmpty()) return false;
+	FJTSItemInstance ReplacedItem;
+	if (!Inventory->TryExchangeItemAtSlot(CarriedSlotIndex, ExpectedCarriedItemId,
+		IncomingItem, ReplacedItem)) return false;
+	if (ReplacedItem.IsEmpty())
+	{
+		LockerEntry.Clear();
+	}
+	else
+	{
+		LockerEntry.StandardItem = ReplacedItem.ItemId == EJTSItemId::StellarText
+			? FJTSItemInstance() : ReplacedItem;
+		LockerEntry.StellarItemId = ReplacedItem.ItemId == EJTSItemId::StellarText
+			? ReplacedItem.StellarItemId : NAME_None;
+		LockerEntry.SlotToken = FGuid::NewGuid();
+	}
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+bool AJTSPlayerState::TryDeleteShipLockerSlot(int32 SlotIndex, FGuid ExpectedToken)
+{
+	if (!HasAuthority() || !ShipLockerSlots.IsValidIndex(SlotIndex) || ShipLockerSlots[SlotIndex].IsEmpty()
+		|| ShipLockerSlots[SlotIndex].bPendingStellarReveal
+		|| !ExpectedToken.IsValid() || ShipLockerSlots[SlotIndex].SlotToken != ExpectedToken)
+	{
+		return false;
+	}
+	ShipLockerSlots[SlotIndex].Clear();
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+bool AJTSPlayerState::TryTakeShipLockerItem(int32 SlotIndex, FGuid ExpectedToken,
+	UJTSInventoryComponent* Inventory, const UJTSStellarLootTable* LootTable)
+{
+	if (!HasAuthority() || !IsValid(Inventory) || !ShipLockerSlots.IsValidIndex(SlotIndex)) return false;
+	const FJTSShipLockerSlot& Slot = ShipLockerSlots[SlotIndex];
+	if (!ExpectedToken.IsValid() || Slot.SlotToken != ExpectedToken || Slot.bPendingStellarReveal) return false;
+	const FJTSItemInstance Item = MakeLockerCarriedItem(Slot, LootTable);
+	if (Item.IsEmpty() || !Inventory->CanAddItem(Item.ItemId, Item.StackCount)) return false;
+	int32 Remaining = Item.StackCount;
+	if (!Inventory->TryAddItem(Item, Remaining) || Remaining != 0) return false;
+	ShipLockerSlots[SlotIndex].Clear();
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+void AJTSPlayerState::RestoreShipLockerSlots(const TArray<FJTSShipLockerSlot>& SavedSlots)
+{
+	if (!HasAuthority()) return;
+	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	for (int32 Index = 0; Index < ShipLockerCapacity; ++Index)
+	{
+		ShipLockerSlots[Index] = SavedSlots.IsValidIndex(Index) ? SavedSlots[Index] : FJTSShipLockerSlot();
+		// A level transition can interrupt the local reel; the earned item is still delivered.
+		ShipLockerSlots[Index].bPendingStellarReveal = false;
+		if (!ShipLockerSlots[Index].IsEmpty() && !ShipLockerSlots[Index].SlotToken.IsValid())
+		{
+			ShipLockerSlots[Index].SlotToken = FGuid::NewGuid();
+		}
+	}
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+}
+
+void AJTSPlayerState::OnRep_ShipLockerSlots()
+{
+	OnNetworkStateChanged.Broadcast();
 }
 
 int32 AJTSPlayerState::GetExperienceRequiredForNextLevel() const
@@ -25,6 +234,7 @@ int32 AJTSPlayerState::GetAbilityRank(const EJTSPlayerAbility Ability) const
 	case EJTSPlayerAbility::StackLimit: return StackLimitAbilityRank;
 	case EJTSPlayerAbility::RunSpeed: return RunSpeedAbilityRank;
 	case EJTSPlayerAbility::Stamina: return StaminaAbilityRank;
+	case EJTSPlayerAbility::CriticalChance: return CriticalChanceAbilityRank;
 	default: return 0;
 	}
 }
@@ -42,6 +252,11 @@ int32 AJTSPlayerState::GetItemStackLimit() const
 float AJTSPlayerState::GetRunSpeedMultiplier() const
 {
 	return FJTSPlayerProgressionRules::GetRunSpeedMultiplier(RunSpeedAbilityRank);
+}
+
+int32 AJTSPlayerState::GetCriticalChancePercent() const
+{
+	return FJTSPlayerProgressionRules::GetCriticalChancePercent(CriticalChanceAbilityRank);
 }
 
 FLinearColor AJTSPlayerState::GetAvatarLinearColor() const
@@ -167,7 +382,8 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 		|| Allocation.InventorySlotRanks < 0
 		|| Allocation.StackLimitRanks < 0
 		|| Allocation.RunSpeedRanks < 0
-		|| Allocation.StaminaRanks < 0)
+		|| Allocation.StaminaRanks < 0
+		|| Allocation.CriticalChanceRanks < 0)
 	{
 		return false;
 	}
@@ -177,7 +393,8 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 		|| InventorySlotAbilityRank + Allocation.InventorySlotRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
 		|| StackLimitAbilityRank + Allocation.StackLimitRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
 		|| RunSpeedAbilityRank + Allocation.RunSpeedRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| StaminaAbilityRank + Allocation.StaminaRanks > FJTSPlayerProgressionRules::MaximumAbilityRank)
+		|| StaminaAbilityRank + Allocation.StaminaRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
+		|| CriticalChanceAbilityRank + Allocation.CriticalChanceRanks > FJTSPlayerProgressionRules::MaximumAbilityRank)
 	{
 		return false;
 	}
@@ -186,6 +403,7 @@ bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Alloc
 	StackLimitAbilityRank += Allocation.StackLimitRanks;
 	RunSpeedAbilityRank += Allocation.RunSpeedRanks;
 	StaminaAbilityRank += Allocation.StaminaRanks;
+	CriticalChanceAbilityRank += Allocation.CriticalChanceRanks;
 	UnspentAbilityPoints -= TotalCost;
 	++ProgressionRevision;
 	NotifyProgressionChanged();
@@ -199,7 +417,8 @@ void AJTSPlayerState::RestoreProgression(
 	const int32 NewInventorySlotRank,
 	const int32 NewStackLimitRank,
 	const int32 NewRunSpeedRank,
-	const int32 NewStaminaRank)
+	const int32 NewStaminaRank,
+	const int32 NewCriticalChanceRank)
 {
 	if (!HasAuthority())
 	{
@@ -215,6 +434,7 @@ void AJTSPlayerState::RestoreProgression(
 	StackLimitAbilityRank = FMath::Clamp(NewStackLimitRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	RunSpeedAbilityRank = FMath::Clamp(NewRunSpeedRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	StaminaAbilityRank = FMath::Clamp(NewStaminaRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
+	CriticalChanceAbilityRank = FMath::Clamp(NewCriticalChanceRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	++ProgressionRevision;
 	NotifyProgressionChanged();
 }
@@ -262,7 +482,9 @@ void AJTSPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AJTSPlayerState, StackLimitAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, RunSpeedAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, StaminaAbilityRank);
+	DOREPLIFETIME(AJTSPlayerState, CriticalChanceAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, ProgressionRevision);
+	DOREPLIFETIME_CONDITION(AJTSPlayerState, ShipLockerSlots, COND_OwnerOnly);
 }
 
 void AJTSPlayerState::CopyProperties(APlayerState* PlayerState)
@@ -282,7 +504,10 @@ void AJTSPlayerState::CopyProperties(APlayerState* PlayerState)
 		Target->StackLimitAbilityRank = StackLimitAbilityRank;
 		Target->RunSpeedAbilityRank = RunSpeedAbilityRank;
 		Target->StaminaAbilityRank = StaminaAbilityRank;
+		Target->CriticalChanceAbilityRank = CriticalChanceAbilityRank;
 		Target->ProgressionRevision = ProgressionRevision;
+		Target->ShipLockerSlots = ShipLockerSlots;
+		for (FJTSShipLockerSlot& Slot : Target->ShipLockerSlots) Slot.bPendingStellarReveal = false;
 	}
 }
 
@@ -303,6 +528,9 @@ void AJTSPlayerState::OverrideWith(APlayerState* PlayerState)
 		StackLimitAbilityRank = Source->StackLimitAbilityRank;
 		RunSpeedAbilityRank = Source->RunSpeedAbilityRank;
 		StaminaAbilityRank = Source->StaminaAbilityRank;
+		CriticalChanceAbilityRank = Source->CriticalChanceAbilityRank;
 		ProgressionRevision = Source->ProgressionRevision;
+		ShipLockerSlots = Source->ShipLockerSlots;
+		for (FJTSShipLockerSlot& Slot : ShipLockerSlots) Slot.bPendingStellarReveal = false;
 	}
 }

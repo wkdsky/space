@@ -66,7 +66,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void FinishCurrentAttack();
 
-	/** Resolves one crosshair-aimed melee hit for an animation hit frame. */
+	/** Samples the server-side fist or held-weapon sweep at an animation hit frame. */
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void PerformHitCheck();
 
@@ -104,7 +104,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Melee|Attack")
 	FOnAttackFinished OnAttackFinished;
 
-	/** Performs one Punch, Knife, or Axe action against the currently aimed valid target. */
+	/** Starts one Punch, Knife, or Axe swing; contact is resolved by the server sweep. */
 	UFUNCTION(BlueprintCallable, Category = "Melee")
 	bool TryAttack();
 
@@ -162,6 +162,7 @@ private:
 	bool FindBestPunchCandidate(APawn* AttackingPawn, AActor*& OutTarget, FVector& OutTargetLocation, bool bRequireMeleeTargetInterface, bool bRequireLineOfSight, float MaximumTargetRange) const;
 	/** Analytic fist path for the current punch. Presentation and the server sweep share this so a hit does not wait on a rendered pose. */
 	bool GetPunchFistPath(APawn* AttackingPawn, FVector& OutStart, FVector& OutEnd) const;
+	void SweepHeldWeaponTip();
 	FVector GetMeleeTargetAimPoint(AActor* Candidate) const;
 	bool IsValidMeleeTarget(AActor* Candidate, APawn* AttackingPawn) const;
 	bool IsValidDamageTarget(AActor* Candidate, APawn* AttackingPawn) const;
@@ -200,7 +201,6 @@ private:
 	TObjectPtr<AActor> CurrentMeleeTarget;
 
 	/** One punch-only candidate acquired at swing start and revalidated at the attack-hit notify. */
-	TWeakObjectPtr<AActor> CachedMeleeTarget;
 
 	/** True while the attack input is held; this enables automatic chaining at attack-chain notifies. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Melee|Attack", meta = (AllowPrivateAccess = "true"))
@@ -278,11 +278,11 @@ private:
 	float PunchVisualElapsed = 0.0f;
 	double LastConfirmedPunchHitSeconds = -100.0;
 
-	/** Camera distance used only to acquire what lies under the screen-center crosshair. */
+	/** UI target preview distance; damage uses the fist or held-item contact sweep. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float MeleeAimTraceDistance = 1200.0f;
 
-	/** Legacy trace radius retained for weapon targeting; Punch uses the candidate search below. */
+	/** Radius of the held item's contact sweep around its authored tip. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Aim", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float MeleeAimAssistRadius = 15.0f;
 
@@ -302,8 +302,8 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Aim Assist", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.0", UIMin = "0.0", UIMax = "45.0"))
 	float MoonAntPunchAimAssistAngle = 14.0f;
 
-	/** A cached MoonAnt may move a short distance during its punch montage, but never beyond this hard limit. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Aim Assist", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", ClampMax = "205.0", UIMin = "1.0", UIMax = "205.0"))
+	/** Serialized compatibility for old punch target grace; contact now follows the fist sweep. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Melee|Legacy", meta = (AllowPrivateAccess = "true", DeprecatedProperty, DeprecationMessage = "Punch damage now uses the fist sweep."))
 	float CachedTargetGraceRange = 205.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Melee|Punch", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
@@ -346,5 +346,9 @@ private:
 	FTimerHandle HeldWeaponChainTimerHandle;
 	FTimerHandle HeldWeaponRecoveryTimerHandle;
 	TSet<TWeakObjectPtr<AActor>> HitActorsThisSwing;
+	FVector PreviousPunchSample = FVector::ZeroVector;
+	FVector PreviousWeaponTip = FVector::ZeroVector;
+	bool bHasPreviousPunchSample = false;
+	bool bHasPreviousWeaponTip = false;
 	double NextAttackTime = 0.0;
 };

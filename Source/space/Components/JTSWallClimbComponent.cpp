@@ -14,9 +14,10 @@
 FJTSClimbMotionSample FJTSClimbMotionSample::Evaluate(float Phase, EJTSClimbMotion Motion)
 {
 	Phase = FMath::Clamp(Phase, 0.0f, 1.0f);
-	const float Release = Motion == EJTSClimbMotion::Leap ? 0.18f
-		: Motion == EJTSClimbMotion::Descend ? 0.08f : 0.13f;
-	const float CatchStart = Motion == EJTSClimbMotion::Leap ? 0.76f : 0.78f;
+	const float Release = Motion == EJTSClimbMotion::Leap ? 0.20f
+		: Motion == EJTSClimbMotion::Descend ? 0.10f : 0.16f;
+	const float CatchStart = Motion == EJTSClimbMotion::Leap ? 0.74f
+		: Motion == EJTSClimbMotion::Descend ? 0.76f : 0.72f;
 	FJTSClimbMotionSample Result;
 	const float Move = FMath::SmoothStep(Release, CatchStart, Phase);
 	// Downward movement gathers speed under gravity before the hands arrest it.
@@ -49,6 +50,8 @@ void UJTSWallClimbComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(UJTSWallClimbComponent, bMantling);
 	DOREPLIFETIME(UJTSWallClimbComponent, StepStartWorldTime);
 	DOREPLIFETIME(UJTSWallClimbComponent, ActiveStepDuration);
+	DOREPLIFETIME(UJTSWallClimbComponent, StepStart);
+	DOREPLIFETIME(UJTSWallClimbComponent, StepTarget);
 }
 
 float UJTSWallClimbComponent::GetStepAlpha() const
@@ -132,6 +135,20 @@ bool UJTSWallClimbComponent::TraceClimbSurface(const FVector& Start, const FVect
 	return World->LineTraceSingleByChannel(OutHit, Start, End, ECC_Visibility, Params) && OutHit.bBlockingHit;
 }
 
+bool UJTSWallClimbComponent::FindPoseContact(const FVector& DesiredWorld,
+	FVector& OutPoint, FVector& OutNormal) const
+{
+	const FVector Normal = FVector(SurfaceNormal).GetSafeNormal();
+	if (!bClimbing || Normal.IsNearlyZero()) return false;
+	FHitResult Hit;
+	if (!TraceClimbSurface(DesiredWorld + Normal * 55.0f,
+		DesiredWorld - Normal * 95.0f, Hit) || !Hit.bBlockingHit
+		|| FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(), Normal) < 0.6f) return false;
+	OutPoint = Hit.ImpactPoint;
+	OutNormal = Hit.ImpactNormal.GetSafeNormal();
+	return true;
+}
+
 bool UJTSWallClimbComponent::ProbeClimbSurface(FHitResult& OutHit) const
 {
 	const AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner());
@@ -183,10 +200,12 @@ void UJTSWallClimbComponent::BeginClimb(const FHitResult& Hit)
 	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
 	const float CapsuleReach = Radius + FMath::Max(0.0f, Height - Radius)
 		* FMath::Abs(FVector::DotProduct(Normal, IsValid(Capsule) ? Capsule->GetUpVector() : Up));
-	const float ProbeHeight = FMath::Clamp(FVector::DotProduct(Hit.TraceStart - Character->GetActorLocation(), Up),
-		-Height * 0.5f, Height * 0.5f);
-	const FVector Target = Hit.ImpactPoint + Normal * (CapsuleReach + 7.0f)
-		+ FVector::VectorPlaneProject(-Up * ProbeHeight, Normal);
+	// Correct only the capsule's distance from the surface. Moving to the ray's
+	// impact point also carries the character along a sloped wall and can pop an
+	// airborne grab upward by nearly a meter when the ray started below the hips.
+	const FVector CurrentLocation = Character->GetActorLocation();
+	const float SurfaceDistance = FVector::DotProduct(CurrentLocation - Hit.ImpactPoint, Normal);
+	const FVector Target = CurrentLocation + Normal * (CapsuleReach + 7.0f - SurfaceDistance);
 	FHitResult MoveHit;
 	if (!Character->SetActorLocation(Target, true, &MoveHit)
 		&& FVector::DistSquared(Character->GetActorLocation(), Target) > 100.0f) return;
@@ -206,6 +225,8 @@ void UJTSWallClimbComponent::BeginClimb(const FHitResult& Hit)
 	bClimbing = true;
 	bJumpGrabArmed = false;
 	GripLocation = Character->GetActorLocation();
+	StepStart = GripLocation;
+	StepTarget = GripLocation;
 	GripSurfaceComponent = Hit.GetComponent();
 	LockBodyFacingToSurface();
 	MissingSurfaceSeconds = 0.0f;
@@ -262,7 +283,15 @@ void UJTSWallClimbComponent::FaceSurface()
 	AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner());
 	if (!IsValid(Character)) return;
 	const FVector Up = GetGravityUp();
-	const FVector IntoWall = FVector::VectorPlaneProject(-FVector(SurfaceNormal), Up).GetSafeNormal();
+	// Curved planet geometry can change normals between grips. Rotate across the
+	// travel phase instead of snapping the capsule at the instant the new grip lands.
+	const float TurnAlpha = bStepActive
+		? FMath::SmoothStep(0.16f, 0.96f,
+			FMath::Clamp(StepElapsed / FMath::Max(0.1f, ActiveStepDuration), 0.0f, 1.0f)) : 0.0f;
+	const FVector FacingNormal = bStepActive
+		? FMath::Lerp(FVector(SurfaceNormal), StepTargetNormal, TurnAlpha).GetSafeNormal()
+		: FVector(SurfaceNormal).GetSafeNormal();
+	const FVector IntoWall = FVector::VectorPlaneProject(-FacingNormal, Up).GetSafeNormal();
 	if (!IntoWall.IsNearlyZero()) Character->SetActorRotation(FRotationMatrix::MakeFromZX(Up, IntoWall).Rotator());
 }
 
@@ -581,6 +610,18 @@ void UJTSWallClimbComponent::ServerArmJumpGrab_Implementation()
 	ArmJumpGrab();
 }
 
+void UJTSWallClimbComponent::TryJumpImpactGrip(const FHitResult& Impact)
+{
+	AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner());
+	const UCharacterMovementComponent* Movement = IsValid(Character) ? Character->GetCharacterMovement() : nullptr;
+	if (!IsValid(Character) || !Character->HasAuthority() || bClimbing || !bJumpGrabArmed
+		|| !IsValid(Movement) || !Movement->IsFalling() || !Impact.bBlockingHit
+		|| !IsValidSurfaceNormal(Impact.ImpactNormal) || !CanClimbNow()
+		|| FVector::DotProduct(Movement->Velocity, -Impact.ImpactNormal.GetSafeNormal()) < 60.0f) return;
+	// CharacterMovement reports this hit before sliding off an unwalkable face.
+	BeginClimb(Impact);
+}
+
 void UJTSWallClimbComponent::TryJumpLandingGrip(const FHitResult& LandingHit)
 {
 	const AActor* Owner = GetOwner();
@@ -667,27 +708,60 @@ void UJTSWallClimbComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (!IsValid(Character)) return;
 	if (!bClimbing)
 	{
-		// Only an armed jump can auto-catch. Wait for descent and near contact so
-		// walking past a wall or jumping away from it cannot start a climb.
+		// An armed jump may catch while rising or falling, provided its velocity
+		// actually approaches a steep surface and the capsule is within reach.
 		if (!Character->HasAuthority() || !bJumpGrabArmed) return;
 		const UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
 		const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
 		const FVector Up = GetGravityUp();
-		if (!IsValid(Movement) || !IsValid(Capsule) || !Movement->IsFalling()
-			|| FVector::DotProduct(Movement->Velocity, Up) >= -10.0f || !CanClimbNow()) return;
-		FHitResult Hit;
+		if (!IsValid(Movement) || !IsValid(Capsule) || !Movement->IsFalling() || !CanClimbNow()) return;
 		const float Radius = Capsule->GetScaledCapsuleRadius();
 		const float Height = Capsule->GetScaledCapsuleHalfHeight();
-		if (ProbeClimbSurface(Hit))
+		FHitResult BestHit;
+		float BestGap = TNumericLimits<float>::Max();
+		auto ConsiderGrip = [&](const FHitResult& Candidate)
 		{
+			if (!Candidate.bBlockingHit || !IsValidSurfaceNormal(Candidate.ImpactNormal)) return;
+			const FVector Normal = Candidate.ImpactNormal.GetSafeNormal();
+			const float ApproachSpeed = FVector::DotProduct(Movement->Velocity, -Normal);
+			const bool bDescendingAlongFace = FVector::DotProduct(Movement->Velocity, Up) < -60.0f
+				&& ApproachSpeed > -30.0f
+				&& FVector::DotProduct(Character->GetActorForwardVector(), -Normal) > 0.35f;
+			if (ApproachSpeed < 60.0f && !bDescendingAlongFace) return;
 			const float CapsuleReach = Radius + FMath::Max(0.0f, Height - Radius)
-				* FMath::Abs(FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(), Capsule->GetUpVector()));
-			if (Hit.Distance <= CapsuleReach + JumpGrabSurfaceGapCm) BeginClimb(Hit);
+				* FMath::Abs(FVector::DotProduct(Normal, Capsule->GetUpVector()));
+			const float Gap = FVector::DotProduct(Candidate.ImpactPoint - Candidate.TraceStart, -Normal)
+				- CapsuleReach;
+			if (Gap <= JumpGrabSurfaceGapCm && Gap < BestGap)
+			{
+				BestGap = Gap;
+				BestHit = Candidate;
+			}
+		};
+		FHitResult ForwardHit;
+		if (ProbeClimbSurface(ForwardHit)) ConsiderGrip(ForwardHit);
+		const FVector FlightDirection = Movement->Velocity.GetSafeNormal();
+		if (!FlightDirection.IsNearlyZero())
+		{
+			for (const float HeightFraction : { 0.15f, -0.20f, -0.45f })
+			{
+				const FVector Start = Character->GetActorLocation() + Up * Height * HeightFraction;
+				FHitResult FlightHit;
+				if (TraceClimbSurface(Start, Start + FlightDirection * ProbeDistance, FlightHit))
+				{
+					FlightHit.TraceStart = Start;
+					ConsiderGrip(FlightHit);
+				}
+			}
 		}
+		if (BestHit.bBlockingHit) BeginClimb(BestHit);
 		return;
 	}
 	LockBodyFacingToSurface();
-	FaceSurface();
+	// During a step the server blends between grip normals. Clients let the
+	// replicated actor rotation carry that blend instead of reapplying the old
+	// surface normal each frame until the next grip replicates.
+	if (Character->HasAuthority() || StepStartWorldTime < 0.0f) FaceSurface();
 	if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
 	{
 		if (Movement->MovementMode != MOVE_Flying) Movement->SetMovementMode(MOVE_Flying);

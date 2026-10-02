@@ -32,6 +32,7 @@
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSStellarLootTable.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -451,6 +452,18 @@ void AJTSSpacecraftActor::OnRep_Controller()
 
 void AJTSSpacecraftActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (HasAuthority())
+	{
+		for (FPendingStellarReveal& Pending : PendingStellarReveals)
+		{
+			GetWorldTimerManager().ClearTimer(Pending.TimerHandle);
+			if (AJTSPlayerState* const State = Pending.PlayerState.Get())
+			{
+				State->TryRevealStellarItem(Pending.SlotIndex, Pending.SlotToken);
+			}
+		}
+		PendingStellarReveals.Reset();
+	}
 	bDisembarkRequestPending = false;
 	UnregisterFlightInputMappingContext();
 	if (FlightMovementComponent != nullptr)
@@ -1151,10 +1164,13 @@ EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, E
 {
 	// The workshop belongs exclusively to the active SpaceWorld surface phase. This validation
 	// mirrors the prompt gate so a client cannot open/purchase from it during Earth collection.
-	if (!HasAuthority() || !IsSpaceWorldSurfaceActive() || !IsValid(Player) || !IsPawnInBoardingRange(Player))
+	if (!HasAuthority() || !CanUseShipTerminal(Player))
 	{
 		return EJTSShopPurchaseResult::DeliveryFailed;
 	}
+	AJTSPlayerState* const BuyerState = Player->GetPlayerState<AJTSPlayerState>();
+	if (!IsValid(BuyerState)) return EJTSShopPurchaseResult::DeliveryFailed;
+	if (!BuyerState->HasFreeShipLockerSlot()) return EJTSShopPurchaseResult::InventoryFull;
 
 	TMap<EJTSResourceType, int32> Costs;
 	if (!BuildShopCosts(ItemId, Costs))
@@ -1166,15 +1182,95 @@ EJTSShopPurchaseResult AJTSSpacecraftActor::TryPurchase(AJTSCharacter* Player, E
 		return EJTSShopPurchaseResult::InsufficientResources;
 	}
 
-	bool bDropped = false;
-	if (!DeliverShopPurchase(Player, UJTSItemDefinitionLibrary::MakeInstance(ItemId), bDropped))
+	if (!DeliverShopPurchase(Player, UJTSItemDefinitionLibrary::MakeInstance(ItemId)))
 	{
 		// A transaction either yields the requested item or restores every material.
 		DepositResourceAmounts(Costs);
 		return EJTSShopPurchaseResult::DeliveryFailed;
 	}
 
-	return bDropped ? EJTSShopPurchaseResult::SucceededDropped : EJTSShopPurchaseResult::Succeeded;
+	return EJTSShopPurchaseResult::Succeeded;
+}
+
+const UJTSStellarLootTable* AJTSSpacecraftActor::GetStellarLootTable() const
+{
+	return StellarLootTable.LoadSynchronous();
+}
+
+EJTSStellarRollResult AJTSSpacecraftActor::TryRollStellarItem(AJTSCharacter* Player, FName& OutItemId,
+	int32& OutSlotIndex)
+{
+	OutItemId = NAME_None;
+	OutSlotIndex = INDEX_NONE;
+	if (!HasAuthority() || !CanUseShipTerminal(Player)) return EJTSStellarRollResult::NotAvailable;
+	AJTSPlayerState* const BuyerState = Player->GetPlayerState<AJTSPlayerState>();
+	const UJTSStellarLootTable* const LootTable = GetStellarLootTable();
+	if (!IsValid(BuyerState) || !IsValid(LootTable) || LootTable->Entries.IsEmpty())
+	{
+		return EJTSStellarRollResult::NotAvailable;
+	}
+	if (!BuyerState->HasFreeShipLockerSlot()) return EJTSStellarRollResult::InventoryFull;
+	if (BuyerState->HasPendingStellarReveal()) return EJTSStellarRollResult::CoolingDown;
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (const double* const LastTime = LastStellarRollTime.Find(BuyerState);
+		LastTime && Now - *LastTime < LootTable->SpinCooldownSeconds)
+	{
+		return EJTSStellarRollResult::CoolingDown;
+	}
+
+	TMap<EJTSResourceType, int32> Costs;
+	for (const FJTSItemCost& Cost : LootTable->SpinCosts)
+	{
+		if (Cost.Amount > 0) Costs.FindOrAdd(Cost.ResourceType) += Cost.Amount;
+	}
+	for (const TPair<EJTSResourceType, int32>& Cost : Costs)
+	{
+		if (!HasResource(Cost.Key, Cost.Value)) return EJTSStellarRollResult::InsufficientResources;
+	}
+	const UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent();
+	const TArray<FJTSItemInstance> CarriedItems = IsValid(Inventory)
+		? Inventory->GetItemSlots() : TArray<FJTSItemInstance>();
+	if (!LootTable->Roll(BuyerState->GetShipLockerSlots(), OutItemId, CarriedItems))
+	{
+		return EJTSStellarRollResult::NotAvailable;
+	}
+	if (!Costs.IsEmpty() && !TryConsumeResourceAmounts(Costs))
+	{
+		OutItemId = NAME_None;
+		return EJTSStellarRollResult::InsufficientResources;
+	}
+	FGuid SlotToken;
+	if (!BuyerState->TryStorePendingStellarItem(OutItemId, OutSlotIndex, SlotToken))
+	{
+		if (!Costs.IsEmpty()) DepositResourceAmounts(Costs);
+		OutItemId = NAME_None;
+		return EJTSStellarRollResult::InventoryFull;
+	}
+	FPendingStellarReveal& Pending = PendingStellarReveals.AddDefaulted_GetRef();
+	Pending.PlayerState = BuyerState;
+	Pending.SlotIndex = OutSlotIndex;
+	Pending.SlotToken = SlotToken;
+	FTimerDelegate RevealDelegate = FTimerDelegate::CreateUObject(this,
+		&AJTSSpacecraftActor::CompletePendingStellarReveal, SlotToken);
+	GetWorldTimerManager().SetTimer(Pending.TimerHandle, RevealDelegate,
+		UJTSStellarLootTable::RevealDurationSeconds, false);
+	LastStellarRollTime.Add(BuyerState, Now);
+	return EJTSStellarRollResult::Succeeded;
+}
+
+void AJTSSpacecraftActor::CompletePendingStellarReveal(FGuid SlotToken)
+{
+	const int32 PendingIndex = PendingStellarReveals.IndexOfByPredicate([&SlotToken](const FPendingStellarReveal& Entry)
+	{
+		return Entry.SlotToken == SlotToken;
+	});
+	if (!HasAuthority() || !PendingStellarReveals.IsValidIndex(PendingIndex)) return;
+	const FPendingStellarReveal Pending = PendingStellarReveals[PendingIndex];
+	PendingStellarReveals.RemoveAtSwap(PendingIndex);
+	if (AJTSPlayerState* const State = Pending.PlayerState.Get())
+	{
+		State->TryRevealStellarItem(Pending.SlotIndex, Pending.SlotToken);
+	}
 }
 
 bool AJTSSpacecraftActor::TryGrantDebugResources(AJTSCharacter* Player)
@@ -3076,9 +3172,8 @@ bool AJTSSpacecraftActor::BuildShopCosts(EJTSItemId ItemId, TMap<EJTSResourceTyp
 	return !OutCosts.IsEmpty();
 }
 
-bool AJTSSpacecraftActor::DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item, bool& bOutDropped)
+bool AJTSSpacecraftActor::DeliverShopPurchase(AJTSCharacter* Player, const FJTSItemInstance& Item)
 {
-	bOutDropped = false;
 	if (!IsValid(Player) || Item.IsEmpty())
 	{
 		return false;
@@ -3090,28 +3185,8 @@ bool AJTSSpacecraftActor::DeliverShopPurchase(AJTSCharacter* Player, const FJTSI
 		return false;
 	}
 
-	bool bDelivered = false;
-	if (UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent())
-	{
-		if (Inventory->CanAddItem(Item.ItemId, Item.StackCount))
-		{
-			int32 Remaining = Item.StackCount;
-			bDelivered = Inventory->TryAddItem(Item, Remaining) && Remaining == 0;
-		}
-	}
-
-	if (bDelivered)
-	{
-		return true;
-	}
-
-	const FVector DropOrigin = IsValid(ExitPoint)
-		? ExitPoint->GetComponentLocation()
-		: GetActorLocation() + GetActorRightVector() * FMath::Max(150.0f, GetBoardingInteractionRadius() * 0.55f);
-	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
-		GetWorld(), Item, DropOrigin, Player, this, Player->GetActorForwardVector());
-	bOutDropped = IsValid(Pickup);
-	return bOutDropped;
+	AJTSPlayerState* const BuyerState = Player->GetPlayerState<AJTSPlayerState>();
+	return IsValid(BuyerState) && BuyerState->TryStorePurchasedItem(Item);
 }
 
 void AJTSSpacecraftActor::DepositResourcesFromOverlappingPlayers()
