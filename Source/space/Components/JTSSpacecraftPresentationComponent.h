@@ -8,7 +8,9 @@
 #include "JTSSpacecraftPresentationComponent.generated.h"
 
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class USpotLightComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
 
 /**
@@ -62,6 +64,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "0.0", UIMin = "0.0", ClampMax = "0.5"))
 	float ExhaustVisibleThreshold = 0.04f;
 
+	/** Project art for the spherical cruise envelope, assigned on the ship Blueprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Presentation|Antigravity", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMesh> AntigravityFieldMesh;
+
+	/** Translucent field material with a scalar FieldAlpha parameter. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Presentation|Antigravity", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> AntigravityFieldMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Presentation|Antigravity", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float AntigravityFieldPadding = 110.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Presentation|Antigravity", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", UIMin = "0.05"))
+	float AntigravityFieldDeployDuration = 0.28f;
+
 	/** How far one nose beam still lights terrain, in centimetres. */
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Headlight", meta = (ClampMin = "100.0", UIMin = "100.0"))
 	float HeadlightRange = 12000.0f;
@@ -105,6 +121,8 @@ private:
 	void ApplyGearPose(const FGearBinding& Leg, float Eased) const;
 	void UpdateGear(float DeltaTime);
 	void UpdateExhaust(float DeltaTime);
+	void EnsureAntigravityField();
+	void UpdateCruiseMode(float DeltaTime);
 	float GetDesiredGearAlpha() const;
 	float GetCommandedMainThrottle() const;
 	float GetCommandedLiftThrottle() const;
@@ -123,6 +141,9 @@ private:
 	TArray<FGearBinding> Gear;
 	TArray<FHeadlightBinding> Headlights;
 	TArray<FPlumeBinding> Plumes;
+	TWeakObjectPtr<UStaticMeshComponent> AntigravityField;
+	TObjectPtr<UMaterialInstanceDynamic> AntigravityFieldDynamicMaterial;
+	FVector AntigravityFieldFullScale = FVector::OneVector;
 	/** Authored deployed poses, keyed by component name. Rediscovery must not recapture an animated pose. */
 	TMap<FName, FVector> CapturedGearLocation;
 	TMap<FName, FRotator> CapturedGearRotation;
@@ -130,5 +151,7 @@ private:
 	float GearAlpha = 1.0f;
 	float SmoothedMainThrottle = 0.0f;
 	float SmoothedLiftThrottle = 0.0f;
+	float AntigravityFieldAlpha = 0.0f;
+	bool bCruiseMode = false;
 	bool bRigReady = false;
 };

@@ -18,6 +18,10 @@ struct SPACE_API FJTSShipLockerSlot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
 	FName StellarItemId = NAME_None;
 
+	/** Nonempty only for an assembled weapon; StellarItemId is then its attachment. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
+	FName StellarCoreId = NAME_None;
+
 	/** Reserved on the server while the reel spins. The UI must keep this slot visually empty. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
 	bool bPendingStellarReveal = false;
@@ -31,6 +35,7 @@ struct SPACE_API FJTSShipLockerSlot
 	{
 		StandardItem.Clear();
 		StellarItemId = NAME_None;
+		StellarCoreId = NAME_None;
 		bPendingStellarReveal = false;
 		SlotToken.Invalidate();
 	}

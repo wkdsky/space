@@ -9,6 +9,7 @@
 #include "Materials/MaterialInterface.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetLandingTypes.h"
+#include "space/World/JTSSpaceWorldManager.h"
 
 UJTSSpacecraftPresentationComponent::UJTSSpacecraftPresentationComponent()
 {
@@ -29,11 +30,19 @@ void UJTSSpacecraftPresentationComponent::BeginPlay()
 		ApplyGearPose(Leg, Eased);
 	}
 	EnsureHeadlights();
+	EnsureAntigravityField();
+	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+	{
+		bCruiseMode = Manager->IsCruisePresentationActive(Cast<AJTSSpacecraftActor>(GetOwner()));
+	}
+	AntigravityFieldAlpha = bCruiseMode ? 1.0f : 0.0f;
+	UpdateCruiseMode(0.0f);
 	SmoothedMainThrottle = GetCommandedMainThrottle();
 	SmoothedLiftThrottle = GetCommandedLiftThrottle();
 	for (FPlumeBinding& Plume : Plumes)
 	{
-		ApplyPlume(Plume, Plume.bIsMainNozzle ? SmoothedMainThrottle : SmoothedLiftThrottle);
+		ApplyPlume(Plume, bCruiseMode ? 0.0f
+			: (Plume.bIsMainNozzle ? SmoothedMainThrottle : SmoothedLiftThrottle));
 	}
 }
 
@@ -59,7 +68,91 @@ void UJTSSpacecraftPresentationComponent::TickComponent(
 	}
 	UpdateHeadlights();
 	UpdateGear(DeltaTime);
+	UpdateCruiseMode(DeltaTime);
 	UpdateExhaust(DeltaTime);
+}
+
+void UJTSSpacecraftPresentationComponent::EnsureAntigravityField()
+{
+	AJTSSpacecraftActor* const Ship = Cast<AJTSSpacecraftActor>(GetOwner());
+	if (!IsValid(Ship) || AntigravityField.IsValid()
+		|| !IsValid(AntigravityFieldMesh) || !IsValid(AntigravityFieldMaterial))
+	{
+		return;
+	}
+
+	UStaticMeshComponent* Hull = nullptr;
+	TInlineComponentArray<UStaticMeshComponent*> Meshes(Ship);
+	for (UStaticMeshComponent* const Mesh : Meshes)
+	{
+		if (IsValid(Mesh) && Mesh->GetName().Contains(TEXT("SpacecraftMesh")))
+		{
+			Hull = Mesh;
+			break;
+		}
+	}
+	if (!IsValid(Hull) || !IsValid(Hull->GetStaticMesh()))
+	{
+		return;
+	}
+
+	UStaticMeshComponent* const Field = NewObject<UStaticMeshComponent>(Ship, TEXT("AntigravityField"));
+	if (!IsValid(Field))
+	{
+		return;
+	}
+	Ship->AddInstanceComponent(Field);
+	Field->SetupAttachment(Ship->GetRootComponent());
+	Field->SetStaticMesh(AntigravityFieldMesh);
+	Field->SetMaterial(0, AntigravityFieldMaterial);
+	Field->SetMobility(EComponentMobility::Movable);
+	Field->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Field->SetGenerateOverlapEvents(false);
+	Field->SetCanEverAffectNavigation(false);
+	Field->SetCastShadow(false);
+	Field->SetVisibility(false);
+	Field->SetTranslucentSortPriority(1);
+	const FBoxSphereBounds HullBounds = Hull->GetStaticMesh()->GetBounds();
+	const FTransform HullToRoot = Hull->GetRelativeTransform();
+	const float MeshRadius = FMath::Max(AntigravityFieldMesh->GetBounds().BoxExtent.GetMax(), 1.0f);
+	const float Radius = HullBounds.SphereRadius * HullToRoot.GetScale3D().GetAbsMax()
+		+ FMath::Max(0.0f, AntigravityFieldPadding);
+	AntigravityFieldFullScale = FVector(Radius / MeshRadius);
+	Field->SetRelativeLocation(HullToRoot.TransformPosition(HullBounds.Origin));
+	// Keep the translucent shell stationary. Growing it through the third-person camera
+	// produces a full-screen shimmer when the camera lies near its surface.
+	Field->SetRelativeScale3D(AntigravityFieldFullScale);
+	Field->RegisterComponent();
+	AntigravityFieldDynamicMaterial = Field->CreateDynamicMaterialInstance(0, AntigravityFieldMaterial);
+	AntigravityField = Field;
+}
+
+void UJTSSpacecraftPresentationComponent::UpdateCruiseMode(float DeltaTime)
+{
+	const AJTSSpacecraftActor* const Ship = Cast<AJTSSpacecraftActor>(GetOwner());
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	bCruiseMode = IsValid(Ship) && IsValid(Manager) && Manager->IsCruisePresentationActive(Ship);
+	if (!AntigravityField.IsValid())
+	{
+		EnsureAntigravityField();
+	}
+
+	const float Duration = FMath::Max(0.05f, AntigravityFieldDeployDuration);
+	AntigravityFieldAlpha = FMath::FInterpConstantTo(AntigravityFieldAlpha,
+		bCruiseMode ? 1.0f : 0.0f, DeltaTime, 1.0f / Duration);
+	if (UStaticMeshComponent* const Field = AntigravityField.Get())
+	{
+		Field->SetVisibility(AntigravityFieldAlpha > KINDA_SMALL_NUMBER);
+		Field->SetRelativeScale3D(AntigravityFieldFullScale);
+	}
+	if (IsValid(AntigravityFieldDynamicMaterial))
+	{
+		AntigravityFieldDynamicMaterial->SetScalarParameterValue(TEXT("FieldAlpha"), AntigravityFieldAlpha);
+		// The material already contains a travelling formation front and bright rim.
+		// Drive that front instead of moving the mesh across the camera.
+		AntigravityFieldDynamicMaterial->SetScalarParameterValue(TEXT("FieldFormation"),
+			FMath::SmoothStep(0.0f, 1.0f, AntigravityFieldAlpha));
+	}
 }
 
 float UJTSSpacecraftPresentationComponent::GetGearDeployAlpha() const
@@ -518,8 +611,11 @@ void UJTSSpacecraftPresentationComponent::UpdateExhaust(float DeltaTime)
 {
 	const float Response = FMath::Max(0.1f, ExhaustResponse);
 	const float Blend = 1.0f - FMath::Exp(-Response * DeltaTime);
-	SmoothedMainThrottle = FMath::Lerp(SmoothedMainThrottle, GetCommandedMainThrottle(), Blend);
-	SmoothedLiftThrottle = FMath::Lerp(SmoothedLiftThrottle, GetCommandedLiftThrottle(), Blend);
+	SmoothedMainThrottle = FMath::Lerp(SmoothedMainThrottle,
+		bCruiseMode ? 0.0f : GetCommandedMainThrottle(), Blend);
+	SmoothedLiftThrottle = FMath::Lerp(SmoothedLiftThrottle,
+		bCruiseMode ? 0.0f : GetCommandedLiftThrottle(), Blend);
+	const float ConventionalDriveAlpha = 1.0f - FMath::SmoothStep(0.0f, 1.0f, AntigravityFieldAlpha);
 
 	// A little lengthwise flicker keeps a held key from looking like a frozen cone.
 	const float Flicker = 0.92f + 0.08f * FMath::Sin(GetWorld() != nullptr
@@ -528,7 +624,8 @@ void UJTSSpacecraftPresentationComponent::UpdateExhaust(float DeltaTime)
 
 	for (FPlumeBinding& Plume : Plumes)
 	{
-		const float Strength = (Plume.bIsMainNozzle ? SmoothedMainThrottle : SmoothedLiftThrottle) * Flicker;
+		const float Strength = (Plume.bIsMainNozzle ? SmoothedMainThrottle : SmoothedLiftThrottle)
+			* ConventionalDriveAlpha * Flicker;
 		ApplyPlume(Plume, Strength);
 	}
 }

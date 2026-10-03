@@ -32,7 +32,9 @@ enum class EJTSItemId : uint8
 	/** Serialized ice-axe value repurposed as dual pistols to preserve existing saves. */
 	IceAxe UMETA(DisplayName = "Dual Pistols"),
 	/** Text-only stellar loot identity; the specific entry remains data driven. */
-	StellarText UMETA(DisplayName = "Stellar Item")
+	StellarText UMETA(DisplayName = "Stellar Item"),
+	/** Assembled from one core and its matching attachment in the ship locker. */
+	StellarWeapon UMETA(DisplayName = "Stellar Weapon")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */
@@ -133,13 +135,18 @@ struct SPACE_API FJTSItemInstance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FName StellarItemId;
 
+	/** Set for an assembled StellarWeapon; StellarItemId identifies its attachment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	FName StellarCoreId;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FText CustomDisplayName;
 
 	bool IsEmpty() const
 	{
 		return ItemId == EJTSItemId::None || StackCount <= 0
-			|| (ItemId == EJTSItemId::StellarText && StellarItemId.IsNone());
+			|| (ItemId == EJTSItemId::StellarText && StellarItemId.IsNone())
+			|| (ItemId == EJTSItemId::StellarWeapon && (StellarCoreId.IsNone() || StellarItemId.IsNone()));
 	}
 	void Clear()
 	{
@@ -148,6 +155,7 @@ struct SPACE_API FJTSItemInstance
 		Durability = -1.0f;
 		InstanceId.Invalidate();
 		StellarItemId = NAME_None;
+		StellarCoreId = NAME_None;
 		CustomDisplayName = FText::GetEmpty();
 	}
 };

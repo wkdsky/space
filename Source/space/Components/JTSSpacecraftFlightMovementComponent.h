@@ -213,6 +213,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "10.0"))
 	float SurfaceTerrainAvoidancePitchMarginDegrees = 3.0f;
 
+	/** Clearance above the entry threshold required before the nose guard can release. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float SurfaceNosePitchReleaseDistance = 120.0f;
+
+	/** Time the predicted path must remain clear before releasing the pitch limit. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "0.5"))
+	float SurfaceNosePitchReleaseDelay = 0.18f;
+
+	/** Rise promptly toward an uphill safety angle, then relax more gently over uneven samples. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float SurfaceTerrainPitchAttackDegreesPerSecond = 90.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float SurfaceTerrainPitchRelaxDegreesPerSecond = 12.0f;
+
 	/** Fallback desired descent duration used to derive a controlled initial vertical speed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float DefaultLandingDuration = 2.0f;
@@ -275,7 +290,8 @@ private:
 	void RefreshSurfaceProximity(float DeltaTime);
 	void UpdateReferenceFrame();
 	void ApplyPlanetGravity(float DeltaTime);
-	FSurfaceAvoidance EvaluateSurfaceAvoidance() const;
+	FSurfaceAvoidance EvaluateSurfaceAvoidance(float DeltaTime);
+	void ResetSurfaceNoseGuard();
 	void ApplySurfaceClearanceProtection(float DeltaTime, const FSurfaceAvoidance& Avoidance);
 	FQuat UpdateRotation(float DeltaTime, const FSurfaceAvoidance& Avoidance);
 	FQuat BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation, const FSurfaceAvoidance& Avoidance) const;
@@ -312,11 +328,14 @@ private:
 	float SurfaceFlightAssistAlpha = 0.0f;
 	float CachedSurfaceAltitude = 0.0f;
 	float SurfaceProximityProbeElapsed = 0.0f;
+	float SurfaceNosePitchClearElapsed = 0.0f;
+	float SmoothedSurfaceMinimumPitch = 0.0f;
 	bool bBoosting = false;
 	bool bBraking = false;
 	bool bAssistedLanding = false;
 	bool bInertialReferenceUpInitialized = false;
 	bool bHasSurfaceProximity = false;
+	bool bSurfaceNoseGuardActive = false;
 	float AssistedLandingClearance = 0.0f;
 	float AssistedLandingDescentSpeed = 0.0f;
 	float AssistedLandingElapsed = 0.0f;

@@ -93,6 +93,20 @@ public:
 	void ServerTakeShipLockerSlot(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken);
 
 	UFUNCTION(Server, Reliable)
+	void ServerMoveShipLockerSlot(AJTSSpacecraftActor* Spacecraft, int32 FromSlotIndex,
+		FGuid ExpectedFromToken, int32 ToSlotIndex, FGuid ExpectedToToken);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShipLockerMoveResult(bool bSucceeded);
+
+	UFUNCTION(Server, Reliable)
+	void ServerCombineStellarSlots(AJTSSpacecraftActor* Spacecraft, int32 CoreSlotIndex,
+		FGuid ExpectedCoreToken, FGuid ExpectedAttachmentToken);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveStellarCombineResult(bool bSucceeded);
+
+	UFUNCTION(Server, Reliable)
 	void ServerExchangeShipLockerWithCarriedSlot(AJTSSpacecraftActor* Spacecraft, int32 LockerSlotIndex,
 		FGuid ExpectedLockerToken, int32 CarriedSlotIndex, FGuid ExpectedCarriedInstanceId);
 

@@ -66,8 +66,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	AJTSPlanetAnchor* GetCurrentPlanet() const;
 
+	/** The body used by flight navigation even after its gravity influence has ended. */
+	const AJTSPlanetAnchor* GetNavigationReferencePlanet(const AJTSSpacecraftActor* Spacecraft) const;
+
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
 	EJTSSpaceTravelState GetCurrentTravelState() const;
+
+	/** Shared visual boundary for the exhaust, antigravity field, and navigation dial. */
+	UFUNCTION(BlueprintPure, Category = "Space World|Cruise")
+	bool IsCruisePresentationActive(const AJTSSpacecraftActor* Spacecraft) const;
 
 	/** True from the moment Space is pressed to leave the surface until the ship is parked again. */
 	UFUNCTION(BlueprintPure, Category = "Space World|State")
@@ -145,8 +152,11 @@ public:
 	/** Distance the navigation and sky should treat as separating the ship from this body, in centimetres. */
 	float GetApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 
-	/** Heliocentric cruise distance for the navigation dial, in centimetres. Grows and shrinks with travel progress along the route. */
+	/** Heliocentric cruise distance for the navigation dial, in centimetres. Follows radial travel from each body's release shell. */
 	float GetCruiseRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
+
+	/** Speed in the same navigation scale as the surface dial or compressed cruise route. */
+	float GetNavigationSpeedCentimetersPerSecond(const AJTSSpacecraftActor* Spacecraft) const;
 
 	/**
 	 * Navigation-only height above a body's ground, in centimetres. Touched down reads zero.
@@ -155,11 +165,12 @@ public:
 	 */
 	float GetNavigationSurfaceRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 
-	/**
-	 * True while this body is being drawn at its authored size for the ship. Surface interactables
-	 * may exist only inside this band; outside it the mesh is already an impostor.
-	 */
+	/** True while this body is being drawn at its authored size for the ship. */
 	bool IsPlanetPresentedAtAuthoredScale(const AJTSPlanetAnchor* Planet) const;
+
+	/** Shared navigation-dial heights for every planet, regardless of flight direction. */
+	static constexpr float SurfaceContentTransitionKilometers = 17.0f;
+	static constexpr float CruiseTransitionKilometers = 18.0f;
 
 	void GetRegisteredPlanets(TArray<AJTSPlanetAnchor*>& OutPlanets) const;
 
@@ -275,24 +286,8 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float CruiseLocalHorizonKilometers = 500.0f;
 
-	/**
-	 * Altitude above the gameplay surface that stays at authored scale. Ship combat and surface
-	 * interaction inside this band see the planet at the size it was placed.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AuthoredScaleAltitudeCentimeters = 50000.0f;
+	/** Maps the compressed level corridor to journey distance without an AU jump at release. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Cruise", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0", UIMax = "8.0"))
+	float CruiseDistanceEaseExponent = 5.0f;
 
-	/**
-	 * Extra altitude the ship must climb before a full-scale body may start shrinking. The gap
-	 * stops a ship skimming the 500 m line from scaling the planet every frame.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float AuthoredScaleReleaseMarginCentimeters = 8000.0f;
-
-	/**
-	 * Extra distance past the release line before surface actors are hidden. Content is already
-	 * gone while the mesh is still essentially full size, so the pop is a distant speck.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Space World|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float SurfaceContentHideMarginCentimeters = 4000.0f;
 };

@@ -14,7 +14,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "space/Core/JTSGameState.h"
-#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Interaction/IInteractable.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
@@ -26,6 +26,8 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingSite.h"
+#include "space/World/JTSPlanetEnemySettlement.h"
+#include "space/World/JTSPlanetSettlementEnemy.h"
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 
 
@@ -34,29 +36,58 @@ namespace
 	/** The manager is looked up frequently by character components, so cache the persistent actor after one lookup. */
 	TMap<const UWorld*, TWeakObjectPtr<AJTSSpaceWorldManager>> GSpaceWorldManagers;
 
-	float ResolveSurfaceAltitude(
-		const AJTSSpacecraftActor* Spacecraft,
-		const AJTSPlanetAnchor* Planet,
-		const FVector& SpacecraftLocation)
+	// The near-surface dial deliberately expands the compact level's metres into displayed
+	// kilometres. The two handoffs are specified in those displayed units, not map kilometres.
+	constexpr float SurfaceNavigationScaleLengthCentimeters = 8000.0f;
+	constexpr float SurfaceNavigationLogGainCentimeters = 1200000.0f;
+	constexpr float SurfaceNavigationLowOrbitCentimeters = 12000000.0f;
+
+	float NavigationRangeFromAltitude(float AltitudeCentimeters)
 	{
-		float SurfaceAltitude = 0.0f;
-		if (IsValid(Spacecraft))
-		{
-			if (const UJTSSpacecraftFlightMovementComponent* const Movement = Spacecraft->GetFlightMovementComponent();
-				Movement != nullptr && Movement->GetResolvedSurfaceAltitude(Planet, SurfaceAltitude))
-			{
-				return SurfaceAltitude;
-			}
-		}
+		return FMath::Min(SurfaceNavigationLowOrbitCentimeters,
+			SurfaceNavigationLogGainCentimeters * FMath::Loge(
+				1.0f + FMath::Max(0.0f, AltitudeCentimeters) / SurfaceNavigationScaleLengthCentimeters));
+	}
 
-		if (IsValid(Planet) && Planet->GetAltitudeAboveSurface(SpacecraftLocation, SurfaceAltitude))
-		{
-			return SurfaceAltitude;
-		}
+	float AltitudeFromNavigationKilometers(float NavigationKilometers)
+	{
+		return SurfaceNavigationScaleLengthCentimeters
+			* (FMath::Exp(FMath::Max(0.0f, NavigationKilometers) * 100000.0f
+				/ SurfaceNavigationLogGainCentimeters) - 1.0f);
+	}
 
-		// The authored radius remains a safe fallback for unloaded/invalid collision, never the
-		// primary source for a loaded real planet.
-		return IsValid(Planet) ? Planet->GetApproximateAltitude(SpacecraftLocation) : 0.0f;
+	float CruiseTransitionAltitude()
+	{
+		return AltitudeFromNavigationKilometers(AJTSSpaceWorldManager::CruiseTransitionKilometers);
+	}
+
+	float SurfaceContentTransitionAltitude()
+	{
+		return AltitudeFromNavigationKilometers(AJTSSpaceWorldManager::SurfaceContentTransitionKilometers);
+	}
+
+	// A small linear onset makes the antigravity drive measurable immediately, while the
+	// eased portion keeps the first kilometres of the compact map well below 0.01 AU.
+	constexpr float CruiseLinearOnsetShare = 0.002f;
+
+	float ResolveCruiseRouteShare(float Progress, float Exponent)
+	{
+		const float ClampedProgress = FMath::Clamp(Progress, 0.0f, 1.0f);
+		return CruiseLinearOnsetShare * ClampedProgress
+			+ (1.0f - CruiseLinearOnsetShare) * FMath::InterpEaseInOut(
+				0.0f, 1.0f, ClampedProgress, Exponent);
+	}
+
+	float ResolveCruiseRouteSlope(float Progress, float Exponent)
+	{
+		if (Progress < 0.0f || Progress >= 1.0f)
+		{
+			return 0.0f;
+		}
+		const float EaseSlope = Progress > 0.0f
+			? Exponent * FMath::Pow(2.0f * FMath::Min(Progress, 1.0f - Progress), Exponent - 1.0f)
+			: 0.0f;
+		return CruiseLinearOnsetShare + (1.0f - CruiseLinearOnsetShare) * EaseSlope;
 	}
 }
 
@@ -300,9 +331,33 @@ AJTSPlanetAnchor* AJTSSpaceWorldManager::GetCurrentPlanet() const
 	return CurrentPlanet.Get();
 }
 
+const AJTSPlanetAnchor* AJTSSpaceWorldManager::GetNavigationReferencePlanet(
+	const AJTSSpacecraftActor* Spacecraft) const
+{
+	return ResolveReferencePlanet(Spacecraft);
+}
+
 EJTSSpaceTravelState AJTSSpaceWorldManager::GetCurrentTravelState() const
 {
 	return CurrentTravelState;
+}
+
+bool AJTSSpaceWorldManager::IsCruisePresentationActive(const AJTSSpacecraftActor* Spacecraft) const
+{
+	if (!IsValid(Spacecraft) || Spacecraft->IsLanded())
+	{
+		return false;
+	}
+
+	const AJTSPlanetAnchor* const Reference = ResolveReferencePlanet(Spacecraft);
+	if (!IsValid(Reference))
+	{
+		return true;
+	}
+
+	// The field and the dial use the same height as the mesh. Replication of the travel
+	// state can arrive a frame later on clients, so presentation follows position directly.
+	return ResolvePresentationAltitude(Reference, Spacecraft) >= CruiseTransitionAltitude();
 }
 
 bool AJTSSpaceWorldManager::IsAirborneTravel() const
@@ -357,7 +412,10 @@ void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 	{
 		GameState->SetCurrentPlanetId(IsValid(CurrentPlanet) ? CurrentPlanet->GetPlanetId().ToString() : FString());
 	}
-	RefreshCelestialVisibility(FVector::ZeroVector, 90.0f);
+	if (IsSurfaceState())
+	{
+		RefreshCelestialVisibility(FVector::ZeroVector, 90.0f);
+	}
 	if (UGameInstance* const GameInstance = GetGameInstance())
 	{
 		if (UJTSExpeditionSubsystem* const Expedition = GameInstance->GetSubsystem<UJTSExpeditionSubsystem>())
@@ -523,14 +581,14 @@ void AJTSSpaceWorldManager::HandleFlightAltitude(float SurfaceAltitude)
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::Takeoff
-		&& SurfaceAltitude >= Planet->GetSpaceFlightAltitude())
+		&& SurfaceAltitude >= CruiseTransitionAltitude())
 	{
 		SetTravelState(EJTSSpaceTravelState::SpaceFlight);
 		return;
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight
-		&& SurfaceAltitude <= Planet->GetApproachTransitionAltitude())
+		&& SurfaceAltitude < CruiseTransitionAltitude())
 	{
 		SetTravelState(EJTSSpaceTravelState::Approach);
 		RequestPlanetContentLoad(Planet, true);
@@ -562,8 +620,8 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 
 	if (CurrentTravelState == EJTSSpaceTravelState::Takeoff)
 	{
-		// The departure planet remains the low-flight reference only until the configured
-		// space-flight altitude. Above it, the ship deliberately has no planet target at all.
+		// Keep the departure planet as the low-flight reference until the shared 18 km
+		// navigation handoff. Above it, the ship has no planet flight target.
 		AJTSPlanetAnchor* const DeparturePlanet = IsValid(Spacecraft->GetFlightPlanet())
 			? Spacecraft->GetFlightPlanet()
 			: CurrentPlanetAnchor;
@@ -577,21 +635,24 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 			Spacecraft->SetFlightTargetPlanet(DeparturePlanet);
 		}
 
-		HandleFlightAltitude(ResolveSurfaceAltitude(Spacecraft, DeparturePlanet, SpacecraftLocation));
+		HandleFlightAltitude(ResolvePresentationAltitude(DeparturePlanet, Spacecraft));
 		if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight)
 		{
+			LastDepartedPlanet = DeparturePlanet;
 			Spacecraft->SetFlightTargetPlanet(nullptr);
+			SetCurrentPlanet(nullptr);
 		}
 		return;
 	}
 
 	if (CurrentTravelState == EJTSSpaceTravelState::SpaceFlight)
 	{
-		// Influence ranges are configured per real planet and are guaranteed by level setup not to
-		// overlap. Outside every range there is intentionally no current or flight planet, so old
-		// Moon-centred camera, HUD, and landing queries cannot leak into deep space.
-		AJTSPlanetAnchor* const NearbyPlanet = FindNearestGameplayPlanet(SpacecraftLocation, true);
-		if (!IsValid(NearbyPlanet))
+		// The near-flight shell is shared by all planets and is independent of the
+		// craft's forward vector or radial velocity. Gravity may have faded already.
+		AJTSPlanetAnchor* const NearbyPlanet = FindNearestGameplayPlanet(SpacecraftLocation, false);
+		const bool bInsideNearFlightShell = IsValid(NearbyPlanet)
+			&& ResolvePresentationAltitude(NearbyPlanet, Spacecraft) < CruiseTransitionAltitude();
+		if (!bInsideNearFlightShell)
 		{
 			if (IsValid(CurrentPlanetAnchor))
 			{
@@ -608,26 +669,15 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 			return;
 		}
 
-		const float Altitude = ResolveSurfaceAltitude(Spacecraft, NearbyPlanet, SpacecraftLocation);
 		if (NearbyPlanet != CurrentPlanetAnchor)
 		{
 			SetCurrentPlanet(NearbyPlanet);
+		}
+		if (Spacecraft->GetFlightPlanet() != NearbyPlanet)
+		{
 			Spacecraft->SetFlightTargetPlanet(NearbyPlanet);
 		}
-
-		const FVector RadialUp = NearbyPlanet->GetRadialUpVector(SpacecraftLocation).GetSafeNormal();
-		const float RadialVelocity = FVector::DotProduct(Spacecraft->GetFlightVelocity(), RadialUp);
-		const bool bMovingTowardPlanet = RadialVelocity < -KINDA_SMALL_NUMBER;
-		const bool bHasArrivalTarget = Spacecraft->GetFlightPlanet() == NearbyPlanet;
-		if (Altitude <= NearbyPlanet->GetApproachTransitionAltitude()
-			&& bMovingTowardPlanet)
-		{
-			if (!bHasArrivalTarget)
-			{
-				Spacecraft->SetFlightTargetPlanet(NearbyPlanet);
-			}
-			HandleFlightAltitude(Altitude);
-		}
+		HandleFlightAltitude(ResolvePresentationAltitude(NearbyPlanet, Spacecraft));
 		return;
 	}
 
@@ -639,10 +689,13 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 			return;
 		}
 
-		const float Altitude = ResolveSurfaceAltitude(Spacecraft, CurrentPlanetAnchor, SpacecraftLocation);
-		if (Altitude > CurrentPlanetAnchor->GetApproachTransitionAltitude())
+		const float Altitude = ResolvePresentationAltitude(CurrentPlanetAnchor, Spacecraft);
+		if (Altitude >= CruiseTransitionAltitude())
 		{
 			SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+			LastDepartedPlanet = CurrentPlanetAnchor;
+			Spacecraft->SetFlightTargetPlanet(nullptr);
+			SetCurrentPlanet(nullptr);
 			return;
 		}
 
@@ -684,37 +737,89 @@ float AJTSSpaceWorldManager::GetCruiseRangeCentimeters(
 		return 0.0f;
 	}
 
-	const AJTSPlanetAnchor* const Reference = ResolveReferencePlanet(Spacecraft);
-	if (!IsValid(Reference))
+	const float LocalAltitudeCentimeters = FMath::Max(0.0f,
+		FVector::Distance(Spacecraft->GetActorLocation(), Planet->GetPlanetCenter())
+		- ResolveAuthoredSurfaceRadius(Planet));
+	// A moon uses its configured parent as the route origin while retaining its own
+	// physical range nearby. The route pair never depends on the ship's active planet.
+	const AJTSPlanetAnchor* RouteOrigin = Planet;
+	if (const TWeakObjectPtr<AJTSPlanetAnchor>* const Parent = PlanetRegistry.Find(Planet->GetParentPlanetId());
+		Parent != nullptr && IsValid(Parent->Get()))
 	{
-		return 0.0f;
+		RouteOrigin = Parent->Get();
+	}
+	const AJTSPlanetAnchor* const Other = FindNearestForeignPlanet(RouteOrigin);
+	if (!IsValid(Other))
+	{
+		return LocalAltitudeCentimeters;
 	}
 
-	const AJTSPlanetAnchor* const Foreign = Planet == Reference || SharesLocalTransfer(Reference, Planet)
-		? FindNearestForeignPlanet(Reference)
-		: Planet;
-	if (!IsValid(Foreign) || Foreign == Reference)
-	{
-		return 0.0f;
-	}
-
-	const float RouteKilometers = ResolveRouteKilometers(Reference, Foreign);
-	const FVector CorridorStart = Reference->GetPlanetCenter();
-	const FVector Corridor = Foreign->GetPlanetCenter() - CorridorStart;
-	const float CorridorLength = Corridor.Size();
+	const float RouteKilometers = ResolveRouteKilometers(RouteOrigin, Other);
+	const float CorridorLength = FVector::Distance(RouteOrigin->GetPlanetCenter(), Other->GetPlanetCenter());
 	if (RouteKilometers <= KINDA_SMALL_NUMBER || CorridorLength <= KINDA_SMALL_NUMBER)
 	{
-		return 0.0f;
+		return LocalAltitudeCentimeters;
 	}
 
-	// The dial reads the ship along the straight corridor between the two bodies.
-	// Flying toward a body shortens its reading. Flying away lengthens it. The previous
-	// progress was distance from the reference only, so leaving that body made both
-	// labels move, and swapping the reference swapped the two numbers.
-	const float AlongCorridor = FVector::DotProduct(Spacecraft->GetActorLocation() - CorridorStart, Corridor)
-		/ (CorridorLength * CorridorLength);
-	const float TargetShare = Planet == Foreign ? 1.0f : 0.0f;
-	return FMath::Max(0.0f, FMath::Abs(TargetShare - AlongCorridor) * RouteKilometers * 100000.0f);
+	// The nearby physical distance uses the contact's own center; the AU contribution
+	// uses its stable route origin. Climbing in any direction accumulates cruise range.
+	const float ReleaseAltitude = CruiseTransitionAltitude();
+	const float LocalShell = ResolveAuthoredSurfaceRadius(RouteOrigin) + ReleaseAltitude;
+	const float OtherShell = ResolveAuthoredSurfaceRadius(Other) + ReleaseAltitude;
+	const float CruiseLength = FMath::Max(CorridorLength - LocalShell - OtherShell, 1.0f);
+	const float Distance = FVector::Distance(Spacecraft->GetActorLocation(), RouteOrigin->GetPlanetCenter());
+	const float Progress = (Distance - LocalShell) / CruiseLength;
+	const float RouteShare = ResolveCruiseRouteShare(Progress,
+		FMath::Max(1.0f, CruiseDistanceEaseExponent));
+	return static_cast<float>(FMath::Max(0.0, static_cast<double>(LocalAltitudeCentimeters)
+		+ static_cast<double>(RouteShare) * static_cast<double>(RouteKilometers) * 100000.0));
+}
+
+float AJTSSpaceWorldManager::GetNavigationSpeedCentimetersPerSecond(const AJTSSpacecraftActor* Spacecraft) const
+{
+	if (!IsValid(Spacecraft)) return 0.0f;
+	const FVector Velocity = Spacecraft->GetFlightVelocity();
+	if (Velocity.IsNearlyZero()) return 0.0f;
+	const AJTSPlanetAnchor* const Reference = ResolveReferencePlanet(Spacecraft);
+	if (!IsValid(Reference)) return Velocity.Size();
+
+	const FVector ShipLocation = Spacecraft->GetActorLocation();
+	if (!IsCruisePresentationActive(Spacecraft))
+	{
+		// Only radial climb uses the surface dial's logarithmic scale. Sideways flight
+		// keeps its measured speed instead of falsely reading zero on a constant-altitude pass.
+		const float Altitude = FMath::Max(0.0f, ResolvePresentationAltitude(Reference, Spacecraft));
+		const float SurfaceDialRange = NavigationRangeFromAltitude(Altitude);
+		const float RadialScale = SurfaceDialRange
+			>= SurfaceNavigationLowOrbitCentimeters ? 0.0f
+			: SurfaceNavigationLogGainCentimeters / (SurfaceNavigationScaleLengthCentimeters + Altitude);
+		const FVector RadialUp = Reference->GetRadialUpVector(ShipLocation).GetSafeNormal();
+		const float RadialVelocity = FVector::DotProduct(Velocity, RadialUp);
+		return FMath::Sqrt((Velocity - RadialUp * RadialVelocity).SizeSquared()
+			+ FMath::Square(RadialVelocity * RadialScale));
+	}
+
+	const AJTSPlanetAnchor* const Foreign = FindNearestForeignPlanet(Reference);
+	if (!IsValid(Foreign)) return Velocity.Size();
+	const float RouteKilometers = ResolveRouteKilometers(Reference, Foreign);
+	const float CorridorLength = FVector::Distance(Foreign->GetPlanetCenter(), Reference->GetPlanetCenter());
+	if (RouteKilometers <= KINDA_SMALL_NUMBER || CorridorLength <= KINDA_SMALL_NUMBER)
+	{
+		return Velocity.Size();
+	}
+
+	const float ReleaseAltitude = CruiseTransitionAltitude();
+	const float DepartureShell = ResolveAuthoredSurfaceRadius(Reference) + ReleaseAltitude;
+	const float ArrivalShell = ResolveAuthoredSurfaceRadius(Foreign) + ReleaseAltitude;
+	const float CruiseLength = FMath::Max(CorridorLength - DepartureShell - ArrivalShell, 1.0f);
+	const float Distance = FVector::Distance(ShipLocation, Reference->GetPlanetCenter());
+	const float Progress = (Distance - DepartureShell) / CruiseLength;
+	const float Exponent = FMath::Max(1.0f, CruiseDistanceEaseExponent);
+	const float RouteScale = 1.0f + RouteKilometers * 100000.0f
+		* ResolveCruiseRouteSlope(Progress, Exponent) / CruiseLength;
+	// The speed is distance travelled through cruise space, so turning across the route
+	// does not make an active antigravity drive appear to slow to ordinary m/s.
+	return Velocity.Size() * RouteScale;
 }
 
 float AJTSSpaceWorldManager::GetNavigationSurfaceRangeCentimeters(
@@ -732,17 +837,8 @@ float AJTSSpaceWorldManager::GetNavigationSurfaceRangeCentimeters(
 		return 0.0f;
 	}
 
-	// Navigation metres are a log of the level climb, not the climb itself.
-	// Two metres off the ground read about 24 m. The authored-scale ceiling (500 m), where the
-	// planet starts shrinking, reads about 7.2 km. The top of this staff is a low orbit: 120 km,
-	// the band where KSP and Outer Wilds still treat you as flying over one world. Past it the
-	// dial hands off to astronomical cruise and floors at <0.01 AU.
-	constexpr float ScaleLengthCentimeters = 8000.0f;
-	constexpr float LogGainCentimeters = 1200000.0f;
-	constexpr float LowOrbitCentimeters = 12000000.0f;
-	return FMath::Min(
-		LowOrbitCentimeters,
-		LogGainCentimeters * FMath::Loge(1.0f + LevelAltitude / ScaleLengthCentimeters));
+	// Preserve the surface dial's authored logarithmic climb, capped at its 120 km orbit mark.
+	return NavigationRangeFromAltitude(LevelAltitude);
 }
 
 void AJTSSpaceWorldManager::GetRegisteredPlanets(TArray<AJTSPlanetAnchor*>& OutPlanets) const
@@ -825,6 +921,30 @@ AJTSPlanetAnchor* AJTSSpaceWorldManager::ResolveReferencePlanet(const AJTSSpacec
 	if (!IsValid(Spacecraft))
 	{
 		return CurrentPlanet.Get();
+	}
+	// A client can reach a destination before the replicated flight target arrives. The
+	// closest body inside the shared shell must win over the retained departure body.
+	AJTSPlanetAnchor* NearbyPlanet = nullptr;
+	float NearestDistanceSquared = TNumericLimits<float>::Max();
+	for (const TPair<FName, TWeakObjectPtr<AJTSPlanetAnchor>>& Entry : PlanetRegistry)
+	{
+		AJTSPlanetAnchor* const Candidate = Entry.Value.Get();
+		if (!IsValid(Candidate) || !Candidate->IsGravityEnabled())
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			Spacecraft->GetActorLocation(), Candidate->GetPlanetCenter());
+		if (DistanceSquared < NearestDistanceSquared)
+		{
+			NearestDistanceSquared = DistanceSquared;
+			NearbyPlanet = Candidate;
+		}
+	}
+	if (IsValid(NearbyPlanet)
+		&& ResolvePresentationAltitude(NearbyPlanet, Spacecraft) < CruiseTransitionAltitude())
+	{
+		return NearbyPlanet;
 	}
 
 	if (AJTSPlanetAnchor* const FlightPlanet = Spacecraft->GetFlightPlanet(); IsValid(FlightPlanet))
@@ -929,36 +1049,16 @@ float AJTSSpaceWorldManager::ResolveCelestialScaleRatio(
 		return 1.0f;
 	}
 
-	// Near-surface flight, including ship-versus-creature range, stays at the authored mesh size.
-	// The hold remembers the previous frame so skimming the boundary does not pulse the scale.
 	const float Altitude = ResolvePresentationAltitude(Planet, Spacecraft);
-	const float AuthoredAltitude = FMath::Max(0.0f, AuthoredScaleAltitudeCentimeters);
-	const float ReleaseAltitude = AuthoredAltitude + FMath::Max(0.0f, AuthoredScaleReleaseMarginCentimeters);
-	if (Altitude <= AuthoredAltitude)
-	{
-		return 1.0f;
-	}
-
-	const AActor* const SurfaceActor = Planet->GetGameplaySurfaceActor();
-	const FSavedCelestialSurface* const SavedSurface = IsValid(SurfaceActor)
-		? SavedCelestialSurfaces.Find(SurfaceActor)
-		: nullptr;
-	const bool bWasAuthored = SavedSurface == nullptr
-		|| !SavedSurface->bCaptured
-		|| !IsValid(SurfaceActor)
-		|| SurfaceActor->GetActorScale3D().Equals(SavedSurface->Scale, 0.01f);
-	if (bWasAuthored && Altitude < ReleaseAltitude)
+	const float ReleaseAltitude = CruiseTransitionAltitude();
+	if (Altitude <= ReleaseAltitude)
 	{
 		return 1.0f;
 	}
 
 	// Apparent range is astronomical and jumps by orders of magnitude inside this compact map.
 	// Scale follows the metres actually flown past the release shell so the disk shrinks every frame.
-	const float LevelDistance = FMath::Max(
-		FVector::Distance(Spacecraft->GetActorLocation(), Planet->GetPlanetCenter()),
-		1.0f);
-	const float ReleaseShell = ResolveAuthoredSurfaceRadius(Planet) + ReleaseAltitude;
-	const float BeyondShell = FMath::Max(0.0f, LevelDistance - ReleaseShell);
+	const float BeyondShell = Altitude - ReleaseAltitude;
 	const float ShrinkSpan = FMath::Max(ResolveCelestialShrinkSpanCentimeters(Planet), 1.0f);
 	const float Progress = FMath::Clamp(BeyondShell / ShrinkSpan, 0.0f, 1.0f);
 	const float FarScale = FMath::Clamp(MinimumCelestialScaleRatio, 0.0001f, 1.0f);
@@ -977,8 +1077,7 @@ float AJTSSpaceWorldManager::ResolveCelestialShrinkSpanCentimeters(const AJTSPla
 		return 1000.0f;
 	}
 
-	const float ReleaseAltitude = FMath::Max(0.0f, AuthoredScaleAltitudeCentimeters)
-		+ FMath::Max(0.0f, AuthoredScaleReleaseMarginCentimeters);
+	const float ReleaseAltitude = CruiseTransitionAltitude();
 	const float LocalShell = ResolveAuthoredSurfaceRadius(Planet) + ReleaseAltitude;
 	const AJTSPlanetAnchor* const Foreign = FindNearestForeignPlanet(Planet);
 	if (!IsValid(Foreign))
@@ -1026,8 +1125,9 @@ float AJTSSpaceWorldManager::ResolvePresentationAltitude(
 
 	const float LevelDistance = FVector::Distance(Spacecraft->GetActorLocation(), Planet->GetPlanetCenter());
 	const float AuthoredAltitude = FMath::Max(0.0f, LevelDistance - ResolveAuthoredSurfaceRadius(Planet));
-	// A shrunk mesh reports altitude from its impostor surface. The 500 m band is measured from the
-	// authored ground, so the trace is only trusted while the body is still full size.
+	// Retain real mesh height near gameplay. Higher up, smoothly converge on the
+	// authored-radius shell before scaling begins; a scaled mesh cannot answer a
+	// full-size surface trace, so this prevents an altitude jump at 18 km.
 	if (!IsPlanetPresentedAtAuthoredScale(Planet))
 	{
 		return AuthoredAltitude;
@@ -1036,7 +1136,10 @@ float AJTSSpaceWorldManager::ResolvePresentationAltitude(
 	float SurfaceAltitude = 0.0f;
 	if (Planet->GetAltitudeAboveSurface(Spacecraft->GetActorLocation(), SurfaceAltitude))
 	{
-		return FMath::Max(0.0f, SurfaceAltitude);
+		const float BlendStart = AltitudeFromNavigationKilometers(6.0f);
+		const float BlendEnd = AltitudeFromNavigationKilometers(14.0f);
+		const float Blend = FMath::SmoothStep(BlendStart, BlendEnd, AuthoredAltitude);
+		return FMath::Lerp(FMath::Max(0.0f, SurfaceAltitude), AuthoredAltitude, Blend);
 	}
 	return AuthoredAltitude;
 }
@@ -1213,7 +1316,11 @@ bool AJTSSpaceWorldManager::ActorBelongsToPlanet(const AActor* Actor, const AJTS
 	{
 		static_cast<void>(Corpse);
 	}
-	else if (!Actor->IsA<AJTSMoonResourceSpawner>() && !Actor->IsA<AJTSWorldPickupActor>())
+	else if (!Actor->IsA<AJTSMoonResourceSpawner>()
+		&& !Actor->IsA<AJTSWorldPickupActor>()
+		&& !Actor->IsA<AJTSPlanetEnemySettlement>()
+		&& !Actor->GetClass()->ImplementsInterface(UJTSPlanetSettlementEnemy::StaticClass())
+		&& !Actor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
 	{
 		return false;
 	}
@@ -1225,11 +1332,9 @@ bool AJTSSpaceWorldManager::ActorBelongsToPlanet(const AActor* Actor, const AJTS
 
 	// Unbound rocks, spawners, and pickups sit on the authored mesh. Claim only the nearest body
 	// inside its gameplay neighbourhood so a neighbour a few kilometres away cannot take them.
-	const float AssociationRadius = Planet->GetApproximateRadius()
-		+ FMath::Max(Planet->GetGravityInfluenceRange(), Planet->GetSpaceExitRange())
-		+ AuthoredScaleAltitudeCentimeters
-		+ AuthoredScaleReleaseMarginCentimeters
-		+ SurfaceContentHideMarginCentimeters;
+	const float AssociationRadius = ResolveAuthoredSurfaceRadius(Planet)
+		+ FMath::Max(FMath::Max(Planet->GetGravityInfluenceRange(), Planet->GetSpaceExitRange()),
+			CruiseTransitionAltitude());
 	if (FVector::Distance(Actor->GetActorLocation(), Planet->GetPlanetCenter()) > AssociationRadius)
 	{
 		return false;
@@ -1331,24 +1436,7 @@ void AJTSSpaceWorldManager::UpdateSurfaceContentPresentation(
 	}
 
 	const float Altitude = ResolvePresentationAltitude(Planet, Spacecraft);
-	const float ShowAltitude = FMath::Max(0.0f, AuthoredScaleAltitudeCentimeters);
-	const float HideAltitude = ShowAltitude
-		+ FMath::Max(0.0f, AuthoredScaleReleaseMarginCentimeters)
-		+ FMath::Max(0.0f, SurfaceContentHideMarginCentimeters);
-	const bool bWasPresented = PresentedSurfaceContentPlanets.Contains(Planet);
-	const bool bAtAuthoredScale = IsPlanetPresentedAtAuthoredScale(Planet);
-
-	bool bPresent = bWasPresented;
-	if (!bAtAuthoredScale || Altitude >= HideAltitude)
-	{
-		bPresent = false;
-	}
-	else if (Altitude <= ShowAltitude)
-	{
-		bPresent = true;
-	}
-
-	SetSurfaceContentPresented(Planet, bPresent);
+	SetSurfaceContentPresented(Planet, Altitude < SurfaceContentTransitionAltitude());
 }
 
 void AJTSSpaceWorldManager::RestoreDisplacedCruiseSurface()
@@ -1502,8 +1590,11 @@ void AJTSSpaceWorldManager::OnRep_SpaceWorldState()
 	{
 		CurrentPlanet->SetActivePlanet(IsSurfaceState());
 	}
-	RestoreDisplacedCruiseSurface();
-	RefreshCelestialVisibility(FVector::ZeroVector, 90.0f);
+	if (IsSurfaceState())
+	{
+		RestoreDisplacedCruiseSurface();
+		RefreshCelestialVisibility(FVector::ZeroVector, 90.0f);
+	}
 }
 
 void AJTSSpaceWorldManager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

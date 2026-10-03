@@ -20,10 +20,13 @@
 #include "InputActionValue.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSRangedWeaponComponent.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftPresentationComponent.h"
 #include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSStellarLootTable.h"
@@ -31,6 +34,7 @@
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/UI/JTSCruiseNavigationWidget.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSPlanetLandingSite.h"
@@ -38,6 +42,11 @@
 
 namespace
 {
+	float PhysicalAltitudeAtNavigationKilometers(float Kilometers)
+	{
+		return 8000.0f * (FMath::Exp(Kilometers / 12.0f) - 1.0f);
+	}
+
 	struct FShipTestWorld
 	{
 		UWorld* World;
@@ -172,6 +181,48 @@ bool FJTSItemDefinitionCacheGcRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSUnarmedAimRegression, "JTS.Character.UnarmedAim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSUnarmedAimRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	AJTSCharacter* Character = nullptr;
+	Fixture.AddPlayer(Character);
+	UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
+	UJTSRangedWeaponComponent* const Aim = IsValid(Character)
+		? Character->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
+	if (!TestNotNull(TEXT("Unarmed character has an inventory"), Inventory)
+		|| !TestNotNull(TEXT("Unarmed character has an aim component"), Aim))
+	{
+		return false;
+	}
+
+	Inventory->RestoreItems({}, 0);
+	Aim->StartAim();
+	TestTrue(TEXT("Empty hands can enter view aim"), Aim->IsAiming());
+	Aim->StopAim();
+	TestFalse(TEXT("Releasing aim returns empty hands to normal view"), Aim->IsAiming());
+	FJTSItemInstance HeadLamp;
+	HeadLamp.ItemId = EJTSItemId::WaistLamp;
+	HeadLamp.StackCount = 1;
+	Inventory->RestoreItems({ HeadLamp }, 0);
+	TestTrue(TEXT("Headlamp occupies the selected inventory slot"), Inventory->GetActiveItemId() == EJTSItemId::WaistLamp);
+	Aim->StartAim();
+	TestTrue(TEXT("Selecting an unlit headlamp leaves hands free to aim"), Aim->IsAiming());
+	Aim->StopAim();
+	Inventory->RequestToggleWaistLamp();
+	TestTrue(TEXT("Headlamp can be worn while selected"), Inventory->IsWaistLampEquipped());
+	Aim->StartAim();
+	TestTrue(TEXT("Wearing a lit headlamp leaves hands free to aim"), Aim->IsAiming());
+	Aim->StopAim();
+	TestTrue(TEXT("A melee tool can enter the inventory beside the headlamp"), Inventory->TryAddItemById(EJTSItemId::Pickaxe));
+	TestTrue(TEXT("A melee tool can be selected while wearing the headlamp"), Inventory->SelectQuickbarSlot(1));
+	Aim->StartAim();
+	TestFalse(TEXT("A held melee tool does not enter ranged aim even with the headlamp on"), Aim->IsAiming());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSShipLockerRegression, "JTS.Spacecraft.ShipLockerAndStellarLoot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -253,7 +304,7 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId));
 	TestTrue(TEXT("Transferred item can be discarded"), LockerState->TryDeleteShipLockerSlot(0,
 		LockerState->GetShipLockerSlot(0).SlotToken));
-	TestTrue(TEXT("Stellar text item uses the terminal slot"), LockerState->TryStoreStellarItem(TEXT("SolidCore")));
+	TestTrue(TEXT("Stellar text item uses the terminal slot"), LockerState->TryStoreStellarItem(TEXT("FireCore")));
 	TestTrue(TEXT("A standard item occupies the carried target before a stellar swap"),
 		CarriedInventory->TryAddItemById(EJTSItemId::Pistol, 1));
 	const FGuid CarriedBeforeStellarSwap = CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId;
@@ -262,21 +313,26 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 			LockerState->GetShipLockerSlot(0).SlotToken, CarriedInventory,
 			CarriedPistolSlot, CarriedBeforeStellarSwap, Table));
 	TestEqual(TEXT("Carried target keeps the stellar identity"),
-		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("SolidCore")));
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("FireCore")));
 	TestEqual(TEXT("Locker receives the displaced carried item"),
 		LockerState->GetShipLockerSlot(0).StandardItem.ItemId, EJTSItemId::Pistol);
 	TestTrue(TEXT("Stellar text survives a round trip back to the locker"),
 		LockerState->TryDeleteShipLockerSlot(0, LockerState->GetShipLockerSlot(0).SlotToken)
 		&& LockerState->TryStoreCarriedItemAtSlot(0, CarriedInventory, CarriedPistolSlot,
 			CarriedInventory->GetItemAtSlot(CarriedPistolSlot).InstanceId)
-		&& LockerState->GetShipLockerSlot(0).StellarItemId == FName(TEXT("SolidCore")));
+		&& LockerState->GetShipLockerSlot(0).StellarItemId == FName(TEXT("FireCore")));
 	TestTrue(TEXT("Stellar text can be taken into the carried inventory"),
 		LockerState->TryTakeShipLockerItem(0, LockerState->GetShipLockerSlot(0).SlotToken,
 			CarriedInventory, Table));
 	TestEqual(TEXT("Taken stellar text remains identifiable"),
-		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("SolidCore")));
+		CarriedInventory->GetItemAtSlot(CarriedPistolSlot).StellarItemId, FName(TEXT("FireCore")));
 
-	TestEqual(TEXT("Document pool has seventeen unique entries"), Table->Entries.Num(), 17);
+	TestEqual(TEXT("Document pool has eighteen unique entries"), Table->Entries.Num(), 18);
+	TestTrue(TEXT("Fire jet pairs with fire core"), Table->CanCombine(TEXT("FireCore"), TEXT("JetTube")));
+	TestTrue(TEXT("Light focus pairs with light core"), Table->CanCombine(TEXT("LightCore"), TEXT("FocusTube")));
+	TestTrue(TEXT("Dark black hole pairs with dark core"), Table->CanCombine(TEXT("DarkCore"), TEXT("BlackHoleTube")));
+	TestFalse(TEXT("Mismatched core and attachment cannot combine"), Table->CanCombine(TEXT("WaterCore"), TEXT("JetTube")));
+	TestFalse(TEXT("Firmware cannot act as an attachment"), Table->CanCombine(TEXT("FireCore"), TEXT("UpgradeFirmware")));
 	TArray<double> BaseProbabilities;
 	TestTrue(TEXT("Empty locker has a valid roll distribution"),
 		Table->GetRollProbabilities({}, BaseProbabilities));
@@ -284,16 +340,16 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 	for (const double Probability : BaseProbabilities) ProbabilityTotal += Probability;
 	TestTrue(TEXT("Displayed roll probabilities add up to one"),
 		FMath::IsNearlyEqual(ProbabilityTotal, 1.0, 0.000001));
-	const int32 SolidCoreIndex = Table->Entries.IndexOfByPredicate([](const FJTSStellarLootEntry& Entry)
+	const int32 FireCoreIndex = Table->Entries.IndexOfByPredicate([](const FJTSStellarLootEntry& Entry)
 	{
-		return Entry.ItemId == FName(TEXT("SolidCore"));
+		return Entry.ItemId == FName(TEXT("FireCore"));
 	});
-	if (!TestTrue(TEXT("Solid core is in the configured pool"), SolidCoreIndex != INDEX_NONE)) return false;
+	if (!TestTrue(TEXT("Fire core is in the configured pool"), FireCoreIndex != INDEX_NONE)) return false;
 	TArray<double> CarriedCoreProbabilities;
 	TestTrue(TEXT("Carried core contributes to next-roll probability"),
 		Table->GetRollProbabilities({}, CarriedCoreProbabilities, CarriedInventory->GetItemSlots()));
 	TestTrue(TEXT("Carrying a core lowers its next-roll probability"),
-		CarriedCoreProbabilities[SolidCoreIndex] < BaseProbabilities[SolidCoreIndex]);
+		CarriedCoreProbabilities[FireCoreIndex] < BaseProbabilities[FireCoreIndex]);
 	const int32 FirstCoreIndex = Table->Entries.IndexOfByPredicate([](const FJTSStellarLootEntry& Entry)
 	{
 		return Entry.bCore;
@@ -330,10 +386,45 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 		&& !LockerState->GetShipLockerSlot(AwardedSlot).bPendingStellarReveal);
 	for (int32 Index = 2; Index < AJTSPlayerState::ShipLockerCapacity; ++Index)
 	{
-		LockerState->TryStoreStellarItem(TEXT("SolidCore"));
+		LockerState->TryStoreStellarItem(TEXT("FireCore"));
 	}
 	TestEqual(TEXT("Full locker blocks purchase before spending"), Fixture.Ship->TryPurchase(Character, EJTSItemId::Pickaxe), EJTSShopPurchaseResult::InventoryFull);
 	TestEqual(TEXT("Full locker blocks a roll"), Fixture.Ship->TryRollStellarItem(Character, AwardedItem, AwardedSlot), EJTSStellarRollResult::InventoryFull);
+
+	LockerState->RestoreShipLockerSlots({});
+	CarriedInventory->RestoreItems({}, 0);
+	TestTrue(TEXT("Core occupies the first slot"), LockerState->TryStoreStellarItem(TEXT("FireCore")));
+	TestTrue(TEXT("Wrong attachment occupies the next slot"), LockerState->TryStoreStellarItem(TEXT("HealingTube")));
+	TestTrue(TEXT("Matching attachment occupies a later slot"), LockerState->TryStoreStellarItem(TEXT("JetTube")));
+	const FJTSShipLockerSlot CoreBeforeMove = LockerState->GetShipLockerSlot(0);
+	const FJTSShipLockerSlot WrongAttachment = LockerState->GetShipLockerSlot(1);
+	const FJTSShipLockerSlot MatchingAttachment = LockerState->GetShipLockerSlot(2);
+	TestFalse(TEXT("A nonadjacent matching attachment cannot combine"),
+		LockerState->TryCombineStellarSlots(0, CoreBeforeMove.SlotToken, MatchingAttachment.SlotToken, Table));
+	TestFalse(TEXT("An adjacent but wrong attachment cannot combine"),
+		LockerState->TryCombineStellarSlots(0, CoreBeforeMove.SlotToken, WrongAttachment.SlotToken, Table));
+	TestFalse(TEXT("A stale destination token cannot move an item"),
+		LockerState->TryMoveShipLockerSlot(2, MatchingAttachment.SlotToken, 1, FGuid::NewGuid()));
+	TestTrue(TEXT("Locker drag can swap accessories into order"),
+		LockerState->TryMoveShipLockerSlot(2, MatchingAttachment.SlotToken, 1, WrongAttachment.SlotToken));
+	const FJTSShipLockerSlot CoreForAssembly = LockerState->GetShipLockerSlot(0);
+	const FJTSShipLockerSlot JetForAssembly = LockerState->GetShipLockerSlot(1);
+	TestFalse(TEXT("Moved attachment invalidates its old drag token"),
+		LockerState->TryCombineStellarSlots(0, CoreForAssembly.SlotToken, MatchingAttachment.SlotToken, Table));
+	TestTrue(TEXT("Adjacent core followed by matching attachment assembles"),
+		LockerState->TryCombineStellarSlots(0, CoreForAssembly.SlotToken, JetForAssembly.SlotToken, Table));
+	TestEqual(TEXT("Assembled slot records its core"), LockerState->GetShipLockerSlot(0).StellarCoreId, FName(TEXT("FireCore")));
+	TestEqual(TEXT("Assembled slot records its attachment"), LockerState->GetShipLockerSlot(0).StellarItemId, FName(TEXT("JetTube")));
+	TestTrue(TEXT("Assembly consumes the second slot"), LockerState->GetShipLockerSlot(1).IsEmpty());
+	TestFalse(TEXT("An assembled weapon cannot be assembled a second time"),
+		LockerState->TryCombineStellarSlots(0, LockerState->GetShipLockerSlot(0).SlotToken,
+			LockerState->GetShipLockerSlot(1).SlotToken, Table));
+	TestTrue(TEXT("Assembled weapon can move to carried inventory"),
+		LockerState->TryTakeShipLockerItem(0, LockerState->GetShipLockerSlot(0).SlotToken, CarriedInventory, Table));
+	const FJTSItemInstance CarriedWeapon = CarriedInventory->GetActiveItem();
+	TestEqual(TEXT("Carried assembly is a weapon"), CarriedWeapon.ItemId, EJTSItemId::StellarWeapon);
+	TestEqual(TEXT("Carried assembly keeps its core"), CarriedWeapon.StellarCoreId, FName(TEXT("FireCore")));
+	TestEqual(TEXT("Carried assembly keeps its attachment"), CarriedWeapon.StellarItemId, FName(TEXT("JetTube")));
 	return true;
 }
 
@@ -1132,9 +1223,61 @@ bool FJTSNosePitchGuardRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Near the surface the camera can look down while the nose stays at terrain pitch"),
 		FVector::DotProduct(DriverController->GetControlRotation().Vector(), FVector::UpVector) < -0.4f
 		&& FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector) > -0.03f);
+	// A held down command must settle against the same safety pitch used by automatic
+	// recovery. Different floors caused repeated small corrections even on a flat mesh.
+	Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromXZ(
+		FVector(1.0f, 0.0f, 0.18f).GetSafeNormal(), FVector::UpVector).ToQuat());
+	Movement->StopMovementImmediately();
+	Movement->SetSteeringInput(FVector2D(0.0f, -1.0f));
+	float LowestSettledPitch = BIG_NUMBER;
+	float HighestSettledPitch = -BIG_NUMBER;
+	for (int32 Step = 0; Step < 120; ++Step)
+	{
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+		if (Step >= 60)
+		{
+			const float PitchDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
+				FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector), -1.0f, 1.0f)));
+			LowestSettledPitch = FMath::Min(LowestSettledPitch, PitchDegrees);
+			HighestSettledPitch = FMath::Max(HighestSettledPitch, PitchDegrees);
+		}
+	}
+	TestTrue(TEXT("Held nose-down input settles above flat terrain without repeated pitch corrections"),
+		LowestSettledPitch >= 1.0f && HighestSettledPitch - LowestSettledPitch < 1.0f);
+	AddInfo(FString::Printf(TEXT("Settled flat-terrain pitch: min=%.2f max=%.2f"),
+		LowestSettledPitch, HighestSettledPitch));
+	const FFloatProperty* const SafetyMarginProperty = FindFProperty<FFloatProperty>(
+		Movement->GetClass(), TEXT("SurfaceClearanceSafetyMargin"));
+	const FFloatProperty* const GuardDistanceProperty = FindFProperty<FFloatProperty>(
+		Movement->GetClass(), TEXT("SurfaceNosePitchGuardDistance"));
+	const FFloatProperty* const ReleaseDistanceProperty = FindFProperty<FFloatProperty>(
+		Movement->GetClass(), TEXT("SurfaceNosePitchReleaseDistance"));
+	if (!TestNotNull(TEXT("Surface safety margin is configurable"), SafetyMarginProperty)
+		|| !TestNotNull(TEXT("Nose guard distance is configurable"), GuardDistanceProperty)
+		|| !TestNotNull(TEXT("Nose guard release distance is configurable"), ReleaseDistanceProperty)) return false;
+	const float EdgeDither = FMath::Max(1.0f, FMath::Min(25.0f,
+		ReleaseDistanceProperty->GetPropertyValue_InContainer(Movement) * 0.25f));
+	float LowestThresholdPitch = BIG_NUMBER;
+	float HighestThresholdPitch = -BIG_NUMBER;
+	for (int32 Step = 0; Step < 24; ++Step)
+	{
+		const float GuardEdgeAltitude = Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector)
+			+ SafetyMarginProperty->GetPropertyValue_InContainer(Movement)
+			+ GuardDistanceProperty->GetPropertyValue_InContainer(Movement);
+		Fixture.Ship->SetActorLocation(GroundHit.ImpactPoint + FVector::UpVector
+			* (GuardEdgeAltitude + (Step % 2 == 0 ? EdgeDither : -EdgeDither)));
+		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		const float PitchDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
+			FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector), -1.0f, 1.0f)));
+		LowestThresholdPitch = FMath::Min(LowestThresholdPitch, PitchDegrees);
+		HighestThresholdPitch = FMath::Max(HighestThresholdPitch, PitchDegrees);
+	}
+	TestTrue(TEXT("Crossing the surface guard edge repeatedly does not pump the nose"),
+		LowestThresholdPitch >= 1.0f && HighestThresholdPitch - LowestThresholdPitch < 1.0f);
 
 	// The same held input must regain full pitch authority after climbing away from the mesh.
 	Fixture.Ship->SetActorLocation(GroundHit.ImpactPoint + FVector::UpVector * 2500.0f);
+	Fixture.Ship->SetActorRotation(LevelRotation);
 	Movement->StopMovementImmediately();
 	Movement->SetSteeringInput(FVector2D(0.0f, -1.0f));
 	for (int32 Step = 0; Step < 8; ++Step)
@@ -1341,7 +1484,8 @@ bool FJTSSpaceFlightFrameRegression::RunTest(const FString& Parameters)
 	const FVector SourceUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation()).GetSafeNormal();
 	const float SourceRadius = Fixture.Planet->GetApproximateRadius();
 	const float SurfaceFrameAltitude = Fixture.Planet->GetTakeoffTransitionAltitude();
-	const float SpaceFlightAltitude = Fixture.Planet->GetSpaceFlightAltitude();
+	const float SpaceFlightAltitude = PhysicalAltitudeAtNavigationKilometers(
+		AJTSSpaceWorldManager::CruiseTransitionKilometers);
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	const FVector RecoveryUp = FVector::UpVector;
 	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
@@ -1357,12 +1501,19 @@ bool FJTSSpaceFlightFrameRegression::RunTest(const FString& Parameters)
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestFalse(TEXT("Leaving the shallow surface band releases the radial movement frame"),
 		Movement->IsUsingPlanetSurfaceFlightFrame());
-	TestEqual(TEXT("The wider space-flight threshold retains the takeoff state briefly"),
+	TestEqual(TEXT("The 18 km handoff retains the takeoff state through the shallow flight band"),
 		Fixture.Manager->GetCurrentTravelState(), EJTSSpaceTravelState::Takeoff);
 	TestTrue(TEXT("Free-flight camera preserves the departure horizon without snapping to World-Z"),
 		FVector::DotProduct(Fixture.Ship->GetFlightReferenceUp(), SourceUp) > 0.999f);
 	TestTrue(TEXT("Surface recovery does not overwrite the departure inertial horizon"),
 		FVector::DotProduct(Fixture.Ship->GetFlightReferenceUp(), SourceUp) > 0.999f);
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (SourceRadius + Fixture.Planet->GetSpaceFlightAltitude() + 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Passing the former 6 km dial handoff leaves the travel state steady"),
+		Fixture.Manager->GetCurrentTravelState(), EJTSSpaceTravelState::Takeoff);
+	TestEqual(TEXT("Passing the former handoff retains the planet flight target"),
+		Fixture.Ship->GetFlightPlanet(), Fixture.Planet);
 
 	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
 		+ SourceUp * (SourceRadius + SpaceFlightAltitude + 100.0f));
@@ -1373,7 +1524,7 @@ bool FJTSSpaceFlightFrameRegression::RunTest(const FString& Parameters)
 	TestNull(TEXT("Free space clears the departed planet flight target"), Fixture.Ship->GetFlightPlanet());
 
 	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
-		+ SourceUp * (SourceRadius + Fixture.Planet->GetGravityInfluenceRange() + 100.0f));
+		+ SourceUp * (SourceRadius + SpaceFlightAltitude + 1000.0f));
 	Movement->StopMovementImmediately();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestNull(TEXT("Deep space clears the stale source planet world reference"), Fixture.Manager->GetCurrentPlanet());
@@ -1505,6 +1656,14 @@ bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	// The map's gravity range remains 200 m; all presentation handoffs use the
+	// shared heights printed by the near-surface navigation dial.
+	FindFProperty<FFloatProperty>(Fixture.Planet->GetClass(), TEXT("GravityInfluenceRange"))
+		->SetPropertyValue_InContainer(Fixture.Planet, 20000.0f);
+	const float ContentAltitude = PhysicalAltitudeAtNavigationKilometers(
+		AJTSSpaceWorldManager::SurfaceContentTransitionKilometers);
+	const float ReleaseAltitude = PhysicalAltitudeAtNavigationKilometers(
+		AJTSSpaceWorldManager::CruiseTransitionKilometers);
 
 	AJTSPlanetAnchor* const Mars = Fixture.AddFlightPlanet(TEXT("Mars"), FVector(180000.0f, 0.0f, 0.0f));
 	AJTSPlanetAnchor* const Deimos = Fixture.AddFlightPlanet(TEXT("Deimos"), FVector(210000.0f, 0.0f, 0.0f));
@@ -1515,15 +1674,307 @@ bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
 	}
 
 	FindFProperty<FFloatProperty>(Fixture.Planet->GetClass(), TEXT("HeliocentricDistanceKilometers"))
-		->SetPropertyValue_InContainer(Fixture.Planet, 384400.0f);
+		->SetPropertyValue_InContainer(Fixture.Planet, 149600000.0f);
 	FindFProperty<FFloatProperty>(Mars->GetClass(), TEXT("HeliocentricDistanceKilometers"))
-		->SetPropertyValue_InContainer(Mars, 227900000.0f);
+		->SetPropertyValue_InContainer(Mars, 227940000.0f);
 	FindFProperty<FFloatProperty>(Deimos->GetClass(), TEXT("HeliocentricDistanceKilometers"))
-		->SetPropertyValue_InContainer(Deimos, 227923400.0f);
+		->SetPropertyValue_InContainer(Deimos, 227963400.0f);
 	FindFProperty<FNameProperty>(Deimos->GetClass(), TEXT("ParentPlanetId"))
 		->SetPropertyValue_InContainer(Deimos, FName(TEXT("Mars")));
-
+	UJTSSpacecraftPresentationComponent* const Presentation =
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>();
+	if (!TestNotNull(TEXT("The ship has a cruise presentation component"), Presentation))
+	{
+		return false;
+	}
+	UStaticMeshComponent* Field = nullptr;
+	TInlineComponentArray<UStaticMeshComponent*> ShipMeshes(Fixture.Ship);
+	for (UStaticMeshComponent* const Mesh : ShipMeshes)
+	{
+		if (IsValid(Mesh) && Mesh->GetName() == TEXT("AntigravityField"))
+		{
+			Field = Mesh;
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("The ship Blueprint provides the antigravity field mesh and material"), Field))
+	{
+		return false;
+	}
+	UMaterialInstanceDynamic* const FieldMaterial = Cast<UMaterialInstanceDynamic>(Field->GetMaterial(0));
+	if (!TestNotNull(TEXT("The field has a dynamic formation material"), FieldMaterial))
+	{
+		return false;
+	}
 	const FVector SourceUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation()).GetSafeNormal();
+	FActorSpawnParameters MarkerSpawnParameters;
+	MarkerSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AJTSPlanetLandingSite* const DepartureMarker = Fixture.World->SpawnActor<AJTSPlanetLandingSite>(
+		AJTSPlanetLandingSite::StaticClass(),
+		Fixture.Planet->GetPlanetCenter() + SourceUp * Fixture.Planet->GetApproximateRadius(),
+		FRotator::ZeroRotator,
+		MarkerSpawnParameters);
+	FindFProperty<FObjectProperty>(DepartureMarker->GetClass(), TEXT("PlanetAnchor"))
+		->SetObjectPropertyValue_InContainer(DepartureMarker, Fixture.Planet);
+	DepartureMarker->DispatchBeginPlay();
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + 19900.0f));
+	Movement->StopMovementImmediately();
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Inside 200 m the Moon is still the gameplay planet"),
+		Fixture.Manager->GetCurrentPlanet(), Fixture.Planet);
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + 20100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Crossing the old gravity edge does not release the travel planet"),
+		Fixture.Manager->GetCurrentPlanet(), Fixture.Planet);
+	TestTrue(TEXT("The near-surface navigation retains the departed Moon"),
+		Fixture.Manager->GetNavigationReferencePlanet(Fixture.Ship) == Fixture.Planet);
+	TestFalse(TEXT("Leaving gravity influence does not start the star chart or field"),
+		Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+	TestTrue(TEXT("The old 14-15 km band leaves the Moon's visible surface unchanged"),
+		Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().Equals(FVector(200.0), 0.1f)
+		&& !Fixture.Planet->IsHidden());
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ContentAltitude - 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Surface interaction remains visible below 17 km"), DepartureMarker->IsHidden());
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ContentAltitude + 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("17 km hides surface interaction before the planet shrinks"),
+		DepartureMarker->IsHidden() && !DepartureMarker->GetActorEnableCollision()
+		&& Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().Equals(FVector(200.0), 0.1f));
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ContentAltitude - 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Returning through 17 km restores interaction"),
+		!DepartureMarker->IsHidden() && DepartureMarker->GetActorEnableCollision());
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude - 100.0f));
+	Movement->StopMovementImmediately();
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Just below 18 km still uses exhaust and the surface dial"),
+		Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+	const float ExpectedSurfaceDialCentimeters = 1200000.0f
+		* FMath::Loge(1.0f + (ReleaseAltitude - 100.0f) / 8000.0f);
+	TestTrue(TEXT("The near-surface dial preserves its kilometre-scale logarithmic climb"),
+		FMath::IsNearlyEqual(Fixture.Manager->GetNavigationSurfaceRangeCentimeters(
+			Fixture.Ship, Fixture.Planet), ExpectedSurfaceDialCentimeters, 1000.0f));
+	Movement->Velocity = SourceUp * 1000.0f;
+	TestTrue(TEXT("The top navigation speed follows the scaled near-surface climb"),
+		Fixture.Manager->GetNavigationSpeedCentimetersPerSecond(Fixture.Ship) > 10000.0f);
+	Movement->StopMovementImmediately();
+	Presentation->TickComponent(0.3f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(1.0f);
+	const float NearFlightFOV = Fixture.Ship->GetFlightCamera()->FieldOfView;
+	const FVector FieldScaleBeforeHandoff = Field->GetRelativeScale3D();
+	const FVector CameraSocketBeforeHandoff = Fixture.Ship->GetFlightCameraBoom()->SocketOffset;
+	UMaterialInstanceDynamic* const Medium = Fixture.Ship->CruiseMediumDistortionInstance;
+	if (!TestNotNull(TEXT("The ship Blueprint equips the camera medium-refraction material"), Medium))
+	{
+		return false;
+	}
+	// A pilot may be rolled relative to the planet when crossing the shell. The handoff itself
+	// must keep that exact view frame instead of rebuilding it from the new flight reference Up.
+	Fixture.Ship->FlightCameraAimRotation = (FQuat(Fixture.Ship->GetActorForwardVector(), HALF_PI)
+		* Fixture.Ship->GetActorQuat()).GetNormalized();
+	Fixture.Ship->LastFlightCameraHullRotation = Fixture.Ship->GetActorQuat();
+	Fixture.Ship->bFlightCameraFrameInitialized = true;
+	Fixture.Ship->bFlightCameraRecentering = false;
+	Fixture.Ship->UpdateFlightCameraFrame(0.0f);
+	const FQuat HullBeforeRelease = Fixture.Ship->GetActorQuat();
+	const FQuat CameraBeforeRelease = Fixture.Ship->FlightCameraAimRotation;
+	TestFalse(TEXT("The antigravity envelope stays hidden in near-surface flight"), Field->IsVisible());
+	constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
+	const FVector ReleaseLocation = Fixture.Planet->GetPlanetCenter()
+		+ FVector::ForwardVector * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude + 100.0f);
+	Fixture.Ship->SetActorLocation(ReleaseLocation);
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("18 km starts mesh shrink, free travel, star chart and antigravity together"),
+		Fixture.Manager->IsCruisePresentationActive(Fixture.Ship)
+		&& Fixture.Manager->GetCurrentTravelState() == EJTSSpaceTravelState::SpaceFlight
+		&& Fixture.Manager->GetCurrentPlanet() == nullptr
+		&& Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().GetAbsMax() < 200.0f);
+	Presentation->TickComponent(0.16f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(0.16f);
+	const FQuat ExpectedReleaseCamera = (Fixture.Ship->GetActorQuat()
+		* HullBeforeRelease.Inverse() * CameraBeforeRelease).GetNormalized();
+	TestTrue(TEXT("18 km drive engagement preserves camera attitude through the planet handoff"),
+		Fixture.Ship->bFlightCameraFrameInitialized
+		&& Fixture.Ship->FlightCameraAimRotation.AngularDistance(ExpectedReleaseCamera)
+			< FMath::DegreesToRadians(0.5f)
+		&& Fixture.Ship->GetFlightCameraBoom()->GetComponentQuat().AngularDistance(ExpectedReleaseCamera)
+			< FMath::DegreesToRadians(0.5f));
+	TestTrue(TEXT("The antigravity envelope wraps the ship at the release shell"), Field->IsVisible());
+	TestTrue(TEXT("Drive engagement keeps only a small axial push while the medium refracts"),
+		Fixture.Ship->GetFlightCamera()->FieldOfView > NearFlightFOV + 0.75f
+		&& Fixture.Ship->GetFlightCamera()->FieldOfView < NearFlightFOV + 2.25f
+		&& FMath::IsNearlyEqual(Fixture.Ship->GetFlightCameraBoom()->SocketOffset.X,
+			CameraSocketBeforeHandoff.X - Fixture.Ship->CruiseEngageCameraPushback, 1.0f)
+		&& FMath::IsNearlyEqual(Fixture.Ship->GetFlightCameraBoom()->SocketOffset.Y, CameraSocketBeforeHandoff.Y)
+		&& FMath::IsNearlyEqual(Fixture.Ship->GetFlightCameraBoom()->SocketOffset.Z, CameraSocketBeforeHandoff.Z)
+		&& Field->GetRelativeScale3D().Equals(FieldScaleBeforeHandoff, 0.001f));
+	AddInfo(FString::Printf(TEXT("Departure medium: configured=%.4f runtime=%.4f material=%.4f radius=%.4f fringe=%.3f"),
+		Fixture.Ship->CruiseMediumWarpStrength, Fixture.Ship->CurrentMediumWarpStrength,
+		Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")),
+		Medium->K2_GetScalarParameterValue(TEXT("WaveRadius")),
+		Fixture.Ship->GetFlightCamera()->PostProcessSettings.SceneFringeIntensity));
+	TestTrue(TEXT("Leaving the planet sends a refractive wave from the view centre outward"),
+		Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")) > 0.005f
+		&& Medium->K2_GetScalarParameterValue(TEXT("WaveRadius")) < 0.4f
+		&& Fixture.Ship->GetFlightCamera()->PostProcessSettings.SceneFringeIntensity
+			> Fixture.Ship->BaseFlightCameraFringeIntensity + 0.2f);
+	const FQuat CameraBeforeReplication = Fixture.Ship->FlightCameraAimRotation;
+	Fixture.Ship->OnRep_FlightState();
+	TestTrue(TEXT("A replicated flight-target update cannot reinitialize the driver's camera"),
+		Fixture.Ship->bFlightCameraFrameInitialized
+		&& Fixture.Ship->FlightCameraAimRotation.AngularDistance(CameraBeforeReplication)
+			< FMath::DegreesToRadians(0.1f));
+	TestTrue(TEXT("The bubble forms through its material instead of geometry growth"),
+		FieldMaterial->K2_GetScalarParameterValue(TEXT("FieldFormation")) > 0.0f
+		&& FieldMaterial->K2_GetScalarParameterValue(TEXT("FieldFormation")) < 1.0f);
+	Presentation->TickComponent(0.3f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(0.55f);
+	TestTrue(TEXT("The acceleration cue settles to a fully formed steady field"),
+		FMath::IsNearlyEqual(FieldMaterial->K2_GetScalarParameterValue(TEXT("FieldFormation")), 1.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Fixture.Ship->GetFlightCamera()->FieldOfView, NearFlightFOV, 0.1f)
+		&& Fixture.Ship->GetFlightCameraBoom()->SocketOffset.Equals(CameraSocketBeforeHandoff, 0.1f)
+		&& FMath::IsNearlyZero(Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")), 0.0001f)
+		&& Fixture.Ship->GetFlightCamera()->PostProcessSettings.bOverride_SceneFringeIntensity
+			== Fixture.Ship->bBaseFlightCameraFringeOverride);
+	const FQuat HullBeforeApproach = Fixture.Ship->GetActorQuat();
+	const FQuat CameraBeforeApproach = Fixture.Ship->FlightCameraAimRotation;
+	Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude - 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	Presentation->TickComponent(0.16f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(0.16f);
+	const FQuat ExpectedApproachCamera = (Fixture.Ship->GetActorQuat()
+		* HullBeforeApproach.Inverse() * CameraBeforeApproach).GetNormalized();
+	TestTrue(TEXT("18 km planet approach preserves camera attitude without a roll"),
+		Fixture.Ship->bFlightCameraFrameInitialized
+		&& Fixture.Ship->FlightCameraAimRotation.AngularDistance(ExpectedApproachCamera)
+			< FMath::DegreesToRadians(0.5f)
+		&& Fixture.Ship->GetFlightCameraBoom()->GetComponentQuat().AngularDistance(ExpectedApproachCamera)
+			< FMath::DegreesToRadians(0.5f));
+	TestTrue(TEXT("Planet approach keeps only a small axial brake while the field withdraws"),
+		Fixture.Ship->GetFlightCamera()->FieldOfView < NearFlightFOV - 0.75f
+		&& Fixture.Ship->GetFlightCamera()->FieldOfView > NearFlightFOV - 2.25f
+		&& FMath::IsNearlyEqual(Fixture.Ship->GetFlightCameraBoom()->SocketOffset.X,
+			CameraSocketBeforeHandoff.X + Fixture.Ship->CruiseBrakeCameraLurch, 1.0f)
+		&& FieldMaterial->K2_GetScalarParameterValue(TEXT("FieldFormation")) < 1.0f
+		&& Field->GetRelativeScale3D().Equals(FieldScaleBeforeHandoff, 0.001f));
+	AddInfo(FString::Printf(TEXT("Approach medium: runtime=%.4f material=%.4f radius=%.4f"),
+		Fixture.Ship->CurrentMediumWarpStrength,
+		Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")),
+		Medium->K2_GetScalarParameterValue(TEXT("WaveRadius"))));
+	TestTrue(TEXT("Entering the planet pulls the refractive boundary inward"),
+		Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")) < -0.005f
+		&& Medium->K2_GetScalarParameterValue(TEXT("WaveRadius")) > 0.4f);
+	const float BrakeFOV = Fixture.Ship->GetFlightCamera()->FieldOfView;
+	const float BrakeCameraOffset = Fixture.Ship->GetFlightCameraBoom()->SocketOffset.X;
+	const float BrakeWarpStrength = Medium->K2_GetScalarParameterValue(TEXT("WarpStrength"));
+	Fixture.Ship->SetActorLocation(ReleaseLocation);
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	Presentation->TickComponent(0.016f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(0.016f);
+	TestTrue(TEXT("Rapid 18 km reversal withdraws the lens cue without a snap"),
+		FMath::Abs(Fixture.Ship->GetFlightCamera()->FieldOfView - BrakeFOV) < 1.5f
+		&& FMath::Abs(Fixture.Ship->GetFlightCameraBoom()->SocketOffset.X - BrakeCameraOffset) < 25.0f
+		&& FMath::Abs(Medium->K2_GetScalarParameterValue(TEXT("WarpStrength")) - BrakeWarpStrength) < 0.002f);
+	Presentation->TickComponent(0.3f, LEVELTICK_All, nullptr);
+	Fixture.Ship->Tick(0.55f);
+	for (const FVector Heading : { FVector::ForwardVector, -FVector::ForwardVector, FVector::RightVector })
+	{
+		Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromX(Heading).ToQuat());
+		Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+			+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude - 100.0f));
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+		TestFalse(TEXT("All headings return to near flight below 18 km"),
+			Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+		Fixture.Ship->SetActorLocation(Fixture.Planet->GetPlanetCenter()
+			+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude + 100.0f));
+		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+		TestTrue(TEXT("All headings enter cruise above 18 km"),
+			Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+	}
+	Fixture.Ship->SetActorLocation(ReleaseLocation);
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	Fixture.Planet->GetGameplaySurfaceActor()->SetActorScale3D(FVector(200.0f));
+	Fixture.Ship->SetRole(ROLE_SimulatedProxy);
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("A client updates the visible planet shrink before switching navigation"),
+		Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().GetAbsMax() < 200.0f
+		&& Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+	Fixture.Ship->SetRole(ROLE_Authority);
+	Movement->Velocity = FVector::ForwardVector * 5000.0f;
+	TestTrue(TEXT("Antigravity flight reports cruise speed immediately after mesh shrink"),
+		Fixture.Manager->GetNavigationSpeedCentimetersPerSecond(Fixture.Ship) > 100000000.0f);
+	Movement->Velocity = FVector::RightVector * 5000.0f;
+	TestTrue(TEXT("Turning across the route does not reduce cruise speed to m/s"),
+		Fixture.Manager->GetNavigationSpeedCentimetersPerSecond(Fixture.Ship) > 100000000.0f);
+	Movement->StopMovementImmediately();
+	TestTrue(TEXT("Cruise range at the shrink boundary is below one hundredth AU"),
+		Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet)
+			< 0.01 * AstronomicalUnitCentimeters);
+	TestEqual(TEXT("Even 120,000 km still displays below 0.01 AU"),
+		UJTSCruiseNavigationWidget::FormatAstronomicalRange(120000.0f * 100000.0f),
+		FString(TEXT("<0.01 AU")));
+	TestEqual(TEXT("The top speed changes units at one kilometre per second"),
+		UJTSCruiseNavigationWidget::FormatNavigationSpeed(100000.0f), FString(TEXT("1.0 km/s")));
+	const float InnerBeforeCrossover = UJTSCruiseNavigationWidget::CruiseRangeRadialFraction(
+		static_cast<float>(0.42 * AstronomicalUnitCentimeters));
+	const float OuterBeforeCrossover = UJTSCruiseNavigationWidget::CruiseRangeRadialFraction(
+		static_cast<float>(0.43 * AstronomicalUnitCentimeters));
+	TestTrue(TEXT("Nearly equal AU ranges stay nearly adjacent when their order changes"),
+		InnerBeforeCrossover < OuterBeforeCrossover
+		&& OuterBeforeCrossover - InnerBeforeCrossover < 0.01f);
+	TestTrue(TEXT("The foreign planet retains its configured half-AU route"),
+		Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Mars)
+			> 0.5 * AstronomicalUnitCentimeters);
+	const float ReleaseRange = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet);
+	Fixture.Ship->SetActorLocation(ReleaseLocation + FVector::RightVector * 10000.0f);
+	TestTrue(TEXT("Leaving the Moon in any direction increases its cruise range"),
+		Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet) > ReleaseRange);
+	const FVector CorridorLocation = FMath::Lerp(ReleaseLocation, Mars->GetPlanetCenter(), 0.25f);
+	Fixture.Ship->SetActorLocation(CorridorLocation);
+	const float MoonRangeBeforeReferenceChange = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet);
+	const float MarsRangeBeforeReferenceChange = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Mars);
+	const float DeimosRangeBeforeReferenceChange = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Deimos);
+	Fixture.Ship->SetFlightTargetPlanet(Mars);
+	TestTrue(TEXT("Every cruise contact keeps its AU range when the flight reference changes"),
+		FMath::IsNearlyEqual(Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet),
+			MoonRangeBeforeReferenceChange, MoonRangeBeforeReferenceChange * 0.0001f)
+		&& FMath::IsNearlyEqual(Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Mars),
+			MarsRangeBeforeReferenceChange, MarsRangeBeforeReferenceChange * 0.0001f)
+		&& FMath::IsNearlyEqual(Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Deimos),
+			DeimosRangeBeforeReferenceChange, DeimosRangeBeforeReferenceChange * 0.0001f));
+	Fixture.Ship->SetFlightTargetPlanet(nullptr);
+	TestTrue(TEXT("Travel into the compressed cruise corridor grows the AU reading"),
+		Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet) > ReleaseRange);
+	Movement->Velocity = (Mars->GetPlanetCenter() - Fixture.Planet->GetPlanetCenter()).GetSafeNormal() * 4200.0f;
+	const float CruiseNavigationSpeed = Fixture.Manager->GetNavigationSpeedCentimetersPerSecond(Fixture.Ship);
+	TestTrue(TEXT("The top navigation speed reflects the compressed AU route in cruise"),
+		CruiseNavigationSpeed > 4200000.0f);
+	const FVector CruiseVelocity = Movement->Velocity;
+	Fixture.Ship->SetActorLocation(CorridorLocation + CruiseVelocity * 0.05f);
+	const float RangeAhead = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet);
+	Fixture.Ship->SetActorLocation(CorridorLocation - CruiseVelocity * 0.05f);
+	const float RangeBehind = Fixture.Manager->GetCruiseRangeCentimeters(Fixture.Ship, Fixture.Planet);
+	Fixture.Ship->SetActorLocation(CorridorLocation);
+	TestTrue(TEXT("The top speed agrees with the route distance change per second"),
+		FMath::IsNearlyEqual(CruiseNavigationSpeed, (RangeAhead - RangeBehind) / 0.1f,
+			CruiseNavigationSpeed * 0.1f));
+	Movement->StopMovementImmediately();
+	FRepMovement ReplicatedShipMovement = Fixture.Ship->GetReplicatedMovement();
+	ReplicatedShipMovement.LinearVelocity = FVector(3000.0f, 4000.0f, 0.0f);
+	Fixture.Ship->SetReplicatedMovement(ReplicatedShipMovement);
+	Fixture.Ship->SetRole(ROLE_SimulatedProxy);
+	TestTrue(TEXT("A client reads ship speed from replicated movement"),
+		FMath::IsNearlyEqual(Fixture.Ship->GetCurrentSpeed(), 5000.0f, 1.0f));
+	Fixture.Ship->SetRole(ROLE_Authority);
+
 	const FVector OutsideLocation = Fixture.Planet->GetPlanetCenter()
 		+ SourceUp * (Fixture.Planet->GetVisualRadius() + Fixture.Planet->GetGravityInfluenceRange() + 20000.0f);
 	Fixture.Ship->SetActorLocation(OutsideLocation);
@@ -1552,20 +2003,35 @@ bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Shrink probe measures altitude from the real surface"),
 		Fixture.Planet->GetAltitudeAboveSurface(OutsideLocation, ShrinkProbeAltitude));
 	const FVector ShrinkProbeLocation = Fixture.Planet->GetPlanetCenter()
-		+ SourceUp * (FVector::Distance(OutsideLocation, Fixture.Planet->GetPlanetCenter()) - ShrinkProbeAltitude + 70000.0f);
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ReleaseAltitude + 30000.0f);
 	Fixture.Ship->SetActorLocation(ShrinkProbeLocation);
 	Movement->SetMoveInput(FVector2D::ZeroVector);
 	Movement->StopMovementImmediately();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	const float ScaleJustPastRelease = Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().GetAbsMax();
-	TestTrue(TEXT("Just past 500 m the departure body has started shrinking and is still a world"),
+	TestTrue(TEXT("Past 18 km the departure body shrinks continuously and remains visible"),
 		ScaleJustPastRelease < 200.0f * 0.9f && ScaleJustPastRelease > 200.0f * 0.05f);
-	TestFalse(TEXT("Just past 500 m the departure body is still on screen"), Fixture.Planet->IsHidden());
+	TestFalse(TEXT("The shrinking departure body remains on screen"), Fixture.Planet->IsHidden());
 	Fixture.Ship->SetActorLocation(OutsideLocation);
 	Movement->StopMovementImmediately();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestTrue(TEXT("The distant destination is hidden while its disk is smaller than a pixel"), Mars->IsHidden());
 	const FVector MarsSurfaceLocation = MarsSurface->GetActorLocation();
+	Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromX(FVector::UpVector).ToQuat());
+	Fixture.Ship->SetActorLocation(Mars->GetPlanetCenter()
+		+ FVector::UpVector * (Mars->GetApproximateRadius() + ReleaseAltitude - 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("18 km reacquires the arriving planet even while facing away"),
+		Fixture.Manager->GetCurrentPlanet() == Mars
+		&& Fixture.Manager->GetCurrentTravelState() == EJTSSpaceTravelState::Approach
+		&& !Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
+	Fixture.Ship->SetActorLocation(Mars->GetPlanetCenter()
+		+ FVector::UpVector * (Mars->GetApproximateRadius() + ReleaseAltitude + 100.0f));
+	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Departing a destination also releases it at 18 km"),
+		Fixture.Manager->GetCurrentPlanet() == nullptr
+		&& Fixture.Manager->GetCurrentTravelState() == EJTSSpaceTravelState::SpaceFlight
+		&& Fixture.Manager->IsCruisePresentationActive(Fixture.Ship));
 
 	const FVector ApproachLocation = Mars->GetPlanetCenter()
 		+ FVector::UpVector * (Mars->GetApproximateRadius() + Mars->GetGravityInfluenceRange() - 500.0f);
@@ -1579,19 +2045,8 @@ bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Scaling a distant body leaves its surface where it was authored"),
 		MarsSurface->GetActorLocation().Equals(MarsSurfaceLocation, 1.0f));
 	const FVector DepartureScaleAfterCruise = Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D();
-	TestTrue(TEXT("Leaving the 500 m band lets the departure body shrink"),
+	TestTrue(TEXT("Leaving the 18 km band lets the departure body shrink"),
 		DepartureScaleAfterCruise.GetAbsMax() < 200.0f * 0.5f);
-
-	FActorSpawnParameters MarkerSpawnParameters;
-	MarkerSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AJTSPlanetLandingSite* const DepartureMarker = Fixture.World->SpawnActor<AJTSPlanetLandingSite>(
-		AJTSPlanetLandingSite::StaticClass(),
-		Fixture.Planet->GetPlanetCenter() + SourceUp * Fixture.Planet->GetApproximateRadius(),
-		FRotator::ZeroRotator,
-		MarkerSpawnParameters);
-	FindFProperty<FObjectProperty>(DepartureMarker->GetClass(), TEXT("PlanetAnchor"))
-		->SetObjectPropertyValue_InContainer(DepartureMarker, Fixture.Planet);
-	DepartureMarker->DispatchBeginPlay();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestTrue(TEXT("A landing marker left behind a shrunken body is hidden"), DepartureMarker->IsHidden());
 	TestFalse(TEXT("A landing marker left behind a shrunken body has no collision"), DepartureMarker->GetActorEnableCollision());
@@ -1599,22 +2054,22 @@ bool FJTSInterplanetaryCruiseRegression::RunTest(const FString& Parameters)
 		Fixture.Manager->GetCurrentPlanet(), Mars);
 
 	const FVector AuthoredBandLocation = Fixture.Planet->GetPlanetCenter()
-		+ SourceUp * (Fixture.Planet->GetVisualRadius() + 45000.0f);
+		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + ContentAltitude - 1000.0f);
 	Fixture.Ship->SetActorLocation(AuthoredBandLocation);
 	Movement->StopMovementImmediately();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-	TestTrue(TEXT("Within 500 m of the surface the body keeps its authored scale"),
+	TestTrue(TEXT("Within 17 km of the surface the body keeps its authored scale"),
 		Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().Equals(FVector(200.0), 0.1));
-	TestFalse(TEXT("Within 500 m of the surface the landing marker is shown"), DepartureMarker->IsHidden());
+	TestFalse(TEXT("Within 17 km of the surface the landing marker is shown"), DepartureMarker->IsHidden());
 
 	const FVector ReturnLocation = Fixture.Planet->GetPlanetCenter()
 		+ SourceUp * (Fixture.Planet->GetApproximateRadius() + Fixture.Planet->GetGravityInfluenceRange() * 0.5f);
 	Fixture.Ship->SetActorLocation(ReturnLocation);
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestFalse(TEXT("Turning back makes the departure body visible again"), Fixture.Planet->IsHidden());
-	TestTrue(TEXT("Returning inside 500 m restores the authored surface scale"),
+	TestTrue(TEXT("Returning inside 18 km restores the authored surface scale"),
 		Fixture.Planet->GetGameplaySurfaceActor()->GetActorScale3D().Equals(FVector(200.0), 0.1));
-	TestFalse(TEXT("Returning inside 500 m shows the landing marker again"), DepartureMarker->IsHidden());
+	TestFalse(TEXT("Returning inside 17 km shows the landing marker again"), DepartureMarker->IsHidden());
 	TestEqual(TEXT("Flying back into the departure influence reacquires that planet"),
 		Fixture.Manager->GetCurrentPlanet(), Fixture.Planet);
 	return true;

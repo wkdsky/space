@@ -77,6 +77,12 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 	UpdateReferenceFrame();
 	if (!GetOwner()->HasAuthority())
 	{
+		// Planet scale and surface-content visibility are local presentation. Clients
+		// must observe the same mesh shrink before their HUD/field enters cruise.
+		if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+		{
+			Manager->UpdateCelestialPresentation(Cast<AJTSSpacecraftActor>(GetPawnOwner()));
+		}
 		return;
 	}
 
@@ -185,6 +191,7 @@ bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
 
 	ClearInput();
 	bAssistedLanding = true;
+	ResetSurfaceNoseGuard();
 	Velocity = FVector::ZeroVector;
 	TargetPlanet = Planet;
 	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Aligning);
@@ -307,6 +314,7 @@ void UJTSSpacecraftFlightMovementComponent::SetTargetPlanet(AJTSPlanetAnchor* Ne
 	}
 
 	TargetPlanet = NewTargetPlanet;
+	ResetSurfaceNoseGuard();
 	bHasSurfaceProximity = false;
 	SurfaceFlightAssistAlpha = 0.0f;
 	SurfaceProximityProbeElapsed = FMath::Max(0.0f, SurfaceProximityProbeInterval);
@@ -523,7 +531,7 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 		Velocity = Velocity.GetClampedToMaxSize(FMath::Max(ExistingSpeed, MaximumSpeed));
 	}
 	ApplyPlanetGravity(DeltaTime);
-	const FSurfaceAvoidance Avoidance = EvaluateSurfaceAvoidance();
+	const FSurfaceAvoidance Avoidance = EvaluateSurfaceAvoidance(DeltaTime);
 	ApplySurfaceClearanceProtection(DeltaTime, Avoidance);
 
 	FHitResult Hit;
@@ -654,11 +662,18 @@ void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
 		return;
 	}
 
-	Velocity += GravityDirection * Planet->GetGravityStrength() * PlanetGravityScale * DeltaTime;
+	// The planet binding now stays through the 18 km navigation handoff. Ease gravity
+	// to zero before its influence edge so passing the old 14-15 km dial band cannot
+	// change acceleration in a single frame.
+	const float InfluenceRange = FMath::Max(1.0f, Planet->GetGravityInfluenceRange());
+	const float Altitude = FMath::Max(0.0f, Planet->GetApproximateAltitude(OwningPawn->GetActorLocation()));
+	const float InfluenceAlpha = 1.0f - FMath::SmoothStep(InfluenceRange * 0.5f, InfluenceRange, Altitude);
+	Velocity += GravityDirection * Planet->GetGravityStrength() * PlanetGravityScale
+		* InfluenceAlpha * DeltaTime;
 }
 
 UJTSSpacecraftFlightMovementComponent::FSurfaceAvoidance
-UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance() const
+UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance(float DeltaTime)
 {
 	FSurfaceAvoidance Result;
 	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
@@ -666,6 +681,7 @@ UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance() const
 	if (!bHasSurfaceProximity || !IsValid(Planet) || !IsValid(Spacecraft)
 		|| !IsValid(UpdatedComponent))
 	{
+		ResetSurfaceNoseGuard();
 		return Result;
 	}
 
@@ -687,6 +703,7 @@ UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance() const
 	}
 	if (RadialUp.IsNearlyZero() || Heading.IsNearlyZero())
 	{
+		ResetSurfaceNoseGuard();
 		return Result;
 	}
 	Result.RadialUp = RadialUp;
@@ -738,6 +755,7 @@ UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance() const
 		&& FVector::Distance(CraftLocation, Planet->GetPlanetCenter()) - OuterSurfaceRadius
 			> RequiredClearance + GuardDistance + BowDistance + Velocity.Size() * LookAheadTime)
 	{
+		ResetSurfaceNoseGuard();
 		return Result;
 	}
 
@@ -787,15 +805,70 @@ UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance() const
 	}
 
 	const bool bThreat = ClosestPredictedClearance <= GuardDistance;
-	Result.MinimumPitch = bHasAheadSurface && HighestGroundPitch > -HALF_PI
-		? HighestGroundPitch : 0.0f;
-	Result.bConstrainPitch = bThreat && (CenterClearance <= GuardDistance || bApproaching);
+	const bool bWasGuardActive = bSurfaceNoseGuardActive;
+	if (bThreat && (CenterClearance <= GuardDistance || bApproaching))
+	{
+		bSurfaceNoseGuardActive = true;
+		SurfaceNosePitchClearElapsed = 0.0f;
+	}
+	else if (bSurfaceNoseGuardActive)
+	{
+		const float ReleaseDistance = FMath::Max(0.0f, SurfaceNosePitchReleaseDistance);
+		if (ClosestPredictedClearance > GuardDistance + 3.0f * ReleaseDistance)
+		{
+			// A genuine climb has cleared the envelope; only the narrow edge needs dwell.
+			ResetSurfaceNoseGuard();
+		}
+		else if (ClosestPredictedClearance > GuardDistance + ReleaseDistance)
+		{
+			SurfaceNosePitchClearElapsed += FMath::Max(0.0f, DeltaTime);
+			if (SurfaceNosePitchClearElapsed >= FMath::Max(0.0f, SurfaceNosePitchReleaseDelay))
+			{
+				ResetSurfaceNoseGuard();
+			}
+		}
+		else
+		{
+			SurfaceNosePitchClearElapsed = 0.0f;
+		}
+	}
+	Result.bConstrainPitch = bSurfaceNoseGuardActive;
 	Result.bAssistVelocity = bThreat && bApproaching;
+	if (Result.bConstrainPitch)
+	{
+		const float GroundPitch = bHasAheadSurface && HighestGroundPitch > -HALF_PI
+			? HighestGroundPitch : 0.0f;
+		const float SafePitch = FMath::Min(FMath::DegreesToRadians(80.0f),
+			GroundPitch + FMath::DegreesToRadians(FMath::Clamp(
+				SurfaceTerrainAvoidancePitchMarginDegrees, 0.0f, 20.0f)));
+		if (!bWasGuardActive)
+		{
+			SmoothedSurfaceMinimumPitch = SafePitch;
+		}
+		else
+		{
+			const float ResponseDegrees = SafePitch > SmoothedSurfaceMinimumPitch
+				? (ClosestPredictedClearance <= 0.0f
+					? 360.0f : SurfaceTerrainPitchAttackDegreesPerSecond)
+				: SurfaceTerrainPitchRelaxDegreesPerSecond;
+			SmoothedSurfaceMinimumPitch = FMath::FInterpConstantTo(
+				SmoothedSurfaceMinimumPitch, SafePitch, FMath::Max(0.0f, DeltaTime),
+				FMath::DegreesToRadians(FMath::Max(1.0f, ResponseDegrees)));
+		}
+		Result.MinimumPitch = SmoothedSurfaceMinimumPitch;
+	}
 	const float CurrentPitch = FMath::Atan2(
 		FVector::DotProduct(Forward, RadialUp), FVector::DotProduct(Forward, Heading));
 	Result.bRaiseNose = Result.bConstrainPitch && bHasAheadSurface && !bTurnAround
 		&& CurrentPitch < Result.MinimumPitch - FMath::DegreesToRadians(1.0f);
 	return Result;
+}
+
+void UJTSSpacecraftFlightMovementComponent::ResetSurfaceNoseGuard()
+{
+	bSurfaceNoseGuardActive = false;
+	SurfaceNosePitchClearElapsed = 0.0f;
+	SmoothedSurfaceMinimumPitch = 0.0f;
 }
 
 void UJTSSpacecraftFlightMovementComponent::ApplySurfaceClearanceProtection(
@@ -883,9 +956,7 @@ FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(
 		const float DesiredPitch = FMath::Atan2(
 			FVector::DotProduct(DesiredForward, Avoidance.RadialUp),
 			FVector::DotProduct(DesiredForward, Avoidance.Heading));
-		const float SafePitch = FMath::Min(FMath::DegreesToRadians(80.0f),
-			Avoidance.MinimumPitch + FMath::DegreesToRadians(
-				FMath::Clamp(SurfaceTerrainAvoidancePitchMarginDegrees, 0.0f, 20.0f)));
+		const float SafePitch = Avoidance.MinimumPitch;
 		if (DesiredPitch < SafePitch)
 		{
 			// Raise the complete hull around the local horizontal axis, leaving yaw and roll intact.

@@ -252,7 +252,10 @@ bool UJTSInventoryComponent::CanAddItem(EJTSItemId ItemId, int32 Count) const
 	{
 		return false;
 	}
-	if (ItemId == EJTSItemId::StellarText) return Count == 1 && HasAvailableSlot();
+	if (ItemId == EJTSItemId::StellarText || ItemId == EJTSItemId::StellarWeapon)
+	{
+		return Count == 1 && HasAvailableSlot();
+	}
 	TArray<FJTSItemInstance> SimulatedSlots = ItemSlots;
 	SimulatedSlots.SetNum(FMath::Max(SimulatedSlots.Num(), GetInventoryCapacity()));
 	int32 Remaining = Count;

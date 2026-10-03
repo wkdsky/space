@@ -641,7 +641,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			18.0f,
 			FLinearColor(0.90f, 0.96f, 1.0f, 1.0f),
 			ETextJustify::Center);
-		AddCanvasChild(GameplayLayer, FlightSpeedText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 18.0f), FVector2D(220.0f, 32.0f), FVector2D(0.5f, 0.0f));
+		AddCanvasChild(GameplayLayer, FlightSpeedText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 18.0f), FVector2D(300.0f, 32.0f), FVector2D(0.5f, 0.0f));
 		ApplyLayerVisibility(FlightSpeedText, false);
 
 		FlightNavPanel = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("FlightNavPanel"));
@@ -1546,25 +1546,11 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 		return;
 	}
 
-	const AJTSPlanetAnchor* SurfacePlanet = Spacecraft->GetFlightPlanet();
-	if (!IsValid(SurfacePlanet))
-	{
-		SurfacePlanet = SpaceWorldManager->GetCurrentPlanet();
-	}
+	const AJTSPlanetAnchor* const SurfacePlanet = SpaceWorldManager->GetNavigationReferencePlanet(Spacecraft);
 
-	float SurfaceAltitude = 0.0f;
-	const UJTSSpacecraftFlightMovementComponent* const FlightMovement = Spacecraft->GetFlightMovementComponent();
-	const bool bHasSurfaceAltitude = IsValid(SurfacePlanet)
-		&& ((FlightMovement != nullptr && FlightMovement->GetResolvedSurfaceAltitude(SurfacePlanet, SurfaceAltitude))
-			|| SurfacePlanet->GetAltitudeAboveSurface(Spacecraft->GetActorLocation(), SurfaceAltitude));
-	if (!bHasSurfaceAltitude && IsValid(SurfacePlanet))
-	{
-		SurfaceAltitude = SurfacePlanet->GetApproximateAltitude(Spacecraft->GetActorLocation());
-	}
-
-	// Inside 500 m of a planet the dial leaves astronomical units and reads that body's surface distance.
-	constexpr float SurfaceNavigationAltitude = 50000.0f;
-	const bool bNearSurface = bHasSurfaceAltitude && SurfaceAltitude <= SurfaceNavigationAltitude;
+	// The same release shell that starts the planet shrink switches the dial to the star chart.
+	const bool bNearSurface = IsValid(SurfacePlanet)
+		&& !SpaceWorldManager->IsCruisePresentationActive(Spacecraft);
 
 	const FVector ShipLocation = Spacecraft->GetActorLocation();
 	const FVector ShipForward = Spacecraft->GetActorForwardVector().GetSafeNormal();
@@ -1634,7 +1620,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 
 		Contacts.Sort([](const FJTSCruiseNavigationContact& Left, const FJTSCruiseNavigationContact& Right)
 		{
-			return Left.RangeCentimeters < Right.RangeCentimeters;
+			return Left.DisplayName < Right.DisplayName;
 		});
 	}
 
@@ -1646,8 +1632,9 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 		: FString::Printf(TEXT("FUEL  %d"), Spacecraft->GetFuelCount());
 	if (FlightSpeedText != nullptr)
 	{
-		const int32 SpeedMetersPerSecond = FMath::Max(0, FMath::RoundToInt(Spacecraft->GetCurrentSpeed() / 100.0f));
-		FlightSpeedText->SetText(FText::FromString(FString::Printf(TEXT("%d m/s"), SpeedMetersPerSecond)));
+		FlightSpeedText->SetText(FText::FromString(FString::Printf(TEXT("NAV  %s"),
+			*UJTSCruiseNavigationWidget::FormatNavigationSpeed(
+				SpaceWorldManager->GetNavigationSpeedCentimetersPerSecond(Spacecraft)))));
 	}
 	if (CruiseNavigationWidget != nullptr)
 	{

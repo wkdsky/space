@@ -37,6 +37,8 @@ public:
 	void NotifyStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
 	void NotifyShipLockerActionResult(bool bSucceeded, bool bTakeAction);
 	void NotifyShipLockerExchangeResult(bool bSucceeded);
+	void NotifyShipLockerMoveResult(bool bSucceeded);
+	void NotifyStellarCombineResult(bool bSucceeded);
 	void NotifyCarriedItemActionResult(bool bSucceeded, bool bStored);
 	void UpdateCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible);
 	void HandleCarriedItemDrop(const FVector2D& ScreenPosition, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
@@ -63,6 +65,7 @@ private:
 	bool CanFinishStellarRoll() const;
 	void SetLeverPull(float Distance);
 	FString GetStellarItemLabel(FName ItemId) const;
+	int32 FindSelectedStellarCoreSlot() const;
 	FString FormatStellarCosts() const;
 	void RefreshAbilities();
 	void RefreshPageVisibility();
@@ -93,6 +96,7 @@ private:
 	UFUNCTION() void HandleStellarTabClicked();
 	UFUNCTION() void HandleStellarRollClicked();
 	UFUNCTION() void HandleTakeLockerItemClicked();
+	UFUNCTION() void HandleCombineStellarWeaponClicked();
 	UFUNCTION() void HandleInventorySlotsDecrease();
 	UFUNCTION() void HandleInventorySlotsIncrease();
 	UFUNCTION() void HandleStackLimitDecrease();
@@ -146,6 +150,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UButton> StellarTabButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> StellarRollButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> TakeLockerItemButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> CombineStellarWeaponButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> DebugResourcesButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> DebugLevelsButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> ConfirmAbilitiesButton;

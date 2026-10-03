@@ -25,6 +25,8 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "Math/RotationMatrix.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
@@ -345,6 +347,21 @@ void AJTSSpacecraftActor::BeginPlay()
 	UpdateFlightCollisionFromSpacecraftMeshBounds();
 	ConfigureCameraCollisionResponses();
 	InitializeFlightCameraDistance();
+	if (FlightCamera != nullptr)
+	{
+		BaseFlightCameraFringeIntensity = FlightCamera->PostProcessSettings.SceneFringeIntensity;
+		bBaseFlightCameraFringeOverride = FlightCamera->PostProcessSettings.bOverride_SceneFringeIntensity;
+		if (IsValid(CruiseMediumDistortionMaterial))
+		{
+			CruiseMediumDistortionInstance = UMaterialInstanceDynamic::Create(CruiseMediumDistortionMaterial, this);
+			if (CruiseMediumDistortionInstance != nullptr)
+			{
+				CruiseMediumDistortionInstance->SetScalarParameterValue(TEXT("WarpStrength"), 0.0f);
+				CruiseMediumDistortionInstance->SetScalarParameterValue(TEXT("WaveRadius"), 0.0f);
+				FlightCamera->AddOrUpdateBlendable(CruiseMediumDistortionInstance, 0.0f);
+			}
+		}
+	}
 	if (FlightMovementComponent != nullptr
 		&& !FlightMovementComponent->OnBoostStateChanged.IsAlreadyBound(this, &AJTSSpacecraftActor::HandleFlightBoostStateChanged))
 	{
@@ -1162,13 +1179,100 @@ void AJTSSpacecraftActor::UpdateFlightCamera(float DeltaSeconds)
 	}
 	UpdateFlightCameraFrame(DeltaSeconds);
 
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	const bool bCruiseMode = IsValid(Manager) && Manager->IsCruisePresentationActive(this);
+	const float Attack = FMath::Max(0.01f, CruiseTransitionFOVAttack);
+	const float Release = FMath::Max(0.05f, CruiseTransitionFOVRelease);
+	const float TransitionDuration = Attack + Release;
+	if (!bFlightModeTransitionInitialized)
+	{
+		bFlightCameraCruiseMode = bCruiseMode;
+		SmoothedFlightBaseFOV = FlightCamera->FieldOfView;
+		FlightModeTransitionElapsed = TransitionDuration;
+		bFlightModeTransitionInitialized = true;
+	}
+	else if (bFlightCameraCruiseMode != bCruiseMode)
+	{
+		// If the ship skims 18 km while the first cue is still playing, withdraw it
+		// smoothly. Restarting with the opposite cue would make the camera snap.
+		const bool bReversingDuringTransition = FlightModeTransitionElapsed < TransitionDuration;
+		bFlightCameraCruiseMode = bCruiseMode;
+		FlightModeTransitionStartKick = CurrentFlightModeFOVKick;
+		FlightModeTransitionStartAxialOffset = CurrentFlightModeAxialOffset;
+		MediumWarpStartStrength = CurrentMediumWarpStrength;
+		MediumWaveStartRadius = CurrentMediumWaveRadius;
+		bMediumWaveWithdrawing = bReversingDuringTransition;
+		MediumWarpPeakStrength = bReversingDuringTransition
+			? 0.0f
+			: (bCruiseMode ? FMath::Max(0.0f, CruiseMediumWarpStrength)
+				: -FMath::Max(0.0f, CruiseMediumWarpStrength));
+		if (!bReversingDuringTransition)
+		{
+			MediumWaveStartRadius = bCruiseMode ? 0.05f : 0.82f;
+		}
+		MediumWaveEndRadius = bReversingDuringTransition
+			? MediumWaveStartRadius
+			: (bCruiseMode ? 0.82f : 0.05f);
+		FlightModeTransitionTargetKick = bReversingDuringTransition
+			? 0.0f
+			: (bCruiseMode ? FMath::Max(0.0f, CruiseEngageFOVKick)
+				: -FMath::Max(0.0f, CruiseBrakeFOVKick));
+		FlightModeTransitionTargetAxialOffset = bReversingDuringTransition
+			? 0.0f
+			: (bCruiseMode ? -FMath::Max(0.0f, CruiseEngageCameraPushback)
+				: FMath::Max(0.0f, CruiseBrakeCameraLurch));
+		FlightModeTransitionElapsed = 0.0f;
+	}
+	FlightModeTransitionElapsed = FMath::Min(TransitionDuration,
+		FlightModeTransitionElapsed + FMath::Max(0.0f, DeltaSeconds));
+
 	const bool bShouldBoostFOV = FlightMovementComponent != nullptr && FlightMovementComponent->IsBoosting();
 	const float TargetFOV = bShouldBoostFOV ? BoostFlightFOV : NormalFlightFOV;
-	FlightCamera->SetFieldOfView(FMath::FInterpTo(
-		FlightCamera->FieldOfView,
+	SmoothedFlightBaseFOV = FMath::FInterpTo(
+		SmoothedFlightBaseFOV,
 		TargetFOV,
 		DeltaSeconds,
-		FMath::Max(0.1f, FlightFOVInterpolationSpeed)));
+		FMath::Max(0.1f, FlightFOVInterpolationSpeed));
+	if (FlightModeTransitionElapsed < Attack)
+	{
+		const float Alpha = FMath::SmoothStep(0.0f, Attack, FlightModeTransitionElapsed);
+		CurrentFlightModeFOVKick = FMath::Lerp(FlightModeTransitionStartKick, FlightModeTransitionTargetKick, Alpha);
+		CurrentFlightModeAxialOffset = FMath::Lerp(
+			FlightModeTransitionStartAxialOffset, FlightModeTransitionTargetAxialOffset, Alpha);
+	}
+	else
+	{
+		const float Alpha = 1.0f - FMath::SmoothStep(Attack, TransitionDuration, FlightModeTransitionElapsed);
+		CurrentFlightModeFOVKick = FlightModeTransitionTargetKick * Alpha;
+		CurrentFlightModeAxialOffset = FlightModeTransitionTargetAxialOffset * Alpha;
+	}
+	FlightCamera->SetFieldOfView(FMath::Clamp(SmoothedFlightBaseFOV + CurrentFlightModeFOVKick,
+		30.0f, 170.0f));
+	if (FlightCameraBoom != nullptr)
+	{
+		FlightCameraBoom->SocketOffset = FlightCameraSocketOffset
+			+ FVector(CurrentFlightModeAxialOffset, 0.0f, 0.0f);
+	}
+	const float WaveTime = FMath::Clamp(FlightModeTransitionElapsed / TransitionDuration, 0.0f, 1.0f);
+	const float WavePhase = FMath::SmoothStep(0.0f, 1.0f, WaveTime);
+	CurrentMediumWaveRadius = FMath::Lerp(MediumWaveStartRadius, MediumWaveEndRadius, WavePhase);
+	const float WaveEnvelope = FMath::Square(FMath::Sin(PI * WaveTime));
+	CurrentMediumWarpStrength = bMediumWaveWithdrawing
+		? MediumWarpStartStrength * (1.0f - WavePhase)
+		: MediumWarpPeakStrength * WaveEnvelope;
+	if (CruiseMediumDistortionInstance != nullptr)
+	{
+		CruiseMediumDistortionInstance->SetScalarParameterValue(TEXT("WarpStrength"), CurrentMediumWarpStrength);
+		CruiseMediumDistortionInstance->SetScalarParameterValue(TEXT("WaveRadius"), CurrentMediumWaveRadius);
+		FlightCamera->AddOrUpdateBlendable(CruiseMediumDistortionInstance,
+			FMath::Abs(CurrentMediumWarpStrength) > KINDA_SMALL_NUMBER ? 1.0f : 0.0f);
+	}
+	const float FringeAlpha = FMath::Clamp(FMath::Abs(CurrentMediumWarpStrength)
+		/ FMath::Max(0.0001f, CruiseMediumWarpStrength), 0.0f, 1.0f);
+	FlightCamera->PostProcessSettings.bOverride_SceneFringeIntensity = FringeAlpha > KINDA_SMALL_NUMBER
+		|| bBaseFlightCameraFringeOverride;
+	FlightCamera->PostProcessSettings.SceneFringeIntensity = BaseFlightCameraFringeIntensity
+		+ FMath::Max(0.0f, CruiseMediumFringeIntensity) * FringeAlpha;
 }
 
 void AJTSSpacecraftActor::HandleFlightBoostStateChanged(bool bIsBoosting)
@@ -1738,12 +1842,18 @@ bool AJTSSpacecraftActor::IsBoosting() const
 
 float AJTSSpacecraftActor::GetCurrentSpeed() const
 {
-	return FlightMovementComponent != nullptr ? FlightMovementComponent->GetCurrentSpeed() : 0.0f;
+	return GetFlightVelocity().Size();
 }
 
 FVector AJTSSpacecraftActor::GetFlightVelocity() const
 {
-	return FlightMovementComponent != nullptr ? FlightMovementComponent->Velocity : FVector::ZeroVector;
+	if (HasAuthority())
+	{
+		return FlightMovementComponent != nullptr ? FlightMovementComponent->Velocity : FVector::ZeroVector;
+	}
+	// Client movement is replicated by the ship actor; the authoritative movement component
+	// does not simulate or update its local Velocity on clients.
+	return GetReplicatedMovement().LinearVelocity;
 }
 
 float AJTSSpacecraftActor::GetSpeedNormalized() const
@@ -1809,7 +1919,6 @@ void AJTSSpacecraftActor::SetFlightTargetPlanet(AJTSPlanetAnchor* Planet)
 		return;
 	}
 	FlightPlanet = Planet;
-	bFlightCameraFrameInitialized = false;
 	if (FlightMovementComponent != nullptr)
 	{
 		FlightMovementComponent->SetTargetPlanet(Planet);
@@ -2810,7 +2919,12 @@ void AJTSSpacecraftActor::OnRep_Occupants()
 
 void AJTSSpacecraftActor::OnRep_FlightState()
 {
-	bFlightCameraFrameInitialized = false;
+	// FlightPlanet is replicated through this callback too. A planet handoff must not rebuild the
+	// local view from a new reference Up; that can roll a level camera by 90 degrees in one frame.
+	if (FlightState == EJTSSpacecraftFlightState::Landed || bIsGroundedOnPlanet)
+	{
+		bFlightCameraFrameInitialized = false;
+	}
 	if (FlightMovementComponent == nullptr)
 	{
 		return;

@@ -27,6 +27,10 @@ struct SPACE_API FJTSStellarLootEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
 	bool bCore = false;
 
+	/** An attachment combines only with this core in the preceding locker slot. Empty for cores and materials. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
+	FName CompatibleCoreId;
+
 	/** Fine tuning within the same grade. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot", meta = (ClampMin = "0.01"))
 	float WeightScale = 1.0f;
@@ -44,21 +48,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
 	TArray<FJTSStellarLootEntry> Entries;
 
-	/** Every step toward Z multiplies weight by this ratio. The total is normalized each roll. */
+	/** Every step toward Z multiplies weight by this ratio (design q = 0.65). The total is normalized each roll. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Balance", meta = (ClampMin = "0.01", ClampMax = "0.99"))
-	float GradeWeightRatio = 0.72f;
-
-	/** Applied to a core for each copy of that same core in this player's locker. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Balance", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float SameCoreCopyMultiplier = 0.55f;
-
-	/** Applied to a core for each other core kind already owned. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Balance", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float OtherCoreKindMultiplier = 0.82f;
-
-	/** Prevents a core from becoming impossible to win. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Balance", meta = (ClampMin = "0.001", ClampMax = "1.0"))
-	float MinimumCoreMultiplier = 0.03f;
+	float GradeWeightRatio = 0.65f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Economy")
 	TArray<FJTSItemCost> SpinCosts;
@@ -68,15 +60,18 @@ public:
 
 	const FJTSStellarLootEntry* FindEntry(FName ItemId) const;
 	FJTSItemInstance MakeTextItem(FName ItemId) const;
+	bool CanCombine(FName CoreId, FName AttachmentId) const;
+	FText GetWeaponDisplayName(FName CoreId, FName AttachmentId) const;
+	FJTSItemInstance MakeWeaponItem(FName CoreId, FName AttachmentId) const;
+	/**
+	 * U: distinct core kinds this player has ever rolled. A core's weight is q^(rank + U), so every
+	 * core slides U grades toward Z while other entries keep q^rank.
+	 */
+	int32 CountDiscoveredCoreKinds(const TArray<FName>& DiscoveredCoreIds) const;
 	/** Probabilities in the same order as Entries, using the exact server roll weights. */
-	bool GetRollProbabilities(const TArray<FJTSShipLockerSlot>& OwnedSlots,
-		TArray<double>& OutProbabilities,
-		const TArray<FJTSItemInstance>& CarriedItems = {}) const;
-	bool Roll(const TArray<FJTSShipLockerSlot>& OwnedSlots, FName& OutItemId,
-		const TArray<FJTSItemInstance>& CarriedItems = {}) const;
+	bool GetRollProbabilities(const TArray<FName>& DiscoveredCoreIds, TArray<double>& OutProbabilities) const;
+	bool Roll(const TArray<FName>& DiscoveredCoreIds, FName& OutItemId) const;
 
 private:
-	double BuildRollWeights(const TArray<FJTSShipLockerSlot>& OwnedSlots,
-		const TArray<FJTSItemInstance>& CarriedItems,
-		TArray<double>& OutWeights) const;
+	double BuildRollWeights(const TArray<FName>& DiscoveredCoreIds, TArray<double>& OutWeights) const;
 };

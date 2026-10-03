@@ -1845,7 +1845,7 @@ void AJTSCharacter::HandleAimStarted(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
 	if (!CanUseNormalGameplayInput() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
-		|| !IsValid(RangedWeaponComponent) || !RangedWeaponComponent->HasActiveRangedWeapon())
+		|| !IsValid(RangedWeaponComponent))
 	{
 		return;
 	}
@@ -2599,8 +2599,7 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 {
 	const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
 	const bool bWantsAim = !bClimbing && IsValid(RangedWeaponComponent)
-		&& RangedWeaponComponent->IsAiming()
-		&& RangedWeaponComponent->HasActiveRangedWeapon();
+		&& RangedWeaponComponent->IsAiming();
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
 	AimCameraAlpha = bClimbing ? 0.0f : FMath::FInterpTo(AimCameraAlpha, TargetAlpha,
 		DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
@@ -2617,7 +2616,8 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 	if (FollowCamera != nullptr)
 	{
 		const float BaseFOV = bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV;
-		const float ActiveAimFOV = IsValid(RangedWeaponComponent) ? RangedWeaponComponent->GetActiveAimFOV() : AimFOV;
+		const float ActiveAimFOV = IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon()
+			? RangedWeaponComponent->GetActiveAimFOV() : AimFOV;
 		FollowCamera->SetFieldOfView(FMath::Lerp(BaseFOV, ActiveAimFOV, AimCameraAlpha));
 	}
 	if (UJTSWeaponVisualComponent* Visual = FindComponentByClass<UJTSWeaponVisualComponent>())

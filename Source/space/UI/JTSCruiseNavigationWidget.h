@@ -39,8 +39,8 @@ struct FJTSCruiseNavigationContact
  *
  * The ship stays fixed at the bottom of the disc, pointing up. Registered planets slide with the
  * hull's heading. A body outside the forward cone, or above or below the nose, pins to the rim
- * with a direction chevron. Inside 500 m of a planet the same frame switches to that body's
- * surface distance.
+ * with a direction chevron. Inside the shared 18 km handoff the same frame switches to that
+ * body's surface distance.
  */
 UCLASS()
 class SPACE_API UJTSCruiseNavigationWidget : public UWidget
@@ -56,6 +56,11 @@ public:
 		const FString& RightCaption,
 		bool bSurfaceMode,
 		float SurfaceFraction);
+
+	static FString FormatAstronomicalRange(float Centimeters);
+	static FString FormatNavigationSpeed(float CentimetersPerSecond);
+	/** Stable dial radius for a contact's own AU range, independent of other contacts. */
+	static float CruiseRangeRadialFraction(float Centimeters);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

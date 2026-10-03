@@ -13,8 +13,22 @@ namespace
 		const UJTSStellarLootTable* LootTable)
 	{
 		if (!Slot.StandardItem.IsEmpty()) return Slot.StandardItem;
-		return !Slot.StellarItemId.IsNone() && IsValid(LootTable)
-			? LootTable->MakeTextItem(Slot.StellarItemId) : FJTSItemInstance();
+		if (Slot.StellarItemId.IsNone() || !IsValid(LootTable)) return FJTSItemInstance();
+		return Slot.StellarCoreId.IsNone()
+			? LootTable->MakeTextItem(Slot.StellarItemId)
+			: LootTable->MakeWeaponItem(Slot.StellarCoreId, Slot.StellarItemId);
+	}
+
+	void AssignItemToLockerSlot(FJTSShipLockerSlot& Slot, const FJTSItemInstance& Item)
+	{
+		const bool bStellar = Item.ItemId == EJTSItemId::StellarText
+			|| Item.ItemId == EJTSItemId::StellarWeapon;
+		Slot.StandardItem = bStellar ? FJTSItemInstance() : Item;
+		Slot.StellarItemId = bStellar ? Item.StellarItemId : NAME_None;
+		Slot.StellarCoreId = Item.ItemId == EJTSItemId::StellarWeapon
+			? Item.StellarCoreId : NAME_None;
+		Slot.bPendingStellarReveal = false;
+		Slot.SlotToken = FGuid::NewGuid();
 	}
 }
 
@@ -55,6 +69,7 @@ bool AJTSPlayerState::TryStorePurchasedItem(const FJTSItemInstance& Item)
 		if (!Slot.IsEmpty()) continue;
 		Slot.StandardItem = Item;
 		Slot.StellarItemId = NAME_None;
+		Slot.StellarCoreId = NAME_None;
 		Slot.bPendingStellarReveal = false;
 		Slot.SlotToken = FGuid::NewGuid();
 		OnRep_ShipLockerSlots();
@@ -73,6 +88,7 @@ bool AJTSPlayerState::TryStoreStellarItem(FName ItemId)
 		if (!Slot.IsEmpty()) continue;
 		Slot.StandardItem.Clear();
 		Slot.StellarItemId = ItemId;
+		Slot.StellarCoreId = NAME_None;
 		Slot.bPendingStellarReveal = false;
 		Slot.SlotToken = FGuid::NewGuid();
 		OnRep_ShipLockerSlots();
@@ -94,6 +110,7 @@ bool AJTSPlayerState::TryStorePendingStellarItem(FName ItemId, int32& OutSlotInd
 		if (!Slot.IsEmpty()) continue;
 		Slot.StandardItem.Clear();
 		Slot.StellarItemId = ItemId;
+		Slot.StellarCoreId = NAME_None;
 		Slot.bPendingStellarReveal = true;
 		Slot.SlotToken = FGuid::NewGuid();
 		OutSlotIndex = Index;
@@ -117,6 +134,61 @@ bool AJTSPlayerState::TryRevealStellarItem(int32 SlotIndex, FGuid ExpectedToken)
 	return true;
 }
 
+bool AJTSPlayerState::TryMoveShipLockerSlot(int32 FromSlotIndex, FGuid ExpectedFromToken,
+	int32 ToSlotIndex, FGuid ExpectedToToken)
+{
+	if (!HasAuthority() || FromSlotIndex == ToSlotIndex
+		|| !ShipLockerSlots.IsValidIndex(FromSlotIndex) || !ShipLockerSlots.IsValidIndex(ToSlotIndex))
+	{
+		return false;
+	}
+	FJTSShipLockerSlot& From = ShipLockerSlots[FromSlotIndex];
+	FJTSShipLockerSlot& To = ShipLockerSlots[ToSlotIndex];
+	if (From.IsEmpty() || From.bPendingStellarReveal || To.bPendingStellarReveal
+		|| !ExpectedFromToken.IsValid() || From.SlotToken != ExpectedFromToken
+		|| To.SlotToken != ExpectedToToken)
+	{
+		return false;
+	}
+	Swap(From, To);
+	From.SlotToken = From.IsEmpty() ? FGuid() : FGuid::NewGuid();
+	To.SlotToken = To.IsEmpty() ? FGuid() : FGuid::NewGuid();
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
+bool AJTSPlayerState::TryCombineStellarSlots(int32 CoreSlotIndex, FGuid ExpectedCoreToken,
+	FGuid ExpectedAttachmentToken, const UJTSStellarLootTable* LootTable)
+{
+	if (!HasAuthority() || !IsValid(LootTable)
+		|| !ShipLockerSlots.IsValidIndex(CoreSlotIndex)
+		|| !ShipLockerSlots.IsValidIndex(CoreSlotIndex + 1))
+	{
+		return false;
+	}
+	FJTSShipLockerSlot& Core = ShipLockerSlots[CoreSlotIndex];
+	FJTSShipLockerSlot& Attachment = ShipLockerSlots[CoreSlotIndex + 1];
+	if (Core.IsEmpty() || Attachment.IsEmpty()
+		|| Core.bPendingStellarReveal || Attachment.bPendingStellarReveal
+		|| !Core.StandardItem.IsEmpty() || !Attachment.StandardItem.IsEmpty()
+		|| !Core.StellarCoreId.IsNone() || !Attachment.StellarCoreId.IsNone()
+		|| !ExpectedCoreToken.IsValid() || !ExpectedAttachmentToken.IsValid()
+		|| Core.SlotToken != ExpectedCoreToken
+		|| Attachment.SlotToken != ExpectedAttachmentToken
+		|| !LootTable->CanCombine(Core.StellarItemId, Attachment.StellarItemId))
+	{
+		return false;
+	}
+	Core.StellarCoreId = Core.StellarItemId;
+	Core.StellarItemId = Attachment.StellarItemId;
+	Core.SlotToken = FGuid::NewGuid();
+	Attachment.Clear();
+	OnRep_ShipLockerSlots();
+	ForceNetUpdate();
+	return true;
+}
+
 bool AJTSPlayerState::TryStoreCarriedItemAtSlot(int32 LockerSlotIndex, UJTSInventoryComponent* Inventory,
 	int32 CarriedSlotIndex, FGuid ExpectedItemId)
 {
@@ -125,11 +197,7 @@ bool AJTSPlayerState::TryStoreCarriedItemAtSlot(int32 LockerSlotIndex, UJTSInven
 	FJTSItemInstance MovedItem;
 	if (!Inventory->TryExtractItemAtSlot(CarriedSlotIndex, ExpectedItemId, MovedItem)) return false;
 	FJTSShipLockerSlot& Slot = ShipLockerSlots[LockerSlotIndex];
-	Slot.StandardItem = MovedItem.ItemId == EJTSItemId::StellarText ? FJTSItemInstance() : MovedItem;
-	Slot.StellarItemId = MovedItem.ItemId == EJTSItemId::StellarText
-		? MovedItem.StellarItemId : NAME_None;
-	Slot.bPendingStellarReveal = false;
-	Slot.SlotToken = FGuid::NewGuid();
+	AssignItemToLockerSlot(Slot, MovedItem);
 	OnRep_ShipLockerSlots();
 	ForceNetUpdate();
 	return true;
@@ -155,11 +223,7 @@ bool AJTSPlayerState::TryExchangeShipLockerItemWithCarriedSlot(int32 LockerSlotI
 	}
 	else
 	{
-		LockerEntry.StandardItem = ReplacedItem.ItemId == EJTSItemId::StellarText
-			? FJTSItemInstance() : ReplacedItem;
-		LockerEntry.StellarItemId = ReplacedItem.ItemId == EJTSItemId::StellarText
-			? ReplacedItem.StellarItemId : NAME_None;
-		LockerEntry.SlotToken = FGuid::NewGuid();
+		AssignItemToLockerSlot(LockerEntry, ReplacedItem);
 	}
 	OnRep_ShipLockerSlots();
 	ForceNetUpdate();

@@ -100,6 +100,27 @@ namespace
 			Thickness);
 	}
 
+	void StrokeEllipse(
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId,
+		const FGeometry& Geometry,
+		const FVector2D& Center,
+		const FVector2D& Radii,
+		const FLinearColor& Color,
+		float Thickness)
+	{
+		constexpr int32 Segments = 64;
+		TArray<FVector2D> Points;
+		Points.Reserve(Segments + 1);
+		for (int32 Index = 0; Index <= Segments; ++Index)
+		{
+			const float Angle = (static_cast<float>(Index) / Segments) * 2.0f * PI;
+			Points.Add(Center + FVector2D(FMath::Cos(Angle) * Radii.X, FMath::Sin(Angle) * Radii.Y));
+		}
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geometry.ToPaintGeometry(),
+			Points, ESlateDrawEffect::None, Color, true, Thickness);
+	}
+
 	void StrokeRoundedRect(
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId,
@@ -462,47 +483,72 @@ private:
 		const FLinearColor& Tint,
 		const FSlateFontInfo& LabelFont) const
 	{
-		float Nearest = TNumericLimits<float>::Max();
-		float Farthest = 1.0f;
-		for (const FJTSCruiseNavigationContact& Contact : Contacts)
-		{
-			Nearest = FMath::Min(Nearest, Contact.RangeCentimeters);
-			Farthest = FMath::Max(Farthest, Contact.RangeCentimeters);
-		}
-		if (Nearest == TNumericLimits<float>::Max())
-		{
-			Nearest = 0.0f;
-		}
-		const float Span = FMath::Max(Farthest - Nearest, 1.0f);
-		const float InnerReach = DialRadius * 0.46f;
-		const float OuterReach = DialRadius * 0.96f;
+		// The flattened ring is the ship's pitch plane. Every contact drops a stalk
+		// to its projection on this plane, so pitch alignment is visible without text.
+		const FLinearColor Grid = InkDim * Tint;
+		StrokeCircle(OutDrawElements, LayerId, Geometry, DialCenter, DialRadius * 0.92f,
+			FLinearColor(Grid.R, Grid.G, Grid.B, 0.42f), 1.2f);
+		StrokeCircle(OutDrawElements, LayerId, Geometry, DialCenter, DialRadius * 0.49f,
+			FLinearColor(Grid.R, Grid.G, Grid.B, 0.25f), 1.0f);
+		StrokeEllipse(OutDrawElements, LayerId, Geometry, DialCenter,
+			FVector2D(DialRadius * 0.89f, DialRadius * 0.30f),
+			FLinearColor(Grid.R, Grid.G, Grid.B, 0.58f), 1.6f);
+		StrokeLine(OutDrawElements, LayerId, Geometry,
+			DialCenter - FVector2D(DialRadius * 0.86f, 0.0f),
+			DialCenter + FVector2D(DialRadius * 0.86f, 0.0f),
+			FLinearColor(Grid.R, Grid.G, Grid.B, 0.32f), 1.0f);
+
+		const float InnerReach = DialRadius * 0.42f;
+		const float OuterReach = DialRadius * 0.78f;
 
 		for (const FJTSCruiseNavigationContact& Contact : Contacts)
 		{
-			const bool bAbove = Contact.ElevationDegrees > 28.0f;
-			const bool bBelow = Contact.ElevationDegrees < -28.0f;
-			const float Normalized = FMath::Clamp((Contact.RangeCentimeters - Nearest) / Span, 0.0f, 1.0f);
-			const float ScopeFraction = FMath::Pow(Normalized, 0.72f);
+			const float Elevation = FMath::Clamp(Contact.ElevationDegrees, -90.0f, 90.0f);
+			const bool bAbove = Elevation > 2.0f;
+			const bool bBelow = Elevation < -2.0f;
+			const float ScopeFraction = UJTSCruiseNavigationWidget::CruiseRangeRadialFraction(
+				Contact.RangeCentimeters);
 			const float BearingRadians = FMath::DegreesToRadians(Contact.BearingDegrees);
 			const FVector2D Direction(FMath::Sin(BearingRadians), -FMath::Cos(BearingRadians));
-			const FVector2D Blip = DialCenter + Direction * FMath::Lerp(InnerReach, OuterReach, ScopeFraction);
+			const FVector2D Projection = DialCenter + Direction * FMath::Lerp(InnerReach, OuterReach, ScopeFraction);
+			const float Height = FMath::Clamp((FMath::Abs(Elevation) - 2.0f) / 63.0f, 0.0f, 1.0f) * 55.0f;
+			const FVector2D Blip(Projection.X,
+				FMath::Clamp(Projection.Y + (bAbove ? -Height : bBelow ? Height : 0.0f),
+					72.0f, Geometry.GetLocalSize().Y - 82.0f));
 
 			const int32 Palette = FMath::Clamp(Contact.PaletteIndex, 0, 2);
 			const FLinearColor BlipColor = PaletteColor(Palette) * Tint;
-			FillQuad(OutDrawElements, LayerId, Geometry, Blip - FVector2D(5.0f, 5.0f), FVector2D(10.0f, 10.0f), BlipColor);
-			StrokeCircle(OutDrawElements, LayerId + 1, Geometry, Blip, 9.0f, BlipColor, 1.4f);
+			const FLinearColor ProjectionColor(BlipColor.R, BlipColor.G, BlipColor.B, 0.35f);
+			StrokeCircle(OutDrawElements, LayerId + 1, Geometry, Projection, 8.0f, ProjectionColor, 1.0f);
+			FillQuad(OutDrawElements, LayerId + 1, Geometry, Projection - FVector2D(2.0f, 2.0f),
+				FVector2D(4.0f, 4.0f), ProjectionColor);
 
 			if (bAbove || bBelow)
 			{
 				const FVector2D ChevronDirection(0.0f, bAbove ? -1.0f : 1.0f);
-				PaintChevron(OutDrawElements, LayerId + 1, Geometry, Blip + ChevronDirection * 14.0f, ChevronDirection, BlipColor);
+				StrokeLine(OutDrawElements, LayerId + 1, Geometry, Projection, Blip,
+					FLinearColor(BlipColor.R, BlipColor.G, BlipColor.B, bAbove ? 0.9f : 0.62f), 2.3f);
+				StrokeLine(OutDrawElements, LayerId + 1, Geometry,
+					Projection - FVector2D(7.0f, 0.0f), Projection + FVector2D(7.0f, 0.0f),
+					BlipColor, 1.4f);
+				if (FMath::Abs(Blip.Y - Projection.Y) > 15.0f)
+				{
+					PaintChevron(OutDrawElements, LayerId + 2, Geometry,
+						(Blip + Projection) * 0.5f, ChevronDirection, BlipColor);
+				}
 			}
+			if (!bBelow)
+			{
+				FillQuad(OutDrawElements, LayerId + 2, Geometry, Blip - FVector2D(5.0f, 5.0f),
+					FVector2D(10.0f, 10.0f), BlipColor);
+			}
+			StrokeCircle(OutDrawElements, LayerId + 2, Geometry, Blip,
+				bBelow ? 10.0f : 9.0f, BlipColor, bBelow ? 2.1f : 1.5f);
 
-			const FString RangeLabel = FormatAstronomicalRange(Contact.RangeCentimeters);
-			const bool bLabelOnLeft = Blip.X > DialCenter.X;
-			const FVector2D NamePosition = bLabelOnLeft
-				? Blip + FVector2D(-16.0f, -22.0f)
-				: Blip + FVector2D(16.0f, -22.0f);
+			const FString RangeLabel = UJTSCruiseNavigationWidget::FormatAstronomicalRange(Contact.RangeCentimeters);
+			const double BelowWeight = 1.0 - FMath::SmoothStep(95.0, 135.0, Blip.Y);
+			const double LabelY = Blip.Y - 22.0 + BelowWeight * 38.0;
+			const FVector2D NamePosition(Blip.X - 16.0f, LabelY);
 			DrawText(
 				OutDrawElements,
 				LayerId + 1,
@@ -511,7 +557,7 @@ private:
 				Contact.DisplayName,
 				NamePosition,
 				BlipColor,
-				bLabelOnLeft ? ETextJustify::Right : ETextJustify::Left);
+				ETextJustify::Right);
 			DrawText(
 				OutDrawElements,
 				LayerId + 1,
@@ -520,7 +566,7 @@ private:
 				RangeLabel,
 					NamePosition + FVector2D(0.0f, 28.0f),
 				Ink * Tint,
-				bLabelOnLeft ? ETextJustify::Right : ETextJustify::Left);
+				ETextJustify::Right);
 		}
 	}
 
@@ -612,17 +658,6 @@ private:
 		return FString::Printf(TEXT("%.2f km"), Meters / 1000.0f);
 	}
 
-	static FString FormatAstronomicalRange(float Centimeters)
-	{
-		constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
-		const double AstronomicalUnits = static_cast<double>(FMath::Max(0.0f, Centimeters)) / AstronomicalUnitCentimeters;
-		if (AstronomicalUnits < 0.01)
-		{
-			return TEXT("<0.01 AU");
-		}
-		return FString::Printf(TEXT("%.2f AU"), AstronomicalUnits);
-	}
-
 	void DrawText(
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId,
@@ -659,6 +694,48 @@ private:
 UJTSCruiseNavigationWidget::UJTSCruiseNavigationWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+}
+
+FString UJTSCruiseNavigationWidget::FormatAstronomicalRange(float Centimeters)
+{
+	constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
+	const double AstronomicalUnits = static_cast<double>(FMath::Max(0.0f, Centimeters)) / AstronomicalUnitCentimeters;
+	if (AstronomicalUnits < 0.01)
+	{
+		return TEXT("<0.01 AU");
+	}
+	return FString::Printf(TEXT("%.2f AU"), AstronomicalUnits);
+}
+
+float UJTSCruiseNavigationWidget::CruiseRangeRadialFraction(float Centimeters)
+{
+	constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
+	constexpr double HalfDialRangeAU = 0.35;
+	const double RangeAU = FMath::Max(0.0, static_cast<double>(Centimeters))
+		/ AstronomicalUnitCentimeters;
+	// A fixed, soft AU scale keeps each contact continuous when two bodies exchange
+	// nearest/farthest order. It also leaves useful space on the dial past one AU.
+	return static_cast<float>(RangeAU / (RangeAU + HalfDialRangeAU));
+}
+
+FString UJTSCruiseNavigationWidget::FormatNavigationSpeed(float CentimetersPerSecond)
+{
+	const double SpeedCentimetersPerSecond = FMath::Max(0.0f, CentimetersPerSecond);
+	constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
+	if (SpeedCentimetersPerSecond >= 0.01 * AstronomicalUnitCentimeters)
+	{
+		return FString::Printf(TEXT("%.3f AU/s"), SpeedCentimetersPerSecond / AstronomicalUnitCentimeters);
+	}
+	const double KilometersPerSecond = SpeedCentimetersPerSecond / 100000.0;
+	if (KilometersPerSecond >= 1000.0)
+	{
+		return FString::Printf(TEXT("%.0f km/s"), KilometersPerSecond);
+	}
+	if (KilometersPerSecond >= 1.0)
+	{
+		return FString::Printf(TEXT("%.1f km/s"), KilometersPerSecond);
+	}
+	return FString::Printf(TEXT("%d m/s"), FMath::RoundToInt(SpeedCentimetersPerSecond / 100.0));
 }
 
 void UJTSCruiseNavigationWidget::SetCruisePresentation(

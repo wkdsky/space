@@ -13,13 +13,44 @@ const FJTSStellarLootEntry* UJTSStellarLootTable::FindEntry(FName ItemId) const
 FJTSItemInstance UJTSStellarLootTable::MakeTextItem(FName ItemId) const
 {
 	FJTSItemInstance Item;
+	if (ItemId.IsNone()) return Item;
 	const FJTSStellarLootEntry* const Entry = FindEntry(ItemId);
-	if (!Entry) return Item;
 	Item.ItemId = EJTSItemId::StellarText;
 	Item.StackCount = 1;
 	Item.InstanceId = FGuid::NewGuid();
-	Item.StellarItemId = Entry->ItemId;
-	Item.CustomDisplayName = Entry->DisplayName;
+	Item.StellarItemId = ItemId;
+	Item.CustomDisplayName = Entry ? Entry->DisplayName : FText::FromName(ItemId);
+	return Item;
+}
+
+bool UJTSStellarLootTable::CanCombine(FName CoreId, FName AttachmentId) const
+{
+	const FJTSStellarLootEntry* const Core = FindEntry(CoreId);
+	const FJTSStellarLootEntry* const Attachment = FindEntry(AttachmentId);
+	return Core && Core->bCore && Attachment && !Attachment->bCore
+		&& !Attachment->CompatibleCoreId.IsNone() && Attachment->CompatibleCoreId == CoreId;
+}
+
+FText UJTSStellarLootTable::GetWeaponDisplayName(FName CoreId, FName AttachmentId) const
+{
+	if (CoreId.IsNone() || AttachmentId.IsNone()) return FText::GetEmpty();
+	const FJTSStellarLootEntry* const Core = FindEntry(CoreId);
+	const FJTSStellarLootEntry* const Attachment = FindEntry(AttachmentId);
+	return FText::Format(FText::FromString(TEXT("{0}·{1}")),
+		Core ? Core->DisplayName : FText::FromName(CoreId),
+		Attachment ? Attachment->DisplayName : FText::FromName(AttachmentId));
+}
+
+FJTSItemInstance UJTSStellarLootTable::MakeWeaponItem(FName CoreId, FName AttachmentId) const
+{
+	FJTSItemInstance Item;
+	if (CoreId.IsNone() || AttachmentId.IsNone()) return Item;
+	Item.ItemId = EJTSItemId::StellarWeapon;
+	Item.StackCount = 1;
+	Item.InstanceId = FGuid::NewGuid();
+	Item.StellarCoreId = CoreId;
+	Item.StellarItemId = AttachmentId;
+	Item.CustomDisplayName = GetWeaponDisplayName(CoreId, AttachmentId);
 	return Item;
 }
 
@@ -37,14 +68,17 @@ double UJTSStellarLootTable::BuildRollWeights(const TArray<FJTSShipLockerSlot>& 
 	};
 	for (const FJTSShipLockerSlot& Slot : OwnedSlots)
 	{
-		CountOwnedCore(!Slot.StellarItemId.IsNone()
-			? Slot.StellarItemId : Slot.StandardItem.StellarItemId);
+		CountOwnedCore(!Slot.StellarCoreId.IsNone() ? Slot.StellarCoreId
+			: !Slot.StellarItemId.IsNone() ? Slot.StellarItemId
+			: !Slot.StandardItem.StellarCoreId.IsNone() ? Slot.StandardItem.StellarCoreId
+			: Slot.StandardItem.StellarItemId);
 	}
 	for (const FJTSItemInstance& Item : CarriedItems)
 	{
-		if (Item.ItemId == EJTSItemId::StellarText && !Item.IsEmpty())
+		if ((Item.ItemId == EJTSItemId::StellarText || Item.ItemId == EJTSItemId::StellarWeapon)
+			&& !Item.IsEmpty())
 		{
-			CountOwnedCore(Item.StellarItemId);
+			CountOwnedCore(!Item.StellarCoreId.IsNone() ? Item.StellarCoreId : Item.StellarItemId);
 		}
 	}
 

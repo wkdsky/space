@@ -114,6 +114,10 @@ public:
 	bool TryStoreStellarItem(FName ItemId);
 	bool TryStorePendingStellarItem(FName ItemId, int32& OutSlotIndex, FGuid& OutSlotToken);
 	bool TryRevealStellarItem(int32 SlotIndex, FGuid ExpectedToken);
+	bool TryMoveShipLockerSlot(int32 FromSlotIndex, FGuid ExpectedFromToken,
+		int32 ToSlotIndex, FGuid ExpectedToToken);
+	bool TryCombineStellarSlots(int32 CoreSlotIndex, FGuid ExpectedCoreToken,
+		FGuid ExpectedAttachmentToken, const class UJTSStellarLootTable* LootTable);
 	bool TryStoreCarriedItemAtSlot(int32 LockerSlotIndex, class UJTSInventoryComponent* Inventory,
 		int32 CarriedSlotIndex, FGuid ExpectedItemId);
 	bool TryExchangeShipLockerItemWithCarriedSlot(int32 LockerSlotIndex, FGuid ExpectedLockerToken,

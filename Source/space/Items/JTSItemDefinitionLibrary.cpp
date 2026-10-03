@@ -242,6 +242,14 @@ namespace
 			Definition->CombatDamage = 0.0f;
 			Definition->AccentColor = FLinearColor(0.40f, 0.84f, 0.92f, 1.0f);
 			break;
+		case EJTSItemId::StellarWeapon:
+			Definition->DisplayName = FText::FromString(TEXT("星际武器"));
+			Definition->Description = FText::FromString(TEXT("由匹配的核心与配件在飞船物品栏组合。"));
+			Definition->PrimaryCategory = EJTSItemCategory::Weapons;
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable, EJTSItemCapability::MeleeOverride });
+			Definition->CombatDamage = 2.0f;
+			Definition->AccentColor = FLinearColor(0.40f, 0.84f, 0.92f, 1.0f);
+			break;
 		default:
 			break;
 		}

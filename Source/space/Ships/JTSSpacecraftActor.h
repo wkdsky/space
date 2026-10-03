@@ -29,6 +29,8 @@ class UEnhancedInputLocalPlayerSubsystem;
 class UInputAction;
 class UInputComponent;
 class UInputMappingContext;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UPrimitiveComponent;
 class USceneComponent;
 class USphereComponent;
@@ -410,6 +412,7 @@ private:
 	friend class FJTSNosePitchGuardRegression;
 	friend class FJTSPredictiveTerrainAvoidanceRegression;
 	friend class FJTSSpaceFlightFrameRegression;
+	friend class FJTSInterplanetaryCruiseRegression;
 	friend class FJTSAutomaticLandingRegression;
 	friend class FJTSMarIILandingMapRegression;
 #endif
@@ -586,6 +589,40 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1"))
 	float FlightFOVInterpolationSpeed = 5.0f;
+
+	/** Brief lens widening when the antigravity drive takes over. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "15.0"))
+	float CruiseEngageFOVKick = 1.5f;
+
+	/** Brief lens compression when conventional flight resumes near a planet. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "15.0"))
+	float CruiseBrakeFOVKick = 1.5f;
+
+	/** Camera trails the ship along its view axis when free travel engages; never adds tilt. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "150.0"))
+	float CruiseEngageCameraPushback = 20.0f;
+
+	/** Camera carries forward along its view axis when the ship brakes near a planet. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "150.0"))
+	float CruiseBrakeCameraLurch = 20.0f;
+
+	/** Blueprint-selected post-process material. Its WaveRadius and WarpStrength parameters refract the rendered scene. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> CruiseMediumDistortionMaterial;
+
+	/** Maximum view-space refraction while crossing the 18 km medium boundary. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "0.04"))
+	float CruiseMediumWarpStrength = 0.022f;
+
+	/** Brief optical fringe on the refracted wave; zero restores the camera's configured value. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", UIMax = "3.0"))
+	float CruiseMediumFringeIntensity = 1.2f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.01", UIMin = "0.01", UIMax = "0.2"))
+	float CruiseTransitionFOVAttack = 0.16f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Transition", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", UIMin = "0.1", UIMax = "1.0"))
+	float CruiseTransitionFOVRelease = 0.55f;
 
 	/** Exterior driving camera default. This is deliberately independent of the character's camera range. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Camera|Zoom", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "5000.0", UIMin = "800.0", UIMax = "3200.0"))
@@ -792,6 +829,23 @@ private:
 	FTransform PendingLandingTransform = FTransform::Identity;
 	float PendingLandingClearance = 0.0f;
 	float CurrentFlightCameraArmLength = 0.0f;
+	float SmoothedFlightBaseFOV = 0.0f;
+	float FlightModeTransitionElapsed = 0.0f;
+	float FlightModeTransitionStartKick = 0.0f;
+	float FlightModeTransitionTargetKick = 0.0f;
+	float CurrentFlightModeFOVKick = 0.0f;
+	float FlightModeTransitionStartAxialOffset = 0.0f;
+	float FlightModeTransitionTargetAxialOffset = 0.0f;
+	float CurrentFlightModeAxialOffset = 0.0f;
+	float MediumWaveStartRadius = 0.0f;
+	float MediumWaveEndRadius = 0.0f;
+	float CurrentMediumWaveRadius = 0.0f;
+	float MediumWarpStartStrength = 0.0f;
+	float MediumWarpPeakStrength = 0.0f;
+	float CurrentMediumWarpStrength = 0.0f;
+	float BaseFlightCameraFringeIntensity = 0.0f;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> CruiseMediumDistortionInstance;
 	FQuat FlightCameraAimRotation = FQuat::Identity;
 	FQuat LastFlightCameraHullRotation = FQuat::Identity;
 	float FlightKeyYaw = 0.0f;
@@ -800,6 +854,10 @@ private:
 	double LastFlightInputTimeSeconds = 0.0;
 	bool bFlightFreeLookHeld = false;
 	bool bFlightCameraRecentering = false;
+	bool bFlightModeTransitionInitialized = false;
+	bool bFlightCameraCruiseMode = false;
+	bool bMediumWaveWithdrawing = false;
+	bool bBaseFlightCameraFringeOverride = false;
 	float AutomaticLandingCheckElapsed = 0.0f;
 	bool bDisembarkInputArmed = false;
 	bool bDisembarkRequestPending = false;

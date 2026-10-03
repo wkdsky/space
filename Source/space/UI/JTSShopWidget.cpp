@@ -326,6 +326,19 @@ void UJTSShopWidget::NotifyShipLockerExchangeResult(bool bSucceeded)
 	RefreshShipLocker();
 }
 
+void UJTSShopWidget::NotifyShipLockerMoveResult(bool bSucceeded)
+{
+	SetStatus(bSucceeded ? TEXT("已调整飞船物品格") : TEXT("移格失败，物品格可能已变化"), !bSucceeded);
+	RefreshShipLocker();
+}
+
+void UJTSShopWidget::NotifyStellarCombineResult(bool bSucceeded)
+{
+	SetStatus(bSucceeded ? TEXT("星际武器组合完成，可取到角色背包")
+		: TEXT("组合失败：核心必须在对应配件的前一格"), !bSucceeded);
+	RefreshShipLocker();
+}
+
 void UJTSShopWidget::NotifyCarriedItemActionResult(bool bSucceeded, bool bStored)
 {
 	SetStatus(bSucceeded
@@ -526,9 +539,27 @@ FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const 
 		}
 		else if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 		{
-			const int32 CarriedSlotIndex = Controller->GetCarriedQuickbarSlotAtPosition(
-				InMouseEvent.GetScreenSpacePosition());
-			if (CarriedSlotIndex != INDEX_NONE)
+			int32 TargetLockerSlot = INDEX_NONE;
+			for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
+			{
+				if (LockerSlotBorders[Index]
+					&& LockerSlotBorders[Index]->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+				{
+					TargetLockerSlot = Index;
+					break;
+				}
+			}
+			if (TargetLockerSlot != INDEX_NONE && TargetLockerSlot != DraggedLockerSlot)
+			{
+				const AJTSPlayerState* const State = Controller->GetPlayerState<AJTSPlayerState>();
+				const FJTSShipLockerSlot Target = State
+					? State->GetShipLockerSlot(TargetLockerSlot) : FJTSShipLockerSlot();
+				Controller->ServerMoveShipLockerSlot(ActiveSpacecraft.Get(), DraggedLockerSlot,
+					DraggedLockerToken, TargetLockerSlot, Target.SlotToken);
+				SelectedLockerSlot = TargetLockerSlot;
+			}
+			else if (const int32 CarriedSlotIndex = Controller->GetCarriedQuickbarSlotAtPosition(
+				InMouseEvent.GetScreenSpacePosition()); CarriedSlotIndex != INDEX_NONE)
 			{
 				const AJTSPlayerState* const State = Controller->GetPlayerState<AJTSPlayerState>();
 				const FJTSShipLockerSlot LockerEntry = State
@@ -691,6 +722,12 @@ void UJTSShopWidget::BuildWidgetTree()
 	TakeLockerItemButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipLockerTakeLabel"), TEXT("取到角色背包"), 13.0f));
 	TakeLockerItemButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleTakeLockerItemClicked);
 	AddCanvas(LockerCanvas, TakeLockerItemButton, FAnchors(0.0f, 0.0f), FVector2D(18.0f, 452.0f), FVector2D(182.0f, 48.0f));
+	CombineStellarWeaponButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipLockerCombine"));
+	CombineStellarWeaponButton->SetBackgroundColor(FLinearColor(0.26f, 0.30f, 0.48f, 1.0f));
+	CombineStellarWeaponButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipLockerCombineLabel"), TEXT("组合武器"), 13.0f));
+	CombineStellarWeaponButton->SetToolTipText(FText::FromString(TEXT("将核心放在前一格，对应配件放在紧邻的后一格，再选择其中一格组合")));
+	CombineStellarWeaponButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCombineStellarWeaponClicked);
+	AddCanvas(LockerCanvas, CombineStellarWeaponButton, FAnchors(0.0f, 0.0f), FVector2D(207.0f, 452.0f), FVector2D(120.0f, 48.0f));
 	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerDeleteHint"), TEXT("拖到废纸篓删除"), 12.0f, FLinearColor(0.75f, 0.62f, 0.56f, 1.0f), ETextJustify::Right), FAnchors(0.0f, 0.0f), FVector2D(333.0f, 466.0f), FVector2D(170.0f, 25.0f));
 	TrashImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("ShipLockerTrashImage"));
 	if (UTexture2D* const TrashTexture = TrashIcon.LoadSynchronous())
@@ -1173,6 +1210,30 @@ FString UJTSShopWidget::GetStellarItemLabel(FName ItemId) const
 	return ItemId.IsNone() ? TEXT("等待信号") : ItemId.ToString();
 }
 
+int32 UJTSShopWidget::FindSelectedStellarCoreSlot() const
+{
+	const AJTSPlayerState* const State = GetOwningPlayer()
+		? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid()
+		? ActiveSpacecraft->GetStellarLootTable() : nullptr;
+	if (!IsValid(State) || !IsValid(Table)) return INDEX_NONE;
+	for (const int32 CoreIndex : { SelectedLockerSlot, SelectedLockerSlot - 1 })
+	{
+		if (CoreIndex < 0 || CoreIndex + 1 >= AJTSPlayerState::ShipLockerCapacity) continue;
+		const FJTSShipLockerSlot Core = State->GetShipLockerSlot(CoreIndex);
+		const FJTSShipLockerSlot Attachment = State->GetShipLockerSlot(CoreIndex + 1);
+		if (!Core.IsEmpty() && !Attachment.IsEmpty()
+			&& !Core.bPendingStellarReveal && !Attachment.bPendingStellarReveal
+			&& Core.StandardItem.IsEmpty() && Attachment.StandardItem.IsEmpty()
+			&& Core.StellarCoreId.IsNone() && Attachment.StellarCoreId.IsNone()
+			&& Table->CanCombine(Core.StellarItemId, Attachment.StellarItemId))
+		{
+			return CoreIndex;
+		}
+	}
+	return INDEX_NONE;
+}
+
 FString UJTSShopWidget::FormatStellarCosts() const
 {
 	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
@@ -1323,7 +1384,11 @@ void UJTSShopWidget::RefreshShipLocker()
 		}
 		else if (!bConcealed && !LockerEntry.StellarItemId.IsNone())
 		{
-			Label = GetStellarItemLabel(LockerEntry.StellarItemId);
+			Label = LockerEntry.StellarCoreId.IsNone()
+				? GetStellarItemLabel(LockerEntry.StellarItemId)
+				: FString::Printf(TEXT("%s·%s"),
+					*GetStellarItemLabel(LockerEntry.StellarCoreId),
+					*GetStellarItemLabel(LockerEntry.StellarItemId));
 		}
 		if (LockerSlotTexts[Index]->GetText().ToString() != Label)
 		{
@@ -1344,7 +1409,9 @@ void UJTSShopWidget::RefreshShipLocker()
 		}
 		const FString Tooltip = bConcealed ? TEXT("遥感扫描中，格子暂时锁定")
 			: LockerEntry.StellarItemId.IsNone() ? Label
-				: FString::Printf(TEXT("%s\n文字版道具，后续可配置玩法和美术"), *Label);
+				: !LockerEntry.StellarCoreId.IsNone()
+					? FString::Printf(TEXT("%s\n已组合的星际武器，可取到角色背包"), *Label)
+					: FString::Printf(TEXT("%s\n核心放在前一格，对应配件放在后一格即可组合"), *Label);
 		if (LockerSlotBorders[Index]->GetToolTipText().ToString() != Tooltip)
 		{
 			LockerSlotBorders[Index]->SetToolTipText(FText::FromString(Tooltip));
@@ -1361,12 +1428,17 @@ void UJTSShopWidget::RefreshShipLocker()
 		const AJTSCharacter* const Character = GetOwningPlayer() ? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
 		const UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
 		const EJTSItemId CarriedItemId = !Selected.StandardItem.IsEmpty()
-			? Selected.StandardItem.ItemId : EJTSItemId::StellarText;
+			? Selected.StandardItem.ItemId
+			: Selected.StellarCoreId.IsNone() ? EJTSItemId::StellarText : EJTSItemId::StellarWeapon;
 		const int32 CarriedCount = !Selected.StandardItem.IsEmpty()
 			? Selected.StandardItem.StackCount : 1;
 		TakeLockerItemButton->SetIsEnabled(!Selected.IsEmpty() && !Selected.bPendingStellarReveal
 			&& !(bRollAnimating && SelectedLockerSlot == RolledLockerSlotIndex)
 			&& IsValid(Inventory) && Inventory->CanAddItem(CarriedItemId, CarriedCount));
+	}
+	if (CombineStellarWeaponButton)
+	{
+		CombineStellarWeaponButton->SetIsEnabled(FindSelectedStellarCoreSlot() != INDEX_NONE);
 	}
 }
 
@@ -1594,6 +1666,21 @@ void UJTSShopWidget::HandleTakeLockerItemClicked()
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 	{
 		Controller->ServerTakeShipLockerSlot(ActiveSpacecraft.Get(), SelectedLockerSlot, LockerEntry.SlotToken);
+	}
+}
+
+void UJTSShopWidget::HandleCombineStellarWeaponClicked()
+{
+	const int32 CoreSlotIndex = FindSelectedStellarCoreSlot();
+	const AJTSPlayerState* const State = GetOwningPlayer()
+		? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (CoreSlotIndex == INDEX_NONE || !IsValid(State) || !ActiveSpacecraft.IsValid()) return;
+	const FJTSShipLockerSlot Core = State->GetShipLockerSlot(CoreSlotIndex);
+	const FJTSShipLockerSlot Attachment = State->GetShipLockerSlot(CoreSlotIndex + 1);
+	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+	{
+		Controller->ServerCombineStellarSlots(ActiveSpacecraft.Get(), CoreSlotIndex,
+			Core.SlotToken, Attachment.SlotToken);
 	}
 }
 void UJTSShopWidget::HandleInventorySlotsDecrease() { AdjustPendingAbility(EJTSPlayerAbility::InventorySlots, -1); }

@@ -27,7 +27,7 @@ public:
 	bool HasActiveRangedWeapon() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
-	bool IsAiming() const { return bIsAiming && HasActiveRangedWeapon() && CanUseWeapon(); }
+	bool IsAiming() const { return bIsAiming && (HasActiveRangedWeapon() || IsEmptyHanded()) && CanUseWeapon(); }
 
 	/** True while the owner is holding the fire button, including the local predicted hold. */
 	UFUNCTION(BlueprintPure, Category = "Ranged")
@@ -83,6 +83,7 @@ public:
 
 private:
 	const UJTSItemDefinition* GetActiveRangedDefinition() const;
+	bool IsEmptyHanded() const;
 	bool CanUseWeapon() const;
 	bool FireOnce();
 	void PlayLocalShotFeedback(const UJTSItemDefinition* Definition);

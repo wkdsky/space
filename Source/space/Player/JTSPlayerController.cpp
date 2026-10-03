@@ -284,6 +284,36 @@ void AJTSPlayerController::ServerTakeShipLockerSlot_Implementation(AJTSSpacecraf
 	ClientReceiveShipLockerActionResult(bSucceeded, true);
 }
 
+void AJTSPlayerController::ServerMoveShipLockerSlot_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 FromSlotIndex, FGuid ExpectedFromToken, int32 ToSlotIndex, FGuid ExpectedToToken)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+		&& IsValid(State) && State->TryMoveShipLockerSlot(FromSlotIndex, ExpectedFromToken,
+			ToSlotIndex, ExpectedToToken);
+	ClientReceiveShipLockerMoveResult(bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveShipLockerMoveResult_Implementation(bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyShipLockerMoveResult(bSucceeded);
+}
+
+void AJTSPlayerController::ServerCombineStellarSlots_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 CoreSlotIndex, FGuid ExpectedCoreToken, FGuid ExpectedAttachmentToken)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+		&& IsValid(State) && State->TryCombineStellarSlots(CoreSlotIndex, ExpectedCoreToken,
+			ExpectedAttachmentToken, Spacecraft->GetStellarLootTable());
+	ClientReceiveStellarCombineResult(bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveStellarCombineResult_Implementation(bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyStellarCombineResult(bSucceeded);
+}
+
 void AJTSPlayerController::ServerExchangeShipLockerWithCarriedSlot_Implementation(
 	AJTSSpacecraftActor* Spacecraft, int32 LockerSlotIndex, FGuid ExpectedLockerToken,
 	int32 CarriedSlotIndex, FGuid ExpectedCarriedInstanceId)

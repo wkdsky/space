@@ -69,6 +69,17 @@ bool UJTSRangedWeaponComponent::HasActiveRangedWeapon() const
 	return GetActiveRangedDefinition() != nullptr;
 }
 
+bool UJTSRangedWeaponComponent::IsEmptyHanded() const
+{
+	const UJTSInventoryComponent* const Inventory = GetOwner() != nullptr
+		? GetOwner()->FindComponentByClass<UJTSInventoryComponent>() : nullptr;
+	if (!IsValid(Inventory)) return false;
+	const FJTSItemInstance ActiveItem = Inventory->GetActiveItem();
+	if (ActiveItem.IsEmpty()) return true;
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveItem.ItemId);
+	return IsValid(Definition) && !Definition->IsHoldable();
+}
+
 float UJTSRangedWeaponComponent::GetActiveAimFOV() const
 {
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
@@ -80,14 +91,14 @@ void UJTSRangedWeaponComponent::StartAim()
 	if (!CanUseWeapon()) return;
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
-		if (HasActiveRangedWeapon())
+		if (HasActiveRangedWeapon() || IsEmptyHanded())
 		{
 			bIsAiming = true;
 			ServerStartAim();
 		}
 		return;
 	}
-	bIsAiming = HasActiveRangedWeapon();
+	bIsAiming = HasActiveRangedWeapon() || IsEmptyHanded();
 }
 
 void UJTSRangedWeaponComponent::StopAim()
