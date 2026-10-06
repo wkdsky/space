@@ -1429,14 +1429,8 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::ItemIdToItemType(EJTSItemId ItemId
 	case EJTSItemId::Rock: return EJTSWorldPickupItemType::Rock;
 	case EJTSItemId::Ore: return EJTSWorldPickupItemType::Ore;
 	case EJTSItemId::MoonAntCorpse: return EJTSWorldPickupItemType::MoonAntCorpse;
-	case EJTSItemId::Pickaxe: return EJTSWorldPickupItemType::Pickaxe;
 	case EJTSItemId::Backpack: return EJTSWorldPickupItemType::Backpack;
-	case EJTSItemId::Knife: return EJTSWorldPickupItemType::Knife;
-	case EJTSItemId::Pistol: return EJTSWorldPickupItemType::Pistol;
-	case EJTSItemId::MachineGun: return EJTSWorldPickupItemType::MachineGun;
-	case EJTSItemId::Axe: return EJTSWorldPickupItemType::Axe;
 	case EJTSItemId::WaistLamp: return EJTSWorldPickupItemType::WaistLamp;
-	case EJTSItemId::IceAxe: return EJTSWorldPickupItemType::IceAxe;
 	default: return EJTSWorldPickupItemType::Rock;
 	}
 }

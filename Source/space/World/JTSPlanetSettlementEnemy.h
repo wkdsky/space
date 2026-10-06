@@ -24,4 +24,7 @@ public:
 	/** Presentation hook; called by the server when an attack begins. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Planet|Enemy")
 	void OnSettlementAttackStarted();
+	/** Presentation only: the server has already resolved the physical collision/knockback. */
+	UFUNCTION(BlueprintNativeEvent, Category = "Planet|Enemy")
+	void OnSettlementForceImpact(FVector Direction, float Speed);
 };

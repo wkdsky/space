@@ -20,6 +20,10 @@ struct SPACE_API FJTSStellarLootEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
 	FText DisplayName;
 
+	/** Blueprint-authored description of the core's nature or the attachment's guidance and traits. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot", meta = (MultiLine = "true"))
+	FText Description;
+
 	/** 0=A (most common), 25=Z (least common). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot", meta = (ClampMin = "0", ClampMax = "25"))
 	int32 RarityRank = 0;
@@ -27,9 +31,17 @@ struct SPACE_API FJTSStellarLootEntry
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
 	bool bCore = false;
 
+	/** Shared HUD halo for a matched vertical pair. Transparent chooses a stable color from the core ID. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot|Presentation")
+	FLinearColor ActivationColor = FLinearColor::Transparent;
+
 	/** An attachment combines only with this core in the preceding locker slot. Empty for cores and materials. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot")
 	FName CompatibleCoreId;
+
+	/** Firmware units one item of this entry grants when spent on core upgrades. Zero for non-firmware entries. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot", meta = (ClampMin = "0"))
+	int32 FirmwareUnits = 0;
 
 	/** Fine tuning within the same grade. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Loot", meta = (ClampMin = "0.01"))
@@ -59,6 +71,9 @@ public:
 	float SpinCooldownSeconds = 2.0f;
 
 	const FJTSStellarLootEntry* FindEntry(FName ItemId) const;
+	FLinearColor GetCoreActivationColor(FName CoreId) const;
+	/** Returns the item description, preceded by the core description for a combined weapon. */
+	FText GetItemDescription(FName ItemId, FName CoreId = NAME_None) const;
 	FJTSItemInstance MakeTextItem(FName ItemId) const;
 	bool CanCombine(FName CoreId, FName AttachmentId) const;
 	FText GetWeaponDisplayName(FName CoreId, FName AttachmentId) const;

@@ -47,9 +47,24 @@ protected:
 	float SpawnRadius = 670.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement", meta = (ClampMin = "0"))
 	float MinimumSpacing = 95.0f;
+	/** Optional server refill policy, authored per settlement in Blueprint or the level. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population")
+	bool bMaintainPopulation = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population", meta = (ClampMin = "0.25"))
+	float RefillInterval = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population", meta = (ClampMin = "1", ClampMax = "512"))
+	int32 RefillBatchSize = 20;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population", meta = (ClampMin = "0"))
+	float MinimumPlayerDistance = 0.0f;
 
 	TArray<TWeakObjectPtr<AActor>> SpawnedEnemies;
 
 private:
+	void RefillPopulation();
+	void SpawnMissingEnemies(int32 SpawnBudget);
+	TWeakObjectPtr<AJTSPlanetAnchor> ActivePlanet;
+	TWeakObjectPtr<AActor> ActiveSurfaceController;
+	FVector SettlementCenter = FVector::ZeroVector;
+	FTimerHandle RefillTimer;
 	bool bActive = false;
 };

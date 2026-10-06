@@ -13,6 +13,7 @@ class AJTSSpacecraftActor;
 class UBorder;
 class UButton;
 class UCanvasPanel;
+class UCanvasPanelSlot;
 class UTextBlock;
 class UUniformGridPanel;
 class UImage;
@@ -34,11 +35,15 @@ public:
 	void CloseShop();
 	bool IsShopOpen() const;
 	void NotifyPurchaseResult(EJTSShopPurchaseResult Result);
+	void HandleStellarItemDrop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId);
 	void NotifyStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
+	void NotifyDebugStellarItemsResult(bool bAvailable, int32 AddedCount, int32 RequestedCount);
 	void NotifyShipLockerActionResult(bool bSucceeded, bool bTakeAction);
 	void NotifyShipLockerExchangeResult(bool bSucceeded);
 	void NotifyShipLockerMoveResult(bool bSucceeded);
 	void NotifyStellarCombineResult(bool bSucceeded);
+	void NotifyStellarProgressionResult(bool bUpgrade, bool bSucceeded);
+	void NotifyWeaponUpgradeResult(bool bUpgrade, bool bSucceeded);
 	void NotifyCarriedItemActionResult(bool bSucceeded, bool bStored);
 	void UpdateCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible);
 	void HandleCarriedItemDrop(const FVector2D& ScreenPosition, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
@@ -52,10 +57,13 @@ protected:
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 
 private:
 	void BuildWidgetTree();
+	void ResetLockerDrag();
 	void RefreshAll();
+	void RefreshResponsiveLayout();
 	void RefreshCatalog();
 	void RefreshShipLocker();
 	void RefreshStellarReel();
@@ -82,18 +90,24 @@ private:
 	FText BuildItemTooltip(EJTSItemId ItemId) const;
 	void RequestPurchase(EJTSItemId ItemId);
 
-	UFUNCTION() void HandlePickaxeBuy();
-	UFUNCTION() void HandleKnifeBuy();
-	UFUNCTION() void HandlePistolBuy();
-	UFUNCTION() void HandleMachineGunBuy();
-	UFUNCTION() void HandleSniperBuy();
+	UFUNCTION() void HandleShortBladeBuy();
+	UFUNCTION() void HandleShockPoleBuy();
+	UFUNCTION() void HandlePowerHammerBuy();
+	UFUNCTION() void HandleRailPistolBuy();
+	UFUNCTION() void HandleAssaultRifleBuy();
+	UFUNCTION() void HandleShotgunBuy();
+	UFUNCTION() void HandleRailSniperBuy();
+	UFUNCTION() void HandleHeavyMachineGunBuy();
+	UFUNCTION() void HandleGrenadeLauncherBuy();
+	UFUNCTION() void HandleArcGunBuy();
 	UFUNCTION() void HandleWaistLampBuy();
-	UFUNCTION() void HandleIceAxeBuy();
 	UFUNCTION() void HandleDebugResourcesClicked();
+	UFUNCTION() void HandleDebugStellarItemsClicked();
 	UFUNCTION() void HandleDebugLevelsClicked();
 	UFUNCTION() void HandleSupplyTabClicked();
 	UFUNCTION() void HandleAbilityTabClicked();
 	UFUNCTION() void HandleStellarTabClicked();
+	UFUNCTION() void HandleWeaponTabClicked();
 	UFUNCTION() void HandleStellarRollClicked();
 	UFUNCTION() void HandleTakeLockerItemClicked();
 	UFUNCTION() void HandleCombineStellarWeaponClicked();
@@ -112,6 +126,7 @@ private:
 	UFUNCTION() void HandleCloseClicked();
 
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> RootCanvas;
+	UPROPERTY(Transient) TObjectPtr<UCanvasPanelSlot> TerminalLayoutSlot;
 	UPROPERTY(Transient) TObjectPtr<UBorder> ShopFrame;
 	UPROPERTY(Transient) TObjectPtr<UBorder> CatalogPanel;
 	UPROPERTY(Transient) TObjectPtr<UBorder> AbilityPanel;
@@ -152,9 +167,22 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UButton> TakeLockerItemButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> CombineStellarWeaponButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> DebugResourcesButton;
+	UPROPERTY(Transient) TObjectPtr<UButton> DebugStellarItemsButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> DebugLevelsButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> ConfirmAbilitiesButton;
 	UPROPERTY(Transient) TObjectPtr<UButton> ResetAbilitiesButton;
+
+	void OpenAttachmentDialog(int32 LockerSlotIndex);
+	void HandleAttachmentDialogClosed();
+
+	/** Large point-allocation dialog opened by clicking a stellar item in the locker. */
+	UPROPERTY(Transient) TObjectPtr<class UJTSStellarAttachmentDialog> AttachmentDialog;
+	UPROPERTY(Transient) TObjectPtr<class UJTSWeaponUpgradePanel> WeaponPanel;
+	UPROPERTY(Transient) TObjectPtr<UBorder> WeaponPage;
+	UPROPERTY(Transient) TObjectPtr<UButton> WeaponTabButton;
+	/** Top-right corner numbers on locker slots: skill points invested in a normal weapon. */
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> LockerSlotBadges;
+	FVector2D LockerPressPosition = FVector2D::ZeroVector;
 
 	TWeakObjectPtr<AJTSSpacecraftActor> ActiveSpacecraft;
 	TMap<EJTSResourceType, int32> LastDisplayedResourceAmounts;
@@ -163,7 +191,9 @@ private:
 	int32 ObservedProgressionRevision = INDEX_NONE;
 	bool bShowingAbilityPage = false;
 	bool bShowingStellarPage = false;
+	bool bShowingWeaponPage = false;
 	bool bRollAnimating = false;
+	bool bDebugStellarGrantPending = false;
 	bool bRollResultReceived = false;
 	FName RolledStellarItemId;
 	int32 RolledLockerSlotIndex = INDEX_NONE;

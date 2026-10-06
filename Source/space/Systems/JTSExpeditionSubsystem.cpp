@@ -9,6 +9,7 @@
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
@@ -147,7 +148,7 @@ void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 		Snapshot.LastPlayedUtcTicks = Snapshot.SavedUtcTicks;
 	}
 	Snapshot.PlaytimeSeconds = FMath::Max(0.0, Snapshot.PlaytimeSeconds);
-	Snapshot.SaveVersion = FMath::Max(4, Snapshot.SaveVersion);
+	Snapshot.SaveVersion = FMath::Max(5, Snapshot.SaveVersion);
 }
 
 void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
@@ -160,7 +161,7 @@ void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
 	Snapshot.SaveSlot = SelectedSlot;
 	Snapshot.DisplayName = FString::Printf(TEXT("Expedition %02d"), SelectedSlot);
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 4;
+	Snapshot.SaveVersion = 5;
 	ActiveSaveSlot = SelectedSlot;
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -181,7 +182,7 @@ bool UJTSExpeditionSubsystem::BeginNewExpeditionInSlot(int32 InSaveSlot, const F
 	Snapshot.SaveSlot = InSaveSlot;
 	Snapshot.DisplayName = InDisplayName.TrimStartAndEnd();
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 4;
+	Snapshot.SaveVersion = 5;
 	NormalizeSnapshotMetadata(InSaveSlot);
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -321,6 +322,10 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			PlayerSnapshot.StaminaAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Stamina);
 			PlayerSnapshot.CriticalChanceAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::CriticalChance);
 			PlayerSnapshot.ShipLockerSlots = PlayerState->GetShipLockerSlots();
+			PlayerSnapshot.DiscoveredStellarCoreIds = PlayerState->GetDiscoveredStellarCoreIds();
+			PlayerSnapshot.StellarFirmwareUnits = PlayerState->GetStellarFirmwareUnits();
+			PlayerSnapshot.StellarLoadoutSlots = PlayerState->GetStellarLoadout()->GetSlots();
+			PlayerSnapshot.StellarEnergy = PlayerState->GetStellarLoadout()->GetEnergy();
 			if (const UJTSHealthComponent* const Health = Character != nullptr ? Character->GetHealthComponent() : nullptr)
 			{
 				PlayerSnapshot.Health = Health->GetHealth();
@@ -362,6 +367,9 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 
 	PlayerState->SetAvatarColor(SavedPlayer->AvatarColor);
 	PlayerState->RestoreShipLockerSlots(SavedPlayer->ShipLockerSlots);
+	PlayerState->RestoreDiscoveredStellarCoreIds(SavedPlayer->DiscoveredStellarCoreIds);
+	PlayerState->RestoreStellarFirmwareUnits(SavedPlayer->StellarFirmwareUnits);
+	PlayerState->GetStellarLoadout()->RestoreState(SavedPlayer->StellarLoadoutSlots, SavedPlayer->StellarEnergy);
 	PlayerState->RestoreProgression(
 		SavedPlayer->ProgressionLevel,
 		SavedPlayer->ExperienceInCurrentLevel,

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Interaction/JTSMeleeTarget.h"
 
 #include "JTSItemDefinition.generated.h"
 
@@ -37,6 +38,102 @@ struct SPACE_API FJTSHeldItemPresentation
 	/** Visible prototype grip dimensions, in world centimetres relative to the engine cube. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
 	FVector GripScale = FVector(0.16f, 0.12f, 0.32f);
+
+	/**
+	 * Primitive-built silhouette. Body, barrel and sight are cubes sized in world centimetres relative to the
+	 * engine cube and placed in item-local space; a zero sight scale hides the sight. Real meshes replace this later.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector BodyScale = FVector(0.48f, 0.18f, 0.14f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector BodyLocation = FVector(13.0f, 0.0f, 0.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector BarrelScale = FVector(0.26f, 0.08f, 0.08f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector BarrelLocation = FVector(48.0f, 0.0f, 0.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector SightScale = FVector::ZeroVector;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
+	FVector SightLocation = FVector(19.0f, 0.0f, 12.0f);
+
+	/** Holds a second mirrored copy in the off hand (dual pistols). Ranged shots then alternate muzzles. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item")
+	bool bDualWield = false;
+};
+
+/** Per-weapon ranged behavior that goes beyond one hitscan ray. A zero field means the feature is off. */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSRangedMechanics
+{
+	GENERATED_BODY()
+
+	/** Rounds per magazine; zero means the weapon has no magazine (heat weapons). Ammo itself is infinite. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Magazine", meta = (ClampMin = "0"))
+	int32 MagazineSize = 0;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Magazine", meta = (ClampMin = "0.1"))
+	float ReloadSeconds = 1.6f;
+
+	/** Rays per shot. The shot's total damage is split between them. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shot", meta = (ClampMin = "1"))
+	int32 Pellets = 1;
+
+	/** Damage is full inside FalloffStart and fades to MinFalloffFraction at FalloffEnd (centimetres). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shot", meta = (ClampMin = "0.0"))
+	float FalloffStartCm = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shot", meta = (ClampMin = "0.0"))
+	float FalloffEndCm = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shot", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MinFalloffFraction = 1.0f;
+
+	/** Extra damageable targets a ray passes through; each pass keeps 75 percent of the damage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shot", meta = (ClampMin = "0"))
+	int32 PierceCount = 0;
+
+	/** Arc chain: after a hit, jump to up to ChainTargets more nearby targets, losing ChainFalloff per jump. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chain", meta = (ClampMin = "0"))
+	int32 ChainTargets = 0;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chain", meta = (ClampMin = "0.0"))
+	float ChainRangeCm = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Chain", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+	float ChainFalloff = 0.3f;
+
+	/** Energy weapons spend EnergyPerShot per shot and trickle back RechargePerSecond. Once the bar runs dry the weapon
+	 * stays locked until it recharges past ResumeFraction (the red zone). Zero capacity means a magazine weapon. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Energy", meta = (ClampMin = "0.0"))
+	float EnergyCapacity = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Energy", meta = (ClampMin = "0.0"))
+	float EnergyPerShot = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Energy", meta = (ClampMin = "0.0"))
+	float RechargePerSecond = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Energy", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float ResumeFraction = 0.3f;
+
+	/** A positive speed fires a physical explosive projectile instead of a ray (centimetres per second). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (ClampMin = "0.0"))
+	float ProjectileSpeed = 0.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (ClampMin = "0.0"))
+	float ProjectileGravityScale = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (ClampMin = "0.0"))
+	float BlastRadiusCm = 0.0f;
+
+	/** Fraction of the direct damage that every skill-granted fragment budget shares. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float FragmentDamageShare = 0.4f;
 };
 
 /**
@@ -109,6 +206,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.05"))
 	float MeleeAttackInterval = 0.45f;
 
+	/** What a swing of this item counts as for targets that react to the weapon kind (for example ant nests). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
+	EJTSMeleeAttackType MeleeAttackClass = EJTSMeleeAttackType::Improvised;
+
 	/** Work applied to a mining node by one valid hit. Zero means it cannot mine. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mining", meta = (ClampMin = "0.0"))
 	float MiningWork = 0.0f;
@@ -148,4 +249,11 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Shop")
 	TArray<FJTSItemCost> ShopCosts;
+
+	/** Scales the shared per-level upgrade cost curve (Rock, Ore, then Organic from level five) for this weapon. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Upgrade", meta = (ClampMin = "0.1"))
+	float UpgradeCostMultiplier = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ranged")
+	FJTSRangedMechanics RangedMechanics;
 };

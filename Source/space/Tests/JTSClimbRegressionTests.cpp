@@ -21,6 +21,7 @@
 #include "space/Animation/JTSAnimInstance.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSWeaponProgression.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSPlanetAnchor.h"
 
@@ -801,9 +802,9 @@ bool FJTSPlanetSlopeClimbRegression::RunTest(const FString& Parameters)
 
 	UJTSInventoryComponent* Inventory = Fixture.Character->FindComponentByClass<UJTSInventoryComponent>();
 	if (!TestNotNull(TEXT("Inventory exists"), Inventory)) return false;
-	if (!TestTrue(TEXT("Character can hold dual pistols"), Inventory->TryAddItemById(EJTSItemId::IceAxe))) return false;
+	if (!TestTrue(TEXT("Character can hold an assault rifle"), Inventory->TryAddItemById(EJTSItemId::AssaultRifle))) return false;
 	Inventory->SelectQuickbarSlot(0);
-	TestEqual(TEXT("Dual pistols are held before climbing"), Inventory->GetActiveItemId(), EJTSItemId::IceAxe);
+	TestEqual(TEXT("Assault rifle are held before climbing"), Inventory->GetActiveItemId(), EJTSItemId::AssaultRifle);
 	UJTSWeaponVisualComponent* Visual = Fixture.Character->FindComponentByClass<UJTSWeaponVisualComponent>();
 	if (!TestNotNull(TEXT("Held item visual exists"), Visual)) return false;
 	Visual->RefreshWeaponVisual();
@@ -846,7 +847,7 @@ bool FJTSPlanetSlopeClimbRegression::RunTest(const FString& Parameters)
 		Fixture.Character->GetActorLocation().Y > BeforeStepY + 20.0f);
 	TestTrue(TEXT("Slope climb remains attached after moving"), Climb->IsClimbing());
 	Climb->ToggleAttach();
-	TestEqual(TEXT("Held item is still selected after climbing"), Inventory->GetActiveItemId(), EJTSItemId::IceAxe);
+	TestEqual(TEXT("Held item is still selected after climbing"), Inventory->GetActiveItemId(), EJTSItemId::AssaultRifle);
 	Visual->RefreshWeaponVisual();
 	TestTrue(TEXT("Held item returns after climbing"), Grip->IsVisible());
 	TestFalse(TEXT("Old ADS input does not reactivate on exit"), Ranged->IsAiming());
@@ -973,21 +974,21 @@ bool FJTSRealPlanetMeshViewOrbitRegression::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Playable inventory exists"), Inventory)
 		|| !TestNotNull(TEXT("Playable held-item visual exists"), Visual)
 		|| !TestNotNull(TEXT("Playable ranged weapon exists"), Ranged)) return false;
-	if (!TestTrue(TEXT("Playable character equips the dual pistols"),
-		Inventory->TryAddItemById(EJTSItemId::IceAxe))) return false;
+	if (!TestTrue(TEXT("Playable character equips the an assault rifle"),
+		Inventory->TryAddItemById(EJTSItemId::AssaultRifle))) return false;
 	int32 PistolSlot = INDEX_NONE;
 	for (int32 Index = 0; Index < Inventory->GetItemSlots().Num(); ++Index)
 	{
-		if (Inventory->GetItemAtSlot(Index).ItemId == EJTSItemId::IceAxe)
+		if (Inventory->GetItemAtSlot(Index).ItemId == EJTSItemId::AssaultRifle)
 		{
 			PistolSlot = Index;
 			break;
 		}
 	}
-	if (!TestTrue(TEXT("Dual pistols occupy a selectable quickbar slot"), PistolSlot != INDEX_NONE)) return false;
+	if (!TestTrue(TEXT("Assault rifle occupy a selectable quickbar slot"), PistolSlot != INDEX_NONE)) return false;
 	Inventory->SelectQuickbarSlot(PistolSlot);
-	if (!TestEqual(TEXT("Playable character is actually holding dual pistols"),
-		Inventory->GetActiveItemId(), EJTSItemId::IceAxe)) return false;
+	if (!TestEqual(TEXT("Playable character is actually holding an assault rifle"),
+		Inventory->GetActiveItemId(), EJTSItemId::AssaultRifle)) return false;
 	Visual->RefreshWeaponVisual();
 	Ranged->StartAim();
 	TArray<UStaticMeshComponent*> HeldPieces;
@@ -1128,16 +1129,72 @@ bool FJTSStaminaCriticalClimbGateRegression::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSDualPistolsNoClimbCapabilityRegression,
-	"JTS.Items.DualPistolsRangedOnly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+	"JTS.Items.NormalWeaponsRangedOnly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FJTSDualPistolsNoClimbCapabilityRegression::RunTest(const FString& Parameters)
 {
-	const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::IceAxe);
-	if (!TestNotNull(TEXT("Dual pistols data asset loads"), Definition)) return false;
-	TestTrue(TEXT("Dual pistols fire as a ranged weapon"), Definition->IsRangedWeapon());
-	TestFalse(TEXT("Dual pistols cannot mine"), Definition->HasCapability(EJTSItemCapability::Mining));
-	TestFalse(TEXT("Dual pistols have no melee override"), Definition->HasCapability(EJTSItemCapability::MeleeOverride));
-	TestTrue(TEXT("Dual pistols deal ranged damage"), Definition->RangedDamage > 0.0f);
+	const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::AssaultRifle);
+	if (!TestNotNull(TEXT("Assault rifle data asset loads"), Definition)) return false;
+	TestTrue(TEXT("Assault rifle fires as a ranged weapon"), Definition->IsRangedWeapon());
+	TestTrue(TEXT("Assault rifle can chip ore as a weapon component"), Definition->HasCapability(EJTSItemCapability::Mining));
+	TestFalse(TEXT("Assault rifle has no melee override"), Definition->HasCapability(EJTSItemCapability::MeleeOverride));
+	TestTrue(TEXT("Assault rifle deals ranged damage"), Definition->RangedDamage > 0.0f);
+
+	// Progression rules: budget, validation, scaling and Rock/Ore/Organic-only costs.
+	{
+		const UJTSItemDefinition* const Shotgun = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::Shotgun);
+		const UJTSItemDefinition* const Arc = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::ArcGun);
+		const UJTSItemDefinition* const Rifle = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::AssaultRifle);
+		const UJTSItemDefinition* const Grenade = UJTSItemDefinitionLibrary::GetItemDefinition(nullptr, EJTSItemId::GrenadeLauncher);
+		if (!TestNotNull(TEXT("Shotgun definition"), Shotgun) || !TestNotNull(TEXT("Arc definition"), Arc)
+			|| !TestNotNull(TEXT("Rifle definition"), Rifle) || !TestNotNull(TEXT("Grenade definition"), Grenade)) return false;
+		FJTSItemInstance Gun = UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::Shotgun);
+		const FJTSRangedWeaponStats Plain = FJTSWeaponProgression::ResolveRanged(Shotgun, Gun);
+		Gun.WeaponBodyLevel = 2;
+		Gun.WeaponPoints = { 0, 0, 5, 0, 0, 0 };
+		const FJTSRangedWeaponStats WithPellets = FJTSWeaponProgression::ResolveRanged(Shotgun, Gun);
+		TestEqual(TEXT("Five pellet points add one pellet"), WithPellets.Pellets, Plain.Pellets + 1);
+		TestTrue(TEXT("More pellets never add total damage"), FMath::IsNearlyEqual(
+			WithPellets.Pellets * WithPellets.DamagePerPellet,
+			FJTSWeaponProgression::Resolve(Gun).ScaleDamage(Shotgun->RangedDamage), 0.01f));
+		TestTrue(TEXT("Shotgun damage is full inside the falloff start"), FMath::IsNearlyEqual(Plain.FalloffMultiplier(100.0f), 1.0f));
+		TestTrue(TEXT("Shotgun damage fades to its floor at the end distance"),
+			FMath::IsNearlyEqual(Plain.FalloffMultiplier(Plain.FalloffEndCm + 500.0f), Plain.MinFalloffFraction, 0.001f));
+		const FJTSItemInstance RifleItem = UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::AssaultRifle);
+		TestTrue(TEXT("Rifle uses a magazine"), FJTSWeaponProgression::ResolveRanged(Rifle, RifleItem).HasMagazine());
+		const FJTSRangedWeaponStats ArcStats = FJTSWeaponProgression::ResolveRanged(Arc, UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::ArcGun));
+		TestTrue(TEXT("Arc gun uses an energy bar instead of a magazine"), ArcStats.UsesEnergy() && !ArcStats.HasMagazine());
+		TestTrue(TEXT("Arc gun chains to more targets"), ArcStats.ChainTargets > 0);
+		TestTrue(TEXT("Grenade launcher fires a projectile"),
+			FJTSWeaponProgression::ResolveRanged(Grenade, UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::GrenadeLauncher)).IsProjectile());
+	}
+
+	TestEqual(TEXT("Level one budget is four points"), FJTSWeaponProgression::GetPointBudget(1), 4);
+	TArray<uint8> Points;
+	Points.Init(0, FJTSWeaponProgression::SkillCount);
+	Points[0] = 4;
+	TestTrue(TEXT("Four points fit level one"), FJTSWeaponProgression::IsValidAllocation(Points, 1));
+	Points[1] = 1;
+	TestFalse(TEXT("Five points exceed level one"), FJTSWeaponProgression::IsValidAllocation(Points, 1));
+	TestTrue(TEXT("Five points fit level two"), FJTSWeaponProgression::IsValidAllocation(Points, 2));
+	FJTSItemInstance Weapon = UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::AssaultRifle);
+	Weapon.WeaponBodyLevel = 10;
+	TestTrue(TEXT("Level ten doubles base damage"), FMath::IsNearlyEqual(FJTSWeaponProgression::Resolve(Weapon).LevelMultiplier, 2.08f, 0.001f));
+	Weapon.WeaponBodyLevel = 1;
+	Weapon.WeaponPoints = { 4 };
+	TestTrue(TEXT("Four damage points add 20 percent"), FMath::IsNearlyEqual(FJTSWeaponProgression::Resolve(Weapon).ScaleDamage(100.0f), 120.0f, 0.01f));
+	TArray<FJTSItemCost> Cost;
+	TestTrue(TEXT("Level one upgrade has a cost"), FJTSWeaponProgression::GetUpgradeCost(Definition, 1, Cost));
+	TestFalse(TEXT("Level ten cannot upgrade"), FJTSWeaponProgression::GetUpgradeCost(Definition, 10, Cost));
+	for (int32 Level = 1; Level < 10; ++Level)
+	{
+		FJTSWeaponProgression::GetUpgradeCost(Definition, Level, Cost);
+		for (const FJTSItemCost& Entry : Cost)
+		{
+			TestTrue(TEXT("Upgrade costs use only Rock, Ore and Organic"), Entry.ResourceType == EJTSResourceType::Rock
+				|| Entry.ResourceType == EJTSResourceType::Ore || Entry.ResourceType == EJTSResourceType::Organic);
+		}
+	}
 	return true;
 }
 

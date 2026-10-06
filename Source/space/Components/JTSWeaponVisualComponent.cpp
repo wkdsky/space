@@ -1,4 +1,5 @@
 #include "space/Components/JTSWeaponVisualComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -75,7 +76,8 @@ void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	UpdateLeftPistolAnchor();
 	UpdateWaistLamp();
 	ApplyPresentationTransform();
-	const bool bHeldItemVisible = IsValid(WeaponBody) && WeaponBody->IsVisible();
+	const bool bHeldItemVisible = (IsValid(WeaponBody) && WeaponBody->IsVisible())
+		|| (IsValid(StellarHeldMesh) && StellarHeldMesh->IsVisible());
 	const bool bLampVisible = IsValid(WaistLampLight) && WaistLampLight->IsVisible();
 	if (!bHeldItemVisible && !bLampVisible && !bTwoHandVisible && ShotKickAlpha <= 0.0f && !bMeleeSwingPresentationActive)
 	{
@@ -229,6 +231,12 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 	WeaponBody = CreateMesh(TEXT("WeaponVisualBody"));
 	WeaponBarrel = CreateMesh(TEXT("WeaponVisualBarrel"));
 	WeaponSight = CreateMesh(TEXT("WeaponVisualSight"));
+	StellarHeldMesh = CreateMesh(TEXT("StellarHeldMesh"));
+	if (StellarHeldMesh)
+	{
+		StellarHeldMesh->SetStaticMesh(nullptr);
+		StellarHeldMesh->EmptyOverrideMaterials();
+	}
 	auto MakePiece = [this](const FName Name, USceneComponent* Parent) -> UStaticMeshComponent*
 	{
 		if (!IsValid(Parent) || !IsValid(CubeMesh))
@@ -610,6 +618,11 @@ void UJTSWeaponVisualComponent::UpdateWaistLamp()
 
 void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
 {
+	if (const auto* Stellar = GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>(); Stellar && Stellar->HasActiveWeapon())
+	{
+		RefreshWeaponVisual();
+		return;
+	}
 	if (bClimbStowed)
 	{
 		SetVisible(false);
@@ -743,6 +756,18 @@ void UJTSWeaponVisualComponent::SetClimbStowed(bool bStowed)
 void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 {
 	EnsureMeshComponents();
+	if (StellarHeldMesh) { StellarHeldMesh->SetVisibility(false); StellarHeldMesh->SetHiddenInGame(true); }
+	const auto* Stellar = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+	if (Stellar && Stellar->HasActiveWeapon())
+	{
+		SetVisible(false);
+		const auto* Climb = GetOwner()->FindComponentByClass<UJTSWallClimbComponent>();
+		const auto* Character = Cast<AJTSCharacter>(GetOwner());
+		if (!bClimbStowed && (!Climb || !Climb->IsClimbing()) && (!Character || !Character->IsBoarded()))
+			RefreshStellarHeldMesh(Stellar);
+		UpdateWaistLamp();
+		return;
+	}
 	const UJTSWallClimbComponent* const Climb = GetOwner() != nullptr
 		? GetOwner()->FindComponentByClass<UJTSWallClimbComponent>() : nullptr;
 	if (bClimbStowed || (IsValid(Climb) && Climb->IsClimbing()))
@@ -776,7 +801,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		return;
 	}
 	bRangedVisible = Definition->IsRangedWeapon();
-	bTwoHandVisible = ItemId == EJTSItemId::IceAxe;
+	bTwoHandVisible = Definition->HeldPresentation.bDualWield;
 	// Mesh +X follows each forearm for ranged weapons.
 	DefaultCarryRotation = FRotator::ZeroRotator;
 	SetComponentTickEnabled(true);
@@ -791,64 +816,6 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(61.0f, 0.0f, 0.0f), FVector::OneVector);
 	DefaultGripScale = FVector(0.16f, 0.12f, 0.32f);
 
-	switch (ItemId)
-	{
-	case EJTSItemId::MachineGun:
-		BodyScale = FVector(0.88f, 0.22f, 0.18f);
-		BarrelScale = FVector(0.38f, 0.10f, 0.10f);
-		SightScale = FVector(0.12f, 0.08f, 0.12f);
-		DefaultBodyLocation = FVector(18.0f, 0.0f, 0.0f);
-		DefaultBarrelLocation = FVector(76.0f, 0.0f, 0.0f);
-		DefaultSightLocation = FVector(28.0f, 0.0f, 16.0f);
-		DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -10.0f), FVector::OneVector);
-		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(95.0f, 0.0f, 0.0f), FVector::OneVector);
-		DefaultGripScale = FVector(0.22f, 0.16f, 0.40f);
-		break;
-	case EJTSItemId::Sniper:
-		BodyScale = FVector(1.10f, 0.20f, 0.14f);
-		BarrelScale = FVector(0.62f, 0.08f, 0.08f);
-		SightScale = FVector(0.12f, 0.09f, 0.18f);
-		DefaultBodyLocation = FVector(23.0f, 0.0f, 0.0f);
-		DefaultBarrelLocation = FVector(96.0f, 0.0f, 0.0f);
-		DefaultSightLocation = FVector(30.0f, 0.0f, 17.0f);
-		DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -10.0f), FVector::OneVector);
-		DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(127.0f, 0.0f, 0.0f), FVector::OneVector);
-		DefaultGripScale = FVector(0.22f, 0.15f, 0.42f);
-		break;
-	case EJTSItemId::Pistol:
-	default:
-		break;
-	}
-
-	if (!Definition->IsRangedWeapon())
-	{
-		SightScale = FVector::ZeroVector;
-		switch (ItemId)
-		{
-		case EJTSItemId::Knife:
-			BodyScale = FVector(0.30f, 0.09f, 0.10f);
-			BarrelScale = FVector(0.46f, 0.06f, 0.05f);
-			DefaultBodyLocation = FVector(4.0f, 0.0f, 0.0f);
-			DefaultBarrelLocation = FVector(42.0f, 0.0f, 0.0f);
-			DefaultGripTransform = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, 0.0f), FVector::OneVector);
-			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(65.0f, 0.0f, 0.0f), FVector::OneVector);
-			DefaultGripScale = FVector(0.22f, 0.12f, 0.12f);
-			break;
-		case EJTSItemId::Pickaxe:
-		case EJTSItemId::Axe:
-			BodyScale = FVector(0.76f, 0.07f, 0.07f);
-			BarrelScale = FVector(0.30f, 0.26f, 0.18f);
-			DefaultBodyLocation = FVector(5.0f, 0.0f, 0.0f);
-			DefaultBarrelLocation = FVector(53.0f, 0.0f, 5.0f);
-			DefaultGripTransform = FTransform(FQuat::Identity, FVector(-6.0f, 0.0f, 0.0f), FVector::OneVector);
-			DefaultMuzzleTransform = FTransform(FQuat::Identity, FVector(68.0f, 0.0f, 5.0f), FVector::OneVector);
-			DefaultGripScale = FVector(0.26f, 0.12f, 0.14f);
-			break;
-		default:
-			break;
-		}
-	}
-
 	// A real weapon mesh can keep its own arbitrary import origin.  Artists author the grip and
 	// muzzle pivots on the item Data Asset; gameplay never needs to know which mesh is selected.
 	if (Definition->HeldPresentation.bOverridePrototypeProfile)
@@ -856,6 +823,16 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		DefaultGripTransform = Definition->HeldPresentation.GripTransform;
 		DefaultMuzzleTransform = Definition->HeldPresentation.MuzzleTransform;
 		DefaultGripScale = Definition->HeldPresentation.GripScale;
+		BodyScale = Definition->HeldPresentation.BodyScale;
+		BarrelScale = Definition->HeldPresentation.BarrelScale;
+		SightScale = Definition->HeldPresentation.SightScale;
+		DefaultBodyLocation = Definition->HeldPresentation.BodyLocation;
+		DefaultBarrelLocation = Definition->HeldPresentation.BarrelLocation;
+		DefaultSightLocation = Definition->HeldPresentation.SightLocation;
+	}
+	else if (!Definition->IsRangedWeapon())
+	{
+		SightScale = FVector::ZeroVector;
 	}
 
 	WeaponGrip->SetVisibility(true);
@@ -874,19 +851,7 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 	WeaponBarrel->SetWorldScale3D(BarrelScale);
 	WeaponSight->SetWorldScale3D(SightScale);
 
-	FLinearColor ItemColor = Definition->AccentColor;
-	if (ItemId == EJTSItemId::Knife)
-	{
-		ItemColor = FLinearColor(0.78f, 0.88f, 1.0f, 1.0f);
-	}
-	else if (ItemId == EJTSItemId::Axe || ItemId == EJTSItemId::Pickaxe)
-	{
-		ItemColor = FLinearColor(1.0f, 0.42f, 0.08f, 1.0f);
-	}
-	else if (ItemId == EJTSItemId::IceAxe)
-	{
-		ItemColor = FLinearColor(0.35f, 0.72f, 0.95f, 1.0f);
-	}
+	const FLinearColor ItemColor = Definition->AccentColor;
 
 	auto ApplyMaterialColor = [](UMaterialInstanceDynamic* Material, const FLinearColor& Color)
 	{
@@ -958,6 +923,37 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		*WeaponBody->GetComponentScale().ToCompactString());
 }
 
+void UJTSWeaponVisualComponent::RefreshStellarHeldMesh(const UJTSStellarWeaponComponent* Stellar)
+{
+	const auto* Definition = Stellar ? Stellar->GetEquippedWeaponDefinition() : nullptr;
+	UStaticMesh* Mesh = Definition ? Definition->HeldMesh.LoadSynchronous() : nullptr;
+	if (!Mesh || !StellarHeldMesh || !WeaponModelRoot || !WeaponMuzzle) return;
+	if (StellarHeldMesh->GetStaticMesh() != Mesh)
+	{
+		StellarHeldMesh->SetStaticMesh(Mesh);
+		StellarHeldMesh->EmptyOverrideMaterials();
+		StellarCoreMaterial = nullptr;
+	}
+	if (Definition->CoreMaterialSlot >= 0 && Definition->CoreMaterialSlot < StellarHeldMesh->GetNumMaterials())
+	{
+		if (!StellarCoreMaterial) StellarCoreMaterial = StellarHeldMesh->CreateAndSetMaterialInstanceDynamic(Definition->CoreMaterialSlot);
+		if (StellarCoreMaterial) StellarCoreMaterial->SetVectorParameterValue(TEXT("CoreColor"), Stellar->GetEquippedCoreColor());
+	}
+	bRangedVisible = !Definition->bMeleePresentation;
+	bUprightScepter = Definition->bUprightScepter;
+	bTwoHandVisible = false;
+	DefaultCarryRotation = Definition->HeldCarryRotation;
+	DefaultGripTransform = Definition->HeldGripTransform;
+	DefaultMuzzleTransform = Definition->HeldMuzzleTransform;
+	StellarHeldMesh->SetRelativeTransform(FTransform::Identity);
+	StellarHeldMesh->SetWorldScale3D(FVector::OneVector);
+	StellarHeldMesh->SetHiddenInGame(false);
+	StellarHeldMesh->SetVisibility(true);
+	SetComponentTickEnabled(true);
+	UpdatePalmAnchor();
+	ApplyPresentationTransform();
+}
+
 bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation, bool bLeftHand) const
 {
 	OutLocation = FVector::ZeroVector;
@@ -973,7 +969,8 @@ bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation, boo
 bool UJTSWeaponVisualComponent::GetMuzzleWorldTransform(FTransform& OutTransform, bool bLeftHand) const
 {
 	OutTransform = FTransform::Identity;
-	if (!IsValid(WeaponMuzzle) || !IsValid(WeaponBody) || !WeaponBody->IsVisible() || bClimbStowed)
+	if (!IsValid(WeaponMuzzle) || bClimbStowed
+		|| (!(IsValid(WeaponBody) && WeaponBody->IsVisible()) && !(IsValid(StellarHeldMesh) && StellarHeldMesh->IsVisible())))
 	{
 		return false;
 	}
@@ -1078,13 +1075,19 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	{
 		// Aim and melee animation rotate the whole held item around its actual grip, not around
 		// the origin of each primitive piece.
-		WeaponPresentationRoot->SetRelativeLocation(AimOffset);
-		WeaponPresentationRoot->SetAbsolute(false, false, true);
+		WeaponPresentationRoot->SetRelativeLocation(bUprightScepter ? FVector::ZeroVector : AimOffset);
+		WeaponPresentationRoot->SetAbsolute(false, bUprightScepter, true);
 		// Relative to the palm frame: ranged stays forward, melee pitch stands the shaft up.
 		// The grip inverse still pins the handle on the palm, so this rotation cannot
 		// throw the item off the hand the way a world rotation on this root did.
 		const FRotator Kick(4.0f * ShotKickAlpha, 0.0f, 0.0f);
-		WeaponPresentationRoot->SetRelativeRotation(DefaultCarryRotation + Kick);
+		if (bUprightScepter && GetOwner())
+		{
+			const FVector Up = GetOwner()->GetActorUpVector().GetSafeNormal();
+			const FVector Forward = FVector::VectorPlaneProject(GetOwner()->GetActorForwardVector(), Up).GetSafeNormal();
+			WeaponPresentationRoot->SetWorldRotation(FRotationMatrix::MakeFromXZ(Forward, Up).ToQuat());
+		}
+		else WeaponPresentationRoot->SetRelativeRotation(DefaultCarryRotation + Kick);
 	}
 	if (IsValid(WeaponModelRoot))
 	{
@@ -1128,7 +1131,9 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 {
 	if (!bVisible)
 	{
+		if (StellarHeldMesh) { StellarHeldMesh->SetVisibility(false); StellarHeldMesh->SetHiddenInGame(true); }
 		bRangedVisible = false;
+		bUprightScepter = false;
 		bTwoHandVisible = false;
 		bMeleeSwingPresentationActive = false;
 		ShotKickAlpha = 0.0f;

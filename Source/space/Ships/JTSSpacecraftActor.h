@@ -61,10 +61,16 @@ public:
 
 	/** Server-authoritative purchase backed by this ship's shared material storage. */
 	EJTSShopPurchaseResult TryPurchase(AJTSCharacter* Player, EJTSItemId ItemId);
-	EJTSStellarRollResult TryRollStellarItem(AJTSCharacter* Player, FName& OutItemId, int32& OutSlotIndex);
+	/** Charges Rock/Ore/Organic from the shared storage and raises a locker weapon one body level, all or nothing. */
+	bool TryUpgradeLockerWeapon(AJTSCharacter* Player, int32 SlotIndex, FGuid ExpectedToken);
+	/** A repeated valid RequestId replays the stored result without charging or rolling again. */
+	EJTSStellarRollResult TryRollStellarItem(AJTSCharacter* Player, FName& OutItemId, int32& OutSlotIndex,
+		const FGuid& RequestId = FGuid());
 	const UJTSStellarLootTable* GetStellarLootTable() const;
 	/** Prototype terminal control: grant 100 of each ship resource after the normal server interaction check. */
 	bool TryGrantDebugResources(AJTSCharacter* Player);
+	/** Adds one of each configured core/attachment to free personal locker slots, excluding firmware. */
+	bool TryGrantDebugStellarItems(AJTSCharacter* Player, int32& OutAddedCount, int32& OutRequestedCount);
 
 	/** Boards a character that is currently inside the spacecraft trigger. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Boarding")

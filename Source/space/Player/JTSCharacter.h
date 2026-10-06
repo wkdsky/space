@@ -56,6 +56,21 @@ class SPACE_API AJTSCharacter : public ACharacter
 
 public:
 	AJTSCharacter();
+	/** Eye height follows spherical gravity instead of APawn's fixed world-Z offset. */
+	virtual FVector GetPawnViewLocation() const override;
+	/** Shared combat gating for composed weapon systems, including phase and local UI. */
+	bool CanUseCombatInput() const { return CanUseNormalGameplayInput(); }
+	/** Server bound for a client camera ray; derived from the Blueprint-authored camera rig. */
+	float GetMaximumGameplayCameraOffset() const
+	{
+		return FMath::Max(0.0f, FMath::Max(ThirdPersonArmLength, ThirdPersonCameraMaxArmLength))
+			+ FMath::Max(0.0f, CameraPivotHeight) + ThirdPersonShoulderOffset.Size() + FMath::Abs(BaseEyeHeight);
+	}
+	/** Tab: cycle only correctly assembled, available stellar weapon pairs. */
+	void HandleCycleStellarWeapon(const FInputActionValue& Value);
+	/** Z: reload the held ordinary firearm, or cycle stellar equipment. */
+	void HandleWeaponUtilityStarted(const FInputActionValue& Value);
+	void HandleReturnToNormalWeapon(const FInputActionValue& Value);
 
 	/** Returns this character's resource carry inventory. */
 	UFUNCTION(BlueprintPure, Category = "Carry")
@@ -235,6 +250,7 @@ private:
 	void HandleMeleeAttackFinished(EJTSAttackType AttackType);
 	void HandleAimStarted(const FInputActionValue& Value);
 	void HandleAimReleased(const FInputActionValue& Value);
+	void HandleReloadStarted(const FInputActionValue& Value);
 	void HandleToggleCameraStarted(const FInputActionValue& Value);
 	void HandleCameraZoom(const FInputActionValue& Value);
 	void HandleQuickbarSlotOneStarted(const FInputActionValue& Value);
@@ -373,6 +389,9 @@ private:
 	/** Server-authoritative hitscan prototype for active RangedWeapon items. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSRangedWeaponComponent> RangedWeaponComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stellar", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<class UJTSStellarWeaponComponent> StellarWeaponComponent;
 
 	/** Composed primitive mesh used as a network-safe placeholder for the active firearm. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged|Presentation", meta = (AllowPrivateAccess = "true"))
@@ -598,6 +617,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> AimAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> CycleStellarAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> WeaponUtilityAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> ReturnToNormalAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ReloadAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ToggleCameraAction;

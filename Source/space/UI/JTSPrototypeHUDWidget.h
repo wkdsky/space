@@ -43,7 +43,9 @@ public:
 	void CloseGameMenu();
 	bool IsGameMenuOpen() const;
 	bool IsOverInventorySlot(const FVector2D& ScreenPosition) const;
+	int32 GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const;
 	int32 GetInventorySlotAtScreenPosition(const FVector2D& ScreenPosition) const;
+	void UpdateInventoryDragPreview(const FVector2D& ScreenPosition, const FString& Label, bool bVisible);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -287,6 +289,12 @@ private:
 	TObjectPtr<UCanvasPanelSlot> PlayerStaminaBarSlot;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> WeaponStatusText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> WeaponStatusBar;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanel> RocketIconCanvas;
 
 	UPROPERTY(Transient)
@@ -306,12 +314,15 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> InventoryPanel;
+	UPROPERTY(Transient) TObjectPtr<class UJTSStellarLoadoutPanel> StellarRow;
+	UPROPERTY(Transient) TObjectPtr<UCanvasPanelSlot> StellarRowSlot;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanelSlot> InventoryPanelSlot;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTextBlock> InventoryTitleText;
+	TObjectPtr<UBorder> InventoryDragPreview;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> InventoryDragPreviewText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> EquipmentHintText;

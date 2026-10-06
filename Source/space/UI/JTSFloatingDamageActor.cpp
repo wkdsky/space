@@ -32,11 +32,18 @@ void AJTSFloatingDamageActor::Initialize(float Damage, bool bCritical, const FVe
 	Side = FVector::CrossProduct(Up, FVector::ForwardVector).GetSafeNormal();
 	if (Side.IsNearlyZero()) Side = FVector::CrossProduct(Up, FVector::RightVector).GetSafeNormal();
 	Side *= FMath::RandBool() ? 1.0f : -1.0f;
-	bIsCritical = bCritical;
 	WidgetComponent->InitWidget();
+	TotalDamage = 0.0f;
+	AddDamage(Damage, bCritical);
+}
+
+void AJTSFloatingDamageActor::AddDamage(float Damage, bool bCritical)
+{
+	TotalDamage += FMath::Max(0.0f, Damage);
+	bIsCritical |= bCritical;
 	if (UJTSFloatingDamageWidget* Widget = Cast<UJTSFloatingDamageWidget>(WidgetComponent->GetUserWidgetObject()))
 	{
-		Widget->SetDamage(Damage, bCritical);
+		Widget->SetDamage(TotalDamage, bIsCritical);
 	}
 }
 

@@ -14,6 +14,7 @@ class USceneComponent;
 class USpotLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UJTSStellarWeaponComponent;
 
 /**
  * Builds a small primitive-mesh firearm presentation from the active item definition.
@@ -60,12 +61,15 @@ public:
 	bool GetMuzzleWorldTransform(FTransform& OutTransform, bool bLeftHand = false) const;
 	/** Strike tip on a held knife, axe or tool, following the posed hand. */
 	bool GetHeldItemTipWorldLocation(FVector& OutLocation) const;
+	UFUNCTION(BlueprintPure, Category="Weapon|Presentation")
+	UStaticMeshComponent* GetStellarHeldMesh() const { return StellarHeldMesh; }
 
 private:
 	UFUNCTION()
 	void HandleInventoryChanged(int32 UsedSlots, int32 Capacity);
 
 	void EnsureMeshComponents();
+	void RefreshStellarHeldMesh(const UJTSStellarWeaponComponent* Stellar);
 	void ConfigureAttachment();
 	void AttachToRootFallback();
 	/** Places the grip in the palm from the posed wrist and finger bones, in world centimetres. */
@@ -154,6 +158,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> WeaponSight;
 
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> StellarHeldMesh;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> StellarCoreMaterial;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> CubeMesh;
 
@@ -203,6 +210,7 @@ private:
 	float AimAlpha = 0.0f;
 	float ShotKickAlpha = 0.0f;
 	bool bRangedVisible = false;
+	bool bUprightScepter = false;
 	bool bTwoHandVisible = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Presentation|Shot", meta = (ClampMin = "1.0"))

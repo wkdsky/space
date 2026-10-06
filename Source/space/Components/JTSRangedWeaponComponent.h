@@ -9,6 +9,40 @@
 #include "JTSRangedWeaponComponent.generated.h"
 
 class UJTSItemDefinition;
+struct FJTSRangedWeaponStats;
+struct FJTSResolvedWeaponStats;
+
+/** Server-side memory of a weapon that is not currently held. */
+struct FJTSStoredWeaponState
+{
+	int32 Ammo = 0;
+	float Energy = 0.0f;
+	float Stamp = 0.0f;
+	bool bLocked = false;
+};
+
+/** Replicated state of the held weapon's magazine or energy bar. One instance per component, swapped when the held weapon changes. */
+USTRUCT()
+struct FJTSRangedRuntimeState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Ammo = 0;
+	/** Server world time the reload began, or a negative value when not reloading. */
+	UPROPERTY()
+	float ReloadStartTime = -1.0f;
+	UPROPERTY()
+	float ReloadDuration = 0.0f;
+	/** Energy at EnergyStamp; the live value is derived from it so the bar costs no per-frame replication. */
+	UPROPERTY()
+	float Energy = 0.0f;
+	UPROPERTY()
+	float EnergyStamp = 0.0f;
+	/** Set when the bar ran dry; clears once it recharges past the resume threshold. */
+	UPROPERTY()
+	bool bEnergyLocked = false;
+};
 
 /**
  * Minimal server-authoritative hitscan path for item definitions with RangedWeapon capability.
@@ -21,6 +55,7 @@ class SPACE_API UJTSRangedWeaponComponent : public UActorComponent
 
 public:
 	UJTSRangedWeaponComponent();
+	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintPure, Category = "Ranged")
@@ -70,6 +105,38 @@ public:
 	UFUNCTION(Client, Unreliable)
 	void ClientConfirmRangedHit(bool bCritical);
 
+	/** Manual reload (Z; T also supported). Safe to call on any machine; the server decides. */
+	UFUNCTION(BlueprintCallable, Category = "Ranged|Magazine")
+	void RequestReload();
+
+	UFUNCTION(Server, Reliable)
+	void ServerReload();
+
+	/** HUD queries. All are derived from replicated state and the held item, so they work on every machine. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Magazine")
+	bool UsesMagazine() const;
+	UFUNCTION(BlueprintPure, Category = "Ranged|Magazine")
+	int32 GetAmmo() const;
+	UFUNCTION(BlueprintPure, Category = "Ranged|Magazine")
+	int32 GetMagazineSize() const;
+	UFUNCTION(BlueprintPure, Category = "Ranged|Magazine")
+	bool IsReloading() const;
+	/** 0 to 1 progress through the current reload. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Magazine")
+	float GetReloadProgress() const;
+
+	UFUNCTION(BlueprintPure, Category = "Ranged|Energy")
+	bool UsesEnergy() const;
+	/** 0 to 1 fill of the energy bar. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Energy")
+	float GetEnergyFraction() const;
+	/** True while the bar is still in the red zone after running dry; the weapon cannot fire. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Energy")
+	bool IsEnergyLocked() const;
+	/** The fraction of the bar the lock lifts at, for drawing the red zone. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Energy")
+	float GetEnergyResumeFraction() const;
+
 	UFUNCTION(BlueprintPure, Category = "Ranged|Feedback")
 	float GetReticleKickAlpha() const;
 
@@ -86,12 +153,38 @@ private:
 	bool IsEmptyHanded() const;
 	bool CanUseWeapon() const;
 	bool FireOnce();
-	void PlayLocalShotFeedback(const UJTSItemDefinition* Definition);
+	/** Plays the local trigger feedback unless one already played this interval. Returns whether it played. */
+	bool PlayLocalShotFeedback(const UJTSItemDefinition* Definition);
+	/** Owning-client prediction: plays feedback and spends the predicted round when the weapon is able to fire. */
+	bool TryLocalShot(const UJTSItemDefinition* Definition);
 	/** Repeats a held trigger at the active item's configured fire interval. */
 	void ScheduleHeldFire(const UJTSItemDefinition* Definition);
 	void ClearFireTimer();
 
+	/** Loads the held weapon's remembered ammo/energy, parking the previous weapon's. Server only. */
+	void SyncActiveWeapon();
+	void BeginReload(const FJTSRangedWeaponStats& Stats);
+	void FinishReload();
+	float ServerNow() const;
+	float CurrentEnergy(const FJTSRangedWeaponStats& Stats) const;
+	bool CanShootNow(const FJTSRangedWeaponStats& Stats) const;
+	UFUNCTION()
+	void HandleInventoryChanged(int32 UsedSlots, int32 Capacity);
+	UFUNCTION()
+	void OnRep_Runtime();
+	FJTSRangedWeaponStats ResolveActiveStats() const;
+
+	/** One ray of a shot: damage, mining, pierce and chain. Returns the furthest point reached. */
+	void FireRay(const FVector& Start, const FVector& Direction, const FJTSRangedWeaponStats& Stats,
+		const UJTSItemDefinition* Definition, const FJTSResolvedWeaponStats& Upgrades, bool& bAnyDamageable, bool& bAnyCritical);
+	void ApplyChain(const FVector& Origin, AActor* FirstTarget, float Damage, const FJTSRangedWeaponStats& Stats,
+		EJTSItemId ShotItem);
+
 	FTimerHandle AutomaticFireTimerHandle;
+	FTimerHandle ReloadTimerHandle;
+	FGuid TrackedInstanceId;
+	TMap<FGuid, FJTSStoredWeaponState> ParkedStates;
+	int32 PredictedAmmo = 0;
 	bool bFireHeld = false;
 	bool bNextLeftServerShot = false;
 	bool bNextLeftFeedbackShot = false;
@@ -104,4 +197,7 @@ private:
 
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "Ranged|Aim", meta = (AllowPrivateAccess = "true"))
 	bool bIsAiming = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Runtime)
+	FJTSRangedRuntimeState Runtime;
 };

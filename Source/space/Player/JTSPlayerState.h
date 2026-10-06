@@ -22,6 +22,11 @@ class SPACE_API AJTSPlayerState : public APlayerState
 public:
 	AJTSPlayerState();
 
+	UFUNCTION(BlueprintPure, Category = "Stellar")
+	class UJTSStellarLoadoutComponent* GetStellarLoadout() const { return StellarLoadout; }
+	/** Atomic loadout/locker transfer; an empty replacement extracts the old item. */
+	bool TryReplaceStellarLockerSlot(int32 Index, FGuid ExpectedToken, const FJTSItemInstance& Replacement);
+
 	UFUNCTION(BlueprintPure, Category = "Expedition")
 	bool IsReady() const { return bReady; }
 
@@ -128,6 +133,29 @@ public:
 		const class UJTSStellarLootTable* LootTable);
 	void RestoreShipLockerSlots(const TArray<FJTSShipLockerSlot>& SavedSlots);
 
+	/** Core kinds this player has ever rolled (design U). Persisted per player; trades never add to it. */
+	const TArray<FName>& GetDiscoveredStellarCoreIds() const { return DiscoveredStellarCoreIds; }
+	void RestoreDiscoveredStellarCoreIds(const TArray<FName>& SavedCoreIds);
+	/** Server-only. Idempotent: a repeated core kind does not grow U. Returns true when the kind is new. */
+	bool RecordDiscoveredStellarCore(FName CoreId);
+
+	/** Server-only. Validates ownership, slot token and budget, then records the six attachment points. */
+	bool TryApplyStellarPoints(int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& NewPoints,
+		const class UJTSStellarLootTable* LootTable);
+	/** Server-only. Records a normal weapon's six skill points; they must fit the body-level budget (lowering is always allowed). */
+	bool TryApplyWeaponPoints(int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& NewPoints);
+	/** Server-only. Raises a locker weapon one body level. The caller has already charged the cost. */
+	bool TryRaiseWeaponBodyLevel(int32 SlotIndex, FGuid ExpectedToken);
+	/** Server-only. Raises a core one level, consuming the specified dragged firmware first when supplied. */
+	bool TryUpgradeStellarCore(int32 SlotIndex, FGuid ExpectedToken, const class UJTSStellarLootTable* LootTable,
+		int32 FirmwareSlotIndex = INDEX_NONE, FGuid ExpectedFirmwareToken = FGuid());
+	int32 GetStellarFirmwareUnits() const { return StellarFirmwareUnits; }
+	void RestoreStellarFirmwareUnits(int32 SavedUnits);
+
+	/** Server-only idempotency log so a resent roll request returns the stored result and never charges twice. */
+	const FJTSStellarRollRecord* FindStellarRollRecord(const FGuid& RequestId) const;
+	void AddStellarRollRecord(const FJTSStellarRollRecord& Record);
+
 	UPROPERTY(BlueprintAssignable, Category = "Expedition")
 	FOnJTSPlayerNetworkStateChanged OnNetworkStateChanged;
 
@@ -139,6 +167,8 @@ public:
 	virtual void OverrideWith(APlayerState* PlayerState) override;
 
 private:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stellar", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<class UJTSStellarLoadoutComponent> StellarLoadout;
 	UFUNCTION()
 	void OnRep_NetworkState();
 
@@ -195,4 +225,14 @@ private:
 	/** Owner-only contents; other expedition members cannot inspect another player's terminal items. */
 	UPROPERTY(ReplicatedUsing = OnRep_ShipLockerSlots, VisibleInstanceOnly, Category = "Ship Locker")
 	TArray<FJTSShipLockerSlot> ShipLockerSlots;
+
+	/** Owner-only roll history that drives the personal drop table. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Ship Locker")
+	TArray<FName> DiscoveredStellarCoreIds;
+
+	/** Firmware units left over from broken-down firmware items; spent on core upgrades. */
+	UPROPERTY(Replicated, VisibleInstanceOnly, Category = "Ship Locker")
+	int32 StellarFirmwareUnits = 0;
+
+	TArray<FJTSStellarRollRecord> RecentStellarRollRecords;
 };

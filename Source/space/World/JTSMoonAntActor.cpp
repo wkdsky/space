@@ -17,6 +17,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Components/JTSExperienceRewardComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
@@ -53,6 +54,7 @@ namespace
 
 AJTSMoonAntActor::AJTSMoonAntActor()
 {
+	CreateDefaultSubobject<UJTSStellarTargetComponent>(TEXT("StellarTarget"));
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;

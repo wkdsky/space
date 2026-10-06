@@ -3,6 +3,7 @@
 #include "space/UI/JTSShopWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -20,6 +21,14 @@
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSStellarLootTable.h"
+#include "space/UI/JTSStellarAttachmentDialog.h"
+#include "space/UI/JTSWeaponUpgradePanel.h"
+#include "space/UI/JTSGameUILayout.h"
+#include "space/UI/SJTSStellarLoadoutView.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "space/Items/JTSWeaponProgression.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -69,9 +78,10 @@ namespace
 		if (Result != nullptr)
 		{
 			Result->SetText(FText::FromString(Text));
-			Result->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), FontSize));
+			Result->SetFont(FCoreStyle::GetDefaultFontStyle(FName(TEXT("Bold")), FMath::Max(16.0f, FontSize)));
 			Result->SetColorAndOpacity(FSlateColor(Color));
-			Result->SetAutoWrapText(true);
+			Result->SetAutoWrapText(false);
+			Result->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
 			Result->SetJustification(Justify);
 		}
 		return Result;
@@ -79,7 +89,7 @@ namespace
 
 	UTextBlock* MakeButtonLabel(UWidgetTree* Tree, FName Name, const FString& Label, float FontSize)
 	{
-		UTextBlock* const Result = MakeText(Tree, Name, Label, FontSize, FLinearColor::White, ETextJustify::Center);
+		UTextBlock* const Result = MakeText(Tree, Name, Label, FMath::Max(18.0f, FontSize), FLinearColor::White, ETextJustify::Center);
 		if (Result) Result->SetAutoWrapText(false);
 		return Result;
 	}
@@ -98,6 +108,26 @@ namespace
 			Result->SetPadding(FMargin(Padding));
 		}
 		return Result;
+	}
+
+	void SetReadableTooltip(UWidgetTree* Tree, UWidget* Owner, const FText& Text)
+	{
+		if (!Tree || !Owner || (Owner->GetToolTip() && Owner->GetToolTipText().EqualTo(Text))) return;
+		Owner->SetToolTipText(Text);
+		if (Text.IsEmpty())
+		{
+			Owner->SetToolTip(nullptr);
+			return;
+		}
+		USizeBox* const Size = Tree->ConstructWidget<USizeBox>();
+		Size->SetWidthOverride(440.0f);
+		UBorder* const Background = MakeBorder(Tree, NAME_None, FLinearColor(0.008f, 0.014f, 0.025f, 0.98f), 16.0f);
+		UTextBlock* const Body = MakeText(Tree, NAME_None, Text.ToString(), 18.0f, FLinearColor::White);
+		Body->SetAutoWrapText(true);
+		Body->SetTextOverflowPolicy(ETextOverflowPolicy::Clip);
+		Background->SetContent(Body);
+		Size->SetContent(Background);
+		Owner->SetToolTip(Size);
 	}
 
 	FString ResourceLabel(const EJTSResourceType ResourceType)
@@ -135,13 +165,13 @@ namespace
 	{
 		if (Definition->PrimaryCategory == EJTSItemCategory::Mining)
 		{
-			return FLinearColor(0.16f, 0.115f, 0.055f, 1.0f);
+			return FLinearColor(0.065f, 0.043f, 0.018f, 1.0f);
 		}
 		if (Definition->IsRangedWeapon())
 		{
-			return FLinearColor(0.055f, 0.11f, 0.17f, 1.0f);
+			return FLinearColor(0.018f, 0.043f, 0.070f, 1.0f);
 		}
-		return FLinearColor(0.09f, 0.105f, 0.12f, 1.0f);
+		return FLinearColor(0.025f, 0.034f, 0.045f, 1.0f);
 	}
 }
 
@@ -156,6 +186,12 @@ FReply UJTSShopWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const
 	if (bShopOpen && InKeyEvent.GetKey() == EKeys::Tab)
 	{
 		ToggleShopPage();
+		return FReply::Handled();
+	}
+
+	if (IsValid(AttachmentDialog) && AttachmentDialog->IsDialogOpen() && InKeyEvent.GetKey() == EKeys::Escape)
+	{
+		AttachmentDialog->CloseDialog();
 		return FReply::Handled();
 	}
 
@@ -194,11 +230,14 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 	BuildWidgetTree();
 	SetIsFocusable(true);
 	ActiveSpacecraft = Spacecraft;
+	ResetLockerDrag();
 	LastDisplayedResourceAmounts.Reset();
 	LastRequestedItem = EJTSItemId::None;
 	bShowingAbilityPage = false;
 	bShowingStellarPage = false;
+	bShowingWeaponPage = false;
 	bRollAnimating = false;
+	bDebugStellarGrantPending = false;
 	bRollResultReceived = false;
 	RolledStellarItemId = NAME_None;
 	RolledLockerSlotIndex = INDEX_NONE;
@@ -218,6 +257,9 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 
 void UJTSShopWidget::CloseShop()
 {
+	ResetLockerDrag();
+	if (IsValid(WeaponPanel)) WeaponPanel->ClearSelection();
+	if (IsValid(AttachmentDialog)) AttachmentDialog->CloseDialog();
 	bShopOpen = false;
 	LastRequestedItem = EJTSItemId::None;
 	LastDisplayedResourceAmounts.Reset();
@@ -311,6 +353,26 @@ void UJTSShopWidget::NotifyStellarRollResult(EJTSStellarRollResult Result, FName
 	RefreshStellarReel();
 }
 
+void UJTSShopWidget::NotifyDebugStellarItemsResult(bool bAvailable, int32 AddedCount, int32 RequestedCount)
+{
+	bDebugStellarGrantPending = false;
+	if (!bAvailable)
+	{
+		SetStatus(TEXT("DEBUG 发放不可用，请靠近当前飞船并检查星际物品表"), true);
+	}
+	else if (AddedCount < RequestedCount)
+	{
+		SetStatus(FString::Printf(TEXT("DEBUG：已加入 %d / %d 件；商店物品栏空间不足，%d 件未加入"),
+			AddedCount, RequestedCount, RequestedCount - AddedCount), true);
+	}
+	else
+	{
+		SetStatus(FString::Printf(TEXT("DEBUG：已加入 %d 件核心与配件各一个（不含升级固件）"), AddedCount), false);
+	}
+	RefreshShipLocker();
+	RefreshStellarReel();
+}
+
 void UJTSShopWidget::NotifyShipLockerActionResult(bool bSucceeded, bool bTakeAction)
 {
 	SetStatus(bSucceeded
@@ -334,7 +396,7 @@ void UJTSShopWidget::NotifyShipLockerMoveResult(bool bSucceeded)
 
 void UJTSShopWidget::NotifyStellarCombineResult(bool bSucceeded)
 {
-	SetStatus(bSucceeded ? TEXT("星际武器组合完成，可取到角色背包")
+	SetStatus(bSucceeded ? TEXT("星际武器组合完成，拖到人物星际栏装备")
 		: TEXT("组合失败：核心必须在对应配件的前一格"), !bSucceeded);
 	RefreshShipLocker();
 }
@@ -364,6 +426,19 @@ void UJTSShopWidget::UpdateCarriedDragPreview(const FVector2D& ScreenPosition,
 	}
 	DragGhostText->SetText(FText::FromString(ItemLabel));
 	DragGhost->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UJTSShopWidget::HandleStellarItemDrop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId)
+{
+	if (!IsShopOpen() || bShowingAbilityPage) return;
+	auto* PS = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (!PS) return;
+	for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
+		if (LockerSlotBorders[Index] && LockerSlotBorders[Index]->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+		{
+			PS->GetStellarLoadout()->ServerExchangeLocker(ActiveSpacecraft.Get(), Index,
+				PS->GetShipLockerSlot(Index).SlotToken, StellarIndex, ExpectedId); return;
+		}
 }
 
 void UJTSShopWidget::HandleCarriedItemDrop(const FVector2D& ScreenPosition,
@@ -434,6 +509,7 @@ void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		}
 		return;
 	}
+	RefreshResponsiveLayout();
 	if (bRollAnimating)
 	{
 		RollElapsed += InDeltaTime;
@@ -484,6 +560,7 @@ FReply UJTSShopWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, cons
 			if (LockerSlotBorders[Index] && LockerSlotBorders[Index]->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
 			{
 				SelectedLockerSlot = Index;
+				LockerPressPosition = InMouseEvent.GetScreenSpacePosition();
 				const FJTSShipLockerSlot LockerEntry = State ? State->GetShipLockerSlot(Index) : FJTSShipLockerSlot();
 				DraggedLockerSlot = LockerEntry.IsEmpty() || LockerEntry.bPendingStellarReveal
 					|| (bRollAnimating && Index == RolledLockerSlotIndex) ? INDEX_NONE : Index;
@@ -507,6 +584,14 @@ FReply UJTSShopWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPoi
 	}
 	if (DraggedLockerSlot != INDEX_NONE && DragGhost && RootCanvas)
 	{
+		if (auto* Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
+		{
+			const auto* State = Controller->GetPlayerState<AJTSPlayerState>();
+			const auto Entry = State ? State->GetShipLockerSlot(DraggedLockerSlot) : FJTSShipLockerSlot();
+			Controller->SetStellarItemDragging(!Entry.StellarItemId.IsNone()
+				|| Entry.StandardItem.ItemId == EJTSItemId::StellarText
+				|| Entry.StandardItem.ItemId == EJTSItemId::StellarWeapon);
+		}
 		const FVector2D Position = RootCanvas->GetCachedGeometry().AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 		if (UCanvasPanelSlot* const GhostSlot = Cast<UCanvasPanelSlot>(DragGhost->Slot)) GhostSlot->SetPosition(Position + FVector2D(12.0f, 12.0f));
 		if (LockerSlotTexts.IsValidIndex(DraggedLockerSlot) && DragGhostText)
@@ -530,6 +615,16 @@ FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const 
 	}
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && DraggedLockerSlot != INDEX_NONE)
 	{
+		// A press that barely moved is a click: open the allocation dialog instead of starting a move.
+		if (FVector2D::Distance(InMouseEvent.GetScreenSpacePosition(), LockerPressPosition) < 8.0f
+			&& LockerSlotBorders.IsValidIndex(DraggedLockerSlot) && LockerSlotBorders[DraggedLockerSlot]
+			&& LockerSlotBorders[DraggedLockerSlot]->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+		{
+			const int32 ClickedSlot = DraggedLockerSlot;
+			ResetLockerDrag();
+			OpenAttachmentDialog(ClickedSlot);
+			return FReply::Handled().ReleaseMouseCapture();
+		}
 		if (TrashImage && TrashImage->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
 		{
 			if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
@@ -539,6 +634,18 @@ FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const 
 		}
 		else if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 		{
+			const int32 StellarIndex = Controller->GetStellarSlotAtScreenPosition(InMouseEvent.GetScreenSpacePosition());
+			if (StellarIndex != INDEX_NONE)
+			{
+				if (auto* State = Controller->GetPlayerState<AJTSPlayerState>())
+				{
+					auto* Loadout = State->GetStellarLoadout();
+					Loadout->ServerExchangeLocker(ActiveSpacecraft.Get(), DraggedLockerSlot, DraggedLockerToken,
+						StellarIndex, Loadout->GetSlot(StellarIndex).InstanceId);
+				}
+				ResetLockerDrag();
+				return FReply::Handled().ReleaseMouseCapture();
+			}
 			int32 TargetLockerSlot = INDEX_NONE;
 			for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
 			{
@@ -567,7 +674,13 @@ FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const 
 				const AJTSCharacter* const Character = Cast<AJTSCharacter>(Controller->GetPawn());
 				const UJTSInventoryComponent* const Inventory = IsValid(Character)
 					? Character->GetInventoryComponent() : nullptr;
-				if (!LockerEntry.IsEmpty() && !LockerEntry.bPendingStellarReveal && IsValid(Inventory))
+				if (!LockerEntry.StellarItemId.IsNone()
+					|| LockerEntry.StandardItem.ItemId == EJTSItemId::StellarText
+					|| LockerEntry.StandardItem.ItemId == EJTSItemId::StellarWeapon)
+				{
+					SetStatus(TEXT("星际物品只能拖到人物右侧星际栏"), true);
+				}
+				else if (!LockerEntry.IsEmpty() && !LockerEntry.bPendingStellarReveal && IsValid(Inventory))
 				{
 					const FJTSItemInstance CarriedItem = Inventory->GetItemAtSlot(CarriedSlotIndex);
 					Controller->ServerExchangeShipLockerWithCarriedSlot(ActiveSpacecraft.Get(),
@@ -579,12 +692,26 @@ FReply UJTSShopWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const 
 				}
 			}
 		}
-		DraggedLockerSlot = INDEX_NONE;
-		DraggedLockerToken.Invalidate();
-		if (DragGhost) DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+		ResetLockerDrag();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+void UJTSShopWidget::ResetLockerDrag()
+{
+	DraggedLockerSlot = INDEX_NONE;
+	DraggedLockerToken.Invalidate();
+	if (DragGhost) DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+	if (auto* Controller = Cast<AJTSPlayerController>(GetOwningPlayer())) Controller->SetStellarItemDragging(false);
+}
+
+void UJTSShopWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
+	ResetLockerDrag();
+	bLeverDragging = false;
+	if (!bRollAnimating) SetLeverPull(0.0f);
 }
 
 void UJTSShopWidget::BuildWidgetTree()
@@ -602,11 +729,11 @@ void UJTSShopWidget::BuildWidgetTree()
 	Dimmer->SetVisibility(ESlateVisibility::HitTestInvisible);
 	AddCanvas(RootCanvas, Dimmer, FAnchors(0.0f, 0.0f, 1.0f, 0.80f), FVector2D::ZeroVector, FVector2D::ZeroVector);
 
-	ShopFrame = MakeBorder(WidgetTree, TEXT("ShipSupplyFrame"), FLinearColor(0.025f, 0.060f, 0.105f, 0.995f));
+	ShopFrame = MakeBorder(WidgetTree, TEXT("ShipSupplyFrame"), FLinearColor(0.012f, 0.025f, 0.043f, 0.98f));
 	UScaleBox* const ResponsiveScale = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("ShipTerminalResponsiveScale"));
 	ResponsiveScale->SetStretch(EStretch::ScaleToFit);
-	AddCanvas(RootCanvas, ResponsiveScale, FAnchors(0.0f, 0.055f, 1.0f, 0.78f),
-		FVector2D(20.0f, 0.0f), FVector2D(20.0f, 0.0f));
+	TerminalLayoutSlot = AddCanvas(RootCanvas, ResponsiveScale, FAnchors(0.0f, 0.0f),
+		FVector2D::ZeroVector, FVector2D(1320.0f, 720.0f));
 	USizeBox* const DesignSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ShipTerminalDesignSize"));
 	DesignSize->SetWidthOverride(1320.0f);
 	DesignSize->SetHeightOverride(720.0f);
@@ -615,7 +742,7 @@ void UJTSShopWidget::BuildWidgetTree()
 	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyFrameCanvas"));
 	ShopFrame->SetContent(FrameCanvas);
 
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端  /  SHIP TERMINAL"), 28.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(600.0f, 42.0f));
+	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端  /  SHIP TERMINAL"), 32.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(880.0f, 46.0f));
 	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipTabHint"), TEXT("TAB  SWITCH"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f), ETextJustify::Right), FAnchors(1.0f, 0.0f), FVector2D(-164.0f, 93.0f), FVector2D(150.0f, 20.0f), FVector2D(1.0f, 0.0f));
 
 	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
@@ -641,7 +768,13 @@ void UJTSShopWidget::BuildWidgetTree()
 	AbilityTabLabel = MakeButtonLabel(WidgetTree, TEXT("ShipAbilityTabLabel"), TEXT("能力"), 16.0f);
 	AbilityTabButton->SetContent(AbilityTabLabel);
 	AbilityTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAbilityTabClicked);
-	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(382.0f, 84.0f), FVector2D(168.0f, 40.0f));
+	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(558.0f, 84.0f), FVector2D(168.0f, 40.0f));
+
+	WeaponTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipWeaponTab"));
+	WeaponTabButton->SetBackgroundColor(FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
+	WeaponTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipWeaponTabLabel"), TEXT("武器改装"), 16.0f));
+	WeaponTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWeaponTabClicked);
+	AddCanvas(FrameCanvas, WeaponTabButton, FAnchors(0.0f, 0.0f), FVector2D(382.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
 	CatalogPanel = MakeBorder(WidgetTree, TEXT("ShipSupplyGridFrame"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
 	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
@@ -652,10 +785,10 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(CatalogCanvas, WalletText, FAnchors(0.0f, 0.0f), FVector2D(16.0f, 42.0f), FVector2D(585.0f, 28.0f));
 	DebugResourcesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugResources"));
 	DebugResourcesButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
-	DebugResourcesButton->SetContent(MakeText(WidgetTree, TEXT("ShipDebugResourcesLabel"), TEXT("DEBUG +100"), 12.0f, FLinearColor::White, ETextJustify::Center));
+	DebugResourcesButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugResourcesLabel"), TEXT("DEBUG +100"), 18.0f));
 	DebugResourcesButton->SetToolTipText(FText::FromString(TEXT("Add 100 of every ship resource")));
 	DebugResourcesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugResourcesClicked);
-	AddCanvas(CatalogCanvas, DebugResourcesButton, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 10.0f), FVector2D(140.0f, 28.0f), FVector2D(1.0f, 0.0f));
+	AddCanvas(CatalogCanvas, DebugResourcesButton, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 10.0f), FVector2D(174.0f, 34.0f), FVector2D(1.0f, 0.0f));
 	UScrollBox* const CatalogScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ShipSupplyCatalogScroll"));
 	AddCanvas(CatalogCanvas, CatalogScroll, FAnchors(0.0f, 0.0f), FVector2D(14.0f, 88.0f), FVector2D(592.0f, 416.0f));
 	CatalogGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ShipSupplyGrid"));
@@ -665,8 +798,15 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, StellarPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
 	UCanvasPanel* const StellarCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipStellarCanvas"));
 	StellarPanel->SetContent(StellarCanvas);
-	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarTitle"), TEXT("星际联盟遥感"), 23.0f, FLinearColor(0.83f, 0.92f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 25.0f), FVector2D(450.0f, 35.0f));
+	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarTitle"), TEXT("星际联盟遥感"), 23.0f, FLinearColor(0.83f, 0.92f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 25.0f), FVector2D(270.0f, 35.0f));
+	DebugStellarItemsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugStellarItems"));
+	DebugStellarItemsButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
+	DebugStellarItemsButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugStellarItemsLabel"), TEXT("DEBUG 全套物品"), 16.0f));
+	DebugStellarItemsButton->SetToolTipText(FText::FromString(TEXT("向商店物品栏的空格加入每种核心、配件各一个；不含升级固件，不消耗资源。")));
+	DebugStellarItemsButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugStellarItemsClicked);
+	AddCanvas(StellarCanvas, DebugStellarItemsButton, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 23.0f), FVector2D(220.0f, 36.0f), FVector2D(1.0f, 0.0f));
 	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarHint"), TEXT("拉动摇杆，遥感信号将锁定一件随机物品"), 14.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 65.0f), FVector2D(520.0f, 26.0f));
+	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarCombineHint"), TEXT("组合说明：核心放在前一格，对应配件放在紧邻的后一格。"), 12.0f, FLinearColor(0.66f, 0.81f, 0.90f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 88.0f), FVector2D(552.0f, 20.0f));
 	UBorder* const ReelFrame = MakeBorder(WidgetTree, TEXT("ShipStellarReelFrame"), FLinearColor(0.035f, 0.075f, 0.11f, 1.0f));
 	AddCanvas(StellarCanvas, ReelFrame, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 112.0f), FVector2D(452.0f, 276.0f));
 	UCanvasPanel* const ReelCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipStellarReelCanvas"));
@@ -695,23 +835,40 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, LockerPanel, FAnchors(0.0f, 0.0f), FVector2D(672.0f, 138.0f), FVector2D(618.0f, 520.0f));
 	UCanvasPanel* const LockerCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipLockerCanvas"));
 	LockerPanel->SetContent(LockerCanvas);
-	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerTitle"), TEXT("当前玩家物品格"), 20.0f, FLinearColor(0.84f, 0.93f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(18.0f, 13.0f), FVector2D(350.0f, 30.0f));
-	LockerCountText = MakeText(WidgetTree, TEXT("ShipLockerCount"), TEXT("0 / 30"), 15.0f, FLinearColor(0.40f, 1.0f, 0.74f, 1.0f), ETextJustify::Right);
+	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerTitle"), TEXT("商店物品栏"), 24.0f, FLinearColor(0.84f, 0.93f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(18.0f, 13.0f), FVector2D(350.0f, 36.0f));
+	LockerCountText = MakeText(WidgetTree, TEXT("ShipLockerCount"), TEXT("0 / 30"), 18.0f, FLinearColor(0.40f, 1.0f, 0.74f, 1.0f), ETextJustify::Right);
 	AddCanvas(LockerCanvas, LockerCountText, FAnchors(0.0f, 0.0f), FVector2D(454.0f, 16.0f), FVector2D(142.0f, 24.0f));
 	LockerGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ShipLockerGrid"));
 	LockerGrid->SetSlotPadding(FMargin(3.0f));
-	AddCanvas(LockerCanvas, LockerGrid, FAnchors(0.0f, 0.0f), FVector2D(17.0f, 51.0f), FVector2D(584.0f, 390.0f));
+	AddCanvas(LockerCanvas, LockerGrid, FAnchors(0.0f, 0.0f), FVector2D(17.0f, 56.0f), FVector2D(584.0f, 378.0f));
 	LockerSlotBorders.Reset();
 	LockerSlotTexts.Reset();
+	LockerSlotBadges.Reset();
 	LockerVisualStates.Init(INDEX_NONE, AJTSPlayerState::ShipLockerCapacity);
 	for (int32 Index = 0; Index < AJTSPlayerState::ShipLockerCapacity; ++Index)
 	{
 		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("ShipLockerCell_%02d"), Index));
 		Cell->SetWidthOverride(110.0f);
-		Cell->SetHeightOverride(60.0f);
+		Cell->SetHeightOverride(57.0f);
 		UBorder* const Border = MakeBorder(WidgetTree, *FString::Printf(TEXT("ShipLockerSlot_%02d"), Index), FLinearColor(0.055f, 0.105f, 0.15f, 1.0f), 5.0f);
 		UTextBlock* const Label = MakeText(WidgetTree, *FString::Printf(TEXT("ShipLockerLabel_%02d"), Index), FString::Printf(TEXT("%02d"), Index + 1), 11.0f, FLinearColor(0.51f, 0.65f, 0.75f, 1.0f), ETextJustify::Center);
-		Border->SetContent(Label);
+		// The corner badge shows how many skill points a normal weapon has absorbed (0 after a reset).
+		UTextBlock* const Badge = MakeText(WidgetTree, *FString::Printf(TEXT("ShipLockerBadge_%02d"), Index), TEXT(""), 13.0f, FLinearColor(1.0f, 0.82f, 0.30f, 1.0f), ETextJustify::Right);
+		UOverlay* const SlotOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), *FString::Printf(TEXT("ShipLockerOverlay_%02d"), Index));
+		if (UOverlaySlot* const LabelSlot = SlotOverlay->AddChildToOverlay(Label))
+		{
+			LabelSlot->SetHorizontalAlignment(HAlign_Fill);
+			LabelSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		if (UOverlaySlot* const BadgeSlot = SlotOverlay->AddChildToOverlay(Badge))
+		{
+			BadgeSlot->SetHorizontalAlignment(HAlign_Right);
+			BadgeSlot->SetVerticalAlignment(VAlign_Top);
+			BadgeSlot->SetPadding(FMargin(0.0f, 0.0f, 3.0f, 0.0f));
+		}
+		Badge->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Border->SetContent(SlotOverlay);
+		LockerSlotBadges.Add(Badge);
 		Cell->SetContent(Border);
 		LockerGrid->AddChildToUniformGrid(Cell, Index / 5, Index % 5);
 		LockerSlotBorders.Add(Border);
@@ -725,7 +882,7 @@ void UJTSShopWidget::BuildWidgetTree()
 	CombineStellarWeaponButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipLockerCombine"));
 	CombineStellarWeaponButton->SetBackgroundColor(FLinearColor(0.26f, 0.30f, 0.48f, 1.0f));
 	CombineStellarWeaponButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipLockerCombineLabel"), TEXT("组合武器"), 13.0f));
-	CombineStellarWeaponButton->SetToolTipText(FText::FromString(TEXT("将核心放在前一格，对应配件放在紧邻的后一格，再选择其中一格组合")));
+	CombineStellarWeaponButton->SetToolTipText(FText::FromString(TEXT("选择已按规则摆放的核心或配件，点击组合武器")));
 	CombineStellarWeaponButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCombineStellarWeaponClicked);
 	AddCanvas(LockerCanvas, CombineStellarWeaponButton, FAnchors(0.0f, 0.0f), FVector2D(207.0f, 452.0f), FVector2D(120.0f, 48.0f));
 	AddCanvas(LockerCanvas, MakeText(WidgetTree, TEXT("ShipLockerDeleteHint"), TEXT("拖到废纸篓删除"), 12.0f, FLinearColor(0.75f, 0.62f, 0.56f, 1.0f), ETextJustify::Right), FAnchors(0.0f, 0.0f), FVector2D(333.0f, 466.0f), FVector2D(170.0f, 25.0f));
@@ -740,6 +897,15 @@ void UJTSShopWidget::BuildWidgetTree()
 	DragGhost->SetContent(DragGhostText);
 	AddCanvas(RootCanvas, DragGhost, FAnchors(0.0f, 0.0f), FVector2D::ZeroVector, FVector2D(140.0f, 56.0f));
 	DragGhost->SetVisibility(ESlateVisibility::Collapsed);
+
+	WeaponPage = MakeBorder(WidgetTree, TEXT("ShipWeaponPage"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
+	AddCanvas(FrameCanvas, WeaponPage, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
+	WeaponPanel = GetOwningPlayer() != nullptr
+		? CreateWidget<UJTSWeaponUpgradePanel>(GetOwningPlayer())
+		: WidgetTree->ConstructWidget<UJTSWeaponUpgradePanel>(UJTSWeaponUpgradePanel::StaticClass(), TEXT("ShipWeaponPanel"));
+	WeaponPage->SetContent(WeaponPanel);
+	WeaponPage->SetVisibility(ESlateVisibility::Collapsed);
+
 
 	AbilityPanel = MakeBorder(WidgetTree, TEXT("ShipAbilityPanel"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
 	AddCanvas(FrameCanvas, AbilityPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1260.0f, 520.0f));
@@ -837,6 +1003,7 @@ void UJTSShopWidget::BuildWidgetTree()
 
 void UJTSShopWidget::RefreshAll()
 {
+	RefreshResponsiveLayout();
 	const bool bResourcesChanged = RefreshWallet();
 	if (bResourcesChanged || (CatalogGrid != nullptr && CatalogGrid->GetChildrenCount() == 0))
 	{
@@ -846,6 +1013,26 @@ void UJTSShopWidget::RefreshAll()
 	RefreshShipLocker();
 	RefreshStellarReel();
 	RefreshPageVisibility();
+}
+
+void UJTSShopWidget::RefreshResponsiveLayout()
+{
+	if (!TerminalLayoutSlot || !RootCanvas) return;
+	FVector2D Viewport = UWidgetLayoutLibrary::GetPlayerScreenWidgetGeometry(GetOwningPlayer()).GetLocalSize();
+	if (Viewport.X <= 1 || Viewport.Y <= 1) Viewport = GetCachedGeometry().GetLocalSize();
+	if (Viewport.X <= 1 || Viewport.Y <= 1) return;
+	const AJTSCharacter* const Character = GetOwningPlayer() ? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
+	const UJTSInventoryComponent* const Inventory = Character ? Character->GetInventoryComponent() : nullptr;
+	const int32 VisibleItems = Inventory ? FMath::Clamp(Inventory->GetInventoryCapacity() - Inventory->GetQuickbarPageStart(),
+		1, UJTSInventoryComponent::MaximumQuickbarSlots) : 1;
+	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	const auto* Loadout = State ? State->GetStellarLoadout() : nullptr;
+	const auto Dock = FJTSGameUILayout::InventoryDock(Viewport, VisibleItems,
+		SJTSStellarLoadoutView::LayoutSize(Loadout ? Loadout->GetAvailableSlots() : 9),
+		SJTSStellarLoadoutView::SlotCenter(0).Y);
+	const FBox2D Bounds = FJTSGameUILayout::TerminalBounds(Viewport, Dock.Top);
+	TerminalLayoutSlot->SetPosition(Bounds.Min);
+	TerminalLayoutSlot->SetSize(Bounds.GetSize());
 }
 
 void UJTSShopWidget::RefreshAbilities()
@@ -944,12 +1131,17 @@ void UJTSShopWidget::RefreshPageVisibility()
 	};
 	if (CatalogPanel != nullptr)
 	{
-		SetVisibilityIfChanged(CatalogPanel, bShowingAbilityPage || bShowingStellarPage
+		SetVisibilityIfChanged(CatalogPanel, bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (StellarPanel != nullptr)
 	{
-		SetVisibilityIfChanged(StellarPanel, !bShowingAbilityPage && bShowingStellarPage
+		SetVisibilityIfChanged(StellarPanel, !bShowingAbilityPage && !bShowingWeaponPage && bShowingStellarPage
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (WeaponPage != nullptr)
+	{
+		SetVisibilityIfChanged(WeaponPage, bShowingWeaponPage && !bShowingAbilityPage
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (LockerPanel != nullptr)
@@ -974,13 +1166,13 @@ void UJTSShopWidget::RefreshPageVisibility()
 	}
 	if (SupplyTabButton != nullptr)
 	{
-		SupplyTabButton->SetBackgroundColor(bShowingAbilityPage || bShowingStellarPage
+		SupplyTabButton->SetBackgroundColor(bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
 			? FLinearColor(0.10f, 0.16f, 0.25f, 1.0f)
 			: FLinearColor(0.08f, 0.29f, 0.43f, 1.0f));
 	}
 	if (StellarTabButton != nullptr)
 	{
-		StellarTabButton->SetBackgroundColor(!bShowingAbilityPage && bShowingStellarPage
+		StellarTabButton->SetBackgroundColor(!bShowingAbilityPage && !bShowingWeaponPage && bShowingStellarPage
 			? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f)
 			: FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
 	}
@@ -990,13 +1182,22 @@ void UJTSShopWidget::RefreshPageVisibility()
 			? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f)
 			: FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
 	}
+	if (WeaponTabButton != nullptr)
+	{
+		WeaponTabButton->SetBackgroundColor(bShowingWeaponPage && !bShowingAbilityPage
+			? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f)
+			: FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
+	}
+
 }
 
 void UJTSShopWidget::ToggleShopPage()
 {
-	if (!bShowingAbilityPage && !bShowingStellarPage) bShowingStellarPage = true;
-	else if (!bShowingAbilityPage) { bShowingStellarPage = false; bShowingAbilityPage = true; }
-	else bShowingAbilityPage = false;
+	// Supply -> stellar -> weapon -> ability -> supply.
+	if (bShowingAbilityPage) { bShowingAbilityPage = false; }
+	else if (bShowingWeaponPage) { bShowingWeaponPage = false; bShowingAbilityPage = true; }
+	else if (bShowingStellarPage) { bShowingStellarPage = false; bShowingWeaponPage = true; }
+	else bShowingStellarPage = true;
 	RefreshAll();
 }
 
@@ -1146,7 +1347,7 @@ void UJTSShopWidget::RefreshCatalog()
 		const bool bAffordable = CanAfford(ItemId);
 		UBorder* const Card = MakeBorder(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyCard_%d"), static_cast<int32>(ItemId)), ItemCardColor(Definition));
-		Card->SetToolTipText(BuildItemTooltip(ItemId));
+		SetReadableTooltip(WidgetTree, Card, BuildItemTooltip(ItemId));
 
 		UCanvasPanel* const CardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(
 			UCanvasPanel::StaticClass(), *FString::Printf(TEXT("ShipSupplyContents_%d"), static_cast<int32>(ItemId)));
@@ -1161,12 +1362,12 @@ void UJTSShopWidget::RefreshCatalog()
 			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 9.0f), FVector2D(250.0f, 20.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyName_%d"), static_cast<int32>(ItemId)),
-			Definition->DisplayName.ToString(), 19.0f, FLinearColor::White),
-			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 34.0f), FVector2D(380.0f, 28.0f));
+			Definition->DisplayName.ToString(), 24.0f, FLinearColor::White),
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 34.0f), FVector2D(420.0f, 36.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyCost_%d"), static_cast<int32>(ItemId)),
-			FormatCosts(ItemId), 14.0f, FLinearColor(0.72f, 0.82f, 0.90f, 1.0f)),
-			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 72.0f), FVector2D(400.0f, 23.0f));
+			FormatCosts(ItemId), 18.0f, FLinearColor(0.72f, 0.82f, 0.90f, 1.0f)),
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 80.0f), FVector2D(400.0f, 28.0f));
 		if (bAffordable)
 		{
 			UButton* const BuyButton = WidgetTree->ConstructWidget<UButton>(
@@ -1179,13 +1380,17 @@ void UJTSShopWidget::RefreshCatalog()
 				FVector2D(90.0f, 42.0f), FVector2D(1.0f, 0.0f));
 			switch (ItemId)
 			{
-			case EJTSItemId::Pickaxe: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePickaxeBuy); break;
-			case EJTSItemId::Knife: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleKnifeBuy); break;
-			case EJTSItemId::Pistol: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePistolBuy); break;
-			case EJTSItemId::MachineGun: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMachineGunBuy); break;
-			case EJTSItemId::Sniper: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleSniperBuy); break;
+			case EJTSItemId::ShortBlade: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleShortBladeBuy); break;
+			case EJTSItemId::ShockPole: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleShockPoleBuy); break;
+			case EJTSItemId::PowerHammer: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePowerHammerBuy); break;
+			case EJTSItemId::RailPistol: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRailPistolBuy); break;
+			case EJTSItemId::AssaultRifle: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAssaultRifleBuy); break;
+			case EJTSItemId::Shotgun: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleShotgunBuy); break;
+			case EJTSItemId::RailSniper: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRailSniperBuy); break;
+			case EJTSItemId::HeavyMachineGun: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleHeavyMachineGunBuy); break;
+			case EJTSItemId::GrenadeLauncher: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleGrenadeLauncherBuy); break;
+			case EJTSItemId::ArcGun: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleArcGunBuy); break;
 			case EJTSItemId::WaistLamp: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWaistLampBuy); break;
-			case EJTSItemId::IceAxe: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleIceAxeBuy); break;
 			default: break;
 			}
 		}
@@ -1193,7 +1398,7 @@ void UJTSShopWidget::RefreshCatalog()
 		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyCell_%d"), static_cast<int32>(ItemId)));
 		Cell->SetWidthOverride(572.0f);
-		Cell->SetHeightOverride(105.0f);
+		Cell->SetHeightOverride(120.0f);
 		Cell->SetContent(Card);
 		CatalogGrid->AddChildToUniformGrid(Cell, CatalogIndex, 0);
 		++CatalogIndex;
@@ -1252,6 +1457,7 @@ void UJTSShopWidget::RefreshStellarReel()
 	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
 	if (ReelCostText) ReelCostText->SetText(FText::FromString(FormatStellarCosts()));
 	if (StellarRollButton) StellarRollButton->SetIsEnabled(IsValid(Table) && !Table->Entries.IsEmpty() && !bRollAnimating);
+	if (DebugStellarItemsButton) DebugStellarItemsButton->SetIsEnabled(IsValid(Table) && !Table->Entries.IsEmpty() && !bDebugStellarGrantPending);
 	if (!IsValid(Table) || Table->Entries.IsEmpty())
 	{
 		if (ReelCurrentText) ReelCurrentText->SetText(FText::FromString(TEXT("奖池待配置")));
@@ -1280,17 +1486,12 @@ void UJTSShopWidget::RefreshStellarOddsTooltip()
 			? ActiveSpacecraft->GetStellarLootTable() : nullptr;
 		const AJTSPlayerState* const State = GetOwningPlayer()
 			? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
-		const AJTSCharacter* const Character = GetOwningPlayer()
-			? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
-		const UJTSInventoryComponent* const Inventory = IsValid(Character)
-			? Character->GetInventoryComponent() : nullptr;
-		const TArray<FJTSItemInstance> CarriedItems = IsValid(Inventory)
-			? Inventory->GetItemSlots() : TArray<FJTSItemInstance>();
 		TArray<double> Probabilities;
 		if (IsValid(Table) && IsValid(State)
-			&& Table->GetRollProbabilities(State->GetShipLockerSlots(), Probabilities, CarriedItems))
+			&& Table->GetRollProbabilities(State->GetDiscoveredStellarCoreIds(), Probabilities))
 		{
-			Tooltip = TEXT("本次遥感爆率（按当前持有道具计算）");
+			Tooltip = FString::Printf(TEXT("个人动态奖池（已爆过核心 %d 种，下次抽奖概率）"),
+				Table->CountDiscoveredCoreKinds(State->GetDiscoveredStellarCoreIds()));
 			for (int32 Index = 0; Index < Table->Entries.Num(); ++Index)
 			{
 				const FJTSStellarLootEntry& Entry = Table->Entries[Index];
@@ -1369,6 +1570,7 @@ void UJTSShopWidget::RefreshShipLocker()
 {
 	const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
 	if (!State) return;
+	const UJTSStellarLootTable* const Table = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetStellarLootTable() : nullptr;
 	int32 Used = 0;
 	for (int32 Index = 0; Index < AJTSPlayerState::ShipLockerCapacity && LockerSlotTexts.IsValidIndex(Index) && LockerSlotBorders.IsValidIndex(Index); ++Index)
 	{
@@ -1398,23 +1600,38 @@ void UJTSShopWidget::RefreshShipLocker()
 		if (!LockerVisualStates.IsValidIndex(Index) || LockerVisualStates[Index] != VisualState)
 		{
 			LockerSlotTexts[Index]->SetColorAndOpacity(FSlateColor((bEmpty || bConcealed)
-				? FLinearColor(0.43f, 0.55f, 0.63f, 1.0f)
+				? FLinearColor(0.62f, 0.72f, 0.80f, 1.0f)
 				: FLinearColor(0.91f, 0.96f, 1.0f, 1.0f)));
 			LockerSlotBorders[Index]->SetBrushColor(bConcealed
 				? FLinearColor(0.13f, 0.15f, 0.14f, 1.0f)
 				: Index == SelectedLockerSlot ? FLinearColor(0.10f, 0.34f, 0.38f, 1.0f)
-					: bEmpty ? FLinearColor(0.055f, 0.105f, 0.15f, 1.0f)
+					: bEmpty ? FLinearColor(0.018f, 0.038f, 0.060f, 1.0f)
 						: FLinearColor(0.08f, 0.19f, 0.23f, 1.0f));
 			if (LockerVisualStates.IsValidIndex(Index)) LockerVisualStates[Index] = VisualState;
 		}
-		const FString Tooltip = bConcealed ? TEXT("遥感扫描中，格子暂时锁定")
-			: LockerEntry.StellarItemId.IsNone() ? Label
-				: !LockerEntry.StellarCoreId.IsNone()
-					? FString::Printf(TEXT("%s\n已组合的星际武器，可取到角色背包"), *Label)
-					: FString::Printf(TEXT("%s\n核心放在前一格，对应配件放在后一格即可组合"), *Label);
+		FString Tooltip = bConcealed ? TEXT("遥感扫描中，格子暂时锁定") : Label;
+		if (!bConcealed && !LockerEntry.StellarItemId.IsNone() && IsValid(Table))
+		{
+			const FString Description = Table->GetItemDescription(LockerEntry.StellarItemId, LockerEntry.StellarCoreId).ToString();
+			if (!Description.IsEmpty())
+			{
+				Tooltip = FString::Printf(TEXT("%s\n\n%s"), *Label, *Description);
+			}
+		}
 		if (LockerSlotBorders[Index]->GetToolTipText().ToString() != Tooltip)
 		{
-			LockerSlotBorders[Index]->SetToolTipText(FText::FromString(Tooltip));
+			SetReadableTooltip(WidgetTree, LockerSlotBorders[Index], FText::FromString(Tooltip));
+		}
+		if (LockerSlotBadges.IsValidIndex(Index) && LockerSlotBadges[Index])
+		{
+			const bool bUpgradeable = !bConcealed && !LockerEntry.StandardItem.IsEmpty()
+				&& FJTSWeaponProgression::IsUpgradeable(LockerEntry.StandardItem.ItemId);
+			const FString BadgeText = bUpgradeable
+				? FString::FromInt(FJTSWeaponProgression::SumPoints(LockerEntry.StandardItem.WeaponPoints)) : FString();
+			if (LockerSlotBadges[Index]->GetText().ToString() != BadgeText)
+			{
+				LockerSlotBadges[Index]->SetText(FText::FromString(BadgeText));
+			}
 		}
 	}
 	const FString CountLabel = FString::Printf(TEXT("%d / 30"), Used);
@@ -1427,14 +1644,14 @@ void UJTSShopWidget::RefreshShipLocker()
 		const FJTSShipLockerSlot Selected = State->GetShipLockerSlot(SelectedLockerSlot);
 		const AJTSCharacter* const Character = GetOwningPlayer() ? Cast<AJTSCharacter>(GetOwningPlayer()->GetPawn()) : nullptr;
 		const UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
-		const EJTSItemId CarriedItemId = !Selected.StandardItem.IsEmpty()
-			? Selected.StandardItem.ItemId
-			: Selected.StellarCoreId.IsNone() ? EJTSItemId::StellarText : EJTSItemId::StellarWeapon;
-		const int32 CarriedCount = !Selected.StandardItem.IsEmpty()
-			? Selected.StandardItem.StackCount : 1;
-		TakeLockerItemButton->SetIsEnabled(!Selected.IsEmpty() && !Selected.bPendingStellarReveal
+		const bool bStellar = !Selected.StellarItemId.IsNone()
+			|| Selected.StandardItem.ItemId == EJTSItemId::StellarText
+			|| Selected.StandardItem.ItemId == EJTSItemId::StellarWeapon;
+		TakeLockerItemButton->SetToolTipText(bStellar
+			? FText::FromString(TEXT("星际核心和配件请拖到人物右侧星际栏")) : FText::GetEmpty());
+		TakeLockerItemButton->SetIsEnabled(!bStellar && !Selected.StandardItem.IsEmpty() && !Selected.bPendingStellarReveal
 			&& !(bRollAnimating && SelectedLockerSlot == RolledLockerSlotIndex)
-			&& IsValid(Inventory) && Inventory->CanAddItem(CarriedItemId, CarriedCount));
+			&& IsValid(Inventory) && Inventory->CanAddItem(Selected.StandardItem.ItemId, Selected.StandardItem.StackCount));
 	}
 	if (CombineStellarWeaponButton)
 	{
@@ -1608,13 +1825,17 @@ void UJTSShopWidget::RequestPurchase(EJTSItemId ItemId)
 	}
 }
 
-void UJTSShopWidget::HandlePickaxeBuy() { RequestPurchase(EJTSItemId::Pickaxe); }
-void UJTSShopWidget::HandleKnifeBuy() { RequestPurchase(EJTSItemId::Knife); }
-void UJTSShopWidget::HandlePistolBuy() { RequestPurchase(EJTSItemId::Pistol); }
-void UJTSShopWidget::HandleMachineGunBuy() { RequestPurchase(EJTSItemId::MachineGun); }
-void UJTSShopWidget::HandleSniperBuy() { RequestPurchase(EJTSItemId::Sniper); }
+void UJTSShopWidget::HandleShortBladeBuy() { RequestPurchase(EJTSItemId::ShortBlade); }
+void UJTSShopWidget::HandleShockPoleBuy() { RequestPurchase(EJTSItemId::ShockPole); }
+void UJTSShopWidget::HandlePowerHammerBuy() { RequestPurchase(EJTSItemId::PowerHammer); }
+void UJTSShopWidget::HandleRailPistolBuy() { RequestPurchase(EJTSItemId::RailPistol); }
+void UJTSShopWidget::HandleAssaultRifleBuy() { RequestPurchase(EJTSItemId::AssaultRifle); }
+void UJTSShopWidget::HandleShotgunBuy() { RequestPurchase(EJTSItemId::Shotgun); }
+void UJTSShopWidget::HandleRailSniperBuy() { RequestPurchase(EJTSItemId::RailSniper); }
+void UJTSShopWidget::HandleHeavyMachineGunBuy() { RequestPurchase(EJTSItemId::HeavyMachineGun); }
+void UJTSShopWidget::HandleGrenadeLauncherBuy() { RequestPurchase(EJTSItemId::GrenadeLauncher); }
+void UJTSShopWidget::HandleArcGunBuy() { RequestPurchase(EJTSItemId::ArcGun); }
 void UJTSShopWidget::HandleWaistLampBuy() { RequestPurchase(EJTSItemId::WaistLamp); }
-void UJTSShopWidget::HandleIceAxeBuy() { RequestPurchase(EJTSItemId::IceAxe); }
 void UJTSShopWidget::HandleDebugResourcesClicked()
 {
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
@@ -1622,6 +1843,15 @@ void UJTSShopWidget::HandleDebugResourcesClicked()
 		if (ActiveSpacecraft.IsValid()) Controller->ServerRequestShopDebugResources(ActiveSpacecraft.Get());
 	}
 }
+void UJTSShopWidget::HandleDebugStellarItemsClicked()
+{
+	AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
+	if (!IsValid(Controller) || !ActiveSpacecraft.IsValid() || bDebugStellarGrantPending) return;
+	bDebugStellarGrantPending = true;
+	RefreshStellarReel();
+	Controller->ServerRequestDebugStellarItems(ActiveSpacecraft.Get());
+}
+
 void UJTSShopWidget::HandleDebugLevelsClicked()
 {
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
@@ -1629,9 +1859,11 @@ void UJTSShopWidget::HandleDebugLevelsClicked()
 		if (ActiveSpacecraft.IsValid()) Controller->ServerRequestDebugAbilityLevels(ActiveSpacecraft.Get());
 	}
 }
-void UJTSShopWidget::HandleSupplyTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; RefreshAll(); }
-void UJTSShopWidget::HandleStellarTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = true; RefreshAll(); }
-void UJTSShopWidget::HandleAbilityTabClicked() { bShowingAbilityPage = true; bShowingStellarPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleSupplyTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleStellarTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = true; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleWeaponTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = true; RefreshAll(); }
+void UJTSShopWidget::HandleAbilityTabClicked() { bShowingAbilityPage = true; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
+
 void UJTSShopWidget::HandleStellarRollClicked()
 {
 	if (bRollAnimating || !ActiveSpacecraft.IsValid()) return;
@@ -1653,7 +1885,7 @@ void UJTSShopWidget::HandleStellarRollClicked()
 	RefreshStellarReel();
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 	{
-		Controller->ServerRequestStellarRoll(ActiveSpacecraft.Get());
+		Controller->ServerRequestStellarRoll(ActiveSpacecraft.Get(), FGuid::NewGuid());
 	}
 }
 
@@ -1728,5 +1960,52 @@ void UJTSShopWidget::HandleCloseClicked()
 	if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 	{
 		Controller->CloseSpaceShop();
+	}
+}
+
+void UJTSShopWidget::OpenAttachmentDialog(int32 LockerSlotIndex)
+{
+	if (!ActiveSpacecraft.IsValid() || !GetOwningPlayer()) return;
+
+	if (bShowingWeaponPage)
+	{
+		// On the weapon page a click picks the weapon to modify; the left panel shows its skills.
+		if (!IsValid(WeaponPanel) || !WeaponPanel->SelectSlot(ActiveSpacecraft.Get(), LockerSlotIndex))
+		{
+			SetStatus(TEXT("这里只能改装普通武器"), true);
+		}
+		return;
+	}
+	if (!IsValid(AttachmentDialog))
+	{
+		AttachmentDialog = CreateWidget<UJTSStellarAttachmentDialog>(GetOwningPlayer());
+		if (IsValid(AttachmentDialog))
+		{
+			AttachmentDialog->OnDialogClosed.BindUObject(this, &UJTSShopWidget::HandleAttachmentDialogClosed);
+		}
+	}
+	if (IsValid(AttachmentDialog) && !AttachmentDialog->OpenForSlot(ActiveSpacecraft.Get(), LockerSlotIndex))
+	{
+		SetStatus(TEXT("核心可直接升级；配件激活后才能加点。普通武器请到“武器改装”页"), true);
+	}
+}
+
+void UJTSShopWidget::HandleAttachmentDialogClosed()
+{
+	SetKeyboardFocus();
+}
+
+void UJTSShopWidget::NotifyWeaponUpgradeResult(bool bUpgrade, bool bSucceeded)
+{
+	if (IsValid(WeaponPanel)) WeaponPanel->NotifyUpgradeResult(bUpgrade, bSucceeded);
+}
+
+void UJTSShopWidget::NotifyStellarProgressionResult(bool bUpgrade, bool bSucceeded)
+{
+	if (IsValid(AttachmentDialog)) AttachmentDialog->NotifyProgressionResult(bUpgrade, bSucceeded);
+	if (bUpgrade)
+	{
+		SetStatus(bSucceeded ? TEXT("核心升级成功") : TEXT("升级失败，请检查固件数量、核心等级或物品是否已变化"), !bSucceeded);
+		RefreshShipLocker();
 	}
 }

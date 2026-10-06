@@ -2,6 +2,10 @@
 
 #include "Components/SphereComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
+#include "TimerManager.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "Math/RotationMatrix.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetSettlementEnemy.h"
@@ -44,7 +48,11 @@ int32 AJTSPlanetEnemySettlement::GetSpawnedEnemyCount() const
 	int32 Count = 0;
 	for (const TWeakObjectPtr<AActor>& Enemy : SpawnedEnemies)
 	{
-		if (Enemy.IsValid()) ++Count;
+		if (Enemy.IsValid())
+		{
+			const UJTSHealthComponent* Health = Enemy->FindComponentByClass<UJTSHealthComponent>();
+			if (!Health || !Health->IsDead()) ++Count;
+		}
 	}
 	return Count;
 }
@@ -67,16 +75,53 @@ void AJTSPlanetEnemySettlement::Activate(AJTSPlanetAnchor* Planet, AActor* Surfa
 	FJTSPlanetSurfaceFrame CenterFrame;
 	if (!Planet->GetSurfaceFrameAt(CenterHit.ImpactPoint, GetActorForwardVector(), CenterFrame)) return;
 	bActive = true;
+	ActivePlanet = Planet;
+	ActiveSurfaceController = SurfaceController;
+	SettlementCenter = CenterFrame.Location;
+	SpawnMissingEnemies(FMath::Clamp(EnemyCount, 0, 512));
+	if (bMaintainPopulation)
+		GetWorld()->GetTimerManager().SetTimer(RefillTimer, this, &ThisClass::RefillPopulation,
+			FMath::Max(0.25f, RefillInterval), true);
+	UE_LOG(LogTemp, Log, TEXT("Enemy settlement %s spawned %d/%d actors on %s; refill=%d."),
+		*GetName(), GetSpawnedEnemyCount(), EnemyCount, *Planet->GetPlanetId().ToString(), bMaintainPopulation);
+}
+
+void AJTSPlanetEnemySettlement::RefillPopulation()
+{
+	if (!HasAuthority() || !bActive) return;
+	if (!ActivePlanet.IsValid()) { Deactivate(); return; }
+	SpawnMissingEnemies(FMath::Clamp(RefillBatchSize, 1, 512));
+}
+
+void AJTSPlanetEnemySettlement::SpawnMissingEnemies(int32 SpawnBudget)
+{
+	AJTSPlanetAnchor* const Planet = ActivePlanet.Get();
+	if (!HasAuthority() || !bActive || !IsValid(Planet) || !GetWorld()) return;
+	SpawnedEnemies.RemoveAll([](const TWeakObjectPtr<AActor>& Enemy)
+	{
+		const UJTSHealthComponent* Health = Enemy.IsValid() ? Enemy->FindComponentByClass<UJTSHealthComponent>() : nullptr;
+		return !Enemy.IsValid() || (Health && Health->IsDead());
+	});
 	TArray<FVector> AcceptedLocations;
 	const int32 DesiredCount = FMath::Clamp(EnemyCount, 0, 512);
-	const int32 MaxAttempts = FMath::Max(32, DesiredCount * 40);
-	for (int32 Attempt = 0; Attempt < MaxAttempts && SpawnedEnemies.Num() < DesiredCount; ++Attempt)
+	const int32 Missing = FMath::Min(SpawnBudget, DesiredCount - SpawnedEnemies.Num());
+	if (Missing <= 0) return;
+	for (const auto& Enemy : SpawnedEnemies) AcceptedLocations.Add(Enemy->GetActorLocation());
+	TArray<FVector> PlayerLocations;
+	if (MinimumPlayerDistance > 0)
+		for (TActorIterator<APawn> It(GetWorld()); It; ++It)
+			if (It->IsPlayerControlled()) PlayerLocations.Add(It->GetActorLocation());
+	const int32 MaxAttempts = FMath::Max(32, Missing * 40);
+	int32 Added = 0;
+	for (int32 Attempt = 0; Attempt < MaxAttempts && Added < Missing; ++Attempt)
 	{
 		FJTSPlanetSurfaceHit Hit;
-		if (!Planet->RandomPointInSurfaceCap(Planet->GetRadialUpVector(CenterHit.ImpactPoint),
+		if (!Planet->RandomPointInSurfaceCap(Planet->GetRadialUpVector(SettlementCenter),
 			FMath::Max(0.0f, SpawnRadius), Hit)
-			|| Planet->ApproximateSurfaceArcDistance(CenterHit.ImpactPoint, Hit.ImpactPoint) > SpawnRadius
+			|| Planet->ApproximateSurfaceArcDistance(SettlementCenter, Hit.ImpactPoint) > SpawnRadius
 			|| !AcceptSpawnPoint(Hit.ImpactPoint, Planet)) continue;
+		if (PlayerLocations.ContainsByPredicate([&](const FVector& Position)
+			{ return Planet->ApproximateSurfaceArcDistance(Position, Hit.ImpactPoint) < MinimumPlayerDistance; })) continue;
 		bool bTooClose = false;
 		for (const FVector& Existing : AcceptedLocations)
 		{
@@ -88,7 +133,7 @@ void AJTSPlanetEnemySettlement::Activate(AJTSPlanetAnchor* Planet, AActor* Surfa
 		}
 		if (bTooClose) continue;
 		const FVector Direction = Planet->ProjectDirectionToSurfaceTangent(
-			Hit.ImpactPoint - CenterHit.ImpactPoint, Hit.ImpactPoint);
+			Hit.ImpactPoint - SettlementCenter, Hit.ImpactPoint);
 		FJTSPlanetSurfaceFrame Frame;
 		if (!Planet->GetSurfaceFrameAt(Hit.ImpactPoint, Direction, Frame)) continue;
 		const FTransform SpawnTransform(Frame.Transform.GetRotation(), Frame.Location);
@@ -98,7 +143,7 @@ void AJTSPlanetEnemySettlement::Activate(AJTSPlanetAnchor* Planet, AActor* Surfa
 		AActor* Enemy = GetWorld()->SpawnActor<AActor>(EnemyClass, SpawnTransform, Params);
 		if (!IsValid(Enemy)) continue;
 		if (!IJTSPlanetSettlementEnemy::Execute_InitializeForSettlement(Enemy, Planet,
-			CenterFrame.Location, Hit.ImpactPoint))
+			SettlementCenter, Hit.ImpactPoint))
 		{
 			Enemy->Destroy();
 			continue;
@@ -109,24 +154,26 @@ void AJTSPlanetEnemySettlement::Activate(AJTSPlanetAnchor* Planet, AActor* Surfa
 			UE_LOG(LogTemp, Warning, TEXT("Enemy settlement %s spawned non-replicated enemy %s."),
 				*GetName(), *Enemy->GetName());
 		}
-		if (IJTSPlanetSurfaceGameplay* Gameplay = Cast<IJTSPlanetSurfaceGameplay>(SurfaceController))
+		if (IJTSPlanetSurfaceGameplay* Gameplay = Cast<IJTSPlanetSurfaceGameplay>(ActiveSurfaceController.Get()))
 		{
 			Gameplay->RegisterSurfaceRuntimeActor(Enemy);
 		}
 		SpawnedEnemies.Add(Enemy);
 		AcceptedLocations.Add(Hit.ImpactPoint);
+		++Added;
 	}
-	UE_LOG(LogTemp, Log, TEXT("Enemy settlement %s spawned %d/%d actors on %s."),
-		*GetName(), SpawnedEnemies.Num(), DesiredCount, *Planet->GetPlanetId().ToString());
 }
 
 void AJTSPlanetEnemySettlement::Deactivate()
 {
 	if (!HasAuthority()) return;
+	bActive = false;
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(RefillTimer);
 	for (const TWeakObjectPtr<AActor>& Enemy : SpawnedEnemies)
 	{
 		if (Enemy.IsValid()) Enemy->Destroy();
 	}
 	SpawnedEnemies.Reset();
-	bActive = false;
+	ActivePlanet.Reset();
+	ActiveSurfaceController.Reset();
 }

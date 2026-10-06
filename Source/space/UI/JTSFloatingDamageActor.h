@@ -15,6 +15,8 @@ class SPACE_API AJTSFloatingDamageActor : public AActor
 public:
 	AJTSFloatingDamageActor();
 	void Initialize(float Damage, bool bCritical, const FVector& SurfaceUp);
+	/** Accumulate rapid damage without extending the popup's fixed lifetime. */
+	void AddDamage(float Damage, bool bCritical);
 
 protected:
 	virtual void BeginPlay() override;
@@ -27,5 +29,6 @@ private:
 	FVector Up = FVector::UpVector;
 	FVector Side = FVector::RightVector;
 	float Age = 0.0f;
+	float TotalDamage = 0.0f;
 	bool bIsCritical = false;
 };

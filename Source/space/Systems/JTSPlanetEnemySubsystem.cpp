@@ -1,15 +1,32 @@
 #include "space/Systems/JTSPlanetEnemySubsystem.h"
+#include "space/Systems/JTSPlanetEnemyPursuit.h"
+#include "space/Components/JTSStellarTargetComponent.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Components/PrimitiveComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "Math/RotationMatrix.h"
+#include "HAL/PlatformTime.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetSettlementEnemy.h"
+
+namespace
+{
+	constexpr int32 MaxScansPerFrame = 24;
+	constexpr int32 MaxSightQueriesPerFrame = 64;
+	constexpr int32 MaxSteeringUpdatesPerFrame = 80;
+	constexpr float SpatialCellSize = 256;
+	FIntVector BucketFor(const FVector& P)
+	{
+		return FIntVector(FMath::FloorToInt(P.X / SpatialCellSize),
+			FMath::FloorToInt(P.Y / SpatialCellSize), FMath::FloorToInt(P.Z / SpatialCellSize));
+	}
+}
 
 bool UJTSPlanetEnemySubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -34,6 +51,8 @@ void UJTSPlanetEnemySubsystem::Deinitialize()
 		}
 	}
 	ActiveEntities.Reset();
+	SpatialBuckets.Reset();
+	SettlementAlerts.Reset();
 	EnemyArchetype.Reset();
 	Super::Deinitialize();
 }
@@ -80,7 +99,7 @@ FMassEntityHandle UJTSPlanetEnemySubsystem::RegisterEnemy(AActor* Actor, AJTSPla
 	if (Planet->ProjectPointToSurface(GroundLocation, SurfaceHit))
 	{
 		Movement.GroundLocation = SurfaceHit.ImpactPoint;
-		Movement.SurfaceUp = SurfaceHit.ImpactNormal.GetSafeNormal();
+		Movement.SurfaceUp = Planet->GetRadialUpVector(SurfaceHit.ImpactPoint);
 	}
 	else Movement.SurfaceUp = Planet->GetRadialUpVector(GroundLocation);
 	FJTSPlanetEnemyNavigationFragment& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
@@ -88,7 +107,11 @@ FMassEntityHandle UJTSPlanetEnemySubsystem::RegisterEnemy(AActor* Actor, AJTSPla
 	Navigation.RoamTarget = HomeLocation;
 	Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values = Behavior;
 	FJTSPlanetEnemyPerceptionFragment& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
-	Perception.NextScanTime = GetWorld()->GetTimeSeconds() + FMath::FRandRange(0.0f, FMath::Max(0.05f, Behavior.ScanInterval));
+	const float Now = GetWorld()->GetTimeSeconds();
+	Perception.NextScanTime = Now + (Behavior.bAcquireOnSpawn ? 0 : FMath::FRandRange(0.0f, FMath::Max(0.05f, Behavior.ScanInterval)));
+	Movement.LastUpdateTime = Now;
+	Movement.NextUpdateTime = Now;
+	Movement.GoalLocation = Movement.GroundLocation;
 	ActiveEntities.Add(Entity);
 	return Entity;
 }
@@ -105,27 +128,48 @@ void UJTSPlanetEnemySubsystem::UnregisterEnemy(FMassEntityHandle Entity)
 
 void UJTSPlanetEnemySubsystem::NotifyDamaged(FMassEntityHandle Entity, AJTSCharacter* Attacker)
 {
-	if (!IsValid(Attacker) || GetWorld()->GetNetMode() == NM_Client) return;
-	UMassEntitySubsystem* Mass = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-	if (Mass == nullptr || !Mass->GetEntityManager().IsEntityActive(Entity)) return;
-	FMassEntityManager& Manager = Mass->GetMutableEntityManager();
-	const FJTSPlanetEnemyActorFragment& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
-	const FJTSPlanetEnemyNavigationFragment& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
-	AJTSPlanetAnchor* Planet = Binding.Planet.Get();
-	if (!IsEligiblePlayer(Attacker, Planet)
-		|| Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Attacker->GetActorLocation())
-			> Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values.LeashRadius)
-	{
-		return;
-	}
-	FJTSPlanetEnemyPerceptionFragment& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
-	const float Now = GetWorld()->GetTimeSeconds();
-	Perception.Target = Attacker;
-	Perception.LastKnownLocation = Attacker->GetActorLocation();
-	Perception.LastSensedTime = Now;
-	Perception.RetaliationUntilTime = Now + 5.0f;
-	Perception.bCurrentlyVisible = false;
-	Perception.NextScanTime = Now;
+    if (!IsValid(Attacker) || GetWorld()->GetNetMode() == NM_Client) return;
+    UMassEntitySubsystem* Mass = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    if (!Mass || !Mass->GetEntityManager().IsEntityActive(Entity)) return;
+    FMassEntityManager& Manager = Mass->GetMutableEntityManager();
+    const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
+    auto& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
+    auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
+    const auto& Behavior = Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values;
+    const float Now = GetWorld()->GetTimeSeconds();
+    if (Behavior.bShareSettlementAlert)
+        for (const FSettlementAlert& Alert : SettlementAlerts)
+            if (Alert.Planet == Binding.Planet && FVector::DistSquared(Alert.Home, Navigation.HomeLocation) < 100
+                && Alert.bProvoked && Alert.Until > Now && Alert.Until <= Perception.CompletedRetaliationUntilTime)
+                return;
+    if (!FJTSPlanetEnemyPursuit::Retaliate(Binding.Planet.Get(), Navigation, Perception, Behavior, Attacker, Now)) return;
+    Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).NextUpdateTime = Now;
+    if (Behavior.bShareSettlementAlert)
+    {
+        const float SharedUntil = ShareAlert(Binding.Planet.Get(), Navigation.HomeLocation, Attacker, Now,
+            Perception.bProvokedPursuit ? Perception.RetaliationUntilTime : Now + Behavior.TargetMemorySeconds,
+            Perception.bProvokedPursuit);
+        if (Perception.bProvokedPursuit) Perception.RetaliationUntilTime = FMath::Min(Perception.RetaliationUntilTime, SharedUntil);
+    }
+}
+
+float UJTSPlanetEnemySubsystem::ShareAlert(AJTSPlanetAnchor* Planet, const FVector& Home, AJTSCharacter* Target,
+    float Now, float Until, bool bProvoked)
+{
+    for (FSettlementAlert& Alert : SettlementAlerts)
+    {
+        if (Alert.Planet != Planet || FVector::DistSquared(Alert.Home, Home) >= 100) continue;
+        if (Alert.bProvoked && Alert.Until > Now)
+        {
+            // A fresh observer or another hit cannot extend the colony's active retaliation episode.
+            if (bProvoked) Alert.Until = FMath::Min(Alert.Until, Until);
+        }
+        else { Alert.Until = Until; Alert.bProvoked = bProvoked; }
+        Alert.Target = Target; Alert.Location = Target->GetActorLocation(); Alert.ReportedTime = Now;
+        return Alert.Until;
+    }
+    SettlementAlerts.Add(FSettlementAlert{Planet, Target, Home, Target->GetActorLocation(), Until, Now, bProvoked});
+    return Until;
 }
 
 bool UJTSPlanetEnemySubsystem::IsEligiblePlayer(const AJTSCharacter* Player, const AJTSPlanetAnchor* Planet)
@@ -135,62 +179,80 @@ bool UJTSPlanetEnemySubsystem::IsEligiblePlayer(const AJTSCharacter* Player, con
 		&& (!IsValid(Player->GetHealthComponent()) || !Player->GetHealthComponent()->IsDead());
 }
 
+void UJTSPlanetEnemySubsystem::ReceiveAlert(AJTSPlanetAnchor* Planet, const FJTSPlanetEnemyNavigationFragment& Navigation,
+	FJTSPlanetEnemyPerceptionFragment& Perception, const FJTSPlanetEnemyBehavior& Behavior, float Now)
+{
+	if (!Behavior.bShareSettlementAlert || Navigation.bReturningHome) return;
+	for (const FSettlementAlert& Alert : SettlementAlerts)
+	{
+		if (Alert.Planet != Planet || FVector::DistSquared(Alert.Home, Navigation.HomeLocation) >= 100 || Alert.Until <= Now
+			|| (Alert.bProvoked && Alert.Until <= Perception.CompletedRetaliationUntilTime)
+			|| !FJTSPlanetEnemyPursuit::CanAcquire(Planet, Navigation.HomeLocation, Alert.Target.Get(), Navigation, Perception,
+				Behavior, Now, Alert.bProvoked)) continue;
+		if (Perception.bCurrentlyVisible && Perception.Target.IsValid() && Perception.Target != Alert.Target) continue;
+		Perception.Target = Alert.Target; Perception.LastKnownLocation = Alert.Location;
+		Perception.LastSensedTime = FMath::Max(Perception.LastSensedTime, Alert.ReportedTime);
+		if (Alert.bProvoked)
+		{
+			Perception.RetaliationUntilTime = Perception.bProvokedPursuit
+				? FMath::Min(Perception.RetaliationUntilTime, Alert.Until) : Alert.Until;
+			Perception.bProvokedPursuit = true;
+		}
+		return;
+	}
+}
+
 bool UJTSPlanetEnemySubsystem::HasSightLine(const AActor* Observer, const AJTSCharacter* Player,
-	AJTSPlanetAnchor* Planet, const TArray<AActor*>& EnemyActors) const
+	AJTSPlanetAnchor* Planet, const FCollisionQueryParams& SightParams)
 {
 	if (!IsValid(Observer) || !IsValid(Player) || !IsValid(Planet)) return false;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(PlanetEnemySight), false, Observer);
-	for (AActor* Enemy : EnemyActors) Params.AddIgnoredActor(Enemy);
+	if (LastSightQueryCount >= MaxSightQueriesPerFrame) return false;
+	++LastSightQueryCount;
 	const FVector From = Observer->GetActorLocation() + Observer->GetActorUpVector() * 24.0f;
 	const FVector To = Player->GetActorLocation() + Planet->GetRadialUpVector(Player->GetActorLocation()) * 55.0f;
 	FHitResult Hit;
-	return !GetWorld()->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params)
+	return !GetWorld()->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, SightParams)
 		|| Hit.GetActor() == Player;
 }
 
 void UJTSPlanetEnemySubsystem::ScanForTargets(const FJTSPlanetEnemyActorFragment& Binding,
-	const FJTSPlanetEnemyNavigationFragment& Navigation,
-	FJTSPlanetEnemyPerceptionFragment& Perception,
-	const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds,
-	const TArray<AJTSCharacter*>& Players, const TArray<AActor*>& EnemyActors)
+    const FJTSPlanetEnemyNavigationFragment& Navigation, FJTSPlanetEnemyPerceptionFragment& Perception,
+    const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds,
+    const TArray<AJTSCharacter*>& Players, const FCollisionQueryParams& SightParams)
 {
-	AJTSPlanetAnchor* Planet = Binding.Planet.Get();
-	AActor* Actor = Binding.Actor.Get();
-	if (!IsValid(Actor) || !IsValid(Planet)) return;
-	Perception.NextScanTime = TimeSeconds + FMath::Max(0.05f, Behavior.ScanInterval);
-	AJTSCharacter* Best = nullptr;
-	float BestScore = FMath::Max(0.0f, Behavior.SightRadius);
-	for (AJTSCharacter* Player : Players)
-	{
-		if (!IsEligiblePlayer(Player, Planet)
-			|| Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Player->GetActorLocation()) > Behavior.LeashRadius)
-		{
-			continue;
-		}
-		const float Distance = Planet->ApproximateSurfaceArcDistance(Actor->GetActorLocation(), Player->GetActorLocation());
-		const float Score = Distance * (Perception.Target.Get() == Player ? 0.8f : 1.0f);
-		if (Distance > Behavior.SightRadius || Score >= BestScore
-			|| !HasSightLine(Actor, Player, Planet, EnemyActors)) continue;
-		Best = Player;
-		BestScore = Score;
-	}
-	if (Best != nullptr)
-	{
-		Perception.Target = Best;
-		Perception.LastKnownLocation = Best->GetActorLocation();
-		Perception.LastSensedTime = TimeSeconds;
-		Perception.bCurrentlyVisible = true;
-	}
-	else
-	{
-		Perception.bCurrentlyVisible = false;
-		if (!IsEligiblePlayer(Perception.Target.Get(), Planet)
-			|| TimeSeconds > FMath::Max(Perception.LastSensedTime + Behavior.TargetMemorySeconds,
-				Perception.RetaliationUntilTime))
-		{
-			Perception.Target.Reset();
-		}
-	}
+    AJTSPlanetAnchor* Planet = Binding.Planet.Get();
+    AActor* Actor = Binding.Actor.Get();
+    if (!IsValid(Actor) || !IsValid(Planet)) return;
+    Perception.NextScanTime = TimeSeconds + FMath::Max(0.05f, Behavior.ScanInterval) * FMath::FRandRange(0.85f, 1.15f);
+    if (Navigation.bReturningHome || TimeSeconds < Perception.NextAcquireAllowedTime) return;
+    AJTSCharacter* Best = nullptr;
+    float BestScore = TNumericLimits<float>::Max();
+    for (AJTSCharacter* Player : Players)
+    {
+        if (!FJTSPlanetEnemyPursuit::CanAcquire(Planet, Navigation.HomeLocation, Player, Navigation, Perception, Behavior, TimeSeconds)) continue;
+        const float SenseRadius = Perception.bProvokedPursuit && Perception.Target == Player
+            ? FMath::Max(Behavior.SightRadius, Behavior.RetaliationLeashRadius) : Behavior.SightRadius;
+        const float Distance = Planet->ApproximateSurfaceArcDistance(Actor->GetActorLocation(), Player->GetActorLocation());
+        const float Score = Distance * (Perception.Target.Get() == Player ? 0.8f : 1.0f);
+        if (Distance > SenseRadius || Score >= BestScore || !HasSightLine(Actor, Player, Planet, SightParams)) continue;
+        Best = Player; BestScore = Score;
+    }
+    Perception.bCurrentlyVisible = Best != nullptr;
+    if (Best)
+    {
+        Perception.Target = Best; Perception.LastKnownLocation = Best->GetActorLocation(); Perception.LastSensedTime = TimeSeconds;
+        if (Behavior.bShareSettlementAlert)
+        {
+            const float SharedUntil = ShareAlert(Planet, Navigation.HomeLocation, Best, TimeSeconds,
+                Perception.bProvokedPursuit ? Perception.RetaliationUntilTime : TimeSeconds + Behavior.TargetMemorySeconds,
+                Perception.bProvokedPursuit);
+            if (Perception.bProvokedPursuit) Perception.RetaliationUntilTime = FMath::Min(Perception.RetaliationUntilTime, SharedUntil);
+        }
+    }
+    else if (Behavior.bShareSettlementAlert)
+    {
+        ReceiveAlert(Planet, Navigation, Perception, Behavior, TimeSeconds);
+    }
 }
 
 void UJTSPlanetEnemySubsystem::ChooseRoamTarget(FJTSPlanetEnemyNavigationFragment& Navigation,
@@ -213,21 +275,24 @@ void UJTSPlanetEnemySubsystem::ChooseRoamTarget(FJTSPlanetEnemyNavigationFragmen
 	}
 }
 
-void UJTSPlanetEnemySubsystem::UpdateMovement(const FJTSPlanetEnemyActorFragment& Binding,
+void UJTSPlanetEnemySubsystem::UpdateSteering(const FJTSPlanetEnemyActorFragment& Binding,
 	FJTSPlanetEnemyMovementFragment& Movement,
 	FJTSPlanetEnemyNavigationFragment& Navigation,
 	const FJTSPlanetEnemyPerceptionFragment& Perception,
-	const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds, float DeltaSeconds)
+	const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds,
+	const FCollisionQueryParams& ObstacleParams)
 {
 	AActor* Actor = Binding.Actor.Get();
 	AJTSPlanetAnchor* Planet = Binding.Planet.Get();
 	if (!IsValid(Actor) || !IsValid(Planet)) return;
 
 	const float HomeDistance = Planet->ApproximateSurfaceArcDistance(Movement.GroundLocation, Navigation.HomeLocation);
-	const bool bReturning = HomeDistance > FMath::Max(0.0f, Behavior.LeashRadius) * 0.9f;
-	const bool bPursuing = !bReturning && IsEligiblePlayer(Perception.Target.Get(), Planet)
-		&& TimeSeconds <= FMath::Max(Perception.LastSensedTime + Behavior.TargetMemorySeconds,
-			Perception.RetaliationUntilTime);
+	const float PursuitLimit = FJTSPlanetEnemyPursuit::Leash(Behavior, Perception);
+	const bool bHasTarget = IsEligiblePlayer(Perception.Target.Get(), Planet)
+		&& Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Perception.Target->GetActorLocation()) <= PursuitLimit;
+	const bool bReturning = Navigation.bReturningHome
+		|| (!bHasTarget && HomeDistance > Behavior.RoamRadius + 150);
+	const bool bPursuing = !bReturning && bHasTarget;
 	FVector Goal = Navigation.HomeLocation;
 	float TopSpeed = Behavior.ChaseSpeed;
 	float StopDistance = 70.0f;
@@ -240,7 +305,7 @@ void UJTSPlanetEnemySubsystem::UpdateMovement(const FJTSPlanetEnemyActorFragment
 			const FVector Lead = FVector::VectorPlaneProject(Target->GetVelocity(), Movement.SurfaceUp)
 				* FMath::Clamp(Behavior.TargetLeadSeconds, 0.0f, 0.5f);
 			const FVector Predicted = Target->GetActorLocation() + Lead;
-			Goal = Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Predicted) <= Behavior.LeashRadius
+			Goal = Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Predicted) <= PursuitLimit
 				? Predicted : Target->GetActorLocation();
 		}
 		StopDistance = Behavior.AttackRange * 0.92f;
@@ -258,32 +323,108 @@ void UJTSPlanetEnemySubsystem::UpdateMovement(const FJTSPlanetEnemyActorFragment
 	}
 
 	const float Distance = Planet->ApproximateSurfaceArcDistance(Movement.GroundLocation, Goal);
-	const FVector Direction = FVector::VectorPlaneProject(Goal - Movement.GroundLocation,
+	Movement.RequestedInterval = bPursuing ? (Distance > Behavior.DistantMovementDistance
+		? FMath::Max(Behavior.MovementInterval, Behavior.DistantMovementInterval) : Behavior.MovementInterval)
+		: Behavior.IdleMovementInterval;
+	FVector Direction = FVector::VectorPlaneProject(Goal - Movement.GroundLocation,
 		Movement.SurfaceUp).GetSafeNormal();
+	if ((bPursuing || bReturning) && Navigation.RouteUntilTime > TimeSeconds && Distance > StopDistance + 250)
+	{
+		const FVector Route = CrowdNavigation.GetDirection(Planet, Navigation.HomeLocation, Movement.GroundLocation,
+			Goal, bPursuing ? static_cast<AActor*>(Perception.Target.Get()) : Planet,
+			Behavior.RoamRadius, bReturning ? FMath::Max(Behavior.LeashRadius, Behavior.RetaliationLeashRadius) : PursuitLimit, TimeSeconds);
+		if (!Route.IsNearlyZero()) Direction = FVector::VectorPlaneProject(Route, Movement.SurfaceUp).GetSafeNormal();
+	}
+	if (TimeSeconds >= Navigation.NextObstacleProbeTime && ObstacleQueriesRemaining > 0 && Distance > StopDistance + 50)
+	{
+		--ObstacleQueriesRemaining;
+		Navigation.NextObstacleProbeTime = TimeSeconds + 0.2f;
+		FCollisionQueryParams Params = ObstacleParams;
+		Params.AddIgnoredActor(Planet->GetGameplaySurfaceActor());
+		FHitResult Obstacle;
+		const FVector ProbeStart = Movement.GroundLocation + Movement.SurfaceUp * 65;
+		FCollisionObjectQueryParams Obstacles;
+		Obstacles.AddObjectTypesToQuery(ECC_WorldStatic);
+		Obstacles.AddObjectTypesToQuery(ECC_PhysicsBody);
+		if (GetWorld()->SweepSingleByObjectType(Obstacle, ProbeStart, ProbeStart + Direction * 180,
+			FQuat::Identity, Obstacles, FCollisionShape::MakeSphere(48), Params))
+		{
+			Navigation.RouteUntilTime = TimeSeconds + 8;
+			Navigation.AvoidanceDirection = FVector::VectorPlaneProject(Direction, Obstacle.ImpactNormal);
+			Navigation.AvoidanceDirection = FVector::VectorPlaneProject(Navigation.AvoidanceDirection, Movement.SurfaceUp).GetSafeNormal();
+			if (Navigation.AvoidanceDirection.IsNearlyZero())
+				Navigation.AvoidanceDirection = FVector::CrossProduct(Movement.SurfaceUp, Obstacle.ImpactNormal).GetSafeNormal();
+		}
+		else Navigation.AvoidanceDirection = FVector::ZeroVector;
+	}
+	if (!Navigation.AvoidanceDirection.IsNearlyZero()) Direction = Navigation.AvoidanceDirection;
+	const double SeparationStarted = FPlatformTime::Seconds();
+	const FVector Separation = GetSeparation(Actor, Planet, Movement.SurfaceUp, Behavior.SeparationRadius);
+	LastWorkStats.SeparationMilliseconds += float((FPlatformTime::Seconds() - SeparationStarted) * 1000);
+	const float Congestion = FMath::Max(0.0f, -FVector::DotProduct(Separation, Direction));
+	Direction = (Direction + Separation * Behavior.SeparationWeight).GetSafeNormal();
 	const float Acceleration = FMath::Max(1.0f, Behavior.Acceleration);
 	const float DesiredSpeed = Direction.IsNearlyZero() ? 0.0f : FMath::Min(FMath::Max(0.0f, TopSpeed),
-		FMath::Sqrt(2.0f * Acceleration * FMath::Max(0.0f, Distance - StopDistance)));
-	Movement.Velocity = FMath::VInterpConstantTo(Movement.Velocity,
-		Direction * DesiredSpeed, DeltaSeconds, Acceleration);
-	Movement.Velocity = FVector::VectorPlaneProject(Movement.Velocity, Movement.SurfaceUp);
-	const float Step = FMath::Min(Movement.Velocity.Size() * DeltaSeconds,
-		FMath::Max(0.0f, Distance - StopDistance));
+		FMath::Sqrt(2.0f * Acceleration * FMath::Max(0.0f, Distance - StopDistance)))
+		* FMath::Clamp(1.0f - Congestion * 0.9f, 0.15f, 1.0f);
+	Movement.DesiredVelocity = Direction * DesiredSpeed;
+	Movement.GoalLocation = Goal;
+	Movement.StopDistance = StopDistance;
+}
+
+void UJTSPlanetEnemySubsystem::UpdateMovement(const FJTSPlanetEnemyActorFragment& Binding,
+	FJTSPlanetEnemyMovementFragment& Movement, const FJTSPlanetEnemyNavigationFragment& Navigation,
+	const FJTSPlanetEnemyPerceptionFragment& Perception, const FJTSPlanetEnemyBehavior& Behavior,
+	float TimeSeconds, float DeltaSeconds)
+{
+	AActor* Actor = Binding.Actor.Get();
+	AJTSPlanetAnchor* Planet = Binding.Planet.Get();
+	if (!IsValid(Actor) || !IsValid(Planet) || DeltaSeconds <= SMALL_NUMBER) return;
+	const FVector PreviousLocation = Actor->GetActorLocation();
+	const float HomeDistance = Planet->ApproximateSurfaceArcDistance(Movement.GroundLocation, Navigation.HomeLocation);
+	const float PursuitLimit = FJTSPlanetEnemyPursuit::Leash(Behavior, Perception);
+	const float Distance = Planet->ApproximateSurfaceArcDistance(Movement.GroundLocation, Movement.GoalLocation);
+	const FVector DesiredVelocity = FVector::VectorPlaneProject(Movement.DesiredVelocity, Movement.SurfaceUp);
+	const float Acceleration = FMath::Max(1.0f, Behavior.Acceleration);
+	auto* StellarTarget = Actor->FindComponentByClass<UJTSStellarTargetComponent>();
+	const bool bForced = StellarTarget && StellarTarget->HasActiveFieldForces();
+	FVector SurfaceStep;
+	float ImpactSpeed = 0;
+	if (bForced)
+	{
+		Movement.RequestedInterval = FMath::Min(Movement.RequestedInterval, 0.05f);
+		const FVector Contacts = GetContactAcceleration(Actor, Planet, Movement.SurfaceUp, Behavior.CollisionRadius, Movement.Velocity);
+		SurfaceStep = StellarTarget->IntegrateFieldMotion(Actor->GetActorLocation(), Movement.SurfaceUp,
+			DesiredVelocity, Acceleration, Contacts, DeltaSeconds, Movement.Velocity, ImpactSpeed);
+	}
+	else
+	{
+		// Remaining physical momentum brakes through the same bounded steering acceleration after a field ends.
+		Movement.Velocity = FMath::VInterpConstantTo(Movement.Velocity, DesiredVelocity, DeltaSeconds, Acceleration);
+		Movement.Velocity = FVector::VectorPlaneProject(Movement.Velocity, Movement.SurfaceUp);
+		const float Step = FMath::Min(Movement.Velocity.Size() * DeltaSeconds, FMath::Max(0.0f, Distance - Movement.StopDistance));
+		SurfaceStep = Movement.Velocity.GetSafeNormal() * Step;
+	}
 	FJTSPlanetSurfaceHit Hit;
-	if (Step > KINDA_SMALL_NUMBER
-		&& Planet->ProjectPointToSurface(Movement.GroundLocation + Movement.Velocity.GetSafeNormal() * Step, Hit))
+	const double SurfaceStarted = FPlatformTime::Seconds();
+	const FVector Candidate = Movement.GroundLocation + SurfaceStep;
+	if (!SurfaceStep.IsNearlyZero()
+		&& Planet->ProbeSurfaceAlongGravity(Candidate + Planet->GetRadialUpVector(Candidate) * 150, 350, Hit))
 	{
 		const float NextHomeDistance = Planet->ApproximateSurfaceArcDistance(Navigation.HomeLocation, Hit.ImpactPoint);
-		if (NextHomeDistance <= Behavior.LeashRadius || NextHomeDistance < HomeDistance)
+		if (bForced || NextHomeDistance <= PursuitLimit || NextHomeDistance < HomeDistance)
 		{
 			Movement.GroundLocation = Hit.ImpactPoint;
-			Movement.SurfaceUp = Hit.ImpactNormal.GetSafeNormal();
+			// Triangle face normals can jump at mesh seams; gravity/hover follow continuous radial up.
+			Movement.SurfaceUp = Planet->GetRadialUpVector(Hit.ImpactPoint);
 		}
 		else Movement.Velocity = FVector::ZeroVector;
 	}
-	else if (Step > KINDA_SMALL_NUMBER) Movement.Velocity = FVector::ZeroVector;
+	else if (!SurfaceStep.IsNearlyZero()) Movement.Velocity = FVector::ZeroVector;
+	LastWorkStats.SurfaceMilliseconds += float((FPlatformTime::Seconds() - SurfaceStarted) * 1000);
 
 	const FVector Facing = Movement.Velocity.SizeSquared() > 25.0f
-		? Movement.Velocity.GetSafeNormal() : Direction;
+		? Movement.Velocity.GetSafeNormal() : DesiredVelocity.GetSafeNormal();
 	FQuat Rotation = Actor->GetActorQuat();
 	if (!Facing.IsNearlyZero())
 	{
@@ -295,35 +436,66 @@ void UJTSPlanetEnemySubsystem::UpdateMovement(const FJTSPlanetEnemyActorFragment
 		Rotation = FQuat::Slerp(Rotation, Desired, Alpha);
 	}
 	const FVector DesiredLocation = Movement.GroundLocation + Movement.SurfaceUp * FMath::Max(0.0f, Behavior.HoverHeight);
-	Actor->SetActorLocationAndRotation(DesiredLocation, Rotation, true);
+	const double TransformStarted = FPlatformTime::Seconds();
+	FHitResult MovementHit;
+	TArray<AActor*, TInlineAllocator<4>> IgnoredCasters;
+	UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+	if (bForced && Body)
+	{
+		StellarTarget->GetRepulsionCasters(IgnoredCasters);
+		IgnoredCasters.RemoveAll([&](AActor* Caster){ return Body->GetMoveIgnoreActors().Contains(Caster); });
+		// Allow egress from an initial overlap with the caster; terrain and other blockers still sweep normally.
+		for (AActor* Caster : IgnoredCasters) Body->IgnoreActorWhenMoving(Caster, true);
+	}
+	Actor->SetActorLocationAndRotation(DesiredLocation, Rotation, true, &MovementHit);
+	// FRepMovement must carry actual swept velocity, rather than an unset Actor velocity.
+	if (Body) Body->ComponentVelocity = (Actor->GetActorLocation() - PreviousLocation) / DeltaSeconds;
+	for (AActor* Caster : IgnoredCasters) Body->IgnoreActorWhenMoving(Caster, false);
+	LastWorkStats.TransformMilliseconds += float((FPlatformTime::Seconds() - TransformStarted) * 1000);
 	if (FVector::DistSquared(Actor->GetActorLocation(), DesiredLocation) > 4.0f)
 	{
-		Movement.Velocity = FVector::ZeroVector;
+		const FVector Normal = FVector::VectorPlaneProject(MovementHit.ImpactNormal, Movement.SurfaceUp).GetSafeNormal();
+		const float Incoming = FVector::DotProduct(Movement.Velocity, Normal);
+		if (bForced && !Normal.IsNearlyZero() && Incoming < 0)
+		{
+			ImpactSpeed = FMath::Max(ImpactSpeed, -Incoming);
+			Movement.Velocity -= Normal * (Incoming * 1.25f);
+		}
+		else Movement.Velocity = FVector::ZeroVector;
 		FJTSPlanetSurfaceHit ActualHit;
 		if (Planet->ProjectPointToSurface(Actor->GetActorLocation(), ActualHit))
 		{
 			Movement.GroundLocation = ActualHit.ImpactPoint;
-			Movement.SurfaceUp = ActualHit.ImpactNormal.GetSafeNormal();
+			Movement.SurfaceUp = Planet->GetRadialUpVector(ActualHit.ImpactPoint);
 		}
+	}
+	if (bForced && ImpactSpeed > 180 && TimeSeconds >= Movement.NextForceImpactTime
+		&& Actor->GetClass()->ImplementsInterface(UJTSPlanetSettlementEnemy::StaticClass()))
+	{
+		Movement.NextForceImpactTime = TimeSeconds + 0.2f;
+		IJTSPlanetSettlementEnemy::Execute_OnSettlementForceImpact(Actor, Movement.Velocity.GetSafeNormal(), ImpactSpeed);
 	}
 }
 
 void UJTSPlanetEnemySubsystem::UpdateCombat(const FJTSPlanetEnemyActorFragment& Binding,
 	const FJTSPlanetEnemyPerceptionFragment& Perception,
 	FJTSPlanetEnemyCombatFragment& Combat,
-	const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds, const TArray<AActor*>& EnemyActors)
+	const FJTSPlanetEnemyBehavior& Behavior, float TimeSeconds, const FCollisionQueryParams& SightParams)
 {
 	AActor* Actor = Binding.Actor.Get();
 	AJTSPlanetAnchor* Planet = Binding.Planet.Get();
 	if (!IsValid(Actor) || !IsValid(Planet)) return;
+	if (!Perception.Target.IsValid()) { Combat.bImpactPending = false; Combat.PendingVictim.Reset(); return; }
 	if (Combat.bImpactPending && TimeSeconds >= Combat.ImpactTime)
 	{
+		// Defer a damaging impact if the shared sight budget is exhausted; never damage through a wall.
+		if (Behavior.AttackDamage > 0 && LastSightQueryCount >= MaxSightQueriesPerFrame) return;
 		Combat.bImpactPending = false;
 		AJTSCharacter* Victim = Combat.PendingVictim.Get();
 		Combat.PendingVictim.Reset();
 		if (Behavior.AttackDamage > 0.0f && IsEligiblePlayer(Victim, Planet)
 			&& Planet->ApproximateSurfaceArcDistance(Actor->GetActorLocation(), Victim->GetActorLocation()) <= Behavior.AttackReach
-			&& HasSightLine(Actor, Victim, Planet, EnemyActors))
+			&& HasSightLine(Actor, Victim, Planet, SightParams))
 		{
 			UGameplayStatics::ApplyDamage(Victim, Behavior.AttackDamage, nullptr, Actor, UDamageType::StaticClass());
 		}
@@ -345,60 +517,190 @@ void UJTSPlanetEnemySubsystem::UpdateCombat(const FJTSPlanetEnemyActorFragment& 
 	}
 }
 
+FVector UJTSPlanetEnemySubsystem::GetSeparation(const AActor* Actor, const AJTSPlanetAnchor* Planet,
+    const FVector& Up, float Radius) const
+{
+    const float Range = FMath::Clamp(Radius, 0.0f, SpatialCellSize - 1);
+    if (Range <= 0) return FVector::ZeroVector;
+    const FIntVector Center = BucketFor(Actor->GetActorLocation());
+    FVector Force = FVector::ZeroVector;
+    int32 Inspected = 0;
+    for (int32 X = -1; X <= 1; ++X)
+    for (int32 Y = -1; Y <= 1; ++Y)
+    for (int32 Z = -1; Z <= 1; ++Z)
+    {
+        const auto* Bucket = SpatialBuckets.Find(Center + FIntVector(X,Y,Z));
+        if (!Bucket) continue;
+        for (const FCrowdSample& Other : *Bucket)
+        {
+            if (Other.Actor == Actor || Other.Planet != Planet) continue;
+            if (++Inspected > 32) return Force.GetClampedToMaxSize(1);
+            const FVector Offset = FVector::VectorPlaneProject(Actor->GetActorLocation() - Other.Position, Up);
+            const float Distance = Offset.Size();
+            if (Distance > 1 && Distance < Range)
+                Force += Offset / Distance * (1 - Distance / Range);
+        }
+    }
+    return Force.GetClampedToMaxSize(1);
+}
+
+FVector UJTSPlanetEnemySubsystem::GetContactAcceleration(const AActor* Actor, const AJTSPlanetAnchor* Planet,
+	const FVector& Up, float Radius, const FVector& Velocity) const
+{
+	const FIntVector Center = BucketFor(Actor->GetActorLocation());
+	FVector Result = FVector::ZeroVector;
+	int32 Inspected = 0;
+	for (int32 X = -1; X <= 1; ++X)
+	for (int32 Y = -1; Y <= 1; ++Y)
+	for (int32 Z = -1; Z <= 1; ++Z)
+	{
+		const auto* Bucket = SpatialBuckets.Find(Center + FIntVector(X, Y, Z));
+		if (!Bucket) continue;
+		for (const auto& Other : *Bucket)
+		{
+			if (Other.Actor == Actor || Other.Planet != Planet) continue;
+			if (++Inspected > 32) return Result.GetClampedToMaxSize(12000);
+			FVector Offset = FVector::VectorPlaneProject(Actor->GetActorLocation() - Other.Position, Up);
+			const float Distance = Offset.Size(), Contact = Radius + Other.Radius;
+			if (Distance >= Contact || FMath::Abs(FVector::DotProduct(Actor->GetActorLocation() - Other.Position, Up)) >= Contact) continue;
+			const FVector Normal = Distance > 0.1f ? Offset / Distance
+				: FVector::CrossProduct(Up, FVector(1, 0.37f, 0.19f)).GetSafeNormal() * (Actor->GetUniqueID() < Other.Actor->GetUniqueID() ? -1 : 1);
+			const float RelativeSpeed = FVector::DotProduct(Velocity - Other.Velocity, Normal);
+			Result += Normal * FMath::Max(0.0f, (Contact - Distance) * 160.0f - RelativeSpeed * 12.0f);
+		}
+	}
+	return Result.GetClampedToMaxSize(12000);
+}
+
+int32 UJTSPlanetEnemySubsystem::GetTrackedTargetCount() const
+{
+    const UMassEntitySubsystem* Mass = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    if (!Mass) return 0;
+    const FMassEntityManager& Manager = Mass->GetEntityManager();
+    int32 Count = 0;
+    for (const FMassEntityHandle Entity : ActiveEntities)
+        if (Manager.IsEntityActive(Entity)
+            && Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity).Target.IsValid()) ++Count;
+    return Count;
+}
+
 void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
 {
-	Super::Tick(DeltaTime);
-	UWorld* World = GetWorld();
-	if (World == nullptr || World->GetNetMode() == NM_Client || ActiveEntities.IsEmpty()) return;
-	UMassEntitySubsystem* Mass = World->GetSubsystem<UMassEntitySubsystem>();
-	if (Mass == nullptr) return;
-	FMassEntityManager& Manager = Mass->GetMutableEntityManager();
-	const float Now = World->GetTimeSeconds();
-	const float Step = FMath::Clamp(DeltaTime, 0.0f, 0.05f);
-	TArray<AActor*> EnemyActors;
-	EnemyActors.Reserve(ActiveEntities.Num());
-	for (const FMassEntityHandle Entity : ActiveEntities)
-	{
-		if (Manager.IsEntityActive(Entity))
-		{
-			if (AActor* Actor = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity).Actor.Get())
-			{
-				EnemyActors.Add(Actor);
-			}
-		}
-	}
-	TArray<AJTSCharacter*> Players;
-	bool bPlayersGathered = false;
-	for (int32 Index = ActiveEntities.Num() - 1; Index >= 0; --Index)
-	{
-		if (!ActiveEntities.IsValidIndex(Index)) continue;
-		const FMassEntityHandle Entity = ActiveEntities[Index];
-		if (!Manager.IsEntityActive(Entity)) continue;
-		const FJTSPlanetEnemyActorFragment& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
-		const AActor* Actor = Binding.Actor.Get();
-		const AJTSPlanetAnchor* Planet = Binding.Planet.Get();
-		if (!IsValid(Actor) || !IsValid(Planet))
-		{
-			UnregisterEnemy(Entity);
-			continue;
-		}
-		if (const UJTSHealthComponent* Health = Actor->FindComponentByClass<UJTSHealthComponent>();
-			IsValid(Health) && Health->IsDead()) continue;
-		FJTSPlanetEnemyMovementFragment& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
-		FJTSPlanetEnemyNavigationFragment& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
-		FJTSPlanetEnemyPerceptionFragment& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
-		FJTSPlanetEnemyCombatFragment& Combat = Manager.GetFragmentDataChecked<FJTSPlanetEnemyCombatFragment>(Entity);
-		const FJTSPlanetEnemyBehavior& Behavior = Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values;
-		if (Perception.NextScanTime <= Now)
-		{
-			if (!bPlayersGathered)
-			{
-				for (TActorIterator<AJTSCharacter> It(World); It; ++It) Players.Add(*It);
-				bPlayersGathered = true;
-			}
-			ScanForTargets(Binding, Navigation, Perception, Behavior, Now, Players, EnemyActors);
-		}
-		UpdateMovement(Binding, Movement, Navigation, Perception, Behavior, Now, Step);
-		UpdateCombat(Binding, Perception, Combat, Behavior, Now, EnemyActors);
-	}
+    Super::Tick(DeltaTime);
+    const double Started = FPlatformTime::Seconds();
+    double PhaseStarted = Started;
+    LastWorkStats = FJTSPlanetEnemyWorkStats();
+    LastTickMilliseconds = 0;
+    LastScanCount = 0; LastMovementCount = 0; LastSteeringCount = 0; LastSightQueryCount = 0;
+    UWorld* World = GetWorld();
+    if (!World || World->GetNetMode() == NM_Client || ActiveEntities.IsEmpty()) return;
+    UMassEntitySubsystem* Mass = World->GetSubsystem<UMassEntitySubsystem>();
+    if (!Mass) return;
+    FMassEntityManager& Manager = Mass->GetMutableEntityManager();
+    const float Now = World->GetTimeSeconds();
+    SettlementAlerts.RemoveAll([&](const FSettlementAlert& Alert)
+        { return !Alert.Planet.IsValid() || !Alert.Target.IsValid() || Alert.Until < Now; });
+    CrowdNavigation.Tick(World, Now);
+    LastWorkStats.NavigationMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    PhaseStarted = FPlatformTime::Seconds();
+    ObstacleQueriesRemaining = 48;
+    SpatialBuckets.Reset();
+    FCollisionQueryParams SightParams(SCENE_QUERY_STAT(PlanetEnemySight), false);
+    TArray<FMassEntityHandle> LiveEntities;
+    LiveEntities.Reserve(ActiveEntities.Num());
+    for (int32 I = ActiveEntities.Num() - 1; I >= 0; --I)
+    {
+        const FMassEntityHandle Entity = ActiveEntities[I];
+        if (!Manager.IsEntityActive(Entity)) { ActiveEntities.RemoveAtSwap(I); continue; }
+        const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
+        AActor* Actor = Binding.Actor.Get();
+        AJTSPlanetAnchor* Planet = Binding.Planet.Get();
+        if (!IsValid(Actor) || !IsValid(Planet)) { UnregisterEnemy(Entity); continue; }
+        if (const auto* Health = Actor->FindComponentByClass<UJTSHealthComponent>(); Health && Health->IsDead()) continue;
+        auto& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
+        auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
+        const bool bWasReturning = Navigation.bReturningHome;
+        const TWeakObjectPtr<AJTSCharacter> PreviousTarget = Perception.Target;
+        // A validated hit alert arrives before leash evaluation, so the colony can join this episode.
+        ReceiveAlert(Planet, Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
+        FJTSPlanetEnemyPursuit::Update(Planet,
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).GroundLocation,
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
+        if (bWasReturning != Navigation.bReturningHome || PreviousTarget != Perception.Target)
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).NextUpdateTime = Now;
+        SightParams.AddIgnoredActor(Actor); // Build the crowd ignore list once, rather than once per ray.
+		SpatialBuckets.FindOrAdd(BucketFor(Actor->GetActorLocation())).Add(FCrowdSample{Actor, Planet, Actor->GetActorLocation(),
+			Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).Velocity,
+			Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values.CollisionRadius});
+        LiveEntities.Add(Entity);
+    }
+    if (LiveEntities.IsEmpty()) return;
+    TArray<AJTSCharacter*> Players;
+    for (TActorIterator<AJTSCharacter> It(World); It; ++It) Players.Add(*It);
+    LastWorkStats.GatherMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    PhaseStarted = FPlatformTime::Seconds();
+    ScanCursor %= LiveEntities.Num();
+    int32 Visited = 0;
+    while (Visited < LiveEntities.Num() && LastScanCount < MaxScansPerFrame && LastSightQueryCount < MaxSightQueriesPerFrame - 4)
+    {
+        const FMassEntityHandle Entity = LiveEntities[ScanCursor];
+        ScanCursor = (ScanCursor + 1) % LiveEntities.Num(); ++Visited;
+        auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
+        if (Perception.NextScanTime > Now) continue;
+        const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
+        const auto& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
+        const auto& Behavior = Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values;
+        const bool bHadTarget = Perception.Target.IsValid();
+        ScanForTargets(Binding, Navigation, Perception, Behavior, Now, Players, SightParams);
+        if (!bHadTarget && Perception.Target.IsValid())
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).NextUpdateTime = Now;
+        ++LastScanCount;
+    }
+    LastWorkStats.SenseMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    PhaseStarted = FPlatformTime::Seconds();
+    MovementCursor %= LiveEntities.Num();
+    Visited = 0;
+    FCollisionQueryParams ObstacleParams(SCENE_QUERY_STAT(PlanetEnemyObstacle), false);
+    while (Visited < LiveEntities.Num() && LastSteeringCount < MaxSteeringUpdatesPerFrame)
+    {
+        const FMassEntityHandle Entity = LiveEntities[MovementCursor];
+        MovementCursor = (MovementCursor + 1) % LiveEntities.Num(); ++Visited;
+        auto& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
+        if (Movement.NextUpdateTime > Now) continue;
+        const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
+        auto& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
+        const auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
+        const auto& Behavior = Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values;
+        UpdateSteering(Binding, Movement, Navigation, Perception, Behavior, Now, ObstacleParams);
+        Movement.NextUpdateTime = Now + FMath::Max(0.025f, Movement.RequestedInterval);
+        ++LastSteeringCount;
+    }
+    LastWorkStats.SteeringMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    PhaseStarted = FPlatformTime::Seconds();
+    // Every entity advances every frame. Budgeting perception/steering must never throttle motion.
+    for (const FMassEntityHandle Entity : LiveEntities)
+    {
+        auto& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
+        UpdateMovement(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity), Movement,
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now,
+            FMath::Clamp(DeltaTime, 0.0f, 0.25f));
+        Movement.LastUpdateTime = Now;
+        ++LastMovementCount;
+    }
+    // Attack windups retain server-side LOS validation independently of steering refresh.
+    LastWorkStats.MovementMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    PhaseStarted = FPlatformTime::Seconds();
+    for (const FMassEntityHandle Entity : LiveEntities)
+        UpdateCombat(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyCombatFragment>(Entity),
+            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now, SightParams);
+    LastWorkStats.CombatMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
+    LastTickMilliseconds = float((FPlatformTime::Seconds() - Started) * 1000);
 }

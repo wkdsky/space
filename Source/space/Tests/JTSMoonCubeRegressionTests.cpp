@@ -160,9 +160,9 @@ bool FJTSWeaponTrajectoryRegression::RunTest(const FString& Parameters)
 		|| !TestNotNull(TEXT("Ranged rules exist"), Ranged)
 		|| !TestNotNull(TEXT("Melee rules exist"), Melee)
 		|| !TestNotNull(TEXT("Target health exists"), Health)) return false;
-	if (!TestTrue(TEXT("Pistol can be equipped"), Inventory->TryAddItemById(EJTSItemId::Pistol))) return false;
+	if (!TestTrue(TEXT("Pistol can be equipped"), Inventory->TryAddItemById(EJTSItemId::RailPistol))) return false;
 	Inventory->SelectQuickbarSlot(0);
-	TestEqual(TEXT("Pistol is selected"), Inventory->GetActiveItemId(), EJTSItemId::Pistol);
+	TestEqual(TEXT("Pistol is selected"), Inventory->GetActiveItemId(), EJTSItemId::RailPistol);
 	Visual->RefreshWeaponVisual();
 	USceneComponent* Muzzle = nullptr;
 	TArray<USceneComponent*> Scenes;
@@ -197,15 +197,15 @@ bool FJTSWeaponTrajectoryRegression::RunTest(const FString& Parameters)
 	Ranged->StopFire();
 	TestTrue(TEXT("The same target takes damage when the barrel intersects it"), Health->GetHealth() < InitialHealth);
 
-	if (!TestTrue(TEXT("Knife can be equipped"), Inventory->TryAddItemById(EJTSItemId::Knife))) return false;
+	if (!TestTrue(TEXT("Knife can be equipped"), Inventory->TryAddItemById(EJTSItemId::ShortBlade))) return false;
 	int32 KnifeSlot = INDEX_NONE;
 	for (int32 Index = 0; Index < Inventory->GetItemSlots().Num(); ++Index)
 	{
-		if (Inventory->GetItemAtSlot(Index).ItemId == EJTSItemId::Knife) KnifeSlot = Index;
+		if (Inventory->GetItemAtSlot(Index).ItemId == EJTSItemId::ShortBlade) KnifeSlot = Index;
 	}
 	if (!TestTrue(TEXT("Knife has a quickbar slot"), KnifeSlot != INDEX_NONE)) return false;
 	Inventory->SelectQuickbarSlot(KnifeSlot);
-	TestEqual(TEXT("Knife is selected"), Inventory->GetActiveItemId(), EJTSItemId::Knife);
+	TestEqual(TEXT("Knife is selected"), Inventory->GetActiveItemId(), EJTSItemId::ShortBlade);
 	Visual->RefreshWeaponVisual();
 	Cube->SetActorLocation(FVector(160.0f, 0.0f, 170.0f));
 	UBoxComponent* Body = Cast<UBoxComponent>(Cube->GetRootComponent());
@@ -246,7 +246,7 @@ bool FJTSWeaponTrajectoryRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Held weapon contact can damage the target"), Health->GetHealth() < BeforeContact);
 	Melee->AttackReleased();
 	Melee->StopAttack();
-	if (!TestTrue(TEXT("Knife can be put away for a punch"), Inventory->TryRemoveItem(EJTSItemId::Knife, 1))) return false;
+	if (!TestTrue(TEXT("Knife can be put away for a punch"), Inventory->TryRemoveItem(EJTSItemId::ShortBlade, 1))) return false;
 	Inventory->SelectQuickbarSlot(KnifeSlot);
 	TestEqual(TEXT("Empty hands select the punch"), Inventory->GetActiveItemId(), EJTSItemId::None);
 	Visual->RefreshWeaponVisual();

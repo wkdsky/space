@@ -18,23 +18,36 @@ enum class EJTSItemId : uint8
 	Rock UMETA(DisplayName = "Rock"),
 	Ore UMETA(DisplayName = "Ore"),
 	MoonAntCorpse UMETA(DisplayName = "Moon Ant Corpse"),
-	Pickaxe UMETA(DisplayName = "Pickaxe"),
+	/** Retired test weapons. Values stay reserved so old saves deserialize; they are no longer obtainable. */
+	Pickaxe UMETA(Hidden),
 	/** Retired serialized value kept only so old saves/world assets can be safely ignored. */
 	Backpack UMETA(Hidden),
-	Knife UMETA(DisplayName = "Knife"),
-	Pistol UMETA(DisplayName = "Pistol"),
-	MachineGun UMETA(DisplayName = "Machine Gun"),
-	Axe UMETA(DisplayName = "Axe"),
+	Knife UMETA(Hidden),
+	Pistol UMETA(Hidden),
+	MachineGun UMETA(Hidden),
+	Axe UMETA(Hidden),
 	/** Stable append-only identity for the long-range precision weapon. */
-	Sniper UMETA(DisplayName = "Sniper Rifle"),
+	Sniper UMETA(Hidden),
 	/** White belt lamp. Worn at the waist, toggled with F from the quickbar. */
 	WaistLamp UMETA(DisplayName = "Waist Lamp"),
 	/** Serialized ice-axe value repurposed as dual pistols to preserve existing saves. */
-	IceAxe UMETA(DisplayName = "Dual Pistols"),
+	IceAxe UMETA(Hidden),
 	/** Text-only stellar loot identity; the specific entry remains data driven. */
 	StellarText UMETA(DisplayName = "Stellar Item"),
 	/** Assembled from one core and its matching attachment in the ship locker. */
-	StellarWeapon UMETA(DisplayName = "Stellar Weapon")
+	StellarWeapon UMETA(DisplayName = "Stellar Weapon"),
+
+	/** Normal weapon line. Append-only; each is upgradeable per instance. */
+	ShortBlade UMETA(DisplayName = "Alloy Short Blade"),
+	ShockPole UMETA(DisplayName = "Shock Pole"),
+	PowerHammer UMETA(DisplayName = "Power Hammer"),
+	RailPistol UMETA(DisplayName = "Rail Pistol"),
+	AssaultRifle UMETA(DisplayName = "Assault Rifle"),
+	Shotgun UMETA(DisplayName = "Shotgun"),
+	RailSniper UMETA(DisplayName = "Rail Sniper"),
+	HeavyMachineGun UMETA(DisplayName = "Heavy Machine Gun"),
+	GrenadeLauncher UMETA(DisplayName = "Grenade Launcher"),
+	ArcGun UMETA(DisplayName = "Arc Gun")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */
@@ -100,6 +113,15 @@ enum class EJTSStellarRollResult : uint8
 	CoolingDown
 };
 
+/** Server-side log of one resolved roll request; a resend with the same RequestId replays it without a second charge. */
+struct FJTSStellarRollRecord
+{
+	FGuid RequestId;
+	EJTSStellarRollResult Result = EJTSStellarRollResult::NotAvailable;
+	FName ItemId = NAME_None;
+	int32 SlotIndex = INDEX_NONE;
+};
+
 /** Legacy serialized values from the retired wearable system. */
 UENUM(BlueprintType)
 enum class EJTSWearableSlot : uint8
@@ -139,8 +161,28 @@ struct SPACE_API FJTSItemInstance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FName StellarCoreId;
 
+	/** Identity of the second physical item in a legacy combined weapon. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	FGuid StellarAttachmentInstanceId;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FText CustomDisplayName;
+
+	/** Stellar core level (1..61). Meaningful for a core or an assembled weapon; the budget is level - 1. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", meta = (ClampMin = "1", ClampMax = "61"))
+	int32 StellarCoreLevel = 1;
+
+	/** Six recorded attachment skill points (0..10 each). Empty means all zero. Never rewritten by scaling. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	TArray<uint8> StellarPoints;
+
+	/** Normal-weapon body level (1..10). Each level grants four skill points and +12% base damage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", meta = (ClampMin = "1", ClampMax = "10"))
+	int32 WeaponBodyLevel = 1;
+
+	/** Normal-weapon skill points, six entries of 0..10 (empty = all zero). Spent from the body-level budget. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	TArray<uint8> WeaponPoints;
 
 	bool IsEmpty() const
 	{
@@ -156,7 +198,12 @@ struct SPACE_API FJTSItemInstance
 		InstanceId.Invalidate();
 		StellarItemId = NAME_None;
 		StellarCoreId = NAME_None;
+		StellarAttachmentInstanceId.Invalidate();
 		CustomDisplayName = FText::GetEmpty();
+		StellarCoreLevel = 1;
+		StellarPoints.Reset();
+		WeaponBodyLevel = 1;
+		WeaponPoints.Reset();
 	}
 };
 

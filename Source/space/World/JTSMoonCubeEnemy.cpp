@@ -10,6 +10,7 @@
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCriticalDamageType.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Systems/JTSPlanetEnemySubsystem.h"
 #include "space/UI/JTSFloatingDamageActor.h"
@@ -32,6 +33,8 @@ AJTSMoonCubeEnemy::AJTSMoonCubeEnemy()
 	BodyCollider->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BodyCollider->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	BodyCollider->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	BodyCollider->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	BodyCollider->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
 	BodyCollider->SetGenerateOverlapEvents(false);
 	BodyCollider->SetCanEverAffectNavigation(false);
 
@@ -61,6 +64,7 @@ AJTSMoonCubeEnemy::AJTSMoonCubeEnemy()
 	WeakPointMesh->SetCanEverAffectNavigation(false);
 
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("Health"));
+	CreateDefaultSubobject<UJTSStellarTargetComponent>(TEXT("StellarTarget"));
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("OverheadHealth"));
 	HealthBar->SetupAttachment(VisualRoot);
 	HealthBar->SetRelativeLocation(FVector(0.0f, 0.0f, 106.0f));
@@ -79,8 +83,6 @@ void AJTSMoonCubeEnemy::BeginPlay()
 {
 	Super::BeginPlay();
 	SetActorTickEnabled(!HasAuthority());
-	SmoothedVisualLocation = GetActorLocation();
-	SmoothedVisualRotation = GetActorQuat();
 	HealthBar->InitWidget();
 	HideHealthBar();
 	if (HasAuthority())
@@ -118,6 +120,7 @@ bool AJTSMoonCubeEnemy::InitializeForSettlement_Implementation(AJTSPlanetAnchor*
 	FVector HomeLocation, FVector GroundLocation)
 {
 	if (!HasAuthority() || !IsValid(InPlanet) || EnemyEntity.IsValid()) return false;
+	BodyCollider->IgnoreActorWhenMoving(InPlanet->GetGameplaySurfaceActor(), true);
 	FJTSPlanetSurfaceFrame Frame;
 	if (InPlanet->GetSurfaceFrameAt(GroundLocation, GetActorForwardVector(), Frame))
 	{
@@ -134,6 +137,11 @@ bool AJTSMoonCubeEnemy::InitializeForSettlement_Implementation(AJTSPlanetAnchor*
 void AJTSMoonCubeEnemy::OnSettlementAttackStarted_Implementation()
 {
 	if (HasAuthority()) MulticastAttackPulse();
+}
+
+void AJTSMoonCubeEnemy::OnSettlementForceImpact_Implementation(FVector Direction, float Speed)
+{
+	if (HasAuthority()) MulticastForceImpact(Direction, Speed);
 }
 
 void AJTSMoonCubeEnemy::ConfigurePresentation(UStaticMesh* InBodyMesh, UStaticMesh* InWeakPointMesh,
@@ -198,10 +206,27 @@ void AJTSMoonCubeEnemy::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (HasAuthority()) return;
-	// Actor replication can arrive at 30 Hz; keep the visible crown and body between snapshots.
-	SmoothedVisualLocation = FMath::VInterpTo(SmoothedVisualLocation, GetActorLocation(), DeltaSeconds, 18.0f);
-	SmoothedVisualRotation = FMath::QInterpTo(SmoothedVisualRotation, GetActorQuat(), DeltaSeconds, 18.0f);
-	VisualRoot->SetWorldLocationAndRotation(SmoothedVisualLocation, SmoothedVisualRotation);
+	FVector Location;
+	FQuat Rotation;
+	if (MotionBuffer.Sample(GetWorld()->GetTimeSeconds(), MovementInterpolationDelay, Location, Rotation))
+	{
+		const FVector Previous = GetActorLocation();
+		// Body, visual mesh and critical-hit collider share the same continuous client transform.
+		SetActorLocationAndRotation(Location, Rotation, false);
+		BodyCollider->ComponentVelocity = DeltaSeconds > SMALL_NUMBER ? (Location - Previous) / DeltaSeconds : FVector::ZeroVector;
+	}
+}
+
+void AJTSMoonCubeEnemy::OnRep_ReplicatedMovement()
+{
+	if (HasAuthority() || !GetWorld() || !IsReplicatingMovement())
+	{
+		Super::OnRep_ReplicatedMovement();
+		return;
+	}
+	const FRepMovement& Snapshot = GetReplicatedMovement();
+	MotionBuffer.Push(GetWorld()->GetTimeSeconds(), FRepMovement::RebaseOntoLocalOrigin(Snapshot.Location, this),
+		Snapshot.Rotation.Quaternion(), Snapshot.LinearVelocity);
 }
 
 void AJTSMoonCubeEnemy::HandleDamaged(float CurrentHealth, float InMaxHealth, float Damage, AActor* DamageCauser)
@@ -256,8 +281,20 @@ void AJTSMoonCubeEnemy::HideHealthBar()
 
 void AJTSMoonCubeEnemy::ResetVisualPulse()
 {
+	BodyMesh->SetRelativeRotation(FRotator::ZeroRotator);
 	BodyMesh->SetRelativeScale3D(FVector(0.9f));
 	WeakPointMesh->SetRelativeScale3D(FVector(0.34f, 0.34f, 0.25f));
+}
+
+void AJTSMoonCubeEnemy::MulticastForceImpact_Implementation(FVector_NetQuantizeNormal Direction, float Speed)
+{
+	if (GetNetMode() == NM_DedicatedServer) return;
+	const FVector Local = GetActorQuat().UnrotateVector(Direction);
+	const float Strength = FMath::Clamp(Speed / 900.0f, 0.15f, 1.0f);
+	BodyMesh->SetRelativeRotation(FRotator(Local.X * -18 * Strength, 0, Local.Y * 18 * Strength));
+	BodyMesh->SetRelativeScale3D(FVector(0.9f + Strength * 0.13f, 0.9f + Strength * 0.13f, 0.9f - Strength * 0.2f));
+	GetWorldTimerManager().ClearTimer(VisualPulseTimer);
+	GetWorldTimerManager().SetTimer(VisualPulseTimer, this, &AJTSMoonCubeEnemy::ResetVisualPulse, 0.16f, false);
 }
 
 void AJTSMoonCubeEnemy::MulticastDamageFeedback_Implementation(float CurrentHealth, float InMaxHealth,
@@ -269,12 +306,18 @@ void AJTSMoonCubeEnemy::MulticastDamageFeedback_Implementation(float CurrentHeal
 	WeakPointMesh->SetRelativeScale3D(bCritical ? FVector(0.46f, 0.46f, 0.32f) : FVector(0.38f, 0.38f, 0.28f));
 	GetWorldTimerManager().ClearTimer(VisualPulseTimer);
 	GetWorldTimerManager().SetTimer(VisualPulseTimer, this, &AJTSMoonCubeEnemy::ResetVisualPulse, 0.13f, false);
+	if (AJTSFloatingDamageActor* Popup = ActiveDamagePopup.Get())
+	{
+		Popup->AddDamage(Damage, bCritical);
+		return;
+	}
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	if (AJTSFloatingDamageActor* Popup = GetWorld()->SpawnActor<AJTSFloatingDamageActor>(
 		AJTSFloatingDamageActor::StaticClass(), FTransform(GetActorRotation(), FVector(HitLocation) + GetActorUpVector() * 25.0f), Params))
 	{
 		Popup->Initialize(Damage, bCritical, GetActorUpVector());
+		ActiveDamagePopup = Popup;
 	}
 }
 

@@ -141,7 +141,8 @@ void AJTSMoonAntNestActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, 
 		return;
 	}
 
-	if (AttackType == EJTSMeleeAttackType::Knife || AttackType == EJTSMeleeAttackType::Axe)
+	if (AttackType == EJTSMeleeAttackType::Knife || AttackType == EJTSMeleeAttackType::Axe
+		|| AttackType == EJTSMeleeAttackType::Tool)
 	{
 		Destroy();
 		return;

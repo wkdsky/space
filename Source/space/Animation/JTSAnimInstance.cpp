@@ -7,6 +7,7 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -49,6 +50,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bHasRangedWeapon = false;
 	bHasHeldItem = false;
 	bActiveRangedWeapon = false;
+	bStellarScepterHeld = false;
+	bool bStellarCasting = false;
 	bMeleeHeld = false;
 	bTwoHandHeld = false;
 	if (IsValid(Character))
@@ -58,18 +61,27 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const EJTSItemId ActiveId = Inventory->GetActiveItemId();
 			const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ActiveId);
 			bHasHeldItem = IsValid(Definition) && Definition->IsHoldable() && !Inventory->GetActiveItem().IsEmpty();
-			// The serialized ice-axe item now represents a pair of ranged pistols.
-			const bool bGun = ActiveId == EJTSItemId::Pistol
-				|| ActiveId == EJTSItemId::MachineGun
-				|| ActiveId == EJTSItemId::Sniper
-				|| ActiveId == EJTSItemId::IceAxe;
-			bTwoHandHeld = bHasHeldItem && ActiveId == EJTSItemId::IceAxe;
+			const bool bGun = bHasHeldItem && Definition->IsRangedWeapon();
+			bTwoHandHeld = bHasHeldItem && Definition->HeldPresentation.bDualWield;
 			bMeleeHeld = bHasHeldItem && !bGun && !bTwoHandHeld;
 		}
 		if (const UJTSRangedWeaponComponent* const Ranged = Character->FindComponentByClass<UJTSRangedWeaponComponent>())
 		{
 			bActiveRangedWeapon = Ranged->HasActiveRangedWeapon();
 			bWeaponAiming = Ranged->IsAiming() && bActiveRangedWeapon;
+		}
+		if (const UJTSStellarWeaponComponent* const Stellar = Character->FindComponentByClass<UJTSStellarWeaponComponent>();
+			IsValid(Stellar) && Stellar->HasActiveWeapon())
+		{
+			const auto* Definition = Stellar->GetEquippedWeaponDefinition();
+			const bool bStellarMelee = Definition && Definition->bMeleePresentation;
+			bStellarScepterHeld = Definition && Definition->bUprightScepter;
+			bStellarCasting = Stellar->IsCasting();
+			bHasHeldItem = true;
+			bActiveRangedWeapon = !bStellarMelee;
+			bWeaponAiming = !bStellarMelee && Stellar->IsAiming();
+			bTwoHandHeld = false;
+			bMeleeHeld = bStellarMelee;
 		}
 		bMeleeHeld = bMeleeHeld && !bActiveRangedWeapon;
 
@@ -103,6 +115,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			bWeaponAiming = false;
 			bMeleeHeld = false;
 			bTwoHandHeld = false;
+			bStellarScepterHeld = false;
+			bStellarCasting = false;
 		}
 		const AJTSPlayerState* const GroundState = Character->GetPlayerState<AJTSPlayerState>();
 		const bool bGroundDead = IsValid(GroundState)
@@ -344,6 +358,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		ShuffleLeftLift = 13.0f * TurnShuffleAlpha * Step;
 		ShuffleRightLift = 13.0f * TurnShuffleAlpha * Other;
 	}
+	StellarCastAlpha = FMath::FInterpTo(StellarCastAlpha, bStellarCasting ? 1.0f : 0.0f,
+		DeltaSeconds, FMath::Max(1.0f, StellarPoseBlendSpeed));
 	bHasRangedWeapon = bActiveRangedWeapon;
 }
 
@@ -856,6 +872,20 @@ void UJTSAnimInstance::ApplyFacingPose()
 		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), RightAim);
 		CloseGrip(true);
 		CloseGrip(false);
+	}
+	else if (bStellarScepterHeld)
+	{
+		// Raise the arm and bend the elbow to present the orb above the shoulder.
+		// Weapon presentation separately keeps the shaft on local gravity up, including on planets.
+		const FVector Forward = FQuat(PoseUp, FMath::DegreesToRadians(BodyYaw)).RotateVector(PoseForward);
+		const FVector Right = FVector::CrossProduct(PoseUp, Forward).GetSafeNormal();
+		const float UpperPitch = FMath::Lerp(StellarCarryUpperArmDegrees, StellarCastUpperArmDegrees, StellarCastAlpha);
+		const float ForePitch = FMath::Lerp(StellarCarryForearmDegrees, StellarCastForearmDegrees, StellarCastAlpha);
+		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), FQuat(Right, FMath::DegreesToRadians(-UpperPitch)).RotateVector(Forward));
+		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), FQuat(Right, FMath::DegreesToRadians(-ForePitch)).RotateVector(Forward));
+		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), -PoseUp);
+		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), -PoseUp);
+		CloseGrip(true);
 	}
 	else if (bActiveRangedWeapon)
 	{

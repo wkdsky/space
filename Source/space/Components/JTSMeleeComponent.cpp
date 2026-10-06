@@ -1,4 +1,5 @@
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
@@ -18,6 +19,7 @@
 #include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSWeaponProgression.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/World/JTSMoonSurfaceController.h"
@@ -186,6 +188,8 @@ void UJTSMeleeComponent::AttackReleased()
 
 void UJTSMeleeComponent::StartAttack()
 {
+	const auto* Stellar = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+	if (Stellar && Stellar->HasActiveWeapon()) return;
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		ServerStartAttack();
@@ -254,6 +258,8 @@ void UJTSMeleeComponent::FinishCurrentAttack()
 
 void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 {
+	const auto* Stellar = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+	if (Stellar && Stellar->HasActiveWeapon()) { EndAttackState(); return; }
 	if (!IsValid(Cast<APawn>(GetOwner())))
 	{
 		EndAttackState();
@@ -495,7 +501,8 @@ bool UJTSMeleeComponent::TryAttack()
 		{
 			if (Definition->IsHoldable())
 			{
-				AttackInterval = Definition->MeleeAttackInterval;
+				const FJTSResolvedWeaponStats Stats = FJTSWeaponProgression::Resolve(Inventory->GetActiveItem());
+				AttackInterval = Stats.ScaleInterval(Definition->MeleeAttackInterval);
 			}
 		}
 	}
@@ -568,20 +575,7 @@ EJTSMeleeAttackType UJTSMeleeComponent::GetCurrentAttackType() const
 		return EJTSMeleeAttackType::Punch;
 	}
 
-	switch (ActiveItem.ItemId)
-	{
-	case EJTSItemId::Knife:
-		return EJTSMeleeAttackType::Knife;
-
-	case EJTSItemId::Axe:
-		return EJTSMeleeAttackType::Axe;
-
-	case EJTSItemId::Pickaxe:
-		return EJTSMeleeAttackType::Tool;
-
-	default:
-		return EJTSMeleeAttackType::Improvised;
-	}
+	return Definition->MeleeAttackClass;
 }
 
 EJTSAttackType UJTSMeleeComponent::ResolveAttackType() const
@@ -1246,7 +1240,8 @@ float UJTSMeleeComponent::GetDamageForAttackType(EJTSMeleeAttackType AttackType)
 		{
 			if (const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Inventory->GetActiveItemId()))
 			{
-				return FMath::Max(0.0f, Definition->CombatDamage);
+				const FJTSResolvedWeaponStats Stats = FJTSWeaponProgression::Resolve(Inventory->GetActiveItem());
+				return FMath::Max(0.0f, Stats.ScaleDamage(Definition->CombatDamage));
 			}
 		}
 	}

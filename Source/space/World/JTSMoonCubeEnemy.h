@@ -5,10 +5,12 @@
 #include "Mass/EntityHandle.h"
 #include "space/Interaction/JTSCriticalHitTarget.h"
 #include "space/Systems/JTSPlanetEnemyFragments.h"
+#include "space/Systems/JTSReplicatedMotionBuffer.h"
 #include "space/World/JTSPlanetSettlementEnemy.h"
 #include "JTSMoonCubeEnemy.generated.h"
 
 class AController;
+class AJTSFloatingDamageActor;
 class AJTSCharacter;
 class AJTSPlanetAnchor;
 class UBoxComponent;
@@ -30,6 +32,7 @@ public:
 	virtual bool InitializeForSettlement_Implementation(AJTSPlanetAnchor* Planet,
 		FVector HomeLocation, FVector GroundLocation) override;
 	virtual void OnSettlementAttackStarted_Implementation() override;
+	virtual void OnSettlementForceImpact_Implementation(FVector Direction, float Speed) override;
 	void ConfigurePresentation(UStaticMesh* InBodyMesh, UStaticMesh* InWeakPointMesh,
 		UMaterialInterface* InBodyMaterial, UMaterialInterface* InWeakPointMaterial);
 	virtual float GetCriticalHitMultiplier(const FHitResult& Hit) const override;
@@ -43,6 +46,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void OnRep_ReplicatedMovement() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
@@ -60,6 +64,8 @@ private:
 		FVector_NetQuantize HitLocation, bool bCritical);
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastAttackPulse();
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastForceImpact(FVector_NetQuantizeNormal Direction, float Speed);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Cube", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UBoxComponent> BodyCollider;
@@ -93,9 +99,11 @@ private:
 
 	FMassEntityHandle EnemyEntity;
 	TWeakObjectPtr<AJTSCharacter> DamageAttacker;
+	TWeakObjectPtr<AJTSFloatingDamageActor> ActiveDamagePopup;
 	FVector CurrentDamageHitLocation = FVector::ZeroVector;
-	FVector SmoothedVisualLocation = FVector::ZeroVector;
-	FQuat SmoothedVisualRotation = FQuat::Identity;
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Cube|Network", meta = (ClampMin = "0.05", ClampMax = "0.2"))
+	float MovementInterpolationDelay = 0.1f;
+	FJTSReplicatedMotionBuffer MotionBuffer;
 	bool bCurrentDamageCritical = false;
 	FTimerHandle HealthBarTimer;
 	FTimerHandle VisualPulseTimer;

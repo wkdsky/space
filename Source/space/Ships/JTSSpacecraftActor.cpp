@@ -35,6 +35,7 @@
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSStellarLootTable.h"
+#include "space/Items/JTSWeaponProgression.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -1380,7 +1381,7 @@ const UJTSStellarLootTable* AJTSSpacecraftActor::GetStellarLootTable() const
 }
 
 EJTSStellarRollResult AJTSSpacecraftActor::TryRollStellarItem(AJTSCharacter* Player, FName& OutItemId,
-	int32& OutSlotIndex)
+	int32& OutSlotIndex, const FGuid& RequestId)
 {
 	OutItemId = NAME_None;
 	OutSlotIndex = INDEX_NONE;
@@ -1390,6 +1391,12 @@ EJTSStellarRollResult AJTSSpacecraftActor::TryRollStellarItem(AJTSCharacter* Pla
 	if (!IsValid(BuyerState) || !IsValid(LootTable) || LootTable->Entries.IsEmpty())
 	{
 		return EJTSStellarRollResult::NotAvailable;
+	}
+	if (const FJTSStellarRollRecord* const Previous = BuyerState->FindStellarRollRecord(RequestId))
+	{
+		OutItemId = Previous->ItemId;
+		OutSlotIndex = Previous->SlotIndex;
+		return Previous->Result;
 	}
 	if (!BuyerState->HasFreeShipLockerSlot()) return EJTSStellarRollResult::InventoryFull;
 	if (BuyerState->HasPendingStellarReveal()) return EJTSStellarRollResult::CoolingDown;
@@ -1409,10 +1416,7 @@ EJTSStellarRollResult AJTSSpacecraftActor::TryRollStellarItem(AJTSCharacter* Pla
 	{
 		if (!HasResource(Cost.Key, Cost.Value)) return EJTSStellarRollResult::InsufficientResources;
 	}
-	const UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent();
-	const TArray<FJTSItemInstance> CarriedItems = IsValid(Inventory)
-		? Inventory->GetItemSlots() : TArray<FJTSItemInstance>();
-	if (!LootTable->Roll(BuyerState->GetShipLockerSlots(), OutItemId, CarriedItems))
+	if (!LootTable->Roll(BuyerState->GetDiscoveredStellarCoreIds(), OutItemId))
 	{
 		return EJTSStellarRollResult::NotAvailable;
 	}
@@ -1437,6 +1441,17 @@ EJTSStellarRollResult AJTSSpacecraftActor::TryRollStellarItem(AJTSCharacter* Pla
 	GetWorldTimerManager().SetTimer(Pending.TimerHandle, RevealDelegate,
 		UJTSStellarLootTable::RevealDurationSeconds, false);
 	LastStellarRollTime.Add(BuyerState, Now);
+	// Commit point: history grows only after the prize is reserved, so a refunded roll leaves U untouched.
+	if (const FJTSStellarLootEntry* const Won = LootTable->FindEntry(OutItemId); Won && Won->bCore)
+	{
+		BuyerState->RecordDiscoveredStellarCore(OutItemId);
+	}
+	FJTSStellarRollRecord Record;
+	Record.RequestId = RequestId;
+	Record.Result = EJTSStellarRollResult::Succeeded;
+	Record.ItemId = OutItemId;
+	Record.SlotIndex = OutSlotIndex;
+	BuyerState->AddStellarRollRecord(Record);
 	return EJTSStellarRollResult::Succeeded;
 }
 
@@ -1470,6 +1485,27 @@ bool AJTSSpacecraftActor::TryGrantDebugResources(AJTSCharacter* Player)
 		Resources.Add(Resource, 100);
 	}
 	return DepositResourceAmounts(Resources);
+}
+
+bool AJTSSpacecraftActor::TryGrantDebugStellarItems(AJTSCharacter* Player, int32& OutAddedCount, int32& OutRequestedCount)
+{
+	OutAddedCount = 0;
+	OutRequestedCount = 0;
+	if (!HasAuthority() || !IsValid(Player) || !CanUseShipTerminal(Player)) return false;
+	AJTSPlayerState* const State = Player->GetPlayerState<AJTSPlayerState>();
+	const UJTSStellarLootTable* const Table = GetStellarLootTable();
+	if (!IsValid(State) || !IsValid(Table)) return false;
+
+	TSet<FName> RequestedIds;
+	for (const FJTSStellarLootEntry& Entry : Table->Entries)
+	{
+		if (Entry.ItemId.IsNone() || Entry.FirmwareUnits != 0
+			|| (!Entry.bCore && Entry.CompatibleCoreId.IsNone()) || RequestedIds.Contains(Entry.ItemId)) continue;
+		RequestedIds.Add(Entry.ItemId);
+		++OutRequestedCount;
+		if (State->TryStoreStellarItem(Entry.ItemId)) ++OutAddedCount;
+	}
+	return OutRequestedCount > 0;
 }
 
 bool AJTSSpacecraftActor::TryBoardPlayer(APawn* InteractingPawn)
@@ -3552,4 +3588,24 @@ void AJTSSpacecraftActor::HandleBoardingTriggerEndOverlap(
 
 	NearbyPlayer = nullptr;
 	OverlappingCharacter->NotifySpacecraftExited(this);
+}
+
+bool AJTSSpacecraftActor::TryUpgradeLockerWeapon(AJTSCharacter* Player, int32 SlotIndex, FGuid ExpectedToken)
+{
+	AJTSPlayerState* const State = IsValid(Player) ? Player->GetPlayerState<AJTSPlayerState>() : nullptr;
+	if (!HasAuthority() || !IsValid(State) || !CanUseShipTerminal(Player)) return false;
+	const FJTSShipLockerSlot Slot = State->GetShipLockerSlot(SlotIndex);
+	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Slot.StandardItem.ItemId);
+	TArray<FJTSItemCost> Cost;
+	if (!ExpectedToken.IsValid() || Slot.SlotToken != ExpectedToken || Slot.bPendingStellarReveal || Slot.StandardItem.IsEmpty()
+		|| !FJTSWeaponProgression::IsUpgradeable(Slot.StandardItem.ItemId)
+		|| !FJTSWeaponProgression::GetUpgradeCost(Definition, Slot.StandardItem.WeaponBodyLevel, Cost)) return false;
+	TMap<EJTSResourceType, int32> Charges;
+	for (const FJTSItemCost& Entry : Cost) Charges.FindOrAdd(Entry.ResourceType) += Entry.Amount;
+	for (const TPair<EJTSResourceType, int32>& Charge : Charges)
+	{
+		if (!HasResource(Charge.Key, Charge.Value)) return false;
+	}
+	// Every precondition was checked above, so raising the level after the charge cannot fail on a valid slot.
+	return TryConsumeResourceAmounts(Charges) && State->TryRaiseWeaponBodyLevel(SlotIndex, ExpectedToken);
 }

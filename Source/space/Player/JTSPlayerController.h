@@ -81,7 +81,7 @@ public:
 	void ServerRequestShopPurchase(AJTSSpacecraftActor* Spacecraft, EJTSItemId ItemId);
 
 	UFUNCTION(Server, Reliable)
-	void ServerRequestStellarRoll(AJTSSpacecraftActor* Spacecraft);
+	void ServerRequestStellarRoll(AJTSSpacecraftActor* Spacecraft, FGuid RequestId);
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
@@ -106,6 +106,26 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveStellarCombineResult(bool bSucceeded);
 
+	/** Records the six attachment skill points on a locker slot. The server enforces ownership and core budget. */
+	UFUNCTION(Server, Reliable)
+	void ServerApplyStellarPoints(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& Points);
+
+	UFUNCTION(Server, Reliable)
+	void ServerUpgradeStellarCore(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveStellarProgressionResult(bool bUpgrade, bool bSucceeded);
+
+	/** Normal-weapon skill points (free to respin) and body-level upgrade (paid from ship storage). */
+	UFUNCTION(Server, Reliable)
+	void ServerApplyWeaponPoints(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& Points);
+
+	UFUNCTION(Server, Reliable)
+	void ServerUpgradeWeaponBody(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveWeaponUpgradeResult(bool bUpgrade, bool bSucceeded);
+
 	UFUNCTION(Server, Reliable)
 	void ServerExchangeShipLockerWithCarriedSlot(AJTSSpacecraftActor* Spacecraft, int32 LockerSlotIndex,
 		FGuid ExpectedLockerToken, int32 CarriedSlotIndex, FGuid ExpectedCarriedInstanceId);
@@ -127,6 +147,12 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopDebugResources(AJTSSpacecraftActor* Spacecraft);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDebugStellarItems(AJTSSpacecraftActor* Spacecraft);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveDebugStellarItemsResult(bool bAvailable, int32 AddedCount, int32 RequestedCount);
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDebugAbilityLevels(AJTSSpacecraftActor* Spacecraft);
@@ -184,6 +210,16 @@ public:
 	void OpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
 	void CloseSpaceShop();
 	bool IsSpaceShopOpen() const;
+	void DropStellarItemInSpaceShop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId);
+	int32 GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const;
+	void OpenStellarItemDialog(class UJTSStellarAttachmentDialog* Dialog);
+	void HandleStellarItemDialogClosed();
+	bool IsStellarItemDialogOpen() const;
+	void SetInventoryArrangementMode(bool bEnabled);
+	bool IsInventoryArrangementMode() const { return bInventoryArrangementMode; }
+	void SetStellarItemDragging(bool bDragging) { bStellarItemDragging = bDragging; }
+	bool IsStellarItemDragging() const { return bStellarItemDragging; }
+
 	void UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible);
 	void DropCarriedItemInSpaceShop(const FVector2D& ScreenPosition, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
 	bool IsOverCarriedQuickbar(const FVector2D& ScreenPosition) const;
@@ -208,6 +244,9 @@ protected:
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 
 private:
+	bool bInventoryArrangementMode = false;
+	bool bStellarItemDragging = false;
+	TWeakObjectPtr<class UJTSStellarAttachmentDialog> StellarItemDialog;
 	void BindGameState();
 	void RetryBindGameState();
 	void ScheduleGameStateBind();

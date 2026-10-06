@@ -37,6 +37,7 @@
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSStaminaComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
 #if !UE_BUILD_SHIPPING
@@ -86,6 +87,7 @@ AJTSCharacter::AJTSCharacter()
 	StaminaComponent = CreateDefaultSubobject<UJTSStaminaComponent>(TEXT("StaminaComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
+	StellarWeaponComponent = CreateDefaultSubobject<UJTSStellarWeaponComponent>(TEXT("StellarWeaponComponent"));
 	WeaponVisualComponent = CreateDefaultSubobject<UJTSWeaponVisualComponent>(TEXT("WeaponVisualComponent"));
 	WallClimbComponent = CreateDefaultSubobject<UJTSWallClimbComponent>(TEXT("WallClimbComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));
@@ -273,6 +275,14 @@ void AJTSCharacter::ApplyProgressionMovementSpeed()
 AJTSPlanetAnchor* AJTSCharacter::GetGameplayPlanet() const
 {
 	return GameplayPlanet.Get();
+}
+
+FVector AJTSCharacter::GetPawnViewLocation() const
+{
+	const AJTSPlanetAnchor* Planet = GameplayPlanet.Get();
+	return IsValid(Planet) && IsPlanetGravityEnabled()
+		? GetActorLocation() + Planet->GetRadialUpVector(GetActorLocation()) * BaseEyeHeight
+		: Super::GetPawnViewLocation();
 }
 
 void AJTSCharacter::InitializePlanetFrame()
@@ -844,6 +854,7 @@ void AJTSCharacter::PossessedBy(AController* NewController)
 {
 	UnregisterInputMappingContext();
 	Super::PossessedBy(NewController);
+	if (StellarWeaponComponent) StellarWeaponComponent->RefreshEquipmentBinding();
 
 	ApplyCameraView();
 	RegisterInputMappingContext();
@@ -923,12 +934,16 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleBoardCompleted);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleBoardCanceled);
 	EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleEquipStarted);
+	EnhancedInputComponent->BindAction(CycleStellarAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleCycleStellarWeapon);
+	EnhancedInputComponent->BindAction(WeaponUtilityAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleWeaponUtilityStarted);
+	EnhancedInputComponent->BindAction(ReturnToNormalAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleReturnToNormalWeapon);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAttackStarted);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAttackReleased);
 	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleAimStarted);
 	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleAimReleased);
 	EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleAimReleased);
+	EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleReloadStarted);
 	EnhancedInputComponent->BindAction(ToggleCameraAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleToggleCameraStarted);
 	EnhancedInputComponent->BindAction(CameraZoomAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleCameraZoom);
 	if (QuickbarSlotActions.Num() == UJTSInventoryComponent::MaximumQuickbarSlots)
@@ -973,6 +988,10 @@ void AJTSCharacter::InitializeInput()
 	EquipAction = NewObject<UInputAction>(this, TEXT("EquipAction"), RF_Transient);
 	AttackAction = NewObject<UInputAction>(this, TEXT("AttackAction"), RF_Transient);
 	AimAction = NewObject<UInputAction>(this, TEXT("AimAction"), RF_Transient);
+	CycleStellarAction = NewObject<UInputAction>(this, TEXT("CycleStellarAction"), RF_Transient);
+	WeaponUtilityAction = NewObject<UInputAction>(this, TEXT("WeaponUtilityAction"), RF_Transient);
+	ReturnToNormalAction = NewObject<UInputAction>(this, TEXT("ReturnToNormalAction"), RF_Transient);
+	ReloadAction = NewObject<UInputAction>(this, TEXT("ReloadAction"), RF_Transient);
 	ToggleCameraAction = NewObject<UInputAction>(this, TEXT("ToggleCameraAction"), RF_Transient);
 	CameraZoomAction = NewObject<UInputAction>(this, TEXT("CameraZoomAction"), RF_Transient);
 	PreviousQuickbarPageAction = NewObject<UInputAction>(this, TEXT("PreviousQuickbarPageAction"), RF_Transient);
@@ -996,6 +1015,10 @@ void AJTSCharacter::InitializeInput()
 	EquipAction->ValueType = EInputActionValueType::Boolean;
 	AttackAction->ValueType = EInputActionValueType::Boolean;
 	AimAction->ValueType = EInputActionValueType::Boolean;
+	CycleStellarAction->ValueType = EInputActionValueType::Boolean;
+	WeaponUtilityAction->ValueType = EInputActionValueType::Boolean;
+	ReturnToNormalAction->ValueType = EInputActionValueType::Boolean;
+	ReloadAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCameraAction->ValueType = EInputActionValueType::Boolean;
 	CameraZoomAction->ValueType = EInputActionValueType::Axis1D;
 	PreviousQuickbarPageAction->ValueType = EInputActionValueType::Boolean;
@@ -1018,6 +1041,11 @@ void AJTSCharacter::InitializeInput()
 	InputMappingContext->MapKey(EquipAction, EKeys::F);
 	InputMappingContext->MapKey(AttackAction, EKeys::LeftMouseButton);
 	InputMappingContext->MapKey(AimAction, EKeys::RightMouseButton);
+	InputMappingContext->MapKey(CycleStellarAction, EKeys::Tab);
+	InputMappingContext->MapKey(WeaponUtilityAction, EKeys::Z);
+	InputMappingContext->MapKey(ReturnToNormalAction, EKeys::X);
+	// Z dispatches the held weapon's utility action; T remains a secondary reload binding.
+	InputMappingContext->MapKey(ReloadAction, EKeys::T);
 	InputMappingContext->MapKey(ToggleCameraAction, EKeys::V);
 	InputMappingContext->MapKey(CameraZoomAction, EKeys::MouseWheelAxis);
 	InputMappingContext->MapKey(PreviousQuickbarPageAction, EKeys::Up);
@@ -1128,6 +1156,7 @@ void AJTSCharacter::UnbindGameState()
 
 void AJTSCharacter::BindPlayerState()
 {
+	if (StellarWeaponComponent) StellarWeaponComponent->RefreshEquipmentBinding();
 	AJTSPlayerState* const NewPlayerState = GetPlayerState<AJTSPlayerState>();
 	if (BoundPlayerState.Get() == NewPlayerState)
 	{
@@ -1506,6 +1535,11 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 	// Ordinary standing third person keeps the body where the player put it.
 	// Aim and first person already face the camera, so a gun click does not add a snap.
 	AlignBodyToViewOnAttack();
+	if (StellarWeaponComponent && StellarWeaponComponent->HasActiveWeapon())
+	{
+		StellarWeaponComponent->SetPrimary(true);
+		return;
+	}
 	if (IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
 	{
 		RangedWeaponComponent->StartFire();
@@ -1647,7 +1681,8 @@ bool AJTSCharacter::WantsContinuousViewFacing() const
 	// Jumping does not change the facing mode. Aim and first person keep their
 	// existing view-facing behavior on the ground and in the air.
 	return bFirstPersonView
-		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
+		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming())
+		|| (StellarWeaponComponent && StellarWeaponComponent->IsAiming());
 }
 
 void AJTSCharacter::HandleClimbStarted(const FInputActionValue& Value)
@@ -1802,6 +1837,7 @@ void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 
 void AJTSCharacter::HandleAttackReleased(const FInputActionValue& Value)
 {
+	if (StellarWeaponComponent) StellarWeaponComponent->SetPrimary(false);
 	// Release must always be forwarded so a blocked UI or phase transition cannot leave the hold state stuck.
 	if (IsValid(RangedWeaponComponent))
 	{
@@ -1844,6 +1880,11 @@ void AJTSCharacter::HandleMeleeAttackFinished(EJTSAttackType AttackType)
 void AJTSCharacter::HandleAimStarted(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
+	if (StellarWeaponComponent && StellarWeaponComponent->HasActiveWeapon())
+	{
+		StellarWeaponComponent->SetSecondary(true);
+		return;
+	}
 	if (!CanUseNormalGameplayInput() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
 		|| !IsValid(RangedWeaponComponent))
 	{
@@ -1852,9 +1893,42 @@ void AJTSCharacter::HandleAimStarted(const FInputActionValue& Value)
 	RangedWeaponComponent->StartAim();
 }
 
+void AJTSCharacter::HandleReloadStarted(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (CanUseNormalGameplayInput() && IsValid(RangedWeaponComponent))
+	{
+		RangedWeaponComponent->RequestReload();
+	}
+}
+
+void AJTSCharacter::HandleCycleStellarWeapon(const FInputActionValue& Value)
+{
+	static_cast<void>(Value);
+	if (CanUseNormalGameplayInput() && StellarWeaponComponent) StellarWeaponComponent->CycleWeapon();
+}
+
+void AJTSCharacter::HandleWeaponUtilityStarted(const FInputActionValue& Value)
+{
+	if (!CanUseNormalGameplayInput()) return;
+	if ((!StellarWeaponComponent || !StellarWeaponComponent->HasActiveWeapon())
+		&& IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon())
+	{
+		HandleReloadStarted(Value);
+		return;
+	}
+	if (StellarWeaponComponent) StellarWeaponComponent->CycleWeapon();
+}
+
+void AJTSCharacter::HandleReturnToNormalWeapon(const FInputActionValue& Value)
+{
+	if (CanUseNormalGameplayInput() && StellarWeaponComponent) StellarWeaponComponent->ReturnToNormalWeapon();
+}
+
 void AJTSCharacter::HandleAimReleased(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
+	if (StellarWeaponComponent) StellarWeaponComponent->SetSecondary(false);
 	if (IsValid(RangedWeaponComponent))
 	{
 		RangedWeaponComponent->StopAim();
@@ -1965,6 +2039,7 @@ void AJTSCharacter::SelectQuickbarSlotByPage(int32 SlotIndexInPage)
 	const int32 SlotIndex = InventoryComponent->GetQuickbarPageStart() + SlotIndexInPage;
 	if (SlotIndex < InventoryComponent->GetInventoryCapacity())
 	{
+		if (StellarWeaponComponent) StellarWeaponComponent->ReturnToNormalWeapon();
 		InventoryComponent->SelectQuickbarSlot(SlotIndex);
 	}
 }
@@ -2285,7 +2360,7 @@ FVector AJTSCharacter::GetPlanetCameraForward(const FVector& CurrentUp) const
 bool AJTSCharacter::IsGameplayInputBlocked() const
 {
 	const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
-	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsSpaceShopOpen() || PlayerController->IsGameMenuOpen();
+	return !IsValid(PlayerController) || PlayerController->IsMoonShopOpen() || PlayerController->IsSpaceShopOpen() || PlayerController->IsGameMenuOpen() || PlayerController->IsStellarItemDialogOpen() || PlayerController->IsInventoryArrangementMode();
 }
 
 void AJTSCharacter::ApplyCameraPitchLimits()
@@ -2598,8 +2673,9 @@ void AJTSCharacter::ApplyBoardedPresentation()
 void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 {
 	const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
-	const bool bWantsAim = !bClimbing && IsValid(RangedWeaponComponent)
-		&& RangedWeaponComponent->IsAiming();
+	const bool bStellarEquipped = StellarWeaponComponent && StellarWeaponComponent->HasActiveWeapon();
+	const bool bWantsAim = !bClimbing && (bStellarEquipped ? StellarWeaponComponent->IsAiming() :
+		IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming());
 	const float TargetAlpha = bWantsAim ? 1.0f : 0.0f;
 	AimCameraAlpha = bClimbing ? 0.0f : FMath::FInterpTo(AimCameraAlpha, TargetAlpha,
 		DeltaSeconds, FMath::Max(1.0f, AimCameraInterpSpeed));
@@ -2616,7 +2692,7 @@ void AJTSCharacter::UpdateAimCamera(float DeltaSeconds)
 	if (FollowCamera != nullptr)
 	{
 		const float BaseFOV = bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV;
-		const float ActiveAimFOV = IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon()
+		const float ActiveAimFOV = !bStellarEquipped && IsValid(RangedWeaponComponent) && RangedWeaponComponent->HasActiveRangedWeapon()
 			? RangedWeaponComponent->GetActiveAimFOV() : AimFOV;
 		FollowCamera->SetFieldOfView(FMath::Lerp(BaseFOV, ActiveAimFOV, AimCameraAlpha));
 	}

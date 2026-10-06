@@ -181,6 +181,20 @@ struct SPACE_API FJTSPlayerSnapshot
 	UPROPERTY()
 	TArray<FJTSShipLockerSlot> ShipLockerSlots;
 
+	/** Core kinds this player has ever rolled (drop-table history U). Absent in old saves, which start at zero. */
+	UPROPERTY()
+	TArray<FName> DiscoveredStellarCoreIds;
+
+	/** Firmware units banked from consumed firmware items. */
+	UPROPERTY()
+	int32 StellarFirmwareUnits = 0;
+
+	/** v5: nine independent stellar positions and one player-wide energy pool. */
+	UPROPERTY()
+	TArray<FJTSItemInstance> StellarLoadoutSlots;
+	UPROPERTY()
+	float StellarEnergy = 100.0f;
+
 	/** Legacy v3 migration input only. New captures never write equipment into a separate container. */
 	UPROPERTY()
 	TArray<FJTSItemInstance> Wearables;
@@ -265,7 +279,7 @@ struct SPACE_API FJTSExpeditionSnapshot
 	double PlaytimeSeconds = 0.0;
 
 	UPROPERTY()
-	int32 SaveVersion = 4;
+	int32 SaveVersion = 5;
 };
 
 /** Read-only front-end projection of a host-owned expedition save. */
@@ -302,5 +316,5 @@ struct SPACE_API FJTSExpeditionSaveSummary
 	double PlaytimeSeconds = 0.0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Expedition Save")
-	int32 SaveVersion = 4;
+	int32 SaveVersion = 5;
 };

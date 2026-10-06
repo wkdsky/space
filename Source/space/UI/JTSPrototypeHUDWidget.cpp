@@ -24,6 +24,7 @@
 #include "Math/RotationMatrix.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSStaminaComponent.h"
@@ -31,6 +32,11 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/UI/JTSStellarLoadoutPanel.h"
+#include "space/UI/SJTSStellarLoadoutView.h"
+#include "space/UI/JTSGameUILayout.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/IInteractable.h"
@@ -255,6 +261,12 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 
 FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (auto* PC = Cast<AJTSPlayerController>(GetOwningPlayer()); PC && PC->IsInventoryArrangementMode()
+		&& (InKeyEvent.GetKey() == EKeys::I || InKeyEvent.GetKey() == EKeys::Escape))
+	{
+		PC->SetInventoryArrangementMode(false);
+		return FReply::Handled();
+	}
 	if (bGameMenuOpen && InKeyEvent.GetKey() == EKeys::Escape)
 	{
 		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
@@ -267,9 +279,24 @@ FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometr
 	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
 }
 
+int32 UJTSPrototypeHUDWidget::GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const
+{
+	return StellarRow ? StellarRow->GetSlotAtScreenPosition(ScreenPosition) : INDEX_NONE;
+}
+
 bool UJTSPrototypeHUDWidget::IsOverInventorySlot(const FVector2D& ScreenPosition) const
 {
 	return GetInventorySlotAtScreenPosition(ScreenPosition) != INDEX_NONE;
+}
+
+void UJTSPrototypeHUDWidget::UpdateInventoryDragPreview(const FVector2D& ScreenPosition, const FString& Label, bool bVisible)
+{
+	if (!InventoryDragPreview || !GameplayLayer) return;
+	InventoryDragPreview->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	if (!bVisible) return;
+	InventoryDragPreviewText->SetText(FText::FromString(Label));
+	if (auto* PreviewSlot = Cast<UCanvasPanelSlot>(InventoryDragPreview->Slot))
+		PreviewSlot->SetPosition(GameplayLayer->GetCachedGeometry().AbsoluteToLocal(ScreenPosition) + FVector2D(12, 12));
 }
 
 int32 UJTSPrototypeHUDWidget::GetInventorySlotAtScreenPosition(const FVector2D& ScreenPosition) const
@@ -296,7 +323,7 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 	AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
 	AJTSCharacter* const Character = Controller ? Cast<AJTSCharacter>(Controller->GetPawn()) : nullptr;
 	UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
-	if (IsValid(Controller) && Controller->IsSpaceShopOpen() && IsValid(Inventory)
+	if (IsValid(Controller) && (Controller->IsSpaceShopOpen() || Controller->IsInventoryArrangementMode()) && IsValid(Inventory)
 		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		for (int32 VisualIndex = 0; VisualIndex < InventorySlotBorders.Num(); ++VisualIndex)
@@ -306,6 +333,7 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 				|| !Border->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition())) continue;
 			const int32 SlotIndex = Inventory->GetQuickbarPageStart() + VisualIndex;
 			Inventory->SelectQuickbarSlot(SlotIndex);
+			if (auto* State = Controller->GetPlayerState<AJTSPlayerState>()) State->GetStellarLoadout()->SelectWeapon(INDEX_NONE);
 			const FJTSItemInstance Item = Inventory->GetItemAtSlot(SlotIndex);
 			if (Item.IsEmpty()) return FReply::Handled();
 			DraggedCarriedSlot = SlotIndex;
@@ -835,6 +863,21 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			PlayerStaminaBar->SetVisibility(ESlateVisibility::Collapsed);
 		}
 
+		// Held-weapon status: ammo count, reload progress, or the energy bar of electric weapons.
+		WeaponStatusText = MakeTextBlock(WidgetTree, TEXT("WeaponStatusText"), TEXT(""), 26.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f), ETextJustify::Right);
+		AddCanvasChild(GameplayLayer, WeaponStatusText, FAnchors(1.0f, 1.0f), FVector2D(-44.0f, -150.0f), FVector2D(320.0f, 36.0f), FVector2D(1.0f, 1.0f));
+		WeaponStatusText->SetVisibility(ESlateVisibility::Collapsed);
+		WeaponStatusBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("WeaponStatusBar"));
+		if (WeaponStatusBar != nullptr)
+		{
+			FProgressBarStyle WeaponBarStyle = WeaponStatusBar->GetWidgetStyle();
+			WeaponBarStyle.BackgroundImage.TintColor = FSlateColor(FLinearColor(0.02f, 0.05f, 0.06f, 0.78f));
+			WeaponBarStyle.FillImage.TintColor = FSlateColor(FLinearColor::White);
+			WeaponStatusBar->SetWidgetStyle(WeaponBarStyle);
+			AddCanvasChild(GameplayLayer, WeaponStatusBar, FAnchors(1.0f, 1.0f), FVector2D(-44.0f, -128.0f), FVector2D(320.0f, 14.0f), FVector2D(1.0f, 1.0f));
+			WeaponStatusBar->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
 		RocketIconCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RocketIconCanvas"));
 		AddCanvasChild(PlayerCardCanvas, RocketIconCanvas, FAnchors(0.0f, 0.0f), FVector2D(59.0f, 59.0f), FVector2D(38.0f, 38.0f));
 		RocketBody = MakeBorder(WidgetTree, TEXT("RocketBody"), FLinearColor(0.85f, 0.94f, 1.0f, 1.0f), 2.0f);
@@ -842,20 +885,20 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		RocketFlame = MakeBorder(WidgetTree, TEXT("RocketFlame"), FLinearColor(1.0f, 0.42f, 0.05f, 1.0f), 1.0f);
 		AddCanvasChild(RocketIconCanvas, RocketFlame, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -4.0f), FVector2D(9.0f, 13.0f), FVector2D(0.5f, 1.0f));
 
-		InventoryPanel = MakeBorder(WidgetTree, TEXT("InventoryPanel"), FLinearColor(0.015f, 0.035f, 0.070f, 0.93f), 6.0f);
-		InventoryPanelSlot = AddCanvasChild(GameplayLayer, InventoryPanel, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -24.0f), FVector2D(720.0f, 98.0f), FVector2D(0.5f, 1.0f));
+		StellarRow = CreateWidget<UJTSStellarLoadoutPanel>(GetOwningPlayer());
+		StellarRowSlot = AddCanvasChild(GameplayLayer, StellarRow, FAnchors(0, 0), FVector2D::ZeroVector, SJTSStellarLoadoutView::LayoutSize(9));
+		InventoryPanel = MakeBorder(WidgetTree, TEXT("InventoryPanel"), FLinearColor::Transparent);
+		InventoryPanelSlot = AddCanvasChild(GameplayLayer, InventoryPanel, FAnchors(0, 0), FVector2D::ZeroVector, FVector2D(928, 88));
 		UCanvasPanel* const InventoryCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("InventoryCanvas"));
 		if (InventoryPanel != nullptr && InventoryCanvas != nullptr)
 		{
 			InventoryPanel->SetContent(InventoryCanvas);
-			InventoryTitleText = MakeTextBlock(WidgetTree, TEXT("InventoryTitle"), TEXT("QUICKBAR 1/1"), 14.0f, FLinearColor(0.78f, 0.92f, 1.0f, 1.0f), ETextJustify::Center);
-			AddCanvasChild(InventoryCanvas, InventoryTitleText, FAnchors(0.5f, 0.0f), FVector2D(0.0f, 2.0f), FVector2D(680.0f, 20.0f), FVector2D(0.5f, 0.0f));
 			for (int32 SlotIndex = 0; SlotIndex < UJTSInventoryComponent::MaximumQuickbarSlots; ++SlotIndex)
 		{
 			UBorder* const SlotBorder = MakeBorder(
 				WidgetTree,
 				*FString::Printf(TEXT("InventorySlot%d"), SlotIndex),
-				FLinearColor(0.08f, 0.15f, 0.22f, 0.96f),
+				FLinearColor(0.08f, 0.15f, 0.22f, 0.30f),
 				3.0f);
 			UTextBlock* const SlotText = MakeTextBlock(
 				WidgetTree,
@@ -868,13 +911,18 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			{
 				SlotBorder->SetContent(SlotText);
 			}
-			AddCanvasChild(InventoryCanvas, SlotBorder, FAnchors(0.0f, 0.0f), FVector2D(8.0f + 76.0f * SlotIndex, 25.0f), FVector2D(72.0f, 64.0f));
+			AddCanvasChild(InventoryCanvas, SlotBorder, FAnchors(0.0f, 0.0f), FVector2D(104.0f * SlotIndex, 0.0f), FVector2D(96.0f, 88.0f));
 			InventorySlotBorders.Add(SlotBorder);
 			InventorySlotTexts.Add(SlotText);
 		}
 		}
+		InventoryDragPreview = MakeBorder(WidgetTree, TEXT("InventoryDragPreview"), FLinearColor(0.05f, 0.14f, 0.21f, 0.8f), 5);
+		InventoryDragPreviewText = MakeTextBlock(WidgetTree, TEXT("InventoryDragPreviewText"), TEXT(""), 12, FLinearColor::White, ETextJustify::Center);
+		InventoryDragPreview->SetContent(InventoryDragPreviewText);
+		if (auto* GhostSlot = AddCanvasChild(GameplayLayer, InventoryDragPreview, FAnchors(0, 0), FVector2D::ZeroVector, FVector2D(140, 48))) GhostSlot->SetZOrder(100);
+		InventoryDragPreview->SetVisibility(ESlateVisibility::Collapsed);
 		EquipmentHintText = MakeTextBlock(WidgetTree, TEXT("EquipmentHintText"), TEXT(""), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
-		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -132.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
+		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -210.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
 		InteractionPromptText = MakeTextBlock(WidgetTree, TEXT("InteractionPromptText"), TEXT(""), 17.0f, FLinearColor(0.90f, 0.96f, 1.0f, 1.0f), ETextJustify::Center);
 		InteractionPromptSlot = AddCanvasChild(
 			GameplayLayer,
@@ -1165,6 +1213,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 	ApplyLayerVisibility(PauseMenuLayer, false);
 	ApplyLayerVisibility(FuelToMoonPanel, false);
 	ApplyLayerVisibility(InventoryPanel, false);
+	ApplyLayerVisibility(StellarRow, false);
 	ApplyLayerVisibility(InteractionPromptText, false);
 	ApplyLayerVisibility(EquipmentHintText, false);
 	ApplyLayerVisibility(CrosshairText, false);
@@ -1433,6 +1482,7 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 	ApplyLayerVisibility(FlightTelemetryText, bSpaceFlight);
 	ApplyLayerVisibility(PlayerCardPanel, bGameplaySurface);
 	ApplyLayerVisibility(InventoryPanel, bGameplaySurface);
+	ApplyLayerVisibility(StellarRow, bGameplaySurface);
 	ApplyLayerVisibility(RightSidebarPanel, bGameplaySurface);
 	if (RightSidebarPanel != nullptr)
 	{
@@ -1798,12 +1848,13 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		? PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>() : nullptr;
 	const float PunchHitFeedback = IsValid(CrosshairMelee)
 		? CrosshairMelee->GetConfirmedPunchHitFeedbackAlpha() : 0.0f;
+	const auto* CrosshairStellar = PlayerCharacter ? PlayerCharacter->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
 	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
 		&& !bGameMenuOpen
 		&& PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded()
 		&& IsValid(CrosshairRanged)
-		&& CrosshairRanged->IsAiming();
+		&& (CrosshairRanged->IsAiming() || (CrosshairStellar && CrosshairStellar->HasActiveWeapon()));
 	const bool bShowPunchHit = !bGameMenuOpen && PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded() && PunchHitFeedback > 0.0f;
 	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming || bShowPunchHit);
@@ -1822,6 +1873,97 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 	}
 	// The quickbar and contextual interaction prompt already teach surface actions. A second
 	// persistent help line competes with the quickbar at narrower viewport sizes.
+	if (WeaponStatusText != nullptr && WeaponStatusBar != nullptr)
+	{
+		const auto* Stellar = PlayerCharacter ? PlayerCharacter->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+		const auto* Loadout = Stellar ? Stellar->GetLoadout() : nullptr;
+		const bool bStellarHud = Stellar && Stellar->HasActiveWeapon() && Loadout;
+		const bool bWeaponHud = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive) && !bGameMenuOpen
+			&& PlayerCharacter != nullptr && !PlayerCharacter->IsBoarded() && IsValid(CrosshairRanged)
+			&& (CrosshairRanged->HasActiveRangedWeapon() || bStellarHud);
+		FString StatusLabel;
+		float StatusPercent = 0.0f;
+		FLinearColor StatusColor = FLinearColor::White;
+		bool bStatusBar = false;
+		if (bWeaponHud)
+		{
+			if (bStellarHud)
+			{
+				StatusPercent = Loadout->GetEnergy() / 100.0f;
+				StatusLabel = FString::Printf(TEXT("星际能量 %.0f / 100   Tab 切换   1–9 普通"), Loadout->GetEnergy());
+				StatusColor = FLinearColor(0.65f,0.5f,1.0f);
+				bStatusBar = true;
+			}
+			else if (CrosshairRanged->UsesEnergy())
+			{
+				// Red until the bar climbs back past the resume point; only then can the weapon fire again.
+				const bool bLocked = CrosshairRanged->IsEnergyLocked();
+				StatusPercent = CrosshairRanged->GetEnergyFraction();
+				StatusLabel = bLocked ? TEXT("充能中…") : TEXT("能量");
+				StatusColor = bLocked ? FLinearColor(1.0f, 0.22f, 0.18f, 1.0f) : FLinearColor(0.35f, 0.82f, 1.0f, 1.0f);
+				bStatusBar = true;
+			}
+			else if (CrosshairRanged->UsesMagazine())
+			{
+				const int32 Ammo = CrosshairRanged->GetAmmo();
+				StatusLabel = FString::Printf(TEXT("%d / %d"), Ammo, CrosshairRanged->GetMagazineSize());
+				if (CrosshairRanged->IsReloading())
+				{
+					StatusPercent = CrosshairRanged->GetReloadProgress();
+					StatusColor = FLinearColor(1.0f, 0.78f, 0.22f, 1.0f);
+					bStatusBar = true;
+				}
+				else
+				{
+					StatusColor = Ammo <= FMath::Max(1, CrosshairRanged->GetMagazineSize() / 5)
+						? FLinearColor(1.0f, 0.46f, 0.26f, 1.0f) : FLinearColor(0.92f, 0.97f, 1.0f, 1.0f);
+				}
+			}
+		}
+		bool bStatusPositionVisible = bStellarHud;
+		auto* TextSlot = Cast<UCanvasPanelSlot>(WeaponStatusText->Slot);
+		auto* BarSlot = Cast<UCanvasPanelSlot>(WeaponStatusBar->Slot);
+		if (bStellarHud && TextSlot && BarSlot)
+		{
+			TextSlot->SetAnchors(FAnchors(1, 1)); TextSlot->SetAlignment(FVector2D(1, 1));
+			TextSlot->SetPosition(FVector2D(-44, -150)); TextSlot->SetSize(FVector2D(320, 36));
+			BarSlot->SetAnchors(FAnchors(1, 1)); BarSlot->SetAlignment(FVector2D(1, 1));
+			BarSlot->SetPosition(FVector2D(-44, -128)); BarSlot->SetSize(FVector2D(320, 14));
+			WeaponStatusText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 26));
+			WeaponStatusText->SetJustification(ETextJustify::Right);
+		}
+		else if (TextSlot && BarSlot && InventoryPanelSlot && PlayerCharacter)
+		{
+			const auto* Inventory = PlayerCharacter->GetInventoryComponent();
+			const int32 VisualIndex = Inventory ? Inventory->GetSelectedQuickbarSlot() - Inventory->GetQuickbarPageStart() : INDEX_NONE;
+			if (InventorySlotBorders.IsValidIndex(VisualIndex) && InventorySlotBorders[VisualIndex]->IsVisible())
+			{
+				const auto* CellSlot = Cast<UCanvasPanelSlot>(InventorySlotBorders[VisualIndex]->Slot);
+				if (CellSlot)
+				{
+					const FVector2D CellSize = CellSlot->GetSize();
+					const float Scale = CellSize.X / 96.0f;
+					const FVector2D BelowCell = InventoryPanelSlot->GetPosition() + CellSlot->GetPosition()
+						+ FVector2D(0, CellSize.Y + 8 * Scale);
+					TextSlot->SetAnchors(FAnchors(0, 0)); TextSlot->SetAlignment(FVector2D::ZeroVector);
+					TextSlot->SetPosition(BelowCell); TextSlot->SetSize(FVector2D(CellSize.X, 26 * Scale));
+					BarSlot->SetAnchors(FAnchors(0, 0)); BarSlot->SetAlignment(FVector2D::ZeroVector);
+					BarSlot->SetPosition(BelowCell + FVector2D(0, 27 * Scale)); BarSlot->SetSize(FVector2D(CellSize.X, 4 * Scale));
+					WeaponStatusText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 18 * Scale));
+					WeaponStatusText->SetJustification(ETextJustify::Center);
+					bStatusPositionVisible = true;
+				}
+			}
+		}
+		WeaponStatusText->SetToolTipText(FText::FromString(bStellarHud ? TEXT("星际能量")
+			: CrosshairRanged && CrosshairRanged->IsReloading() ? TEXT("换弹中") : TEXT("Z 主动换弹")));
+		WeaponStatusText->SetText(FText::FromString(StatusLabel));
+		WeaponStatusText->SetColorAndOpacity(FSlateColor(StatusColor));
+		ApplyLayerVisibility(WeaponStatusText, bWeaponHud && bStatusPositionVisible && !StatusLabel.IsEmpty());
+		WeaponStatusBar->SetPercent(StatusPercent);
+		WeaponStatusBar->SetFillColorAndOpacity(StatusColor);
+		ApplyLayerVisibility(WeaponStatusBar, bWeaponHud && bStatusPositionVisible && bStatusBar);
+	}
 	ApplyLayerVisibility(GameplayHelpText, false);
 
 	AJTSSpacecraftActor* const Spacecraft = FindSpacecraft();
@@ -1922,12 +2064,6 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 		? PlayerCharacter->GetInventoryComponent()
 		: nullptr;
 	const int32 InventoryCapacity = FMath::Max(1, IsValid(Inventory) ? Inventory->GetInventoryCapacity() : 1);
-	const int32 PageCount = IsValid(Inventory)
-		? Inventory->GetQuickbarPageCount()
-		: 1;
-	const int32 PageIndex = IsValid(Inventory)
-		? Inventory->GetQuickbarPageIndex()
-		: 0;
 	const int32 PageStart = IsValid(Inventory)
 		? Inventory->GetQuickbarPageStart()
 		: 0;
@@ -1942,54 +2078,52 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 		? &Inventory->GetItemSlots()
 		: nullptr;
 
-	int32 ViewportWidth = 1280;
-	int32 ViewportHeight = 720;
-	if (APlayerController* const PlayerController = GetOwningPlayer())
-	{
-		PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
-	}
-	const float PanelWidth = FMath::Clamp(static_cast<float>(ViewportWidth) * 0.78f, 360.0f, 920.0f);
-	const float SlotGap = 4.0f;
-	const float SlotWidth = (PanelWidth - 16.0f
-		- static_cast<float>(UJTSInventoryComponent::MaximumQuickbarSlots - 1) * SlotGap)
-		/ static_cast<float>(UJTSInventoryComponent::MaximumQuickbarSlots);
-	const float SlotHeight = 62.0f;
-	const float SlotRowWidth = static_cast<float>(VisibleSlotCount) * SlotWidth
-		+ static_cast<float>(FMath::Max(0, VisibleSlotCount - 1)) * SlotGap;
-	const float FirstSlotX = (PanelWidth - SlotRowWidth) * 0.5f;
+	const auto* PS = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
+	const auto* Loadout = PS ? PS->GetStellarLoadout() : nullptr;
+	const FVector2D StellarSize = SJTSStellarLoadoutView::LayoutSize(Loadout ? Loadout->GetAvailableSlots() : 9);
+	const auto Layout = FJTSGameUILayout::InventoryDock(GetViewportWidgetLocalSize(), VisibleSlotCount,
+		StellarSize, SJTSStellarLoadoutView::SlotCenter(0).Y);
 
 	if (InventoryPanelSlot != nullptr)
 	{
-		InventoryPanelSlot->SetSize(FVector2D(PanelWidth, 94.0f));
+		InventoryPanelSlot->SetPosition(Layout.InventoryPosition);
+		InventoryPanelSlot->SetSize(Layout.InventorySize);
 	}
-	if (InventoryTitleText != nullptr)
+	if (StellarRowSlot)
 	{
-		InventoryTitleText->SetText(FText::FromString(FString::Printf(
-			TEXT("QUICKBAR %d/%d  ·  UP/DOWN PAGE  ·  Q DROP  ·  HOLD Q DESTROY"),
-			PageIndex + 1,
-			PageCount)));
+		StellarRowSlot->SetPosition(Layout.StellarPosition);
+		StellarRowSlot->SetSize(StellarSize);
+		StellarRow->SetRenderScale(FVector2D(Layout.StellarScale));
+		StellarRow->SetRenderTransformPivot(FVector2D::ZeroVector);
 	}
+	const auto* PC = Cast<AJTSPlayerController>(GetOwningPlayer());
+	const bool bRejectStellarDrop = PC && PC->IsStellarItemDragging();
 
 	for (int32 VisualSlotIndex = 0; VisualSlotIndex < InventorySlotTexts.Num(); ++VisualSlotIndex)
 	{
 		const bool bSlotVisible = VisualSlotIndex < VisibleSlotCount;
 		const int32 InventorySlotIndex = PageStart + VisualSlotIndex;
-		const bool bSelected = bSlotVisible && InventorySlotIndex == SelectedSlotIndex;
+		const bool bSelected = bSlotVisible && (!Loadout || Loadout->GetActiveCoreSlot() == INDEX_NONE)
+			&& InventorySlotIndex == SelectedSlotIndex;
 		if (InventorySlotBorders.IsValidIndex(VisualSlotIndex) && InventorySlotBorders[VisualSlotIndex] != nullptr)
 		{
 			InventorySlotBorders[VisualSlotIndex]->SetVisibility(bSlotVisible
 				? ESlateVisibility::Visible
 				: ESlateVisibility::Collapsed);
-			InventorySlotBorders[VisualSlotIndex]->SetBrushColor(bSelected
-				? FLinearColor(0.12f, 0.56f, 0.67f, 0.99f)
-				: FLinearColor(0.08f, 0.15f, 0.22f, 0.96f));
-			InventorySlotBorders[VisualSlotIndex]->SetPadding(bSelected ? 1.5f : 3.0f);
+			InventorySlotBorders[VisualSlotIndex]->SetBrush(FSlateRoundedBoxBrush(
+				bRejectStellarDrop ? FLinearColor(0.08f, 0.08f, 0.08f, 0.70f)
+					: bSelected ? FLinearColor(0.07f, 0.27f, 0.34f, 0.40f) : FLinearColor(0.06f, 0.13f, 0.19f, 0.30f),
+				6.0f, bRejectStellarDrop ? FLinearColor(0.30f, 0.30f, 0.30f, 0.85f)
+					: bSelected ? FLinearColor(0.42f, 0.90f, 1.0f, 0.95f) : FLinearColor(0.38f, 0.70f, 0.82f, 0.65f), 1.0f));
+			InventorySlotBorders[VisualSlotIndex]->SetBrushColor(FLinearColor::White);
+			InventorySlotBorders[VisualSlotIndex]->SetPadding(FMargin(8, 10));
+			InventorySlotBorders[VisualSlotIndex]->SetClipping(EWidgetClipping::ClipToBounds);
 			if (UCanvasPanelSlot* const LayoutSlot = Cast<UCanvasPanelSlot>(InventorySlotBorders[VisualSlotIndex]->Slot))
 			{
 				LayoutSlot->SetPosition(FVector2D(
-					FirstSlotX + static_cast<float>(VisualSlotIndex) * (SlotWidth + SlotGap),
-					25.0f));
-				LayoutSlot->SetSize(FVector2D(SlotWidth, SlotHeight));
+					static_cast<float>(VisualSlotIndex) * (Layout.SlotWidth + Layout.SlotGap),
+					0.0f));
+				LayoutSlot->SetSize(FVector2D(Layout.SlotWidth, Layout.SlotHeight));
 			}
 		}
 
@@ -1999,20 +2133,23 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 				? (*Items)[InventorySlotIndex]
 				: FJTSItemInstance();
 			FString SlotLabel = Item.IsEmpty()
-				? TEXT("EMPTY")
+				? TEXT("空")
 				: (Item.CustomDisplayName.IsEmpty()
 					? UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString()
-					: Item.CustomDisplayName.ToString()).ToUpper();
+					: Item.CustomDisplayName.ToString());
 			if (!Item.IsEmpty() && Item.StackCount > 1)
 			{
 				SlotLabel += FString::Printf(TEXT(" x%d"), Item.StackCount);
 			}
 			InventorySlotTexts[VisualSlotIndex]->SetText(FText::FromString(
-				FString::Printf(TEXT("[%d] %s"), VisualSlotIndex + 1, *SlotLabel)));
+				FString::Printf(TEXT("%d\n%s"), VisualSlotIndex + 1, *SlotLabel)));
 			InventorySlotTexts[VisualSlotIndex]->SetFont(FCoreStyle::GetDefaultFontStyle(
-				FName(TEXT("Bold")),
-				SlotWidth < 64.0f ? 10.0f : 12.0f));
-			InventorySlotTexts[VisualSlotIndex]->SetColorAndOpacity(FSlateColor(bSelected
+				FName(TEXT("Bold")), 18.0f * Layout.StellarScale));
+			InventorySlotBorders[VisualSlotIndex]->SetToolTipText(FText::FromString(SlotLabel));
+			InventorySlotTexts[VisualSlotIndex]->SetAutoWrapText(false);
+			InventorySlotTexts[VisualSlotIndex]->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+			InventorySlotTexts[VisualSlotIndex]->SetColorAndOpacity(FSlateColor(bRejectStellarDrop
+				? FLinearColor(0.40f, 0.40f, 0.40f, 1.0f) : bSelected
 				? FLinearColor(0.88f, 1.0f, 1.0f, 1.0f)
 				: FLinearColor(0.78f, 0.84f, 0.90f, 1.0f)));
 		}
@@ -2073,10 +2210,6 @@ void UJTSPrototypeHUDWidget::RefreshEquipmentHint()
 				Hint = Inventory->IsWaistLampEquipped()
 					? FText::FromString(TEXT("[F] 关掉头灯"))
 					: FText::FromString(TEXT("[F] 打开头灯"));
-			}
-			else
-			{
-				Hint = FText::FromString(TEXT("坡脚按 W+空格 抓墙  跳跃落向陡坡时自动抓墙"));
 			}
 		}
 	}

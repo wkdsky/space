@@ -15,6 +15,9 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSStellarLootTable.h"
+#include "space/UI/JTSStellarAttachmentDialog.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/Core/JTSMapPaths.h"
@@ -249,13 +252,13 @@ void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecra
 	ClientReceiveShopPurchaseResult(Result);
 }
 
-void AJTSPlayerController::ServerRequestStellarRoll_Implementation(AJTSSpacecraftActor* Spacecraft)
+void AJTSPlayerController::ServerRequestStellarRoll_Implementation(AJTSSpacecraftActor* Spacecraft, FGuid RequestId)
 {
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	FName ItemId;
 	int32 SlotIndex = INDEX_NONE;
 	const EJTSStellarRollResult Result = IsValid(Spacecraft) && IsValid(ControlledCharacter)
-		? Spacecraft->TryRollStellarItem(ControlledCharacter, ItemId, SlotIndex)
+		? Spacecraft->TryRollStellarItem(ControlledCharacter, ItemId, SlotIndex, RequestId)
 		: EJTSStellarRollResult::NotAvailable;
 	ClientReceiveStellarRollResult(Result, ItemId, SlotIndex);
 }
@@ -288,6 +291,23 @@ void AJTSPlayerController::ServerMoveShipLockerSlot_Implementation(AJTSSpacecraf
 	int32 FromSlotIndex, FGuid ExpectedFromToken, int32 ToSlotIndex, FGuid ExpectedToToken)
 {
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const UJTSStellarLootTable* const Table = IsValid(Spacecraft) ? Spacecraft->GetStellarLootTable() : nullptr;
+	if (IsValid(State) && IsValid(Table))
+	{
+		const FJTSShipLockerSlot From = State->GetShipLockerSlot(FromSlotIndex);
+		const FJTSShipLockerSlot To = State->GetShipLockerSlot(ToSlotIndex);
+		const FJTSStellarLootEntry* const Firmware = Table->FindEntry(From.StellarItemId);
+		const FName CoreId = To.StellarCoreId.IsNone() ? To.StellarItemId : To.StellarCoreId;
+		const FJTSStellarLootEntry* const Core = Table->FindEntry(CoreId);
+		if (From.StandardItem.IsEmpty() && From.StellarCoreId.IsNone() && Firmware && Firmware->FirmwareUnits > 0
+			&& To.StandardItem.IsEmpty() && Core && Core->bCore)
+		{
+			const bool bUpgraded = Spacecraft->CanUseShipTerminal(GetPawn())
+				&& State->TryUpgradeStellarCore(ToSlotIndex, ExpectedToToken, Table, FromSlotIndex, ExpectedFromToken);
+			ClientReceiveStellarProgressionResult(true, bUpgraded);
+			return;
+		}
+	}
 	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
 		&& IsValid(State) && State->TryMoveShipLockerSlot(FromSlotIndex, ExpectedFromToken,
 			ToSlotIndex, ExpectedToToken);
@@ -312,6 +332,53 @@ void AJTSPlayerController::ServerCombineStellarSlots_Implementation(AJTSSpacecra
 void AJTSPlayerController::ClientReceiveStellarCombineResult_Implementation(bool bSucceeded)
 {
 	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyStellarCombineResult(bSucceeded);
+}
+
+void AJTSPlayerController::ServerApplyStellarPoints_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& Points)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+		&& IsValid(State) && State->TryApplyStellarPoints(SlotIndex, ExpectedToken, Points,
+			Spacecraft->GetStellarLootTable());
+	ClientReceiveStellarProgressionResult(false, bSucceeded);
+}
+
+void AJTSPlayerController::ServerUpgradeStellarCore_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 SlotIndex, FGuid ExpectedToken)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+		&& IsValid(State) && State->TryUpgradeStellarCore(SlotIndex, ExpectedToken,
+			Spacecraft->GetStellarLootTable());
+	ClientReceiveStellarProgressionResult(true, bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveStellarProgressionResult_Implementation(bool bUpgrade, bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyStellarProgressionResult(bUpgrade, bSucceeded);
+}
+
+void AJTSPlayerController::ServerApplyWeaponPoints_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& Points)
+{
+	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+		&& IsValid(State) && State->TryApplyWeaponPoints(SlotIndex, ExpectedToken, Points);
+	ClientReceiveWeaponUpgradeResult(false, bSucceeded);
+}
+
+void AJTSPlayerController::ServerUpgradeWeaponBody_Implementation(AJTSSpacecraftActor* Spacecraft,
+	int32 SlotIndex, FGuid ExpectedToken)
+{
+	const bool bSucceeded = IsValid(Spacecraft)
+		&& Spacecraft->TryUpgradeLockerWeapon(Cast<AJTSCharacter>(GetPawn()), SlotIndex, ExpectedToken);
+	ClientReceiveWeaponUpgradeResult(true, bSucceeded);
+}
+
+void AJTSPlayerController::ClientReceiveWeaponUpgradeResult_Implementation(bool bUpgrade, bool bSucceeded)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyWeaponUpgradeResult(bUpgrade, bSucceeded);
 }
 
 void AJTSPlayerController::ServerExchangeShipLockerWithCarriedSlot_Implementation(
@@ -376,6 +443,23 @@ void AJTSPlayerController::ServerRequestShopDebugResources_Implementation(AJTSSp
 	{
 		Spacecraft->TryGrantDebugResources(ControlledCharacter);
 	}
+}
+
+void AJTSPlayerController::ServerRequestDebugStellarItems_Implementation(AJTSSpacecraftActor* Spacecraft)
+{
+	const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	int32 AddedCount = 0;
+	int32 RequestedCount = 0;
+	const bool bAvailable = IsValid(GameState) && GameState->GetActiveSpacecraft() == Spacecraft
+		&& IsValid(Spacecraft) && IsValid(ControlledCharacter)
+		&& Spacecraft->TryGrantDebugStellarItems(ControlledCharacter, AddedCount, RequestedCount);
+	ClientReceiveDebugStellarItemsResult(bAvailable, AddedCount, RequestedCount);
+}
+
+void AJTSPlayerController::ClientReceiveDebugStellarItemsResult_Implementation(bool bAvailable, int32 AddedCount, int32 RequestedCount)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyDebugStellarItemsResult(bAvailable, AddedCount, RequestedCount);
 }
 
 void AJTSPlayerController::ServerRequestDebugAbilityLevels_Implementation(AJTSSpacecraftActor* Spacecraft)
@@ -490,6 +574,12 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 {
 	if (!IsLocalController())
 	{
+		return;
+	}
+	if (IsStellarItemDialogOpen()) { ApplyModalUIInputMode(StellarItemDialog.Get()); return; }
+	if (bInventoryArrangementMode)
+	{
+		if (auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD())) ApplyModalUIInputMode(Hud->GetPrototypeWidget());
 		return;
 	}
 	if (IsInventoryQuantityDialogOpen())
@@ -697,6 +787,7 @@ void AJTSPlayerController::OpenSpaceShop(AJTSSpacecraftActor* Spacecraft)
 
 void AJTSPlayerController::CloseSpaceShop()
 {
+	if (StellarItemDialog.IsValid()) StellarItemDialog->CloseDialog();
 	if (IsValid(SpaceShopWidget))
 	{
 		SpaceShopWidget->CloseShop();
@@ -717,6 +808,50 @@ void AJTSPlayerController::CloseSpaceShop()
 	}
 }
 
+void AJTSPlayerController::OpenStellarItemDialog(UJTSStellarAttachmentDialog* Dialog)
+{
+	if (!IsLocalController() || !Dialog) return;
+	StellarItemDialog = Dialog;
+	Dialog->OnDialogClosed.BindUObject(this, &ThisClass::HandleStellarItemDialogClosed);
+	ApplyModalUIInputMode(Dialog);
+}
+void AJTSPlayerController::HandleStellarItemDialogClosed()
+{
+	StellarItemDialog.Reset();
+	if (IsSpaceShopOpen()) ApplyModalUIInputMode(SpaceShopWidget);
+	else RestoreGameplayInputAfterModal();
+}
+bool AJTSPlayerController::IsStellarItemDialogOpen() const
+{
+	return StellarItemDialog.IsValid() && StellarItemDialog->IsDialogOpen();
+}
+
+void AJTSPlayerController::SetInventoryArrangementMode(bool bEnabled)
+{
+	if (!IsLocalController() || (bEnabled && (!IsNormalGameplayPhase() || IsGameMenuOpen()
+		|| IsSpaceShopOpen() || IsMoonShopOpen() || IsStellarItemDialogOpen() || IsInventoryQuantityDialogOpen()
+		|| !Cast<AJTSCharacter>(GetPawn())))) return;
+	const auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD());
+	auto* Widget = Hud ? Hud->GetPrototypeWidget() : nullptr;
+	if (bEnabled && !Widget) return;
+	bInventoryArrangementMode = bEnabled;
+	if (bEnabled) ApplyModalUIInputMode(Widget);
+	else
+	{
+		if (Widget) Widget->UpdateInventoryDragPreview(FVector2D::ZeroVector, FString(), false);
+		RestoreGameplayInputAfterModal();
+	}
+}
+void AJTSPlayerController::DropStellarItemInSpaceShop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId)
+{
+	if (IsSpaceShopOpen()) SpaceShopWidget->HandleStellarItemDrop(ScreenPosition, StellarIndex, ExpectedId);
+}
+int32 AJTSPlayerController::GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const
+{
+	const auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD());
+	return Hud && Hud->GetPrototypeWidget() ? Hud->GetPrototypeWidget()->GetStellarSlotAtScreenPosition(ScreenPosition) : INDEX_NONE;
+}
+
 bool AJTSPlayerController::IsSpaceShopOpen() const
 {
 	return IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen();
@@ -726,11 +861,20 @@ void AJTSPlayerController::UpdateShipCarriedDragPreview(const FVector2D& ScreenP
 	const FString& ItemLabel, bool bVisible)
 {
 	if (IsSpaceShopOpen()) SpaceShopWidget->UpdateCarriedDragPreview(ScreenPosition, ItemLabel, bVisible);
+	else if (const auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD()))
+		if (auto* Widget = Hud->GetPrototypeWidget()) Widget->UpdateInventoryDragPreview(ScreenPosition, ItemLabel, bVisible);
 }
 
 void AJTSPlayerController::DropCarriedItemInSpaceShop(const FVector2D& ScreenPosition,
 	int32 CarriedSlotIndex, FGuid ExpectedInstanceId)
 {
+	const int32 Index = GetStellarSlotAtScreenPosition(ScreenPosition);
+	if (Index != INDEX_NONE)
+	{
+		if (auto* PS = GetPlayerState<AJTSPlayerState>())
+			PS->GetStellarLoadout()->ServerExchangeInventory(CarriedSlotIndex, ExpectedInstanceId, Index, PS->GetStellarLoadout()->GetSlot(Index).InstanceId);
+		return;
+	}
 	if (IsSpaceShopOpen()) SpaceShopWidget->HandleCarriedItemDrop(ScreenPosition, CarriedSlotIndex, ExpectedInstanceId);
 }
 
@@ -822,6 +966,7 @@ void AJTSPlayerController::OpenGameMenu()
 		CloseSpaceShop();
 		return;
 	}
+	if (IsStellarItemDialogOpen()) { ApplyModalUIInputMode(StellarItemDialog.Get()); return; }
 	if (IsInventoryQuantityDialogOpen())
 	{
 		CloseInventoryQuantityDialog();
@@ -888,6 +1033,12 @@ void AJTSPlayerController::RestoreGameplayInputAfterModal()
 
 bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (Params.Event == IE_Pressed && Params.Key == EKeys::I && IsNormalGameplayPhase()
+		&& !IsGameMenuOpen() && !IsSpaceShopOpen() && !IsMoonShopOpen() && !IsStellarItemDialogOpen())
+	{
+		SetInventoryArrangementMode(!bInventoryArrangementMode);
+		return true;
+	}
 	if (Params.Event == IE_Pressed && Params.Key == EKeys::Escape)
 	{
 		if (IsInventoryQuantityDialogOpen())
@@ -1041,6 +1192,7 @@ void AJTSPlayerController::ApplyInputModeForPhase(EJTSGameplayPhase GameplayPhas
 	{
 		return;
 	}
+	if (IsStellarItemDialogOpen()) { ApplyModalUIInputMode(StellarItemDialog.Get()); return; }
 	if (IsInventoryQuantityDialogOpen())
 	{
 		ApplyModalUIInputMode(InventoryQuantityDialog);

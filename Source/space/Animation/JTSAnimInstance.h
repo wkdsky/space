@@ -100,6 +100,14 @@ protected:
 	bool bHasHeldItem = false;
 
 	bool bActiveRangedWeapon = false;
+	bool bStellarScepterHeld = false;
+	float StellarCastAlpha = 0.0f;
+	/** Asset-specific scepter poses; pitch is measured above the character's local forward. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Stellar|Pose") float StellarCarryUpperArmDegrees = -60.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Stellar|Pose") float StellarCarryForearmDegrees = -5.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Stellar|Pose") float StellarCastUpperArmDegrees = 85.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Stellar|Pose") float StellarCastForearmDegrees = 85.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Stellar|Pose", meta=(ClampMin="1")) float StellarPoseBlendSpeed = 14.0f;
 
 	/** Held item that uses the present-arms pose (knife, axe, pickaxe). */
 	bool bMeleeHeld = false;

@@ -11,6 +11,7 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSWeaponProgression.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
@@ -354,7 +355,7 @@ bool AJTSMoonResourceActor::ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutI
 		return false;
 	}
 	OutItemId = ActiveItem.ItemId;
-	OutWork = Definition->MiningWork;
+	OutWork = FJTSWeaponProgression::Resolve(ActiveItem).ScaleDamage(Definition->MiningWork);
 	return true;
 }
 
