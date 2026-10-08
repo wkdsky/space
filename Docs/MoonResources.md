@@ -30,6 +30,8 @@
 
 此标记修正涉及 `JTSPrototypeHUDWidget.cpp`、`JTSMoonResourceActor.h/.cpp`、`JTSWorldPickupActor.cpp` 和现有 `JTSSurfacePlacementBounds.h/.cpp`。`JTSMoonResourceTests.cpp` 增加任意径向方向、模型偏移和 BoundsScale 下的顶部中心回归检查。
 
+2026-10-08 标记修正验证：`spaceEditor Win64 Development` 编译成功；`JTS.Moon.Resources.AuthoredMeshAndCollision` 和 `JTS.Moon.Resources.MixedMiningYield` 均通过（采矿测试保留既有的动力战锤 Data Asset 缺失警告，使用默认定义）。Unreal MCP 的实际 `L_SpaceWorld` PIE 已逐一查看五类资源，确认单行标记位于模型顶部中心。截图位于 `Saved/MoonPromptMixed.png`、`Saved/MoonPromptMediumRock.png`、`Saved/MoonPromptLargeRock.png`、`Saved/MoonPromptLargeMetalRock.png` 和 `Saved/MoonPromptSmallRock.png`；测试响应保存于 `Saved/moon_prompt_tests.json`。验证用玩家位置和相机调整仅应用于独立 PIE 会话，未保存关卡。
+
 资产已经保存，无需重新设置。在 `L_SpaceWorld` 启动 PIE，前往月球资源区即可验证。小石头直接拾取；其余四类使用当前可用的采矿武器，例如动力战锤，混合矿同时产出石头与金属。
 
 调节入口：

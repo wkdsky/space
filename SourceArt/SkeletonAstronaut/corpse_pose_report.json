@@ -1,0 +1,43 @@
+{
+  "vertices": 3256,
+  "triangles": 5534,
+  "dimensions_m": [
+    0.9733827114105225,
+    2.0850934982299805,
+    0.6457204818725586
+  ],
+  "materials": [
+    "M_SA_SuitIvory",
+    "M_SA_Graphite",
+    "M_SA_Orange",
+    "M_SA_Bone",
+    "M_SA_Socket",
+    "M_SA_Cyan",
+    "M_SA_Metal"
+  ],
+  "minimum_z_m": 0.0,
+  "pivot": "XY visual center, Z lowest point",
+  "pose": "Supine, relaxed asymmetric arms and legs",
+  "support_regions": {
+    "left_boot": {
+      "minimum_z_m": 0.008143335580825806,
+      "vertex_count": 113
+    },
+    "right_boot": {
+      "minimum_z_m": 0.007707446813583374,
+      "vertex_count": 113
+    },
+    "pelvis": {
+      "minimum_z_m": 0.016593724489212036,
+      "vertex_count": 16
+    },
+    "head": {
+      "minimum_z_m": 0.013619571924209595,
+      "vertex_count": 911
+    },
+    "back": {
+      "minimum_z_m": 0.004753530025482178,
+      "vertex_count": 126
+    }
+  }
+}

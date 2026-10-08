@@ -1,0 +1,32 @@
+{
+  "vertices": 3256,
+  "triangles": 5534,
+  "bones": 80,
+  "unweighted_vertices": 0,
+  "dimensions_m": [
+    1.6078200340270996,
+    0.6340864896774292,
+    2.102802276611328
+  ],
+  "material_slots": [
+    "M_SA_SuitIvory",
+    "M_SA_Graphite",
+    "M_SA_Orange",
+    "M_SA_Bone",
+    "M_SA_Socket",
+    "M_SA_Cyan",
+    "M_SA_Metal"
+  ],
+  "boot_dimensions_m": {
+    "L": [
+      0.11812163889408112,
+      0.27275942638516426,
+      0.12147132121026516
+    ],
+    "R": [
+      0.11812162399291992,
+      0.27275942638516426,
+      0.12147132121026516
+    ]
+  }
+}

@@ -72,7 +72,7 @@ public:
 	virtual void RegisterSurfaceRuntimeActor(AActor* RuntimeActor) override;
 	TArray<AJTSCharacter*> GetActivePlayers() const;
 
-	/** Spawns the one real-mesh Moon corpse at an explicitly authored surface anchor. It never initializes MoonAnts or resources. */
+	/** Reuses the placed corpse or spawns one at its authored surface anchor. It never initializes MoonAnts or resources. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Real Surface")
 	AJTSMoonCorpseActor* SpawnCorpseAtPlanetSurfaceAnchor(AJTSPlanetSurfaceAnchor* InCorpseSurfaceAnchor);
 
@@ -137,6 +137,10 @@ private:
 	/** An authored anchor determines the real-surface corpse placement. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSPlanetSurfaceAnchor> CorpseSurfaceAnchor;
+
+	/** Optional level-authored corpse. Reused instead of spawning a second overlapping landmark. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSMoonCorpseActor> PlacedCorpseLandmark;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;

@@ -1,0 +1,31 @@
+{
+  "license": "CC0-1.0",
+  "downloaded_on": "2026-10-08",
+  "sources": [
+    {
+      "file": "Skeleton_Warrior.glb",
+      "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0/main/addons/kaykit_character_pack_skeletons/Characters/gltf/Skeleton_Warrior.glb",
+      "sha256": "178b6fda810b814c250d8a2010c24dfd9b458b9006dd323353e620b7ff118bbe"
+    },
+    {
+      "file": "Astronaut_RaeTheRedPanda.blend",
+      "url": "https://drive.usercontent.google.com/download?id=1rlsFDUgALSjeXdL5lGvLLABK_Cb6nLs4&export=download",
+      "sha256": "1ea0be81c1bc5215f1761095fb210f4b0b50e39975aa7b2c0abcdc69552d165c"
+    },
+    {
+      "file": "Atlas.png",
+      "url": "https://drive.usercontent.google.com/download?id=1Wo82Sbrl8Ql67XpBAwrsCH62MtFMeId3&export=download",
+      "sha256": "516cefca3254dff7655d7cde0af2a21723f1354172ba2436fd748bb0f038a81a"
+    },
+    {
+      "file": "LICENSE_KayKit.txt",
+      "url": "https://raw.githubusercontent.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0/main/LICENSE.txt",
+      "sha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954"
+    },
+    {
+      "file": "LICENSE_Quaternius.txt",
+      "url": "https://drive.usercontent.google.com/download?id=1WmpH3wsL_759gtn2JQTsz0v4eyG0bK-Z&export=download",
+      "sha256": "de990ef6fc68cffd7fd1ae342c4d0c823b541b8848d8f76bca5d3339f4de6f6e"
+    }
+  ]
+}

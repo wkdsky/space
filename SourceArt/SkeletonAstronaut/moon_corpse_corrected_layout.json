@@ -1,0 +1,39 @@
+{
+  "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonSkeletonAstronautCorpse_C_0",
+  "class": "/Game/Space/Blueprints/Planets/Moon/BP_MoonSkeletonAstronautCorpse.BP_MoonSkeletonAstronautCorpse_C",
+  "location": [
+    51556.30207177071,
+    102552.22739744601,
+    18983.500614071632
+  ],
+  "surface_location": [
+    51556.349981233434,
+    102551.935546875,
+    18983.45033550035
+  ],
+  "root_clearance_cm": 0.30000001191351133,
+  "alignment_dot": 1.0000000000000013,
+  "surface_placement": true,
+  "replicates": true,
+  "components": [
+    "SceneRoot",
+    "CorpseMesh"
+  ],
+  "mesh": "/Game/Space/Characters/SkeletonAstronaut/SM_SkeletonAstronaut_Corpse.SM_SkeletonAstronaut_Corpse",
+  "materials": [
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_SuitIvory.MI_SA_SuitIvory",
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_Graphite.MI_SA_Graphite",
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_Orange.MI_SA_Orange",
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_Bone.MI_SA_Bone",
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_Cyan.MI_SA_Cyan",
+    "/Game/Space/Characters/SkeletonAstronaut/Materials/MI_SA_Metal.MI_SA_Metal"
+  ],
+  "crater_center_world": [
+    51556.6337911716,
+    102543.93525123596,
+    18982.822388519617
+  ],
+  "nest_data": "/Game/Space/Data/Planets/Moon/PDA_MoonSurfaceGameplay.PDA_MoonSurfaceGameplay",
+  "nest_outer_radius_cm": 600.0,
+  "nest_count": 5
+}

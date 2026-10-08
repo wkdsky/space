@@ -1,0 +1,73 @@
+{
+  "anchor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.JTSPlanetSurfaceAnchor_0",
+  "anchor_transform": {
+    "location": [
+      50239.542587486794,
+      101867.12262913372,
+      21702.995012566484
+    ],
+    "rotation_xyzw": [
+      -0.6215181337222001,
+      -0.05194936981105928,
+      0.1142144492506878,
+      0.773286190238174
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "anchor_mesh_local": [
+    -43.05090088379543,
+    144.72100767236248,
+    25.432764688557146
+  ],
+  "resolved_surface_transform": {
+    "location": [
+      50242.363598615135,
+      101848.1025390625,
+      21697.058841338032
+    ],
+    "rotation_xyzw": [
+      -0.6215181413919098,
+      -0.05194937281306018,
+      0.11421445018754252,
+      0.7732861837337023
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "planet": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.JTSPlanetAnchor_1",
+  "planet_location": [
+    52000.0,
+    90000.0,
+    18000.0
+  ],
+  "planet_mesh": "/Game/ThirdParty/Environment/UltimateSpace/Meshes/Planet_3.Planet_3",
+  "planet_mesh_transform": {
+    "location": [
+      52000.0,
+      90000.0,
+      18000.0
+    ],
+    "rotation_xyzw": [
+      -0.0,
+      0.29237170472273677,
+      0.0,
+      0.9563047559630355
+    ],
+    "scale": [
+      82.0,
+      82.0,
+      82.0
+    ]
+  },
+  "controller": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonSurfaceController_C_1",
+  "controller_anchor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.JTSPlanetSurfaceAnchor_0",
+  "controller_corpse_class": "/Script/space.JTSMoonCorpseActor",
+  "corpse_actors": []
+}

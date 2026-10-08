@@ -254,6 +254,20 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnCorpseAtPlanetSurfaceAnchor
 		return nullptr;
 	}
 
+	if (IsValid(PlacedCorpseLandmark))
+	{
+		if (PlacedCorpseLandmark->GetWorld() != World
+			|| PlacedCorpseLandmark->GetLevel() != GetLevel()
+			|| !PlacedCorpseLandmark->SnapToPlanetSurfaceAnchor(InCorpseSurfaceAnchor))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s could not reuse its placed corpse landmark."), *GetName());
+			return nullptr;
+		}
+		RealSurfaceMoonCorpse = PlacedCorpseLandmark;
+		RegisterSurfaceRuntimeActor(PlacedCorpseLandmark);
+		return PlacedCorpseLandmark;
+	}
+
 	TSubclassOf<AJTSMoonCorpseActor> CorpseClass = MoonCorpseClass;
 	if (CorpseClass == nullptr)
 	{

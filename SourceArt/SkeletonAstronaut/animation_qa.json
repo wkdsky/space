@@ -1,0 +1,57 @@
+[
+  {
+    "clip": "Idle_Neutral",
+    "frame": 12.73,
+    "dimensions_m": [
+      0.6838663816452026,
+      0.6419535875320435,
+      2.0918478965759277
+    ],
+    "rest_matrix_max_error": 9.305775165557861e-06,
+    "image": "Preview_Idle_Neutral.png"
+  },
+  {
+    "clip": "Walk",
+    "frame": 10.43,
+    "dimensions_m": [
+      0.6844493746757507,
+      0.6418294906616211,
+      2.06123948097229
+    ],
+    "rest_matrix_max_error": 9.305775165557861e-06,
+    "image": "Preview_Walk.png"
+  },
+  {
+    "clip": "Run",
+    "frame": 6.75,
+    "dimensions_m": [
+      0.656097412109375,
+      0.9422883987426758,
+      2.018054723739624
+    ],
+    "rest_matrix_max_error": 9.305775165557861e-06,
+    "image": "Preview_Run.png"
+  },
+  {
+    "clip": "Punch_Left",
+    "frame": 13.48,
+    "dimensions_m": [
+      0.7525839805603027,
+      0.8510619401931763,
+      1.9736119508743286
+    ],
+    "rest_matrix_max_error": 9.305775165557861e-06,
+    "image": "Preview_Punch_Left.png"
+  },
+  {
+    "clip": "Punch_Right",
+    "frame": 13.48,
+    "dimensions_m": [
+      0.7526452541351318,
+      0.8508796691894531,
+      1.973758339881897
+    ],
+    "rest_matrix_max_error": 9.305775165557861e-06,
+    "image": "Preview_Punch_Right.png"
+  }
+]

@@ -1,0 +1,59 @@
+{
+  "corpse_count": 1,
+  "surface_gameplay_initialized": true,
+  "nest_count": 5,
+  "configured_outer_radius_cm": 600.0,
+  "observed_live_ant_count": 10,
+  "nests": [
+    {
+      "actor": "BP_MoonAntNest_C_0",
+      "location_cm": [
+        51796.5245263131,
+        102606.71041820839,
+        18819.82973887909
+      ],
+      "distance_from_corpse_cm": 295.74184774246993,
+      "owner_is_corpse": true
+    },
+    {
+      "actor": "BP_MoonAntNest_C_1",
+      "location_cm": [
+        51342.61504594465,
+        102526.64726507409,
+        18997.72479811494
+      ],
+      "distance_from_corpse_cm": 215.6823887767187,
+      "owner_is_corpse": true
+    },
+    {
+      "actor": "BP_MoonAntNest_C_2",
+      "location_cm": [
+        51650.77253818708,
+        102521.15937163813,
+        19175.793085415746
+      ],
+      "distance_from_corpse_cm": 216.48631818022395,
+      "owner_is_corpse": true
+    },
+    {
+      "actor": "BP_MoonAntNest_C_3",
+      "location_cm": [
+        51447.330302024755,
+        102483.63890298958,
+        19318.05620028648
+      ],
+      "distance_from_corpse_cm": 358.4784935252724,
+      "owner_is_corpse": true
+    },
+    {
+      "actor": "BP_MoonAntNest_C_4",
+      "location_cm": [
+        51542.04244136546,
+        102613.93608399341,
+        18680.755296034793
+      ],
+      "distance_from_corpse_cm": 309.2990755664531,
+      "owner_is_corpse": true
+    }
+  ]
+}

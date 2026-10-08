@@ -1,0 +1,43 @@
+{
+  "skeleton": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2_Skeleton.Casual_2_Skeleton",
+  "player_blueprint": "/Game/Space/Blueprints/Player/BP_JTSPlayer_SkeletonAstronaut.BP_JTSPlayer_SkeletonAstronaut",
+  "animation_blueprint": "/Game/Space/Blueprints/Player/Animations/ABP_JTSPlayer_Casual_2.ABP_JTSPlayer_Casual_2_C",
+  "physics_asset": "/Game/Space/Characters/SkeletonAstronaut/SK_SkeletonAstronaut_PhysicsAsset.SK_SkeletonAstronaut_PhysicsAsset",
+  "mesh": "/Game/Space/Characters/SkeletonAstronaut/SK_SkeletonAstronaut.SK_SkeletonAstronaut",
+  "checks": [
+    "same skeleton asset",
+    "player mesh configured",
+    "existing animation blueprint reused",
+    "no old material overrides",
+    "physics assigned",
+    "all materials assigned",
+    "five player animation skeletons match"
+  ],
+  "animations": [
+    {
+      "name": "Idle_Neutral",
+      "asset": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2CharacterArmature_Idle_Neutral",
+      "duration": 1.6666666269302368
+    },
+    {
+      "name": "Walk",
+      "asset": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2CharacterArmature_Walk",
+      "duration": 1.3333333730697632
+    },
+    {
+      "name": "Run",
+      "asset": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2CharacterArmature_Run",
+      "duration": 0.800000011920929
+    },
+    {
+      "name": "Punch_Left",
+      "asset": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2CharacterArmature_Punch_Left",
+      "duration": 0.8333333134651184
+    },
+    {
+      "name": "Punch_Right",
+      "asset": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2CharacterArmature_Punch_Right",
+      "duration": 0.8333333134651184
+    }
+  ]
+}

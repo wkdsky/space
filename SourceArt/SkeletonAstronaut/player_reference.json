@@ -1,0 +1,19 @@
+{
+  "mesh": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2.Casual_2",
+  "skeleton": "/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Casual_2_Skeleton.Casual_2_Skeleton",
+  "relative_location": "<Struct 'Vector' (0x000002AC7ECA6580) {x: 0.000000, y: 0.000000, z: -98.000000}>",
+  "relative_rotation": "<Struct 'Rotator' (0x000002AC7ECA6598) {pitch: 0.000000, yaw: -90.000000, roll: 0.000000}>",
+  "relative_scale": "<Struct 'Vector' (0x000002AC7ECA65B0) {x: 1.000000, y: 1.000000, z: 1.000000}>",
+  "anim_class": "<Object '/Game/Space/Blueprints/Player/Animations/ABP_JTSPlayer_Casual_2.ABP_JTSPlayer_Casual_2_C' (0x000002AC931F0E00) Class 'AnimBlueprintGeneratedClass'>",
+  "materials": [
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Red_Dark.Red_Dark' (0x000002AC93655800) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/White.White' (0x000002AC93656800) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Skin.Skin' (0x000002AC93655000) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/LightBrown.LightBrown' (0x000002AC93654800) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Skin_Darker.Skin_Darker' (0x000002AC93656000) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Eyebrows.Eyebrows' (0x000002AC93653800) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Hair.Hair' (0x000002AC93653000) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/Eye.Eye' (0x000002AC93652000) Class 'MaterialInstanceConstant'>",
+    "<Object '/Game/ThirdParty/Player/UltimateModularMen/Casual_2/Mesh/LightBlue.LightBlue' (0x000002AC93654000) Class 'MaterialInstanceConstant'>"
+  ]
+}

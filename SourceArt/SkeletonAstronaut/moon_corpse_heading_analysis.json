@@ -1,0 +1,27 @@
+{
+  "nearby_triangle_count": 3,
+  "current": {
+    "local_heading_delta_degrees": 0,
+    "minimum_gap_cm": 0.30013723465839937,
+    "region_contacts_cm": {
+      "head": 7.607018296037536,
+      "back": 2.770116142184616,
+      "pelvis": 0.7840147926360185,
+      "left_boot": 0.30013723465839937,
+      "right_boot": 0.3326342974889315
+    },
+    "worst_contact_cm": 7.607018296037536
+  },
+  "best": {
+    "local_heading_delta_degrees": 145,
+    "minimum_gap_cm": 0.3326343945432705,
+    "region_contacts_cm": {
+      "head": 1.989894635428055,
+      "back": 1.2669135311309385,
+      "pelvis": 0.7754911030567397,
+      "left_boot": 1.319875511094796,
+      "right_boot": 0.3326343945432705
+    },
+    "worst_contact_cm": 1.989894635428055
+  }
+}
