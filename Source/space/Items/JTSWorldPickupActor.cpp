@@ -597,22 +597,11 @@ FVector AJTSWorldPickupActor::GetInteractionAnchorWorldLocation() const
 {
 	if (IsValid(PickupMesh) && PickupMesh->IsRegistered())
 	{
-		if (bUsesRealPlanetSurface)
+		FVector TopCenter;
+		if (JTSSurfacePlacementBounds::GetVisualTopCenter(PickupMesh, SurfaceUp, 22.0f, TopCenter))
 		{
-			FJTSSurfaceVisualProjectionBounds VisualBounds;
-			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-				PickupMesh,
-				GetActorLocation(),
-				SurfaceUp,
-				VisualBounds))
-			{
-				return VisualBounds.HighestPoint + SurfaceUp * 22.0f;
-			}
+			return TopCenter;
 		}
-
-		const float BoundsScale = FMath::Max(FMath::Abs(PickupMesh->BoundsScale), KINDA_SMALL_NUMBER);
-		const FVector PhysicalExtent = PickupMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		return PickupMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 22.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 70.0f;
@@ -808,7 +797,19 @@ FText AJTSWorldPickupActor::GetInteractionPrompt_Implementation(APawn* Interacti
 	}
 
 	const FText FailureFeedback = GetFailureFeedback();
-	return FailureFeedback.IsEmpty() ? FText::FromString(TEXT("[E] PICK UP")) : FailureFeedback;
+	if (!FailureFeedback.IsEmpty())
+	{
+		return FailureFeedback;
+	}
+	if (ItemInstance.ItemId == EJTSItemId::Rock)
+	{
+		return FText::FromString(TEXT("[E] Rocks"));
+	}
+	if (ItemInstance.ItemId == EJTSItemId::Ore)
+	{
+		return FText::FromString(TEXT("[E] Metal"));
+	}
+	return FText::FromString(TEXT("[E] PICK UP"));
 }
 
 void AJTSWorldPickupActor::Interact_Implementation(APawn* InteractingPawn)
@@ -1144,6 +1145,28 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		return;
 	}
 
+	const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this,
+		ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId);
+	if (Definition && IsValid(Definition->WorldPickupMesh))
+	{
+		UStaticMesh* const Mesh = Definition->WorldPickupMesh.Get();
+		if (PickupMesh->GetStaticMesh() != Mesh)
+		{
+			PickupMesh->SetStaticMesh(Mesh);
+		}
+		PickupMesh->EmptyOverrideMaterials();
+		PickupMaterial = nullptr;
+		AppliedPresentationMaterial = nullptr;
+		const FBox Bounds = Mesh->GetBoundingBox();
+		const float Scale = FMath::Max(1.0f, Definition->WorldPickupWidth) / FMath::Max(1.0f, Bounds.GetSize().GetAbs().GetMax());
+		PickupMesh->SetRelativeScale3D(FVector(Scale));
+		PickupMesh->SetRelativeLocation(-Bounds.GetCenter() * Scale);
+		PickupMesh->SetHiddenInGame(false);
+		PickupMesh->SetVisibility(true, true);
+		PickupMesh->UpdateBounds();
+		return;
+	}
+	PickupMesh->SetRelativeLocation(FVector::ZeroVector);
 	UStaticMesh* DesiredMesh = RockMesh.Get();
 	FVector DesiredScale(0.32f);
 	if (ItemType == EJTSWorldPickupItemType::Ore)
@@ -1232,6 +1255,12 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 	}
 
 	ConfigureAppearance();
+	if (const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this,
+		ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId);
+		Definition && IsValid(Definition->WorldPickupMesh))
+	{
+		return;
+	}
 	ApplySurfacePresentationMaterial();
 	PickupMesh->SetHiddenInGame(false);
 	PickupMesh->SetVisibility(true, true);

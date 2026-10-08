@@ -164,13 +164,13 @@ protected:
 	/** 0 on the ground, rises while airborne so the jump tuck can play out and then release. */
 	float JumpTuckAlpha = 0.0f;
 
-	/** Keeps the thighs hanging below the pelvis during a jump. */
+	/** How far the thighs drop toward the ground. 0 lifts them to horizontal at full tuck. */
 	UPROPERTY(EditDefaultsOnly, Category = "Jump|Style", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float JumpThighDownBias = 0.90f;
+	float JumpThighDownBias = 0.15f;
 
-	/** A modest knee bend; the shin must never fold back above the pelvis. */
-	UPROPERTY(EditDefaultsOnly, Category = "Jump|Style", meta = (ClampMin = "20.0", ClampMax = "90.0"))
-	float JumpShinFoldDegrees = 55.0f;
+	/** Knee fold for a full tuck. Casual_2's rest shin already points down, so this is the extra bend. */
+	UPROPERTY(EditDefaultsOnly, Category = "Jump|Style", meta = (ClampMin = "20.0", ClampMax = "170.0"))
+	float JumpShinFoldDegrees = 150.0f;
 
 	/** Seconds spent in the current fall, used to fold the legs and then open them again. */
 	float AirTime = 0.0f;

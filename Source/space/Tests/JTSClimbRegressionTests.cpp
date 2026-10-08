@@ -1128,6 +1128,36 @@ bool FJTSStaminaCriticalClimbGateRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSClimbFaceMustClearHeadRegression,
+	"JTS.Character.ClimbFaceMustClearStandingHead",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSClimbFaceMustClearHeadRegression::RunTest(const FString& Parameters)
+{
+	FClimbTestWorld Fixture;
+	if (!TestNotNull(TEXT("Character spawns"), Fixture.Character)) return false;
+	UJTSWallClimbComponent* Climb = Fixture.Character->FindComponentByClass<UJTSWallClimbComponent>();
+	if (!TestNotNull(TEXT("Climb exists"), Climb) || !TestNotNull(TEXT("Test wall exists"), Fixture.Wall)) return false;
+
+	// A chest-high block is a step, not a wall. Its face blocks visibility the same way a cube enemy does.
+	Fixture.Wall->SetActorScale3D(FVector(0.9f, 0.9f, 0.9f));
+	Fixture.Wall->SetActorLocation(FVector(130.0f, 0.0f, 45.0f));
+	Fixture.Character->SetActorLocation(FVector(0.0f, 0.0f, 110.0f));
+	Climb->TryAutoAttach();
+	TestFalse(TEXT("A face below the standing capsule refuses a grab"), Climb->IsClimbing());
+	Fixture.Advance(0.25f);
+	Climb->ToggleAttach();
+	TestFalse(TEXT("The climb shortcut also refuses a face below the head"), Climb->IsClimbing());
+	Fixture.Advance(0.4f);
+
+	const float HalfHeight = Fixture.Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	Fixture.Wall->SetActorScale3D(FVector(0.9f, 0.9f, (HalfHeight * 2.0f + 80.0f) / 100.0f));
+	Fixture.Wall->SetActorLocation(FVector(130.0f, 0.0f, Fixture.Wall->GetActorScale3D().Z * 50.0f));
+	Climb->TryAutoAttach();
+	TestTrue(TEXT("The same block accepts a grab once its face clears the standing head"), Climb->IsClimbing());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSDualPistolsNoClimbCapabilityRegression,
 	"JTS.Items.NormalWeaponsRangedOnly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

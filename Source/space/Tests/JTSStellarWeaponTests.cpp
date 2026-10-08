@@ -11,6 +11,8 @@
 #include "EngineUtils.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -30,7 +32,16 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Weapons/JTSStellarEffectActor.h"
+#include "space/Weapons/JTSStellarStatusEffectActor.h"
 #include "space/Weapons/JTSBlackHoleField.h"
+#include "space/Components/JTSStellarAbilityComponent.h"
+#include "space/Components/JTSStellarSupportComponent.h"
+#include "space/Components/JTSStaminaComponent.h"
+#include "space/Weapons/JTSStellarProjectile.h"
+#include "space/Weapons/JTSStellarAreaField.h"
+#include "space/Weapons/JTSStellarDrone.h"
+#include "space/World/JTSMoonResourceActor.h"
+#include "space/Items/JTSWorldPickupActor.h"
 #include "space/UI/JTSStellarAttachmentDialog.h"
 
 namespace
@@ -773,6 +784,7 @@ bool FStellarCombatPresentationTest::RunTest(const FString&)
 	if(!TestNotNull(TEXT("Catalog exists"),Catalog)) return false;
 	for(const auto& Def:Catalog->Weapons)
 	{
+		if(Def.Mode> EJTSStellarWeaponMode::PresentationOnly) continue;
 		if(Def.Mode==EJTSStellarWeaponMode::PresentationOnly) continue;
 		if(!TestNotNull(TEXT("Combat mode supplies a configured FX Blueprint"),Def.EffectClass.Get())) return false;
 		auto* FX=W.World->SpawnActor<AJTSStellarEffectActor>(Def.EffectClass);
@@ -1002,4 +1014,299 @@ bool FStellarBlackHoleReticleTest::RunTest(const FString&)
 		TestTrue(TEXT("The cast uses the actual camera reticle point, not nearer eye-ray ground"),FMath::IsNearlyEqual(It->GetActorLocation().X,1400.0,1.0));
 	return true;
 }
+
+namespace
+{
+	struct FAbilityRig
+	{
+		FStellarWorld W;
+		AJTSPlayerState* PS;
+		AJTSCharacter* Character;
+		UJTSStellarWeaponComponent* Weapon;
+		UJTSStellarAbilityComponent* Ability;
+		UJTSStellarLoadoutComponent* Loadout;
+		FJTSStellarWeaponBinding Binding;
+		FAbilityRig(FName Attachment, TArray<uint8> Points = {0,0,0,0,0,0})
+		{
+			auto* Authored = LoadObject<UJTSStellarWeaponCatalog>(nullptr, TEXT("/Game/Space/Data/Weapons/DA_StellarWeaponCatalog.DA_StellarWeaponCatalog"));
+			check(Authored);
+			W.Table->Entries = Authored->LootTable.LoadSynchronous()->Entries;
+			PS = W.AddPlayer(); Character = W.AddCharacter(PS, EJTSStellarWeaponMode::Jet);
+			Weapon = Character->FindComponentByClass<UJTSStellarWeaponComponent>();
+			Weapon->WeaponCatalog.Get()->Weapons = Authored->Weapons;
+			Ability = Character->FindComponentByClass<UJTSStellarAbilityComponent>(); Loadout = PS->GetStellarLoadout();
+			const auto* Def = Authored->Weapons.FindByPredicate([&](const auto& D) { return D.AttachmentId == Attachment; });
+			check(Def);
+			TArray<FJTSItemInstance> Slots; Slots.SetNum(9); Slots[1] = W.Table->MakeTextItem(Def->CoreId);
+			Slots[1].StellarCoreLevel = 61; Slots[2] = W.Table->MakeTextItem(Attachment); Slots[2].StellarPoints = Points;
+			Loadout->RestoreState(Slots,100); Loadout->SelectWeapon(1); Loadout->GetActiveWeapon(Binding); W.Step(.05f);
+			Character->GetHealthComponent()->SetMaxHealth(100);
+		}
+		void Input(bool Primary, bool Secondary)
+		{
+			Weapon->ServerSetInput(Primary,Secondary,Binding.CoreInstanceId,Binding.AttachmentInstanceId,FVector::ForwardVector,Character->GetPawnViewLocation());
+		}
+		void Step(float Seconds) { W.Step(Seconds,Weapon); }
+	};
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarAllAbilitiesTest,"JTS.Stellar.Abilities.AllTwelveCombatDefinitions",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarAllAbilitiesTest::RunTest(const FString&)
+{
+	FAbilityRig Rig(TEXT("ExplosionTube"));
+	const auto* Catalog = Rig.Weapon->WeaponCatalog.Get(); TSet<EJTSStellarWeaponMode> Modes;
+	for (const auto& Def : Catalog->Weapons)
+	{
+		TestTrue(TEXT("Every assembled weapon has real gameplay"),Def.Mode != EJTSStellarWeaponMode::PresentationOnly);
+		TestNotNull(TEXT("Every weapon has an authored FX Blueprint"),Def.EffectClass.Get()); Modes.Add(Def.Mode);
+	}
+	TestEqual(TEXT("Twelve distinct gameplay modes configured"),Modes.Num(),12);
+	for (FName Attachment : {FName("ExplosionTube"),FName("FreezingTube"),FName("ShapingTube"),FName("EffectTube"),FName("DiffusionTube"),FName("ShadowTube"),FName("InstanceTube"),FName("DisassemblyTube")})
+	{
+		FAbilityRig R(Attachment);
+		auto* Enemy = R.W.Target(FVector(180,0,R.Character->BaseEyeHeight));
+		R.Input(true,false); R.Step(1.1f); R.Input(false,false);
+		TestTrue(FString::Printf(TEXT("%s zero-point primary damages hostile targets"),*Attachment.ToString()),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000);
+		TestTrue(TEXT("Actual combat spends shared energy"),R.Loadout->GetEnergy()<100);
+	}
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarExplosionChargeTest,"JTS.Stellar.Abilities.ExplosionChargeAndResidualLimits",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarExplosionChargeTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("ExplosionTube"),{0,0,9,10,10,10});
+	auto* Enemy = R.W.Target(FVector(600,0,R.Character->BaseEyeHeight));
+	R.Input(false,true); R.Step(.3f); R.Input(false,false);
+	TestEqual(TEXT("Releasing before charge completion is free"),R.Loadout->GetEnergy(),100.f);
+	R.Input(false,true); R.Step(.9f); R.Input(false,false);
+	TestEqual(TEXT("One charged orb costs exactly thirty energy"),R.Loadout->GetEnergy(),70.f);
+	R.Step(.5f);
+	TestTrue(TEXT("Charged explosion deals amplified direct and capped split damage"),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<8500);
+	TestTrue(TEXT("Charged impact creates persistent residual fire"),static_cast<bool>(TActorIterator<AJTSStellarAreaField>(R.W.World)));
+	TestTrue(TEXT("Charged impact supplies armor corrosion"),Enemy->FindComponentByClass<UJTSStellarTargetComponent>()->GetArmorReduction()>.1f);
+	const float Before = R.Loadout->GetEnergy(); R.Input(false,true); R.Step(.9f); R.Input(false,false);
+	TestEqual(TEXT("Cooling down cannot be bypassed by release and repress"),R.Loadout->GetEnergy(),Before);
+	R.Weapon->ReturnToNormalWeapon();
+	TArray<FJTSItemInstance> Empty; Empty.SetNum(9); R.Loadout->RestoreState(Empty,50);
+	R.Ability->ValidatePersistentEffects();
+	for(TActorIterator<AJTSStellarAreaField> It(R.W.World);It;++It) TestTrue(TEXT("Invalid equipment cancels residuals"),It->IsActorBeingDestroyed());
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarSupportLimitsTest,"JTS.Stellar.Abilities.SupportCapsAndNoRevive",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarSupportLimitsTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("HealingTube")); auto* Health=R.Character->FindComponentByClass<UJTSHealthComponent>();
+	auto* Stamina=R.Character->GetStaminaComponent(); auto* Support=R.Character->FindComponentByClass<UJTSStellarSupportComponent>();
+	Health->RestoreAuthoritativeHealth(50); Stamina->Spend(50);
+	R.Input(true,true); R.Step(.4f); R.Input(false,false);
+	TestTrue(TEXT("Secondary priority heals the caster"),Health->GetHealth()>50);
+	TestTrue(TEXT("Healing replenishes stamina"),Stamina->GetCurrentStamina()>50);
+	Health->RestoreAuthoritativeHealth(10);
+	for(int32 I=0;I<10;++I) Support->HealPulse(1,0,0,0,.2f);
+	TestTrue(TEXT("All healing sources share twenty-percent-per-second cap"),Health->GetHealth()<=30);
+	Support->GrantShield(false,.4f,5,R.Character); Support->GrantShield(false,.2f,5,R.Character); Support->GrantShield(true,.35f,5,R.Character);
+	TestEqual(TEXT("Light and dark shields share a sixty-percent total cap"),Support->GetShield(),60.f);
+	const float Before=Health->GetHealth(); Health->ApplyDamage(60,nullptr,R.Character);
+	TestEqual(TEXT("Shield intercepts the common health damage path"),Health->GetHealth(),Before);
+	Health->ApplyDamage(1000,nullptr,R.Character); Support->HealPulse(1,1,.2f,.2f,1);
+	TestTrue(TEXT("Healing never revives dead characters"),Health->IsDead());
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarColdControlTest,"JTS.Stellar.Abilities.FreezingAndSharedControlImmunity",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarColdControlTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("FreezingTube")); auto* Normal=R.W.Target(FVector(300,0,R.Character->BaseEyeHeight));
+	auto* Status=Normal->FindComponentByClass<UJTSStellarTargetComponent>();
+	R.Input(true,false); R.Step(2.1f); R.Input(false,false);
+	TestTrue(TEXT("Ice spears accumulate a real freeze"),Status->IsFrozen()); TestEqual(TEXT("Frozen normal stops movement"),Status->GetMovementScale(),0.f);
+	R.Step(2.2f); TestTrue(TEXT("Frozen normal shatters after two seconds"),Normal->FindComponentByClass<UJTSHealthComponent>()->IsDead());
+	auto* Hail=R.W.Target(FVector(0,300,64)); auto* HailStatus=Hail->FindComponentByClass<UJTSStellarTargetComponent>();
+	R.Input(false,true); R.Step(.5f); R.Input(false,false);
+	TestTrue(TEXT("Hail damages and slows nearby hostiles"),Hail->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000 && HailStatus->GetMovementScale()<1);
+	TestFalse(TEXT("Hail never creates a freeze"),HailStatus->IsFrozen());
+	auto* Elite=R.W.Target(FVector(800,0,64),EJTSStellarTargetTier::Elite); auto* EliteStatus=Elite->FindComponentByClass<UJTSStellarTargetComponent>();
+	EliteStatus->ApplyRoot(2); R.Step(1.1f); EliteStatus->ApplyRoot(2);
+	TestFalse(TEXT("Elite first control lasts at most one second and shared immunity prevents immediate refresh"),EliteStatus->IsHardControlled());
+	auto* Boss=R.W.Target(FVector(1000,0,64),EJTSStellarTargetTier::Boss); auto* BossStatus=Boss->FindComponentByClass<UJTSStellarTargetComponent>();
+	BossStatus->ApplyCold(R.Character,100,300,100); BossStatus->ApplyRoot(2);
+	TestFalse(TEXT("Boss cannot be frozen or rooted"),BossStatus->IsFrozen()||BossStatus->IsHardControlled());
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarShapingReleaseTest,"JTS.Stellar.Abilities.ShapingReleaseAndParry",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarShapingReleaseTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("ShapingTube")); auto* Front=R.W.Target(FVector(180,0,64)); auto* Behind=R.W.Target(FVector(-180,0,64));
+	R.Input(true,false); R.Step(.1f); R.Input(false,false);
+	TestTrue(TEXT("Light blade hits the forward fan"),Front->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000);
+	TestEqual(TEXT("Forward slash cannot hit behind caster"),Behind->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),10000.f);
+	auto* Health=R.Character->FindComponentByClass<UJTSHealthComponent>(); const float Before=Health->GetHealth();
+	R.Input(false,true); Health->ApplyDamage(10,nullptr,Front); TestEqual(TEXT("Facing incoming strike consumes one actual parry"),Health->GetHealth(),Before);
+	Health->ApplyDamage(10,nullptr,Front); TestTrue(TEXT("Parry is never permanent invulnerability"),Health->GetHealth()<Before);
+	R.Step(1.25f); R.Input(false,false); TestTrue(TEXT("Charged circular release hits rear enemies"),Behind->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000);
+	TestTrue(TEXT("Fully paid slash costs eight plus twenty-five"),FMath::IsNearlyEqual(R.Loadout->GetEnergy(),67));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarCorrosionTest,"JTS.Stellar.Abilities.CorrosionArmorAndOneGeneration",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarCorrosionTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("DiffusionTube"),{0,0,0,0,10,10}); auto* Enemy=R.W.Target(FVector(300,0,64)); auto* Near=R.W.Target(FVector(300,100,64));
+	auto* Health=Enemy->FindComponentByClass<UJTSHealthComponent>();
+	FindFProperty<FFloatProperty>(Health->GetClass(),TEXT("ArmorDamageReduction"))->SetPropertyValue_InContainer(Health,.5f);
+	R.Input(true,false); R.Step(.15f); R.Input(false,false);
+	auto* Status=Enemy->FindComponentByClass<UJTSStellarTargetComponent>(); TestTrue(TEXT("Diffusion applies corrosion and removes configured armor"),Status->IsCorroded() && Status->GetArmorReduction()>.2f);
+	Health->ApplyDamage(100000,nullptr,R.Character);
+	TestTrue(TEXT("Corroded death propagates once to nearby hostiles"),Near->FindComponentByClass<UJTSStellarTargetComponent>()->IsCorroded());
+	R.Step(.3f); TestTrue(TEXT("Transferred corrosion deals finite remaining damage"),Near->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarRobotQuotaTest,"JTS.Stellar.Abilities.RobotQuotaSwitchAndCancellation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarRobotQuotaTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("InstanceTube"),{10,10,10,10,10,10});
+	R.Input(true,false); R.Step(.1f); R.Input(false,false); TestEqual(TEXT("A paid manufacturing pulse creates one drone"),R.Ability->GetRobotCount(),1);
+	R.Step(1.1f); R.Input(true,false); R.Step(.1f); R.Input(false,false); TestEqual(TEXT("Repressing cannot reset the manufacturing interval"),R.Ability->GetRobotCount(),2);
+	R.Weapon->ReturnToNormalWeapon(); R.Ability->ValidatePersistentEffects();
+	for(TActorIterator<AJTSStellarDrone> It(R.W.World);It;++It) TestTrue(TEXT("Switching limits existing robots to eight seconds"),It->GetLifeSpan()<=8.01f);
+	R.Loadout->SelectWeapon(1); auto* Enemy=R.W.Target(FVector(180,0,140)); R.Input(false,true); R.Input(false,false);
+	TestEqual(TEXT("Right press commands own robots to detonate once"),R.Ability->GetRobotCount(),0);
+	TestTrue(TEXT("Drone self-destruction damages hostiles"),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<10000);
+	R.Loadout->RestoreState(R.Loadout->GetSlots(),100,1); R.Step(1.2f); R.Input(true,false); R.Step(.1f); R.Input(false,false);
+	const float Before=Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
+	TArray<FJTSItemInstance> Empty;Empty.SetNum(9);R.Loadout->RestoreState(Empty,100);R.Ability->ValidatePersistentEffects();
+	TestEqual(TEXT("Invalid pair cancels robots without explosions"),R.Ability->GetRobotCount(),0);
+	TestEqual(TEXT("Equipment cancellation has no self-destruct damage"),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),Before);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarDisassemblyFilterTest,"JTS.Stellar.Abilities.DisassemblyLockAndEngineeringFilter",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarDisassemblyFilterTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("DisassemblyTube")); auto* Enemy=R.W.Target(FVector(300,0,64));
+	R.Input(true,false); R.Step(.4f); TestTrue(TEXT("Combat target accumulates a continuous lock"),R.Ability->GetLockProgress()>0 && R.Ability->GetLockProgress()<1);
+	R.Input(false,false); TestEqual(TEXT("Release discards incomplete lock"),R.Ability->GetLockProgress(),0.f);
+	R.Input(false,true); R.Input(false,false); TestTrue(TEXT("Right edge toggles engineering filter"),R.Ability->IsEngineeringMode());
+	R.Input(true,false); R.Step(1.6f); R.Input(false,false); TestEqual(TEXT("Engineering mode cannot damage enemies"),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),10000.f);
+	TestEqual(TEXT("An invalid engineering lock costs no energy"),R.Loadout->GetEnergy(),100.f);
+	R.Input(false,true); R.Input(false,false); Enemy->FindComponentByClass<UJTSHealthComponent>()->RestoreAuthoritativeHealth(500);
+	R.Input(true,false); R.Step(.85f); R.Input(false,false); TestTrue(TEXT("Normal enemy below budget is actually disassembled"),Enemy->FindComponentByClass<UJTSHealthComponent>()->IsDead());
+	TestTrue(TEXT("One kill refunds only its configured capped amount"),FMath::IsNearlyEqual(R.Loadout->GetEnergy(),73.f));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarAbilityOcclusionTest,"JTS.Stellar.Abilities.CoverFriendlyAndEnergyValidation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarAbilityOcclusionTest::RunTest(const FString&)
+{
+	for (FName Attachment : {FName("EffectTube"),FName("ShadowTube"),FName("FreezingTube"),FName("DiffusionTube"),FName("DisassemblyTube"),FName("ShapingTube")})
+	{
+		FAbilityRig R(Attachment); R.W.Ground(FVector(100,0,90),FVector(15,100,200)); auto* Enemy=R.W.Target(FVector(180,0,64));
+		R.Input(true,true); R.Step(.9f); R.Input(false,false);
+		TestEqual(FString::Printf(TEXT("%s cannot attack through static cover"),*Attachment.ToString()),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),10000.f);
+		R.Loadout->RestoreState(R.Loadout->GetSlots(),0,1); R.Input(true,false); R.Step(.2f); R.Input(false,false);
+		TestEqual(TEXT("Missing energy produces no free final damage pulse"),Enemy->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),10000.f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarEngineeringYieldTest,"JTS.Stellar.Abilities.EngineeringPreservesResourceYield",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarEngineeringYieldTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("DisassemblyTube")); R.W.Ground();
+	auto* Node = R.W.World->SpawnActor<AJTSMoonResourceActor>(FVector(300,0,64), FRotator::ZeroRotator);
+	Node->InitializeMiningNode(EJTSResourceType::Rock,6,EJTSMoonResourceNodeSize::MediumRock);
+	TestFalse(TEXT("Combat mode cannot disassemble a resource"),Node->CanDisassemble_Implementation(R.Character));
+	R.Input(false,true); R.Input(false,false);
+	TestTrue(TEXT("Only an active engineering weapon may consume a resource"),Node->CanDisassemble_Implementation(R.Character));
+	R.Input(true,false); R.Step(1.6f); R.Input(false,false);
+	TestTrue(TEXT("Completed engineering lock consumes the node"),Node->IsActorBeingDestroyed());
+	int32 Yield = 0;
+	for(TActorIterator<AJTSWorldPickupActor> It(R.W.World);It;++It)
+		if(!It->IsActorBeingDestroyed() && It->GetItemInstance().ItemId == EJTSItemId::Rock) Yield += It->GetItemInstance().StackCount;
+	TestEqual(TEXT("Resource drops conserve the existing six-unit yield"),Yield,6);
+	TestTrue(TEXT("One successful engineering operation costs twenty-eight"),FMath::IsNearlyEqual(R.Loadout->GetEnergy(),72.f));
+	TestFalse(TEXT("Consumed node cannot yield duplicate drops"),Node->Disassemble_Implementation(R.Character));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarAbilitySurfaceVisualTest,"JTS.Stellar.Abilities.RadialSurfaceAndRaisedCoreVisuals",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarAbilitySurfaceVisualTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("FreezingTube")); const auto* Catalog = R.Weapon->WeaponCatalog.Get();
+	const FVector Up = FVector(1,2,3).GetSafeNormal(), Center(900,300,700);
+	for(const auto& Def : Catalog->Weapons) if(Def.Mode > EJTSStellarWeaponMode::PresentationOnly)
+	{
+		auto* FX = R.W.World->SpawnActor<AJTSStellarEffectActor>(Def.EffectClass);
+		if(!TestNotNull(TEXT("Configured FX actor spawns"),FX)) continue;
+		TestNotNull(TEXT("Area visual owns an actual authored mesh"),FX->Field->GetStaticMesh().Get());
+		TestNotNull(TEXT("Raised core corona owns an actual mesh"),FX->Core->GetStaticMesh().Get());
+		TestNotNull(TEXT("Every new ability has an authored sound"),FX->LoopSound ? FX->LoopSound.Get() : FX->ShotSound.Get());
+		FX->UpdateArea(Def.Mode,Center,Up,500,Def.Color,true,false,false);
+		TestTrue(TEXT("Effect surface follows arbitrary radial up"),FVector::DotProduct(FX->Field->GetUpVector(),Up)>.999);
+		TestTrue(TEXT("Visible area preserves the five-meter radius"),FMath::IsNearlyEqual(FX->Field->GetComponentScale().X,10));
+		FX->Destroy();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarDownwardHailTest,"JTS.Stellar.Presentation.DownwardHailAndNoCoreEmission",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarDownwardHailTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("FreezingTube"));
+	const auto* Def = R.Weapon->WeaponCatalog.Get()->Weapons.FindByPredicate([](const auto& D){ return D.Mode == EJTSStellarWeaponMode::Freezing; });
+	auto* FX = R.W.World->SpawnActor<AJTSStellarEffectActor>(Def->EffectClass);
+	const FVector Up = FVector(1,2,3).GetSafeNormal();
+	FX->UpdateArea(Def->Mode,FVector(900,300,700),Up,500,Def->Color,true,false,false);
+	TestNotNull(TEXT("Hail uses authored ice, trails and impacts"),FX->Hailstones->GetStaticMesh().Get());
+	TestEqual(TEXT("The storm has a bounded twenty-four drops"),FX->Hailstones->GetInstanceCount(),24);
+	FTransform Before, After;
+	FX->Hailstones->GetInstanceTransform(0,Before,true);
+	R.Step(.1f);
+	FX->Hailstones->GetInstanceTransform(0,After,true);
+	TestTrue(TEXT("Ice falls toward the surface along arbitrary planet gravity"),FVector::DotProduct(After.GetLocation()-Before.GetLocation(),Up)<-100);
+	TestTrue(TEXT("Falling ice does not drift sideways"),FVector::VectorPlaneProject(After.GetLocation()-Before.GetLocation(),Up).Size()<.01);
+	FX->SetOwner(R.Character);
+	FX->UpdateArea(Def->Mode,R.Character->GetActorLocation(),FVector::UpVector,500,Def->Color,true,false,false);
+	TestFalse(TEXT("Secondary hail never emits a core corona"),FX->Core->IsVisible() || FX->OrbitInner->IsVisible());
+	TestFalse(TEXT("Secondary hail never emits a muzzle beam"),FX->Beam->IsVisible() || FX->BeamGlow->IsVisible());
+	FX->Destroy();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarLayeredStatusTest,"JTS.Stellar.Presentation.ConcurrentBodyStatusesAndCleanup",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarLayeredStatusTest::RunTest(const FString&)
+{
+	FAbilityRig R(TEXT("FreezingTube"));
+	auto* Target = R.W.Target(FVector(300,0,50),EJTSStellarTargetTier::Elite);
+	auto* Body = NewObject<UStaticMeshComponent>(Target); Target->AddInstanceComponent(Body);
+	Body->SetupAttachment(Target->GetRootComponent());
+	Body->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
+	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision); Body->SetRelativeScale3D(FVector(.4)); Body->RegisterComponent();
+	const auto* Def = R.Weapon->WeaponCatalog.Get()->Weapons.FindByPredicate([](const auto& D){ return D.Mode == EJTSStellarWeaponMode::Freezing; });
+	auto* Status = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+	Status->SetStatusPresentation(Def->TargetStatusEffectClass);
+	Status->ApplyFire(R.Character,10,10,0);
+	Status->ApplyCold(R.Character,100,0,0);
+	Status->ApplyCorrosion(R.Character,10,.4f,.1f);
+	R.Step(.05f);
+	AJTSStellarStatusEffectActor* FX = nullptr;
+	for(TActorIterator<AJTSStellarStatusEffectActor> It(R.W.World);It;++It) if(It->GetOwner()==Target && !It->IsActorBeingDestroyed()) FX=*It;
+	if(!TestNotNull(TEXT("All statuses share one configured local presentation"),FX)) return false;
+	TestTrue(TEXT("Burn and freeze render together"),FX->Flames->IsVisible() && FX->IceShards->IsVisible());
+	auto* Tint = Cast<UMaterialInstanceDynamic>(Body->GetOverlayMaterial());
+	if(!TestNotNull(TEXT("Poison stains the actual mesh surface"),Tint)) return false;
+	TestEqual(TEXT("Poison is independently enabled on the body"),Tint->K2_GetScalarParameterValue(TEXT("Poisoned")),1.f);
+	TestEqual(TEXT("Frozen body tint coexists with poison"),Tint->K2_GetScalarParameterValue(TEXT("Frozen")),1.f);
+	FTransform Flame, Shard;
+	FX->Flames->GetInstanceTransform(0,Flame,true); FX->IceShards->GetInstanceTransform(0,Shard,true);
+	TestTrue(TEXT("Fire is above the enemy body"),Flame.GetLocation().Z>Target->GetActorLocation().Z+20);
+	TestTrue(TEXT("Ice attaches to an outer body edge"),FMath::Abs(Shard.GetLocation().X-Target->GetActorLocation().X)>15);
+	R.Step(.6f);
+	TestTrue(TEXT("Expiring poison preserves fire and ice"),FX->Flames->IsVisible() && FX->IceShards->IsVisible());
+	TestEqual(TEXT("Only poison stains disappear on poison expiration"),Tint->K2_GetScalarParameterValue(TEXT("Poisoned")),0.f);
+	R.Step(2.2f);
+	TestTrue(TEXT("Expired statuses remove their local actor"),FX->IsActorBeingDestroyed());
+	TestNull(TEXT("Original body material overlay is restored"),Body->GetOverlayMaterial());
+	Status->ApplyLightBurn(R.Character,10,1,0,0);
+	TestTrue(TEXT("Light burn also enables persistent enemy feedback"),Status->IsBurning());
+	Target->FindComponentByClass<UJTSHealthComponent>()->ApplyDamage(100000,nullptr,R.Character);
+	TestFalse(TEXT("Death immediately clears all burning state"),Status->IsBurning());
+	TestNull(TEXT("Death removes mesh stains immediately"),Body->GetOverlayMaterial());
+	return true;
+}
+
 #endif

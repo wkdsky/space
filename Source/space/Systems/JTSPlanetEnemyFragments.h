@@ -41,6 +41,14 @@ struct SPACE_API FJTSPlanetEnemyBehavior
 	float HoverHeight = 45.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "1"))
 	float CollisionRadius = 45.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Collision", meta = (ClampMin = "0"))
+	float CollisionHalfHeight = 45.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Collision", meta = (ClampMin = "0"))
+	float CollisionInverseMass = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Collision")
+	int32 CollisionLayer = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Collision")
+	bool bBodyCollisionEnabled = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception", meta = (ClampMin = "0.05"))
 	float ScanInterval = 0.28f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception", meta = (ClampMin = "0"))
@@ -64,7 +72,7 @@ struct SPACE_API FJTSPlanetEnemyBehavior
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0"))
 	float DistantMovementDistance = 1000.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0"))
-	float SeparationRadius = 120.0f;
+	float SeparationRadius = 190.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0", ClampMax = "1"))
 	float SeparationWeight = 0.75f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0.1"))
@@ -109,6 +117,23 @@ struct FJTSPlanetEnemyMovementFragment : public FMassFragment
 	float LastUpdateTime = 0.0f;
 	float RequestedInterval = 0.05f;
 	float NextForceImpactTime = 0.0f;
+	FVector PreviousLocation = FVector::ZeroVector;
+	FVector ProposedLocation = FVector::ZeroVector;
+	FQuat ProposedRotation = FQuat::Identity;
+};
+
+USTRUCT()
+struct FJTSPlanetEnemyBodyFragment : public FMassFragment
+{
+	GENERATED_BODY()
+	uint64 StableId = 0;
+	FVector Position = FVector::ZeroVector;
+	float Radius = 45.0f;
+	float HalfHeight = 45.0f;
+	float InverseMass = 1.0f;
+	int32 Layer = 0;
+	bool bEnabled = true;
+	bool bParticipating = false;
 };
 
 USTRUCT()

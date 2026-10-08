@@ -119,7 +119,15 @@ void AJTSMoonCubeEnemy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 bool AJTSMoonCubeEnemy::InitializeForSettlement_Implementation(AJTSPlanetAnchor* InPlanet,
 	FVector HomeLocation, FVector GroundLocation)
 {
-	if (!HasAuthority() || !IsValid(InPlanet) || EnemyEntity.IsValid()) return false;
+	if (!HasAuthority() || !IsValid(InPlanet)) return false;
+	if (EnemyEntity.IsValid())
+	{
+		FJTSPlanetEnemyBodyFragment Body;
+		auto* Enemies = GetWorld()->GetSubsystem<UJTSPlanetEnemySubsystem>();
+		if (Enemies && Enemies->GetBodyCollisionData(EnemyEntity, Body)) return false;
+		// An explicitly released live Actor may be reused; a stale Mass handle is not a registration.
+		EnemyEntity = FMassEntityHandle();
+	}
 	BodyCollider->IgnoreActorWhenMoving(InPlanet->GetGameplaySurfaceActor(), true);
 	FJTSPlanetSurfaceFrame Frame;
 	if (InPlanet->GetSurfaceFrameAt(GroundLocation, GetActorForwardVector(), Frame))

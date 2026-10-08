@@ -41,6 +41,7 @@ public:
 	void SetSprintRequested(bool bRequested);
 	/** Server-only: returns false when the requested action cannot be paid for. */
 	bool Spend(float Amount);
+	void Restore(float Amount);
 
 	UPROPERTY(BlueprintAssignable, Category = "Stamina")
 	FJTSOnStaminaChanged OnStaminaChanged;

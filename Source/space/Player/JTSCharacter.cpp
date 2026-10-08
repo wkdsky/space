@@ -38,6 +38,8 @@
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Components/JTSStellarAbilityComponent.h"
+#include "space/Components/JTSStellarSupportComponent.h"
 #include "space/Components/JTSStaminaComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
 #if !UE_BUILD_SHIPPING
@@ -88,6 +90,8 @@ AJTSCharacter::AJTSCharacter()
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
 	StellarWeaponComponent = CreateDefaultSubobject<UJTSStellarWeaponComponent>(TEXT("StellarWeaponComponent"));
+	CreateDefaultSubobject<UJTSStellarAbilityComponent>(TEXT("StellarAbilities"));
+	CreateDefaultSubobject<UJTSStellarSupportComponent>(TEXT("StellarSupport"));
 	WeaponVisualComponent = CreateDefaultSubobject<UJTSWeaponVisualComponent>(TEXT("WeaponVisualComponent"));
 	WallClimbComponent = CreateDefaultSubobject<UJTSWallClimbComponent>(TEXT("WallClimbComponent"));
 	PlanetGravityComponent = CreateDefaultSubobject<UJTSPlanetGravityComponent>(TEXT("PlanetGravityComponent"));

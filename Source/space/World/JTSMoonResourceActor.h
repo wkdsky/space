@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Interaction/JTSMeleeTarget.h"
+#include "space/Interaction/JTSDisassemblyTarget.h"
 #include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSResourceType.h"
 
@@ -22,11 +23,13 @@ enum class EJTSMoonResourceNodeSize : uint8
 {
 	MediumRock UMETA(DisplayName = "Medium Rock"),
 	LargeRock UMETA(DisplayName = "Large Rock"),
-	OreVein UMETA(DisplayName = "Ore Vein")
+	OreVein UMETA(DisplayName = "Ore Vein"),
+	MediumMetalRock UMETA(DisplayName = "Medium Rock + Metal"),
+	LargeMetalRock UMETA(DisplayName = "Large Rock + Metal")
 };
 
 UCLASS()
-class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable, public IJTSMeleeTarget
+class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable, public IJTSMeleeTarget, public IJTSDisassemblyTarget
 {
 	GENERATED_BODY()
 
@@ -65,10 +68,15 @@ public:
 		const FVector& PreferredForward);
 
 	/** Initializes a Medium Rock, Large Rock, or Ore Vein mining node. */
-	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits, EJTSMoonResourceNodeSize NewNodeSize = EJTSMoonResourceNodeSize::LargeRock);
+	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits, EJTSMoonResourceNodeSize NewNodeSize = EJTSMoonResourceNodeSize::LargeRock, int32 NewMetalYieldUnits = 0, int32 NewVisualVariantIndex = 0);
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Mining")
+	int32 GetMetalYieldUnits() const;
 
 	/** Server-authoritative work application shared by melee and hitscan weapons. */
 	bool ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemId, float WorkAmount);
+	virtual bool CanDisassemble_Implementation(APawn* Operator) const override;
+	virtual bool Disassemble_Implementation(APawn* Operator) override;
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
@@ -92,7 +100,6 @@ private:
 	UFUNCTION()
 	void OnRep_SurfacePresentation();
 
-	FText GetMiningPrompt(APawn* InteractingPawn) const;
 	bool ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutItemId, float& OutWork) const;
 	bool SpawnAllResourceDrops(APawn* Miner);
 	void ConfigureResourceMesh();
@@ -104,6 +111,19 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> ResourceMesh;
+
+	/** Asset selection stays in the Moon Blueprint; variant selection is replicated. */
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> MediumRockMeshes;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> LargeRockMeshes;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> MediumMetalRockMeshes;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> LargeMetalRockMeshes;
 
 	/** Surface material used by every resource node. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Rendering", meta = (AllowPrivateAccess = "true"))
@@ -125,6 +145,13 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 RemainingYieldUnits = 6;
+
+	/** Included in TotalYieldUnits; the remaining units use ResourceType. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true"))
+	int32 MetalYieldUnits = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_ResourceData)
+	int32 VisualVariantIndex = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Resource", meta = (AllowPrivateAccess = "true"))
 	EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::LargeRock;

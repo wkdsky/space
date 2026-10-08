@@ -1,4 +1,5 @@
 #include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Components/JTSStellarAbilityComponent.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Components/JTSHealthComponent.h"
@@ -82,7 +83,7 @@ bool UJTSStellarWeaponComponent::CanUseWeapon() const
 bool UJTSStellarWeaponComponent::IsAiming() const
 {
 	const auto* Def = GetEquippedWeaponDefinition();
-	return bLocalSecondary && Def && (Def->Mode == EJTSStellarWeaponMode::Jet || Def->Mode == EJTSStellarWeaponMode::Focus);
+	return bLocalSecondary && Def && (Def->Mode == EJTSStellarWeaponMode::Jet || Def->Mode == EJTSStellarWeaponMode::Focus || Def->Mode == EJTSStellarWeaponMode::Diffusion);
 }
 
 bool UJTSStellarWeaponComponent::IsCasting() const
@@ -209,7 +210,13 @@ void UJTSStellarWeaponComponent::ServerUpdateAim_Implementation(FVector_NetQuant
 void UJTSStellarWeaponComponent::ServerSetInput_Implementation(bool bPrimary, bool bSecondary,
 	FGuid CoreId, FGuid AttachmentId, FVector_NetQuantizeNormal Direction, FVector_NetQuantize CastViewOrigin)
 {
-	if (!bPrimary && !bSecondary) { StopServerChannels(); return; }
+	if (!bPrimary && !bSecondary)
+	{
+		FJTSStellarWeaponBinding Released; const auto* Definition = ResolveDefinition(Released);
+		if (CanUseWeapon() && Definition && Released.CoreInstanceId == ChannelBinding.CoreInstanceId && Released.AttachmentInstanceId == ChannelBinding.AttachmentInstanceId)
+			if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>()) Abilities->InputChanged(*Definition, Released, false, false, AimDirection);
+		StopServerChannels(); return;
+	}
 	auto* Loadout = GetLoadout();
 	if (!Loadout) return;
 	if (Catalog) Loadout->ConfigureLootTable(Catalog->LootTable.LoadSynchronous());
@@ -226,6 +233,7 @@ void UJTSStellarWeaponComponent::ServerSetInput_Implementation(bool bPrimary, bo
 	if (auto* Ranged = GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>()) Ranged->CancelForClimb();
 	const bool bNewField = bPrimary && !bServerPrimary && Def->Mode == EJTSStellarWeaponMode::BlackHole;
 	ChannelBinding = Binding;
+	if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>()) Abilities->InputChanged(*Def, Binding, bPrimary, bSecondary, AimDirection);
 	bServerPrimary = bPrimary;
 	bServerSecondary = bSecondary;
 	bReplicatedCasting = bSecondary || (bPrimary && Def->Mode != EJTSStellarWeaponMode::BlackHole);
@@ -270,6 +278,13 @@ void UJTSStellarWeaponComponent::ServerPulse()
 	LastPulseTime = Now;
 	// Point changes are adopted at the next attack/pulse, never rewrite the recorded allocation.
 	ChannelBinding = Current;
+	if (Def->Mode > EJTSStellarWeaponMode::PresentationOnly)
+	{
+		Loadout->SetChannelActive(bServerPrimary || (bServerSecondary && (Def->Mode == EJTSStellarWeaponMode::Healing || Def->Mode == EJTSStellarWeaponMode::Freezing || Def->Mode == EJTSStellarWeaponMode::Explosion || Def->Mode == EJTSStellarWeaponMode::Shaping)));
+		if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>())
+			if (!Abilities->ExecutePulse(*Def, Current, bServerPrimary, bServerSecondary, AimDirection, Delta)) StopServerChannels();
+		return;
+	}
 	const auto& X = Current.EffectiveLevels;
 	float Cost = 0;
 	const bool bJetChannel = Def->Mode == EJTSStellarWeaponMode::Jet && (bServerPrimary || bServerSecondary);
@@ -320,8 +335,12 @@ void UJTSStellarWeaponComponent::JetPulse(const FJTSStellarWeaponDefinition& Def
 			|| !UJTSStellarTargetComponent::HasLineOfSight(GetWorld(), Origin, Target, Pawn)) continue;
 		UGameplayStatics::ApplyDamage(Target, Def.BaseDamage * (1 + 0.04 * X[0]) * Delta,
 			Pawn->GetController(), Pawn, UDamageType::StaticClass());
-		if (IsValid(Target)) Target->FindComponentByClass<UJTSStellarTargetComponent>()->ApplyFire(Pawn,
-			50 * (1 + 0.1 * X[3]) * Delta, Def.StatusDamagePerSecond, FMath::FloorToInt(X[4] / 2));
+		if (IsValid(Target))
+		{
+			auto* Status = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+			Status->SetStatusPresentation(Def.TargetStatusEffectClass);
+			Status->ApplyFire(Pawn, 50 * (1 + 0.1 * X[3]) * Delta, Def.StatusDamagePerSecond, FMath::FloorToInt(X[4] / 2));
+		}
 		if (++HitCount >= FMath::Clamp(Def.MaximumTargets, 1, 256)) break;
 	}
 	// The central plume stops at terrain, while each target uses its own occlusion ray.
@@ -358,8 +377,12 @@ void UJTSStellarWeaponComponent::FocusShot(const FJTSStellarWeaponDefinition& De
 		if (Hit) UGameplayStatics::ApplyPointDamage(Target, Damage, AimDirection, *Hit, Pawn->GetController(), Pawn,
 			WeakPoint > 1 ? UJTSCriticalDamageType::StaticClass() : UDamageType::StaticClass());
 		else UGameplayStatics::ApplyDamage(Target, Damage, Pawn->GetController(), Pawn, UDamageType::StaticClass());
-		if (IsValid(Target)) Target->FindComponentByClass<UJTSStellarTargetComponent>()->ApplyLightBurn(Pawn,
-			Def.StatusDamagePerSecond * Scale, 2.0f, X[3] > 0 ? 2 : 0, 0.05 * X[3]);
+		if (IsValid(Target))
+		{
+			auto* Status = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+			Status->SetStatusPresentation(Def.TargetStatusEffectClass);
+			Status->ApplyLightBurn(Pawn, Def.StatusDamagePerSecond * Scale, 2.0f, X[3] > 0 ? 2 : 0, 0.05 * X[3]);
+		}
 	};
 	for (int32 Pass = 0; Pass < PierceHits; ++Pass)
 	{
@@ -512,6 +535,7 @@ void UJTSStellarWeaponComponent::RemoveForces()
 
 void UJTSStellarWeaponComponent::StopServerChannels()
 {
+	if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>()) Abilities->CancelCast();
 	bServerPrimary = false; bServerSecondary = false; AreaAccumulator = 0;
 	bReplicatedCasting = false;
 	GetOwner()->ForceNetUpdate();
@@ -533,6 +557,7 @@ void UJTSStellarWeaponComponent::StopChannels()
 
 void UJTSStellarWeaponComponent::HandleLoadoutChanged()
 {
+	if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>()) Abilities->ValidatePersistentEffects();
 	FJTSStellarWeaponBinding Selected;
 	if (GetOwner()->HasAuthority())
 	{
@@ -607,6 +632,7 @@ void UJTSStellarWeaponComponent::MulticastEffect_Implementation(FName Core, FNam
 
 void UJTSStellarWeaponComponent::MulticastStopEffect_Implementation()
 {
+	if (auto* Abilities = GetOwner()->FindComponentByClass<UJTSStellarAbilityComponent>()) Abilities->StopPresentation();
 	if (IsValid(LocalEffect)) LocalEffect->Destroy();
 	LocalEffect = nullptr;
 }

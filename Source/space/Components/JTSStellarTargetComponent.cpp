@@ -1,5 +1,6 @@
 #include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Weapons/JTSStellarStatusEffectActor.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Pawn.h"
@@ -19,6 +20,83 @@ bool UJTSStellarTargetComponent::IsAliveTarget() const
 	const auto* Health = GetOwner()->FindComponentByClass<UJTSHealthComponent>();
 	const auto* Pawn = Cast<APawn>(GetOwner());
 	return Health && !Health->IsDead() && !(Pawn && Pawn->IsPlayerControlled());
+}
+
+void UJTSStellarTargetComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	if (auto* Health = GetOwner()->FindComponentByClass<UJTSHealthComponent>()) Health->OnDeath.AddDynamic(this, &ThisClass::HandleDeath);
+}
+void UJTSStellarTargetComponent::ApplyCorrosion(APawn* Source, float DPS, float Duration, float Armor, float Spread)
+{
+	if (!GetOwner()->HasAuthority() || !IsValid(Source) || !IsAliveTarget()) return;
+	auto* Entry = DamageSources.FindByPredicate([&](const auto& S) { return S.Pawn == Source; });
+	if (!Entry) { Entry = &DamageSources.AddDefaulted_GetRef(); Entry->Pawn = Source; }
+	Entry->CorrosionDPS = FMath::Max(0.f, DPS); Entry->CorrosionEnd = GetWorld()->GetTimeSeconds() + Duration;
+	Entry->ArmorReduction = FMath::Clamp(Armor, 0.f, .4f); Entry->DeathSpreadRadius = Spread;
+	bCorroded = true; WakeStatusTimer();
+}
+float UJTSStellarTargetComponent::GetArmorReduction() const
+{
+	float Result = 0;
+	for (const auto& S : DamageSources) if (S.CorrosionEnd > GetWorld()->GetTimeSeconds()) Result = FMath::Max(Result, S.ArmorReduction);
+	return Result;
+}
+void UJTSStellarTargetComponent::ApplySlow(float Fraction, float Duration)
+{
+	if (!GetOwner()->HasAuthority() || !IsAliveTarget()) return;
+	if (GetWorld()->GetTimeSeconds() >= SlowEnd) SlowFraction = 0;
+	SlowFraction = FMath::Max(SlowFraction, FMath::Clamp(Fraction, 0.f, .5f));
+	SlowEnd = GetWorld()->GetTimeSeconds() + Duration; WakeStatusTimer();
+}
+void UJTSStellarTargetComponent::ApplyRoot(float Duration)
+{
+	if (!GetOwner()->HasAuthority() || !IsAliveTarget() || GetWorld()->GetTimeSeconds() < NextControl) return;
+	NextControl = GetWorld()->GetTimeSeconds() + 4;
+	if (Tier == EJTSStellarTargetTier::Boss) { PosturePressure = FMath::Min(100.f, PosturePressure + 10); return; }
+	RootEnd = GetWorld()->GetTimeSeconds() + (Tier == EJTSStellarTargetTier::Elite ? FMath::Min(1.f, Duration) : Duration);
+	WakeStatusTimer();
+}
+bool UJTSStellarTargetComponent::IsHardControlled() const { return GetWorld()->GetTimeSeconds() < RootEnd; }
+float UJTSStellarTargetComponent::GetMovementScale() const
+{
+	return IsHardControlled() ? 0.f : GetWorld()->GetTimeSeconds() < SlowEnd ? 1.f - SlowFraction : 1.f;
+}
+void UJTSStellarTargetComponent::ApplyCold(APawn* Source, float Amount, float Radius, float Damage)
+{
+	if (!GetOwner()->HasAuthority() || !IsValid(Source) || !IsAliveTarget()) return;
+	ApplySlow(.3f, .6f);
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (bFrozen || Now < NextCold) return;
+	ColdAmount += Amount;
+	if (ColdAmount < 100) return;
+	ColdAmount = 0; NextCold = Now + 4;
+	if (Tier == EJTSStellarTargetTier::Boss)
+	{
+		PosturePressure = FMath::Min(100.f, PosturePressure + 20);
+		UGameplayStatics::ApplyDamage(GetOwner(), Damage, Source->GetController(), Source, UDamageType::StaticClass());
+		return;
+	}
+	bFrozen = true; FreezeEnd = Now + 2; Freezer = Source; ShatterRadius = Radius; ShatterDamage = Damage;
+	ApplyRoot(2.f); WakeStatusTimer();
+}
+void UJTSStellarTargetComponent::HandleDeath(AController*, AActor*)
+{
+	if (!GetOwner()->HasAuthority()) return;
+	const auto Sources = DamageSources;
+	DamageSources.Reset(); Forces.Reset(); bFrozen = false; bCorroded = false; bIgnited = false; bBurning = false; bLightBurning = false;
+	UpdateStatusPresentation();
+	for (const auto& S : Sources) if (S.Pawn.IsValid() && S.DeathSpreadRadius > 0 && S.CorrosionEnd > GetWorld()->GetTimeSeconds())
+	{
+		TArray<AActor*> Neighbors; QueryTargets(GetWorld(), GetOwner()->GetActorLocation(), S.DeathSpreadRadius, 16, Neighbors);
+		const float Remaining = S.CorrosionEnd - GetWorld()->GetTimeSeconds();
+		for (auto* Target : Neighbors) if (Target != GetOwner() && HasLineOfSight(GetWorld(), GetOwner()->GetActorLocation(), Target, S.Pawn.Get()))
+		{
+			auto* Status = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+			Status->SetStatusPresentation(StatusEffectClass);
+			Status->ApplyCorrosion(S.Pawn.Get(), S.CorrosionDPS * .35f, Remaining, S.ArmorReduction, 0);
+		}
+	}
 }
 
 void UJTSStellarTargetComponent::QueryTargets(UWorld* World, const FVector& Center, float Radius,
@@ -54,6 +132,7 @@ bool UJTSStellarTargetComponent::HasLineOfSight(UWorld* World, const FVector& Fr
 
 void UJTSStellarTargetComponent::WakeStatusTimer()
 {
+	UpdateStatusPresentation();
 	if (!GetWorld()->GetTimerManager().IsTimerActive(StatusTimer))
 		GetWorld()->GetTimerManager().SetTimer(StatusTimer, this, &ThisClass::StatusPulse, 0.2f, true);
 }
@@ -62,10 +141,17 @@ void UJTSStellarTargetComponent::ApplyFire(APawn* Source, float Heat, float Burn
 {
 	if (!GetOwner()->HasAuthority() || !IsValid(Source) || !IsAliveTarget() || !FMath::IsFinite(Heat) || Heat < 0) return;
 	const double Now = GetWorld()->GetTimeSeconds();
+	if ((bFrozen || SlowFraction >= .2f) && Now >= NextThermalShock && Heat >= 5)
+	{
+		NextThermalShock = Now + 3; ColdAmount *= .5f; Heat *= .5f;
+		UGameplayStatics::ApplyDamage(GetOwner(), ResistantIgnitionDamage * .5f, Source->GetController(), Source, UDamageType::StaticClass());
+		if (!IsAliveTarget()) return;
+	}
 	FJTSStellarDamageSource* Entry = DamageSources.FindByPredicate([&](const auto& S){ return S.Pawn == Source; });
 	if (!Entry) { Entry = &DamageSources.AddDefaulted_GetRef(); Entry->Pawn = Source; }
 	Entry->FireDPS = FMath::Max(0.0f, BurnDPS);
 	Entry->FireEnd = Now + 2.5;
+	bBurning = BurnDPS > 0 || bBurning;
 	HeatAmount += Heat;
 	LastHeatTime = Now;
 	if (!bIgnited && HeatAmount >= IgnitionThreshold)
@@ -79,7 +165,9 @@ void UJTSStellarTargetComponent::ApplyFire(APawn* Source, float Heat, float Burn
 		for (AActor* Actor : Neighbors) if (Actor != GetOwner() && Remaining > 0
 			&& HasLineOfSight(GetWorld(), GetOwner()->GetActorLocation(), Actor, Source))
 		{
-			Actor->FindComponentByClass<UJTSStellarTargetComponent>()->ApplyFire(Source, IgnitionThreshold * 0.35f, BurnDPS * 0.35f, 0);
+			auto* Status = Actor->FindComponentByClass<UJTSStellarTargetComponent>();
+			Status->SetStatusPresentation(StatusEffectClass);
+			Status->ApplyFire(Source, IgnitionThreshold * 0.35f, BurnDPS * 0.35f, 0);
 			--Remaining;
 		}
 	}
@@ -101,8 +189,11 @@ void UJTSStellarTargetComponent::ApplyLightBurn(APawn* Source, float DPS, float 
 		QueryTargets(GetWorld(), GetOwner()->GetActorLocation(), 300.0f, SpreadTargets + 1, Neighbors);
 		for (AActor* Actor : Neighbors) if (Actor != GetOwner()
 			&& HasLineOfSight(GetWorld(), GetOwner()->GetActorLocation(), Actor, Source))
-			Actor->FindComponentByClass<UJTSStellarTargetComponent>()->ApplyLightBurn(Source,
-				DPS * FMath::Clamp(SpreadScale, 0.0f, 0.5f), Duration, 0, 0);
+		{
+			auto* Status = Actor->FindComponentByClass<UJTSStellarTargetComponent>();
+			Status->SetStatusPresentation(StatusEffectClass);
+			Status->ApplyLightBurn(Source, DPS * FMath::Clamp(SpreadScale, 0.0f, 0.5f), Duration, 0, 0);
+		}
 	}
 	WakeStatusTimer();
 }
@@ -113,7 +204,8 @@ void UJTSStellarTargetComponent::ExecuteIgnition(APawn* Source)
 	if (!Health || Health->IsDead()) return;
 	const bool bExecute = Tier == EJTSStellarTargetTier::Normal
 		|| (Tier == EJTSStellarTargetTier::Elite && Health->GetHealthNormalized() <= 0.15f);
-	UGameplayStatics::ApplyDamage(GetOwner(), bExecute ? Health->GetHealth() : ResistantIgnitionDamage,
+	if (bExecute) Health->ApplyDamage(Health->GetHealth(), Source ? Source->GetController() : nullptr, Source, true);
+	else UGameplayStatics::ApplyDamage(GetOwner(), ResistantIgnitionDamage,
 		Source ? Source->GetController() : nullptr, Source, UDamageType::StaticClass());
 	if (Tier == EJTSStellarTargetTier::Boss) PosturePressure = FMath::Min(100.0f, PosturePressure + 20.0f);
 }
@@ -122,10 +214,25 @@ void UJTSStellarTargetComponent::StatusPulse()
 {
 	if (!IsAliveTarget())
 	{
-		DamageSources.Reset(); Forces.Reset(); bIgnited = false; bLightBurning = false;
+		DamageSources.Reset(); Forces.Reset(); bIgnited = false; bBurning = false; bLightBurning = false; bFrozen = false; bCorroded = false;
+		UpdateStatusPresentation();
 		GetWorld()->GetTimerManager().ClearTimer(StatusTimer); return;
 	}
 	const double Now = GetWorld()->GetTimeSeconds();
+	if (bFrozen && Now >= FreezeEnd)
+	{
+		bFrozen = false; ColdAmount = 0;
+		APawn* Source = Freezer.Get();
+		if (Source)
+		{
+			ExecuteIgnition(Source);
+			TArray<AActor*> Neighbors;
+			QueryTargets(GetWorld(), GetOwner()->GetActorLocation(), ShatterRadius, 32, Neighbors);
+			for (auto* Target : Neighbors) if (Target != GetOwner() && HasLineOfSight(GetWorld(), GetOwner()->GetActorLocation(), Target, Source))
+				UGameplayStatics::ApplyDamage(Target, ShatterDamage, Source->GetController(), Source, UDamageType::StaticClass());
+		}
+		if (!IsAliveTarget()) { StatusPulse(); return; }
+	}
 	if (bIgnited && Now >= IgnitionEnd)
 	{
 		bIgnited = false; HeatAmount = 0;
@@ -133,24 +240,29 @@ void UJTSStellarTargetComponent::StatusPulse()
 		if (!IsAliveTarget()) { StatusPulse(); return; }
 	}
 	if (Now > LastHeatTime + 1.0) HeatAmount = FMath::Max(0.0f, HeatAmount - 4.0f);
-	DamageSources.RemoveAll([&](const auto& S){ return !S.Pawn.IsValid() || (S.FireEnd <= Now && S.LightEnd <= Now); });
+	DamageSources.RemoveAll([&](const auto& S){ return !S.Pawn.IsValid() || (S.FireEnd <= Now && S.LightEnd <= Now && S.CorrosionEnd <= Now); });
 	// Each element has its own three-source cap. Refreshing does not add another source from that player.
-	for (bool bFire : {true, false})
+	for (int32 Element = 0; Element < 3; ++Element)
 	{
+		const auto End = [Element](const auto& S) { return Element == 0 ? S.FireEnd : Element == 1 ? S.LightEnd : S.CorrosionEnd; };
+		const auto DPS = [Element](const auto& S) { return Element == 0 ? S.FireDPS : Element == 1 ? S.LightDPS : S.CorrosionDPS; };
 		TArray<FJTSStellarDamageSource> Active;
-		for (const auto& S : DamageSources) if ((bFire ? S.FireEnd : S.LightEnd) > Now) Active.Add(S);
-		Active.Sort([&](const auto& A, const auto& B){ return (bFire ? A.FireDPS : A.LightDPS) > (bFire ? B.FireDPS : B.LightDPS); });
+		for (const auto& S : DamageSources) if (End(S) > Now) Active.Add(S);
+		Active.Sort([&](const auto& A, const auto& B){ return DPS(A) > DPS(B); });
 		for (int32 Index = 0; Index < FMath::Min(3, Active.Num()) && IsAliveTarget(); ++Index)
 		{
 			const auto& S = Active[Index];
 			APawn* Source = S.Pawn.Get();
-			UGameplayStatics::ApplyDamage(GetOwner(), (bFire ? S.FireDPS : S.LightDPS) * 0.2f,
+			UGameplayStatics::ApplyDamage(GetOwner(), DPS(S) * 0.2f,
 				Source->GetController(), Source, UDamageType::StaticClass());
 		}
 	}
+	bBurning = DamageSources.ContainsByPredicate([&](const auto& S){ return S.FireEnd > Now && S.FireDPS > 0; });
 	bLightBurning = DamageSources.ContainsByPredicate([&](const auto& S){ return S.LightEnd > Now; });
+	bCorroded = DamageSources.ContainsByPredicate([&](const auto& S){ return S.CorrosionEnd > Now; });
+	UpdateStatusPresentation();
 	Forces.RemoveAll([&](const auto& S){ return !S.Pawn.IsValid() || !S.Field.IsValid() || S.Field->IsActorBeingDestroyed() || S.End <= Now; });
-	if (!bIgnited && HeatAmount <= 0 && DamageSources.IsEmpty() && Forces.IsEmpty())
+	if (!bIgnited && !bFrozen && HeatAmount <= 0 && DamageSources.IsEmpty() && Forces.IsEmpty() && SlowEnd <= Now && RootEnd <= Now)
 		GetWorld()->GetTimerManager().ClearTimer(StatusTimer);
 }
 
@@ -285,6 +397,8 @@ FVector UJTSStellarTargetComponent::IntegrateFieldMotion(const FVector& Position
 
 void UJTSStellarTargetComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+	if (IsValid(LocalStatusEffect)) LocalStatusEffect->Destroy();
+	if (auto* Health = GetOwner()->FindComponentByClass<UJTSHealthComponent>()) Health->OnDeath.RemoveDynamic(this, &ThisClass::HandleDeath);
 	if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(StatusTimer);
 	Super::EndPlay(Reason);
 }
@@ -293,6 +407,40 @@ void UJTSStellarTargetComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UJTSStellarTargetComponent, bIgnited);
+	DOREPLIFETIME(UJTSStellarTargetComponent, bBurning);
 	DOREPLIFETIME(UJTSStellarTargetComponent, bLightBurning);
 	DOREPLIFETIME(UJTSStellarTargetComponent, PosturePressure);
+	DOREPLIFETIME(UJTSStellarTargetComponent, bFrozen);
+	DOREPLIFETIME(UJTSStellarTargetComponent, bCorroded);
+	DOREPLIFETIME(UJTSStellarTargetComponent, SlowFraction);
+	DOREPLIFETIME(UJTSStellarTargetComponent, SlowEnd);
+	DOREPLIFETIME(UJTSStellarTargetComponent, RootEnd);
+	DOREPLIFETIME(UJTSStellarTargetComponent, StatusEffectClass);
+}
+
+void UJTSStellarTargetComponent::SetStatusPresentation(TSubclassOf<AJTSStellarStatusEffectActor> EffectClass)
+{
+	if (GetOwner()->HasAuthority() && EffectClass && EffectClass != StatusEffectClass)
+	{
+		StatusEffectClass = EffectClass;
+		UpdateStatusPresentation();
+	}
+}
+void UJTSStellarTargetComponent::UpdateStatusPresentation()
+{
+	if (GetNetMode() == NM_DedicatedServer) return;
+	if ((!bFrozen && !bCorroded && !IsBurning()) || !StatusEffectClass || !IsAliveTarget())
+	{
+		if (IsValid(LocalStatusEffect)) LocalStatusEffect->Destroy(); LocalStatusEffect = nullptr; return;
+	}
+	if (IsValid(LocalStatusEffect) && LocalStatusEffect->GetClass() != StatusEffectClass)
+	{
+		LocalStatusEffect->Destroy(); LocalStatusEffect = nullptr;
+	}
+	if (!IsValid(LocalStatusEffect))
+	{
+		FActorSpawnParameters P; P.Owner = GetOwner();
+		LocalStatusEffect = GetWorld()->SpawnActor<AJTSStellarStatusEffectActor>(StatusEffectClass, GetOwner()->GetActorTransform(), P);
+	}
+	if (LocalStatusEffect) LocalStatusEffect->UpdateStatus(bFrozen, bBurning || bIgnited, bLightBurning, bCorroded);
 }

@@ -42,6 +42,13 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	int32 MediumMetalRockWeight = 0;
+
+	/** Large mixed deposits keep the existing OreWeight distribution slot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "1", UIMin = "1"))
+	int32 MediumMetalYieldUnits = 2;
+
 	/** Extra surface-distance clearance added around the spacecraft's physical mesh bounds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SpacecraftExclusionPadding = 500.0f;
@@ -97,6 +104,8 @@ private:
 		EJTSResourceType ResourceType,
 		int32 TotalYieldUnits,
 		EJTSMoonResourceNodeSize NodeSize,
+		int32 MetalYieldUnits,
+		int32 VisualVariantIndex,
 		const FVector& ResourceScale,
 		const FRotator& ResourceRotation,
 		const FVector& GroundLocation);
@@ -129,6 +138,12 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 OreWeight = 15;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0"))
+	int32 MediumMetalRockWeight = 0;
+
+	UPROPERTY(VisibleInstanceOnly, Category = "Moon|Resources")
+	int32 MediumMetalYieldUnits = 2;
 
 	/** Runtime copy of the Moon surface settings' spacecraft exclusion setting. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))

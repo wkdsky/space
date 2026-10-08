@@ -68,3 +68,28 @@ bool JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
 
 	return bAddedProjection;
 }
+
+bool JTSSurfacePlacementBounds::GetVisualTopCenter(
+	const UPrimitiveComponent* VisualComponent,
+	const FVector& SurfaceUp,
+	float Clearance,
+	FVector& OutLocation)
+{
+	if (!IsValid(VisualComponent))
+	{
+		return false;
+	}
+
+	const FVector SafeSurfaceUp = SurfaceUp.GetSafeNormal();
+	const FVector VisualCenter = VisualComponent->GetComponentTransform().TransformPosition(
+		VisualComponent->CalcBounds(FTransform::Identity).Origin);
+	FJTSSurfaceVisualProjectionBounds VisualBounds;
+	if (!AccumulateVisualProjectionBounds(VisualComponent, VisualCenter, SafeSurfaceUp, VisualBounds))
+	{
+		return false;
+	}
+
+	// HighestPoint is a box corner: keep only its height so the marker stays centred.
+	OutLocation = VisualCenter + SafeSurfaceUp * (VisualBounds.HighestProjectionFromRoot + Clearance);
+	return true;
+}

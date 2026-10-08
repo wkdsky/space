@@ -29,6 +29,7 @@ public:
 	const UJTSStellarLootTable* GetLootTable() const;
 	void ConfigureLootTable(UJTSStellarLootTable* Table);
 	bool ConsumeEnergy(float Amount);
+	void RefundEnergy(float Amount);
 	void SetChannelActive(bool bActive) { bChannelActive = bActive; }
 	void StopStellarWeapon();
 	void RefreshParticipants();

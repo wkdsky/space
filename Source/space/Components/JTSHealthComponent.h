@@ -39,7 +39,7 @@ public:
 
 	/** Applies authoritative damage and returns the health amount actually removed. */
 	UFUNCTION(BlueprintCallable, Category = "Health")
-	float ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser);
+	float ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser, bool bBypassArmor = false);
 
 	/** Heals a living owner and returns the health amount actually restored. */
 	UFUNCTION(BlueprintCallable, Category = "Health")
@@ -85,6 +85,8 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_MaxHealth, Category = "Health", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float MaxHealth = 100.0f;
+	/** Armor is enemy configuration; corrosion removes at most 40 percentage points. */
+	UPROPERTY(EditDefaultsOnly, Category="Health", meta=(ClampMin="0", ClampMax="0.8")) float ArmorDamageReduction = 0.0f;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentHealth, Category = "Health", meta = (AllowPrivateAccess = "true"))
 	float CurrentHealth = 100.0f;

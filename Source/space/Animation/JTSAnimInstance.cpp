@@ -942,15 +942,20 @@ void UJTSAnimInstance::ApplyFacingPose()
 	{
 		// Kneeling tuck for the whole jump. A turn in the air must not swap this
 		// for the shuffle, or the legs snap open before the landing.
-		// Foot_L/R are root siblings, so translate each shoe with its ankle.
-		// PT_L/R sit far from the ankles on this skeleton and are not toe bones.
+		// Foot_L/R and PT_L/R hang off Root, so a folded ankle leaves the shoe mesh
+		// stretched to a foot that never left the ground. Each shoe bone moves with
+		// the same delta the ankle just received.
 		const float Bend = JumpTuckAlpha;
 		const int32 FootR = Mesh->GetBoneIndex(TEXT("Foot_R"));
 		const int32 FootL = Mesh->GetBoneIndex(TEXT("Foot_L"));
+		const int32 ToeR = Mesh->GetBoneIndex(TEXT("PT_R"));
+		const int32 ToeL = Mesh->GetBoneIndex(TEXT("PT_L"));
 		const int32 AnkleR = Mesh->GetBoneIndex(TEXT("LowerLeg_R_end"));
 		const int32 AnkleL = Mesh->GetBoneIndex(TEXT("LowerLeg_L_end"));
 		const FVector RestFootR = Pose.IsValidIndex(FootR) ? Pose[FootR].GetLocation() : FVector::ZeroVector;
 		const FVector RestFootL = Pose.IsValidIndex(FootL) ? Pose[FootL].GetLocation() : FVector::ZeroVector;
+		const FVector RestToeR = Pose.IsValidIndex(ToeR) ? Pose[ToeR].GetLocation() : FVector::ZeroVector;
+		const FVector RestToeL = Pose.IsValidIndex(ToeL) ? Pose[ToeL].GetLocation() : FVector::ZeroVector;
 		const FVector RestAnkleR = Pose.IsValidIndex(AnkleR) ? Pose[AnkleR].GetLocation() : FVector::ZeroVector;
 		const FVector RestAnkleL = Pose.IsValidIndex(AnkleL) ? Pose[AnkleL].GetLocation() : FVector::ZeroVector;
 
@@ -959,8 +964,9 @@ void UJTSAnimInstance::ApplyFacingPose()
 		AimSegment(TEXT("UpperLeg_R"), TEXT("LowerLeg_R"), ThighAim);
 		AimSegment(TEXT("UpperLeg_L"), TEXT("LowerLeg_L"), ThighAim);
 
-		auto FoldShin = [&](const FName ShinName, const FName AnkleName)
+		auto FoldShin = [&](const FName ShinName, const FName AnkleName, FQuat& OutFold)
 		{
+			OutFold = FQuat::Identity;
 			const int32 ShinIndex = Mesh->GetBoneIndex(ShinName);
 			const int32 AnkleIndex = Mesh->GetBoneIndex(AnkleName);
 			if (!Pose.IsValidIndex(ShinIndex) || !Pose.IsValidIndex(AnkleIndex))
@@ -975,27 +981,34 @@ void UJTSAnimInstance::ApplyFacingPose()
 			}
 			const FQuat Fold = FQuat(ActorRight, FMath::DegreesToRadians(JumpShinFoldDegrees * Bend));
 			const FVector Folded = Fold.RotateVector(ShinDir);
-			const FQuat Delta = FQuat::FindBetweenNormals(ShinDir, Folded);
-			Pose[AnkleIndex].SetLocation(Knee + Delta.RotateVector(Pose[AnkleIndex].GetLocation() - Knee));
-			Pose[AnkleIndex].SetRotation(Delta * Pose[AnkleIndex].GetRotation());
+			OutFold = FQuat::FindBetweenNormals(ShinDir, Folded);
+			Pose[AnkleIndex].SetLocation(Knee + OutFold.RotateVector(Pose[AnkleIndex].GetLocation() - Knee));
+			Pose[AnkleIndex].SetRotation(OutFold * Pose[AnkleIndex].GetRotation());
 			Pose[AnkleIndex].NormalizeRotation();
-			Pose[ShinIndex].SetRotation(Delta * Pose[ShinIndex].GetRotation());
+			Pose[ShinIndex].SetRotation(OutFold * Pose[ShinIndex].GetRotation());
 			Pose[ShinIndex].NormalizeRotation();
 		};
-		FoldShin(TEXT("LowerLeg_R"), TEXT("LowerLeg_R_end"));
-		FoldShin(TEXT("LowerLeg_L"), TEXT("LowerLeg_L_end"));
+		FQuat FoldR = FQuat::Identity;
+		FQuat FoldL = FQuat::Identity;
+		FoldShin(TEXT("LowerLeg_R"), TEXT("LowerLeg_R_end"), FoldR);
+		FoldShin(TEXT("LowerLeg_L"), TEXT("LowerLeg_L_end"), FoldL);
 
-		// Keep the original shoe orientation instead of rolling it up with the shin.
-		auto SeatShoe = [&](const int32 ShoeIndex, const int32 AnkleIndex, const FVector& RestShoe, const FVector& RestAnkle)
+		// The shoe bones were recorded before the shin folded. Reattach each one
+		// with the same delta the ankle just received, so the shoe keeps its shape.
+		auto SeatShoe = [&](const int32 ShoeIndex, const int32 AnkleIndex, const FVector& RestShoe, const FVector& RestAnkle, const FQuat& Fold)
 		{
 			if (!Pose.IsValidIndex(ShoeIndex) || !Pose.IsValidIndex(AnkleIndex))
 			{
 				return;
 			}
-			Pose[ShoeIndex].SetLocation(Pose[AnkleIndex].GetLocation() + RestShoe - RestAnkle);
+			Pose[ShoeIndex].SetLocation(Pose[AnkleIndex].GetLocation() + Fold.RotateVector(RestShoe - RestAnkle));
+			Pose[ShoeIndex].SetRotation(Fold * Pose[ShoeIndex].GetRotation());
+			Pose[ShoeIndex].NormalizeRotation();
 		};
-		SeatShoe(FootR, AnkleR, RestFootR, RestAnkleR);
-		SeatShoe(FootL, AnkleL, RestFootL, RestAnkleL);
+		SeatShoe(FootR, AnkleR, RestFootR, RestAnkleR, FoldR);
+		SeatShoe(FootL, AnkleL, RestFootL, RestAnkleL, FoldL);
+		SeatShoe(ToeR, AnkleR, RestToeR, RestAnkleR, FoldR);
+		SeatShoe(ToeL, AnkleL, RestToeL, RestAnkleL, FoldL);
 	}
 	else if (TurnShuffleAlpha >= 0.02f && GaitBlend <= 0.02f)
 	{

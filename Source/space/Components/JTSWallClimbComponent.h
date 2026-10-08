@@ -78,6 +78,8 @@ private:
 	bool IsValidSurfaceNormal(const FVector& Normal) const;
 	bool TraceClimbSurface(const FVector& Start, const FVector& End, FHitResult& OutHit) const;
 	bool ProbeClimbSurface(FHitResult& OutHit) const;
+	/** A new grab needs a face that rises above the standing capsule. An existing grip may stay. */
+	bool HasClimbableRise(const FHitResult& Hit) const;
 	bool CanClimbNow() const;
 	void BeginClimb(const FHitResult& Hit);
 	void EndClimb(bool bWalkOff = false, const TCHAR* Reason = TEXT("Manual"));
@@ -159,6 +161,12 @@ private:
 	float ContactGraceSeconds = 0.65f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Surface", meta = (ClampMin = "0"))
 	float JumpGrabSurfaceGapCm = 28.0f;
+	/**
+	 * Extra height, above the standing capsule top, that a face must reach before a new grab.
+	 * Scales with the capsule, so a later character-height change keeps the same rule.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Climb|Surface", meta = (ClampMin = "0"))
+	float MinimumRiseAboveHeadCm = 20.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "20"))
 	float StepDistance = 70.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Climb|Movement", meta = (ClampMin = "0.1"))

@@ -10,6 +10,7 @@
 #include "JTSItemDefinition.generated.h"
 
 class UMaterialInterface;
+class UStaticMesh;
 class USoundBase;
 
 /**
@@ -178,6 +179,13 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
 	TArray<EJTSShopCategory> ShopCategories;
+
+	/** Optional authored world pickup; unset items retain their prototype visual. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
+	TObjectPtr<UStaticMesh> WorldPickupMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation", meta = (ClampMin = "1.0"))
+	float WorldPickupWidth = 32.0f;
 
 	/** Short purpose tags shown on shop cards and used for future recommendation/sorting work. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")

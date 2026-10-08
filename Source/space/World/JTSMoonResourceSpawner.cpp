@@ -49,6 +49,8 @@ void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawn
 	MediumRockWeight = FMath::Max(0, Settings.MediumRockWeight);
 	LargeRockWeight = FMath::Max(0, Settings.LargeRockWeight);
 	OreWeight = FMath::Max(0, Settings.OreWeight);
+	MediumMetalRockWeight = FMath::Max(0, Settings.MediumMetalRockWeight);
+	MediumMetalYieldUnits = FMath::Max(1, Settings.MediumMetalYieldUnits);
 	SpacecraftExclusionPadding = FMath::Max(0.0f, Settings.SpacecraftExclusionPadding);
 	LandmarkExclusionPadding = FMath::Max(0.0f, Settings.LandmarkExclusionPadding);
 	bUseRandomSeed = !Settings.bUseDeterministicSeed;
@@ -106,10 +108,12 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	const int32 SafeMediumRockWeight = FMath::Max(0, MediumRockWeight);
 	const int32 SafeLargeRockWeight = FMath::Max(0, LargeRockWeight);
 	const int32 SafeOreWeight = FMath::Max(0, OreWeight);
+	const int32 SafeMediumMetalWeight = FMath::Max(0, MediumMetalRockWeight);
 	const int64 TotalResourceWeight = static_cast<int64>(SafeSmallRockWeight)
 		+ static_cast<int64>(SafeMediumRockWeight)
 		+ static_cast<int64>(SafeLargeRockWeight)
-		+ static_cast<int64>(SafeOreWeight);
+		+ static_cast<int64>(SafeOreWeight)
+		+ static_cast<int64>(SafeMediumMetalWeight);
 	if (TotalResourceWeight <= 0)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Moon Resource Spawn Skipped: all resource weights are zero or negative."));
@@ -205,10 +209,12 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		const double MediumRockThreshold = static_cast<double>(SafeSmallRockWeight)
 			+ static_cast<double>(SafeMediumRockWeight);
 		const double LargeRockThreshold = MediumRockThreshold + static_cast<double>(SafeLargeRockWeight);
+		const double MediumMetalThreshold = LargeRockThreshold + static_cast<double>(SafeMediumMetalWeight);
 		EJTSResourceType ResourceType = EJTSResourceType::Rock;
 		FVector BaseResourceScale(0.5f);
 		bool bMiningNode = false;
 		int32 TotalYieldUnits = 0;
+		int32 MetalYieldUnits = 0;
 		EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::MediumRock;
 		if (ResourceRoll < static_cast<double>(SafeSmallRockWeight))
 		{
@@ -228,13 +234,21 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 			TotalYieldUnits = LargeRockYieldUnits;
 			NodeSize = EJTSMoonResourceNodeSize::LargeRock;
 		}
+		else if (ResourceRoll < MediumMetalThreshold)
+		{
+			BaseResourceScale = FVector(1.0f);
+			bMiningNode = true;
+			TotalYieldUnits = 2;
+			MetalYieldUnits = MediumMetalYieldUnits;
+			NodeSize = EJTSMoonResourceNodeSize::MediumMetalRock;
+		}
 		else
 		{
-			ResourceType = EJTSResourceType::Ore;
-			BaseResourceScale = FVector(1.2f, 1.2f, 1.8f);
+			BaseResourceScale = FVector(2.0f);
 			bMiningNode = true;
-			TotalYieldUnits = OreDepositYieldUnits;
-			NodeSize = EJTSMoonResourceNodeSize::OreVein;
+			TotalYieldUnits = LargeRockYieldUnits;
+			MetalYieldUnits = OreDepositYieldUnits;
+			NodeSize = EJTSMoonResourceNodeSize::LargeMetalRock;
 		}
 
 		const FVector ResourceScale(
@@ -256,6 +270,8 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 				ResourceType,
 				TotalYieldUnits,
 				NodeSize,
+				MetalYieldUnits,
+				RandomStream.RandRange(0, 255),
 				ResourceScale,
 				ResourceRotation,
 				GroundLocation))
@@ -317,6 +333,8 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	EJTSResourceType ResourceType,
 	int32 TotalYieldUnits,
 	EJTSMoonResourceNodeSize NodeSize,
+	int32 MetalYieldUnits,
+	int32 VisualVariantIndex,
 	const FVector& ResourceScale,
 	const FRotator& ResourceRotation,
 	const FVector& GroundLocation)
@@ -349,7 +367,7 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 		return nullptr;
 	}
 
-	Resource->InitializeMiningNode(ResourceType, TotalYieldUnits, NodeSize);
+	Resource->InitializeMiningNode(ResourceType, TotalYieldUnits, NodeSize, MetalYieldUnits, VisualVariantIndex);
 	Resource->FinishSpawning(SpawnTransform);
 	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
 	{

@@ -1,5 +1,6 @@
 #include "space/Components/JTSStaminaComponent.h"
 
+
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -92,4 +93,12 @@ void UJTSStaminaComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		if (bExhausted && CurrentStamina >= MaxStamina * ExhaustionRecoveryFraction) bExhausted = false;
 		PublishChange();
 	}
+}
+
+void UJTSStaminaComponent::Restore(float Amount)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !FMath::IsFinite(Amount) || Amount <= 0) return;
+	CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + Amount);
+	if (CurrentStamina >= MaxStamina * ExhaustionRecoveryFraction) bExhausted = false;
+	PublishChange();
 }

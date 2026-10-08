@@ -6,10 +6,15 @@
 
 class UJTSStellarLootTable;
 class AJTSStellarEffectActor;
+class AJTSStellarStatusEffectActor;
 class UStaticMesh;
 
 UENUM(BlueprintType)
-enum class EJTSStellarWeaponMode : uint8 { Jet, Focus, BlackHole, PresentationOnly };
+enum class EJTSStellarWeaponMode : uint8
+{
+	Jet, Focus, BlackHole, PresentationOnly, // Preserve serialized values in existing assets.
+	Explosion, Healing, Freezing, Shaping, Radiance, Diffusion, Shadow, Instance, Disassembly
+};
 
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSStellarWeaponDefinition
@@ -18,6 +23,16 @@ struct SPACE_API FJTSStellarWeaponDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly) FName CoreId;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly) FName AttachmentId;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly) EJTSStellarWeaponMode Mode = EJTSStellarWeaponMode::Jet;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.01")) float PrimaryEnergyPerCast = 14.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.01")) float PrimaryInterval = 0.65f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.01")) float SecondaryEnergy = 30.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.01")) float SecondaryCooldown = 8.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.01")) float ChargeSeconds = 1.2f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="100")) float ProjectileSpeed = 2400.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0.1")) float ResidualDuration = 1.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="1")) float RobotHealth = 180.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="1")) float RobotExplosionDamage = 600.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ability", meta=(ClampMin="0")) float NearGroundHeight = 200.0f;
 	/** Jet/black hole: DPS. Focus: damage per shot. Independent of enemy health. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0")) float BaseDamage = 300.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0")) float StatusDamagePerSecond = 40.0f;
@@ -53,6 +68,8 @@ struct SPACE_API FJTSStellarWeaponDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Beam", meta=(ClampMin="0")) float ChainRadiusCentimeters = 500.0f;
 	/** Blueprint selects meshes, materials, Niagara and audio. No project assets in C++. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly) TSubclassOf<AJTSStellarEffectActor> EffectClass;
+	/** Persistent enemy feedback is independent of the weapon channel's meshes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation") TSubclassOf<AJTSStellarStatusEffectActor> TargetStatusEffectClass;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly) FLinearColor Color = FLinearColor(1, 0.25f, 0.05f);
 	/** Presentation assets and item-local pivots are authored in the catalog, never in gameplay code. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation") TSoftObjectPtr<UStaticMesh> HeldMesh;

@@ -33,6 +33,7 @@
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Components/JTSStellarAbilityComponent.h"
 #include "space/UI/JTSStellarLoadoutPanel.h"
 #include "space/UI/SJTSStellarLoadoutView.h"
 #include "space/UI/JTSGameUILayout.h"
@@ -1891,6 +1892,10 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 			{
 				StatusPercent = Loadout->GetEnergy() / 100.0f;
 				StatusLabel = FString::Printf(TEXT("星际能量 %.0f / 100   Tab 切换   1–9 普通"), Loadout->GetEnergy());
+				const auto* Def = Stellar->GetEquippedWeaponDefinition();
+				if (Def && Def->Mode == EJTSStellarWeaponMode::Disassembly)
+					if (const auto* Ability = PlayerCharacter->FindComponentByClass<UJTSStellarAbilityComponent>())
+						StatusLabel = FString::Printf(TEXT("%s · 锁定 %.0f%% · 能量 %.0f   右键切换"), Ability->IsEngineeringMode() ? TEXT("工程分解") : TEXT("战斗分解"), Ability->GetLockProgress() * 100, Loadout->GetEnergy());
 				StatusColor = FLinearColor(0.65f,0.5f,1.0f);
 				bStatusBar = true;
 			}
@@ -2230,6 +2235,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	FVector PromptAnchor = FVector::ZeroVector;
 	bool bHasPromptAnchor = false;
 	bool bUseCenteredPrompt = false;
+	bool bUseCompactPrompt = false;
 	const AJTSPlayerController* const OwningController = Cast<AJTSPlayerController>(GetOwningPlayer());
 	if (!bGameMenuOpen && (!IsValid(OwningController) || !OwningController->IsSpaceShopOpen()))
 	{
@@ -2262,6 +2268,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 						TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
 						PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
 						bHasPromptAnchor = !PromptText.IsEmpty() && !TargetName.IsEmpty();
+						bUseCompactPrompt = MeleeTarget->IsA<AJTSMoonResourceActor>();
 					}
 				}
 
@@ -2276,6 +2283,8 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 							if (const AJTSWorldPickupActor* const Pickup = Cast<AJTSWorldPickupActor>(Target))
 							{
 								TargetName = Pickup->GetItemDisplayName();
+								const EJTSItemId ItemId = Pickup->GetItemInstance().ItemId;
+								bUseCompactPrompt = ItemId == EJTSItemId::Rock || ItemId == EJTSItemId::Ore;
 								PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
 								bHasPromptAnchor = true;
 							}
@@ -2288,6 +2297,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 							else if (const AJTSMoonResourceActor* const Resource = Cast<AJTSMoonResourceActor>(Target))
 							{
 								TargetName = Resource->GetInteractionDisplayName();
+								bUseCompactPrompt = true;
 								PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
 								bHasPromptAnchor = true;
 							}
@@ -2324,13 +2334,16 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	const bool bShowPrompt = !PromptText.IsEmpty() && !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
 	if (InteractionPromptText != nullptr)
 	{
+		InteractionPromptText->SetAutoWrapText(!bUseCompactPrompt);
 		InteractionPromptText->SetText(bShowPrompt
-			? FText::FromString(FString::Printf(TEXT("%s\n%s"), *TargetName.ToString(), *PromptText.ToString()))
+			? (bUseCompactPrompt ? PromptText
+				: FText::FromString(FString::Printf(TEXT("%s\n%s"), *TargetName.ToString(), *PromptText.ToString())))
 			: FText::GetEmpty());
 		InteractionPromptText->SetVisibility(bShowPrompt ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
 	if (InteractionPromptSlot != nullptr)
 	{
+		InteractionPromptSlot->SetAutoSize(bUseCompactPrompt);
 		if (bUseCenteredPrompt)
 		{
 			InteractionPromptSlot->SetAnchors(FAnchors(0.5f, 0.5f));

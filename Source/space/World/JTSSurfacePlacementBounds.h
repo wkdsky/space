@@ -45,4 +45,11 @@ namespace JTSSurfacePlacementBounds
 		const FVector& ActorRootLocation,
 		const FVector& SurfaceUp,
 		FJTSSurfaceVisualProjectionBounds& InOutBounds);
+
+	/** Point above the visual's centre along SurfaceUp, independent of imported mesh pivot. */
+	SPACE_API bool GetVisualTopCenter(
+		const UPrimitiveComponent* VisualComponent,
+		const FVector& SurfaceUp,
+		float Clearance,
+		FVector& OutLocation);
 }

@@ -127,12 +127,53 @@ bool UJTSWallClimbComponent::TraceClimbSurface(const FVector& Start, const FVect
 	const AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner());
 	const UWorld* World = GetWorld();
 	if (!IsValid(Character) || World == nullptr) return false;
-	if (const AJTSPlanetAnchor* Planet = Character->GetGameplayPlanet(); IsValid(Planet) && Planet->HasGameplaySurface())
+	FHitResult PlanetHit;
+	const bool bPlanetHit = [&]()
 	{
-		if (Planet->TraceGameplaySurfaceSegment(Start, End, OutHit)) return true;
-	}
+		const AJTSPlanetAnchor* Planet = Character->GetGameplayPlanet();
+		return IsValid(Planet) && Planet->HasGameplaySurface()
+			&& Planet->TraceGameplaySurfaceSegment(Start, End, PlanetHit) && PlanetHit.bBlockingHit;
+	}();
+	// Planet mesh is queried on its own object type and used to return immediately.
+	// A monster or ore node standing on that mesh then never reached the visibility trace.
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSClimbSurface), true, Character);
-	return World->LineTraceSingleByChannel(OutHit, Start, End, ECC_Visibility, Params) && OutHit.bBlockingHit;
+	FHitResult VisibilityHit;
+	const bool bVisibilityHit = World->LineTraceSingleByChannel(
+		VisibilityHit, Start, End, ECC_Visibility, Params) && VisibilityHit.bBlockingHit;
+	if (bPlanetHit && (!bVisibilityHit || PlanetHit.Distance <= VisibilityHit.Distance))
+	{
+		OutHit = PlanetHit;
+		return true;
+	}
+	if (bVisibilityHit)
+	{
+		OutHit = VisibilityHit;
+		return true;
+	}
+	return false;
+}
+
+bool UJTSWallClimbComponent::HasClimbableRise(const FHitResult& Hit) const
+{
+	const AJTSCharacter* Character = Cast<AJTSCharacter>(GetOwner());
+	if (!Hit.bBlockingHit || !IsValid(Character)) return false;
+	const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
+	const float HalfHeight = IsValid(Capsule) ? Capsule->GetScaledCapsuleHalfHeight() : 96.0f;
+	const FVector Up = GetGravityUp();
+	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+	if (Normal.IsNearlyZero()) return false;
+	// Standing eye line, just above the capsule crown, pushed into the face.
+	const FVector Head = Character->GetActorLocation() + Up * (HalfHeight + MinimumRiseAboveHeadCm);
+	// Positive means the head is still outside the face. A short block's infinite plane
+	// stays in front of the body, so only a real hit at this height proves the face is tall.
+	const float Outside = FVector::DotProduct(FVector::VectorPlaneProject(Head - Hit.ImpactPoint, Up), Normal);
+	if (Outside <= 4.0f) return true;
+	FHitResult CrownHit;
+	const FVector Start = Head + Normal * 30.0f;
+	return TraceClimbSurface(Start, Start - Normal * (ProbeDistance + 40.0f), CrownHit)
+		&& CrownHit.bBlockingHit
+		&& CrownHit.GetActor() == Hit.GetActor()
+		&& FVector::DotProduct(CrownHit.ImpactNormal.GetSafeNormal(), Normal) > 0.7f;
 }
 
 bool UJTSWallClimbComponent::FindPoseContact(const FVector& DesiredWorld,
@@ -578,7 +619,7 @@ bool UJTSWallClimbComponent::TryAutoAttach()
 	NextAttachRequestSeconds = Now + 0.18f;
 	if (!CanClimbNow()) return false;
 	FHitResult Hit;
-	if (!ProbeClimbSurface(Hit)) return false;
+	if (!ProbeClimbSurface(Hit) || !HasClimbableRise(Hit)) return false;
 	if (!Owner->HasAuthority())
 	{
 		ServerTryAutoAttach();
@@ -617,6 +658,7 @@ void UJTSWallClimbComponent::TryJumpImpactGrip(const FHitResult& Impact)
 	if (!IsValid(Character) || !Character->HasAuthority() || bClimbing || !bJumpGrabArmed
 		|| !IsValid(Movement) || !Movement->IsFalling() || !Impact.bBlockingHit
 		|| !IsValidSurfaceNormal(Impact.ImpactNormal) || !CanClimbNow()
+		|| !HasClimbableRise(Impact)
 		|| FVector::DotProduct(Movement->Velocity, -Impact.ImpactNormal.GetSafeNormal()) < 60.0f) return;
 	// CharacterMovement reports this hit before sliding off an unwalkable face.
 	BeginClimb(Impact);
@@ -628,7 +670,7 @@ void UJTSWallClimbComponent::TryJumpLandingGrip(const FHitResult& LandingHit)
 	if (!IsValid(Owner) || !Owner->HasAuthority() || bClimbing || !bJumpGrabArmed) return;
 	bJumpGrabArmed = false;
 	if (!LandingHit.bBlockingHit || !IsValidSurfaceNormal(LandingHit.ImpactNormal)
-		|| !CanClimbNow()) return;
+		|| !CanClimbNow() || !HasClimbableRise(LandingHit)) return;
 	BeginClimb(LandingHit);
 }
 
@@ -651,7 +693,7 @@ void UJTSWallClimbComponent::ToggleAttach()
 	if (Now < NextAttachRequestSeconds || !CanClimbNow()) return;
 	NextAttachRequestSeconds = Now + 0.35f;
 	FHitResult Hit;
-	if (ProbeClimbSurface(Hit)) BeginClimb(Hit);
+	if (ProbeClimbSurface(Hit) && HasClimbableRise(Hit)) BeginClimb(Hit);
 }
 
 void UJTSWallClimbComponent::ServerToggleAttach_Implementation()
@@ -721,7 +763,8 @@ void UJTSWallClimbComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		float BestGap = TNumericLimits<float>::Max();
 		auto ConsiderGrip = [&](const FHitResult& Candidate)
 		{
-			if (!Candidate.bBlockingHit || !IsValidSurfaceNormal(Candidate.ImpactNormal)) return;
+			if (!Candidate.bBlockingHit || !IsValidSurfaceNormal(Candidate.ImpactNormal)
+				|| !HasClimbableRise(Candidate)) return;
 			const FVector Normal = Candidate.ImpactNormal.GetSafeNormal();
 			const float ApproachSpeed = FVector::DotProduct(Movement->Velocity, -Normal);
 			const bool bDescendingAlongFace = FVector::DotProduct(Movement->Velocity, Up) < -60.0f

@@ -1,4 +1,6 @@
 #include "space/Components/JTSStellarLoadoutComponent.h"
+
+
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -362,4 +364,9 @@ void UJTSStellarLoadoutComponent::GetLifetimeReplicatedProps(TArray<FLifetimePro
 	DOREPLIFETIME_CONDITION(UJTSStellarLoadoutComponent, ActiveCoreSlot, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UJTSStellarLoadoutComponent, Revision, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UJTSStellarLoadoutComponent, Energy, COND_OwnerOnly);
+}
+
+void UJTSStellarLoadoutComponent::RefundEnergy(float Amount)
+{
+	if (GetOwner()->HasAuthority() && FMath::IsFinite(Amount) && Amount > 0) Energy = FMath::Min(100.f, Energy + Amount);
 }

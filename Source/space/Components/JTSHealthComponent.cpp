@@ -1,4 +1,6 @@
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSStellarSupportComponent.h"
+#include "space/Components/JTSStellarTargetComponent.h"
 
 #include "GameFramework/Actor.h"
 #include "GameFramework/DamageType.h"
@@ -32,13 +34,17 @@ bool UJTSHealthComponent::IsDead() const
 	return bIsDead || CurrentHealth <= 0.0f;
 }
 
-float UJTSHealthComponent::ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser)
+float UJTSHealthComponent::ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser, bool bBypassArmor)
 {
 	if (!CanModifyHealth() || IsDead() || !FMath::IsFinite(Damage) || Damage <= 0.0f)
 	{
 		return 0.0f;
 	}
 
+	const auto* Status = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
+	if (!bBypassArmor) Damage *= 1.f - FMath::Clamp(ArmorDamageReduction - (Status ? Status->GetArmorReduction() : 0.f), 0.f, .8f);
+	if (auto* Support = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarSupportComponent>() : nullptr)
+		Damage = Support->AbsorbDamage(Damage, DamageCauser);
 	const float PreviousHealth = CurrentHealth;
 	CurrentHealth = FMath::Clamp(CurrentHealth - Damage, 0.0f, MaxHealth);
 	const float AppliedDamage = PreviousHealth - CurrentHealth;

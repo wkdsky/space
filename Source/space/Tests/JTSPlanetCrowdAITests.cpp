@@ -11,8 +11,11 @@
 #include "MassEntityManager.h"
 #include "MassEntitySubsystem.h"
 #include "UObject/UnrealType.h"
+#include "HAL/IConsoleManager.h"
+#include "EngineUtils.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Components/JTSStellarTargetComponent.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSMoonCubeEnemy.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -23,6 +26,30 @@
 
 namespace
 {
+	// Development-only fixture for observing the real rendered level. No assets or AI defaults change.
+	FAutoConsoleCommandWithWorldAndArgs GBodyTestSpawn(TEXT("jts.EnemyBody.TestSpawn"),
+		TEXT("Development QA: TestSpawn <planet actor name> <count> <surface X> <Y> <Z>. Spawns stationary coincident bodies."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World || !World->IsGameWorld() || World->GetNetMode() == NM_Client || Args.Num() != 5) return;
+			AJTSPlanetAnchor* Planet = nullptr;
+			for (TActorIterator<AJTSPlanetAnchor> It(World); It; ++It) if (It->GetName() == Args[0]) Planet = *It;
+			if (!Planet) return;
+			FJTSPlanetSurfaceHit Hit;
+			if (!Planet->ProjectPointToSurface(FVector(FCString::Atod(*Args[2]), FCString::Atod(*Args[3]), FCString::Atod(*Args[4])), Hit)) return;
+			const FVector Ground = Hit.ImpactPoint, Up = Planet->GetRadialUpVector(Ground);
+			FJTSPlanetEnemyBehavior Behavior; Behavior.RoamSpeed = 0; Behavior.ChaseSpeed = 0;
+			Behavior.SeparationWeight = 0; Behavior.bAcquireOnSpawn = false;
+			auto* AI = World->GetSubsystem<UJTSPlanetEnemySubsystem>();
+			FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			for (int32 I = 0; I < FMath::Clamp(FCString::Atoi(*Args[1]), 1, 1000); ++I)
+			{
+				auto* Cube = World->SpawnActor<AJTSMoonCubeEnemy>(Ground + Up * Behavior.HoverHeight,
+					FRotationMatrix::MakeFromZ(Up).Rotator(), Spawn);
+				Cast<UBoxComponent>(Cube->GetRootComponent())->IgnoreActorWhenMoving(Planet->GetGameplaySurfaceActor(), true);
+				AI->RegisterEnemy(Cube, Planet, Ground, Ground, Behavior);
+			}
+		}));
 	struct FCrowdWorld
 	{
 		UWorld* World;
@@ -206,13 +233,34 @@ bool FJTSCrowdAcquisitionTest::RunTest(const FString&)
 	Player->SetActorLocation(Home + FVector(0,0,100));
 	// Recover before the old colony alert expires: it must not re-enrol returned enemies.
 	for (int32 Frame = 0; Frame < 600; ++Frame) Scope.Step();
+	TMap<int32, float> EligibleSince;
 	for (int32 Frame = 0; Frame < 35; ++Frame)
 	{
 		Scope.Step();
+		for (int32 I = 0; I < Entities.Num(); ++I)
+		{
+			const auto E = Entities[I];
+			const bool bEligible = !Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(E).bReturningHome
+				&& Scope.World->GetTimeSeconds() >= Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(E).NextAcquireAllowedTime;
+			if (bEligible) EligibleSince.FindOrAdd(I, Scope.World->GetTimeSeconds());
+			else EligibleSince.Remove(I);
+		}
 		if (AI->GetLastScanCount() > 24 || AI->GetLastSightQueryCount() > 64 || AI->GetLastSteeringCount() > 80 || AI->GetLastMovementCount() != 200)
 			AddError(TEXT("Four-player acquisition exceeded its work budget"));
 	}
-	TestEqual(TEXT("Four eligible expedition players do not starve crowd acquisition"), AI->GetTrackedTargetCount(), 200);
+	int32 EligibleCount = 0;
+	for (const auto E : Entities)
+		if (!Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(E).bReturningHome
+			&& Scope.World->GetTimeSeconds() >= Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(E).NextAcquireAllowedTime)
+			++EligibleCount;
+	// Independent footprints can delay entry into the crowded return area. Returning/cooldown bodies
+	// remain deliberately ineligible; this check covers acquisition starvation, not crowd formation.
+	TestTrue(TEXT("Some returned bodies are eligible to acquire again"), EligibleCount > 0);
+	TestTrue(TEXT("Returning bodies cannot be selected as eligible targets"), AI->GetTrackedTargetCount() <= EligibleCount);
+	for (const auto& Entry : EligibleSince)
+		if (Scope.World->GetTimeSeconds() - Entry.Value > Behavior.ScanInterval * 1.15f + .2f)
+			TestTrue(TEXT("Every body eligible for a full scan budget eventually reacquires"),
+				Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entities[Entry.Key]).Target.IsValid());
 	for (const FMassEntityHandle E : Entities)
 	{
 		const auto& P = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(E);
@@ -272,7 +320,7 @@ bool FJTSCrowdContinuousMotionTest::RunTest(const FString&)
 			{
 				const double Step = FVector::Distance(Before[I], Cubes[I]->GetActorLocation());
 				if (Step < 0.1) ++Pauses;
-				if (Step > Behavior.ChaseSpeed / 60.0 + 1) ++LargeSteps;
+				if (Step > (Behavior.ChaseSpeed + AI->BodySeparationSettings.MaxCorrectionSpeed) / 60.0 + 1) ++LargeSteps;
 				TestTrue(TEXT("The swept collision body publishes movement velocity"), Cubes[I]->GetVelocity().Size() > 1);
 			}
 		}
@@ -442,6 +490,155 @@ bool FJTSCrowdSphericalRouteTest::RunTest(const FString&)
 	TestFalse(TEXT("Side-of-planet route is available"), SideDirection.IsNearlyZero());
 	TestTrue(TEXT("Side route is tangent to radial gravity"),
 		FMath::Abs(FVector::DotProduct(SideDirection, Scope.Planet->GetRadialUpVector(SideHome))) < 0.01f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSBodyLifecycleTest, "JTS.Moon.BodyCollision.RuntimeLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSBodyLifecycleTest::RunTest(const FString&)
+{
+	FCrowdWorld W; W.Begin();
+	const FVector Home = W.Ground(FVector(0,0,10000));
+	auto* AI = W.World->GetSubsystem<UJTSPlanetEnemySubsystem>();
+	FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto* Cube = W.World->SpawnActor<AJTSMoonCubeEnemy>(Home+W.Planet->GetRadialUpVector(Home)*45, FRotator::ZeroRotator, Spawn);
+	TestTrue(TEXT("Settlement initialization succeeds"), IJTSPlanetSettlementEnemy::Execute_InitializeForSettlement(Cube, W.Planet, Home, Home));
+	FJTSPlanetEnemyBehavior Behavior;
+	const auto First = AI->RegisterEnemy(Cube, W.Planet, Home, Home, Behavior);
+	TestTrue(TEXT("Repeated registration returns the same entity"), First == AI->RegisterEnemy(Cube,W.Planet,Home,Home,Behavior));
+	W.Step();
+	FJTSPlanetEnemyBodyFragment Data;
+	TestTrue(TEXT("Body snapshot exists"), AI->GetBodyCollisionData(First, Data));
+	const uint64 Id = Data.StableId;
+	TestEqual(TEXT("Only one footprint registered"), AI->GetBodySeparationStats().Participants, 1);
+	Cube->SetActorEnableCollision(false); W.Step();
+	TestEqual(TEXT("Actor collision off removes footprint"), AI->GetBodySeparationStats().Participants, 0);
+	Cube->SetActorEnableCollision(true); W.Step();
+	TestEqual(TEXT("Actor collision on restores footprint"), AI->GetBodySeparationStats().Participants, 1);
+	AI->SetBodyCollisionEnabled(First, false); W.Step();
+	TestEqual(TEXT("Explicit collision state disables participation"), AI->GetBodySeparationStats().Participants, 0);
+	AI->UnregisterEnemy(First); AI->UnregisterEnemy(First);
+	TestFalse(TEXT("Pool release removes stale handle"), AI->GetBodyCollisionData(First, Data));
+	const auto Second = AI->RegisterEnemy(Cube,W.Planet,Home,Home,Behavior);
+	AI->GetBodyCollisionData(Second, Data);
+	TestTrue(TEXT("Reused Actor obtains a fresh stable identity"), Data.StableId != Id);
+	AI->UnregisterEnemy(Second);
+	TestTrue(TEXT("Settlement initialization accepts an explicitly released live Actor"),
+		IJTSPlanetSettlementEnemy::Execute_InitializeForSettlement(Cube,W.Planet,Home,Home));
+	const auto Reused = AI->RegisterEnemy(Cube,W.Planet,Home,Home,Behavior);
+	W.Step(); TestEqual(TEXT("Reuse does not retain duplicate footprint"), AI->GetBodySeparationStats().Participants, 1);
+	Cube->Destroy();
+	TestFalse(TEXT("Actor destruction immediately unregisters even direct registrations"), AI->GetBodyCollisionData(Reused, Data));
+	W.Step(); TestEqual(TEXT("Destroyed Actor leaves no footprint"), AI->GetBodySeparationStats().Participants, 0);
+	auto* Dead = W.World->SpawnActor<AJTSMoonCubeEnemy>(Home,FRotator::ZeroRotator,Spawn);
+	IJTSPlanetSettlementEnemy::Execute_InitializeForSettlement(Dead,W.Planet,Home,Home);
+	const auto DeadEntity=AI->RegisterEnemy(Dead,W.Planet,Home,Home,Behavior);
+	W.Step(); Dead->GetHealthComponent()->ApplyDamage(2000,nullptr,nullptr);
+	TestFalse(TEXT("Existing death rule immediately unregisters body"), AI->GetBodyCollisionData(DeadEntity,Data));
+	TestEqual(TEXT("Death removes participation before delayed corpse destruction"), AI->GetBodySeparationStats().Participants, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSBodyEnvironmentTest, "JTS.Moon.BodyCollision.RuntimeMovementAndEnvironment",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSBodyEnvironmentTest::RunTest(const FString&)
+{
+	FCrowdWorld W; W.Begin();
+	auto* AI=W.World->GetSubsystem<UJTSPlanetEnemySubsystem>();
+	auto& Manager=W.World->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	const FVector Home=W.Ground(FVector(0,0,10000));
+	FJTSPlanetEnemyBehavior Behavior; Behavior.RoamSpeed=0; Behavior.ChaseSpeed=0; Behavior.SeparationWeight=0;
+	Behavior.bAcquireOnSpawn=false; Behavior.CollisionRadius=70;
+	FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	auto SpawnBody=[&](const FVector& Ground)
+	{
+		auto* Cube=W.World->SpawnActor<AJTSMoonCubeEnemy>(Ground+W.Planet->GetRadialUpVector(Ground)*45,FRotator::ZeroRotator,Spawn);
+		Cast<UBoxComponent>(Cube->GetRootComponent())->IgnoreActorWhenMoving(W.Surface,true);
+		const auto Entity=AI->RegisterEnemy(Cube,W.Planet,Home,Ground,Behavior);
+		return TPair<AJTSMoonCubeEnemy*,FMassEntityHandle>(Cube,Entity);
+	};
+	auto A=SpawnBody(Home), B=SpawnBody(Home);
+	IJTSPlanetSettlementEnemy::Execute_OnSettlementAttackStarted(A.Key);
+	Manager.GetFragmentDataChecked<FJTSPlanetEnemyCombatFragment>(A.Value).bImpactPending=true;
+	Manager.GetFragmentDataChecked<FJTSPlanetEnemyCombatFragment>(A.Value).ImpactTime=MAX_flt;
+	for(int32 I=0;I<120;++I) W.Step();
+	TestEqual(TEXT("Stationary/attacking bodies are still participants"), AI->GetBodySeparationStats().Participants, 2);
+	TestEqual(TEXT("Static coincident bodies separate on the real mesh"), AI->GetBodySeparationStats().ResidualPairs, 0);
+	TestTrue(TEXT("Body positions remain finite"), !A.Key->GetActorLocation().ContainsNaN() && !B.Key->GetActorLocation().ContainsNaN());
+	for(auto Item:{A,B})
+	{
+		const FVector Ground=W.Ground(Item.Key->GetActorLocation());
+		TestTrue(TEXT("Correction retains real ground hover height"), FMath::Abs(FVector::Distance(Item.Key->GetActorLocation(),Ground)-45)<.2);
+	}
+	// Preserve active movement intent while only projecting overlapping bodies apart.
+	A.Key->SetActorLocation(W.Ground(Home+FVector(-160,0,0))+FVector(0,0,45));
+	B.Key->SetActorLocation(W.Ground(Home+FVector(160,0,0))+FVector(0,0,45));
+	for(auto Item:{A,B})
+	{
+		auto& Move=Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Item.Value);
+		Move.GroundLocation=W.Ground(Item.Key->GetActorLocation()); Move.NextUpdateTime=MAX_flt;
+		Move.DesiredVelocity=FVector(Item.Value==A.Value?120:-120,0,0);
+		Move.GoalLocation=Home+FVector(Item.Value==A.Value?1000:-1000,0,0); Move.StopDistance=0;
+	}
+	for(int32 I=0;I<180;++I)
+	{
+		W.Step();
+		TestTrue(TEXT("Opposing native movement does not continually occupy the same space"), FVector::Distance(A.Key->GetActorLocation(),B.Key->GetActorLocation())>=140.5);
+		TestTrue(TEXT("Position projection cannot create abnormal velocity"), A.Key->GetVelocity().Size()<425 && B.Key->GetVelocity().Size()<425);
+	}
+	A.Key->Destroy(); B.Key->Destroy();
+	// A wall constrains accumulated correction. Residual overlap is permitted and diagnosed.
+	auto* Wall=W.World->SpawnActor<AStaticMeshActor>(Home+FVector(150,0,45),FRotator::ZeroRotator);
+	Wall->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+	Wall->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
+	Wall->SetActorScale3D(FVector(1,12,6)); Wall->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
+	const FVector NearWall=W.Ground(Home+FVector(54,0,0));
+	A=SpawnBody(NearWall); B=SpawnBody(NearWall);
+	for(int32 I=0;I<120;++I)
+	{
+		W.Step();
+		TestTrue(TEXT("Environment-constrained separation never pushes native box through wall"), A.Key->GetActorLocation().X<=55.1 && B.Key->GetActorLocation().X<=55.1);
+	}
+	TestTrue(TEXT("Solver exposes bounded residuals instead of hiding bodies"), AI->GetBodySeparationStats().Iterations<=AI->BodySeparationSettings.Iterations);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSBodyDenseSurfaceTest, "JTS.Moon.BodyCollision.RuntimeDenseCurvedSurface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSBodyDenseSurfaceTest::RunTest(const FString&)
+{
+	FCrowdWorld W; W.Begin();
+	auto* AI = W.World->GetSubsystem<UJTSPlanetEnemySubsystem>();
+	const FVector Home = W.Ground(FVector(2000, 4500, 8500));
+	const FVector Up = W.Planet->GetRadialUpVector(Home);
+	FJTSPlanetEnemyBehavior Behavior; Behavior.RoamSpeed = 0; Behavior.ChaseSpeed = 0;
+	Behavior.SeparationWeight = 0; Behavior.bAcquireOnSpawn = false;
+	FActorSpawnParameters Spawn; Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	TArray<AJTSMoonCubeEnemy*> Cubes;
+	for (int32 I = 0; I < 200; ++I)
+	{
+		auto* Cube = W.World->SpawnActor<AJTSMoonCubeEnemy>(Home + Up * 45, FRotationMatrix::MakeFromZ(Up).Rotator(), Spawn);
+		Cast<UBoxComponent>(Cube->GetRootComponent())->IgnoreActorWhenMoving(W.Surface, true);
+		AI->RegisterEnemy(Cube, W.Planet, Home, Home, Behavior); Cubes.Add(Cube);
+	}
+	float MaxStep = 0, MaxGroundError = 0, TailSpeed = 0;
+	for (int32 Frame = 0; Frame < 1800; ++Frame)
+	{
+		W.Step(); MaxStep = FMath::Max(MaxStep, AI->GetBodySeparationStats().MaxStepCorrection);
+		for (auto* Cube : Cubes)
+		{
+			if (Cube->GetActorLocation().ContainsNaN()) { AddError(TEXT("Dense curved-surface body produced NaN")); return false; }
+			if (Frame >= 1740) TailSpeed = FMath::Max(TailSpeed, float(Cube->GetVelocity().Size()));
+		}
+	}
+	for (auto* Cube : Cubes) MaxGroundError = FMath::Max(MaxGroundError,
+		float(FMath::Abs(FVector::Distance(Cube->GetActorLocation(), W.Ground(Cube->GetActorLocation())) - 45)));
+	AddInfo(FString::Printf(TEXT("200 coincident curved-mesh actors: residual %d, max depth %.3f cm, max step %.3f cm, ground error %.3f cm, tail speed %.3f cm/s"),
+		AI->GetBodySeparationStats().ResidualPairs, AI->GetBodySeparationStats().MaxPenetration, MaxStep, MaxGroundError, TailSpeed));
+	TestEqual(TEXT("Native mesh constraints allow 200 coincident stationary bodies to settle"), AI->GetBodySeparationStats().ResidualPairs, 0);
+	TestEqual(TEXT("All 200 stationary bodies retain participation"), AI->GetBodySeparationStats().Participants, 200);
+	TestTrue(TEXT("All solver iterations obey the total step budget"), MaxStep <= 5.001f);
+	TestTrue(TEXT("Dense separation retains the real mesh surface"), MaxGroundError < .2f);
+	TestTrue(TEXT("Dense settled bodies do not continue to jitter"), TailSpeed < 1);
 	return true;
 }
 #endif

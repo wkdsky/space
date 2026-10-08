@@ -1,4 +1,9 @@
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/Components/JTSStellarAbilityComponent.h"
+#include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Components/JTSStellarTargetComponent.h"
+#include "space/Components/JTSHealthComponent.h"
+
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -122,37 +127,25 @@ float AJTSMoonResourceActor::GetRemainingMiningWork() const
 	return FMath::Clamp(RemainingMiningWork, 0.0f, FMath::Max(0.1f, TotalMiningWork));
 }
 
+int32 AJTSMoonResourceActor::GetMetalYieldUnits() const
+{
+	return FMath::Clamp(MetalYieldUnits, 0, GetTotalYieldUnits());
+}
+
 FText AJTSMoonResourceActor::GetInteractionDisplayName() const
 {
-	switch (NodeSize)
-	{
-	case EJTSMoonResourceNodeSize::MediumRock: return FText::FromString(TEXT("MEDIUM ROCK"));
-	case EJTSMoonResourceNodeSize::OreVein: return FText::FromString(TEXT("ORE VEIN"));
-	case EJTSMoonResourceNodeSize::LargeRock:
-	default: return FText::FromString(TEXT("LARGE ROCK"));
-	}
+	return FText::FromString(TEXT("Rocks"));
 }
 
 FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
 {
 	if (IsValid(ResourceMesh) && ResourceMesh->IsRegistered())
 	{
-		if (bUsesRealPlanetSurface)
+		FVector TopCenter;
+		if (JTSSurfacePlacementBounds::GetVisualTopCenter(ResourceMesh, SurfaceUp, 28.0f, TopCenter))
 		{
-			FJTSSurfaceVisualProjectionBounds VisualBounds;
-			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-				ResourceMesh,
-				GetActorLocation(),
-				SurfaceUp,
-				VisualBounds))
-			{
-				return VisualBounds.HighestPoint + SurfaceUp * 28.0f;
-			}
+			return TopCenter;
 		}
-
-		const float BoundsScale = FMath::Max(FMath::Abs(ResourceMesh->BoundsScale), KINDA_SMALL_NUMBER);
-		const FVector PhysicalExtent = ResourceMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		return ResourceMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 28.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 120.0f;
@@ -290,7 +283,9 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 void AJTSMoonResourceActor::InitializeMiningNode(
 	EJTSResourceType NewResourceType,
 	int32 NewTotalYieldUnits,
-	EJTSMoonResourceNodeSize NewNodeSize)
+	EJTSMoonResourceNodeSize NewNodeSize,
+	int32 NewMetalYieldUnits,
+	int32 NewVisualVariantIndex)
 {
 	if (!HasAuthority())
 	{
@@ -298,11 +293,15 @@ void AJTSMoonResourceActor::InitializeMiningNode(
 	}
 	ResourceType = NewResourceType;
 	NodeSize = NewResourceType == EJTSResourceType::Ore ? EJTSMoonResourceNodeSize::OreVein : NewNodeSize;
-	TotalYieldUnits = FMath::Max(1, NewTotalYieldUnits);
+	const bool bMixedNode = NodeSize == EJTSMoonResourceNodeSize::MediumMetalRock || NodeSize == EJTSMoonResourceNodeSize::LargeMetalRock;
+	MetalYieldUnits = bMixedNode ? FMath::Max(0, NewMetalYieldUnits) : 0;
+	VisualVariantIndex = FMath::Max(0, NewVisualVariantIndex);
+	const int32 PrimaryYieldUnits = FMath::Max(1, NewTotalYieldUnits);
+	TotalYieldUnits = PrimaryYieldUnits + MetalYieldUnits;
 	RemainingYieldUnits = TotalYieldUnits;
 	const float WorkPerDrop = NodeSize == EJTSMoonResourceNodeSize::MediumRock ? 2.5f
 		: NodeSize == EJTSMoonResourceNodeSize::LargeRock ? 4.0f : 5.0f;
-	TotalMiningWork = FMath::Max(1.0f, static_cast<float>(TotalYieldUnits) * WorkPerDrop);
+	TotalMiningWork = FMath::Max(1.0f, static_cast<float>(PrimaryYieldUnits) * WorkPerDrop);
 	RemainingMiningWork = TotalMiningWork;
 	bMiningInProgress = false;
 	ApplyResourceAppearance();
@@ -317,7 +316,8 @@ bool AJTSMoonResourceActor::CanInteract_Implementation(APawn* InteractingPawn) c
 
 FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
-	return CanInteract_Implementation(InteractingPawn) ? GetMiningPrompt(InteractingPawn) : FText::GetEmpty();
+	return CanInteract_Implementation(InteractingPawn)
+		? FText::FromString(TEXT("[E] Rocks")) : FText::GetEmpty();
 }
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
@@ -374,9 +374,11 @@ bool AJTSMoonResourceActor::SpawnAllResourceDrops(APawn* Miner)
 	TArray<AJTSWorldPickupActor*> SpawnedPickups;
 	for (int32 DropIndex = 0; DropIndex < GetTotalYieldUnits(); ++DropIndex)
 	{
+		const EJTSItemId ItemId = DropIndex < GetTotalYieldUnits() - GetMetalYieldUnits()
+			? DropItemId : EJTSItemId::Ore;
 		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
 			GetWorld(),
-			UJTSItemDefinitionLibrary::MakeInstance(DropItemId),
+			UJTSItemDefinitionLibrary::MakeInstance(ItemId),
 			GetActorLocation(),
 			Miner,
 			this,
@@ -453,7 +455,7 @@ FText AJTSMoonResourceActor::GetMeleeTargetDisplayName_Implementation() const
 
 FText AJTSMoonResourceActor::GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const
 {
-	return GetMiningPrompt(AttackingPawn);
+	return GetInteractionPrompt_Implementation(AttackingPawn);
 }
 
 FVector AJTSMoonResourceActor::GetMeleeTargetAnchorWorldLocation_Implementation() const
@@ -484,6 +486,8 @@ void AJTSMoonResourceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AJTSMoonResourceActor, ResourceType);
 	DOREPLIFETIME(AJTSMoonResourceActor, TotalYieldUnits);
 	DOREPLIFETIME(AJTSMoonResourceActor, RemainingYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, MetalYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, VisualVariantIndex);
 	DOREPLIFETIME(AJTSMoonResourceActor, NodeSize);
 	DOREPLIFETIME(AJTSMoonResourceActor, TotalMiningWork);
 	DOREPLIFETIME(AJTSMoonResourceActor, RemainingMiningWork);
@@ -501,23 +505,6 @@ void AJTSMoonResourceActor::OnRep_SurfacePresentation()
 	ApplyResourceAppearance();
 }
 
-FText AJTSMoonResourceActor::GetMiningPrompt(APawn* InteractingPawn) const
-{
-	EJTSItemId ItemId = EJTSItemId::None;
-	float Work = 0.0f;
-	if (!ResolveHeldMiningWork(InteractingPawn, ItemId, Work))
-	{
-		const UJTSInventoryComponent* const Inventory = IsValid(InteractingPawn)
-			? InteractingPawn->FindComponentByClass<UJTSInventoryComponent>()
-			: nullptr;
-		return IsValid(Inventory) && !Inventory->GetActiveItem().IsEmpty()
-			? FText::FromString(TEXT("ACTIVE ITEM CANNOT MINE"))
-			: FText::FromString(TEXT("HOLD AN ITEM TO MINE"));
-	}
-
-	return FText::FromString(FString::Printf(TEXT("[E] MINE  %.1f WORK"), Work));
-}
-
 void AJTSMoonResourceActor::ConfigureResourceMesh()
 {
 	if (!IsValid(ResourceMesh))
@@ -525,15 +512,36 @@ void AJTSMoonResourceActor::ConfigureResourceMesh()
 		return;
 	}
 
-	UStaticMesh* const DesiredMesh = ResourceType == EJTSResourceType::Ore
+	const TArray<TObjectPtr<UStaticMesh>>* Meshes = nullptr;
+	switch (NodeSize)
+	{
+	case EJTSMoonResourceNodeSize::MediumRock: Meshes = &MediumRockMeshes; break;
+	case EJTSMoonResourceNodeSize::LargeRock: Meshes = &LargeRockMeshes; break;
+	case EJTSMoonResourceNodeSize::MediumMetalRock: Meshes = &MediumMetalRockMeshes; break;
+	case EJTSMoonResourceNodeSize::LargeMetalRock: Meshes = &LargeMetalRockMeshes; break;
+	default: break;
+	}
+	UStaticMesh* const ConfiguredMesh = Meshes && !Meshes->IsEmpty()
+		? (*Meshes)[FMath::Max(0, VisualVariantIndex) % Meshes->Num()].Get() : nullptr;
+	UStaticMesh* const DesiredMesh = IsValid(ConfiguredMesh) ? ConfiguredMesh : ResourceType == EJTSResourceType::Ore
 		? OreMesh.Get()
 		: RockMesh.Get();
-	if (!IsValid(DesiredMesh) || ResourceMesh->GetStaticMesh() == DesiredMesh)
+	if (!IsValid(DesiredMesh))
 	{
 		return;
 	}
 
-	ResourceMesh->SetStaticMesh(DesiredMesh);
+	if (ResourceMesh->GetStaticMesh() != DesiredMesh)
+	{
+		ResourceMesh->SetStaticMesh(DesiredMesh);
+		ResourceMesh->EmptyOverrideMaterials();
+		ResourceMaterial = nullptr;
+		AppliedPresentationMaterial = nullptr;
+	}
+	const FBox Bounds = DesiredMesh->GetBoundingBox();
+	const float Scale = IsValid(ConfiguredMesh) ? 100.0f / FMath::Max(1.0f, Bounds.GetSize().GetAbs().GetMax()) : 1.0f;
+	ResourceMesh->SetRelativeScale3D(FVector(Scale));
+	ResourceMesh->SetRelativeLocation(IsValid(ConfiguredMesh) ? -Bounds.GetCenter() * Scale : FVector::ZeroVector);
 	ResourceMesh->UpdateBounds();
 }
 
@@ -563,6 +571,11 @@ void AJTSMoonResourceActor::ApplyResourceAppearance()
 	}
 
 	ConfigureResourceMesh();
+	// Authored models retain all their rock/metal material slots.
+	if (ResourceMesh->GetStaticMesh() != RockMesh && ResourceMesh->GetStaticMesh() != OreMesh)
+	{
+		return;
+	}
 	ApplySurfacePresentationMaterial();
 
 	if (!IsValid(ResourceMaterial))
@@ -587,4 +600,21 @@ void AJTSMoonResourceActor::ApplyResourceAppearance()
 	ResourceMaterial->SetVectorParameterValue(TEXT("Tint"), ResourceColor);
 	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceRoughness"), ResourceRoughness);
 	ResourceMaterial->SetScalarParameterValue(TEXT("ResourceMetallic"), ResourceMetallic);
+}
+
+bool AJTSMoonResourceActor::CanDisassemble_Implementation(APawn* Operator) const
+{
+	const auto* Weapon = IsValid(Operator) ? Operator->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+	const auto* Ability = IsValid(Operator) ? Operator->FindComponentByClass<UJTSStellarAbilityComponent>() : nullptr;
+	const auto* Def = Weapon ? Weapon->GetEquippedWeaponDefinition() : nullptr;
+	const auto* Health = IsValid(Operator) ? Operator->FindComponentByClass<UJTSHealthComponent>() : nullptr;
+	return HasAuthority() && Operator && Operator->HasAuthority() && Operator->GetWorld() == GetWorld() && Health && !Health->IsDead()
+		&& !IsActorBeingDestroyed() && !bMiningInProgress && RemainingYieldUnits > 0 && Def && Ability && Ability->IsEngineeringMode()
+		&& Def->Mode == EJTSStellarWeaponMode::Disassembly && FVector::DistSquared(Operator->GetPawnViewLocation(), GetActorLocation()) <= FMath::Square(Def->RangeCentimeters)
+		&& UJTSStellarTargetComponent::HasLineOfSight(GetWorld(), Operator->GetPawnViewLocation(), const_cast<AJTSMoonResourceActor*>(this), Operator);
+}
+bool AJTSMoonResourceActor::Disassemble_Implementation(APawn* Operator)
+{
+	if (!CanDisassemble_Implementation(Operator) || !SpawnAllResourceDrops(Operator)) return false;
+	RemainingMiningWork = 0; RemainingYieldUnits = 0; Destroy(); return true;
 }
