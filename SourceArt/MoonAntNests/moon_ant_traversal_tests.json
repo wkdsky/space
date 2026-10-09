@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "JTS.Moon.Ants.EscapesBlockedCorner",
+      "state": "Success",
+      "duration": 0.04816009849309921,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "name": "JTS.Moon.Ants.RadialSlopeLimit",
+      "state": "Success",
+      "duration": 0.018333800137043,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "passed": 2,
+  "failed": 0,
+  "skipped": 0,
+  "total": 2,
+  "duration": 0.06649389863014221
+}

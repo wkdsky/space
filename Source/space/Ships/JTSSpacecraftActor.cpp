@@ -14,6 +14,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -31,6 +32,8 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -148,6 +151,8 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	FlightMovementComponent->SetUpdatedComponent(SceneRoot);
 
 	GroundProbeComponent = CreateDefaultSubobject<UJTSSpacecraftGroundProbeComponent>(TEXT("GroundProbeComponent"));
+	LandingSupportComponent = CreateDefaultSubobject<UJTSSpacecraftLandingSupportComponent>(TEXT("LandingSupportComponent"));
+	SurfaceEnvelopeComponent = CreateDefaultSubobject<UJTSSpacecraftSurfaceEnvelopeComponent>(TEXT("SurfaceEnvelopeComponent"));
 	PresentationComponent = CreateDefaultSubobject<UJTSSpacecraftPresentationComponent>(TEXT("PresentationComponent"));
 
 	// Retain the legacy subobject name so existing Blueprint component templates keep their camera tuning.
@@ -328,12 +333,11 @@ void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 		{
 			FlightMovementComponent->ClearInput();
 			bAutomaticLandingDescentHeld = false;
-			AutomaticLandingCheckElapsed = 0.0f;
 			ReplicatedPresentationForward = 0.0f;
 			ReplicatedPresentationLift = 0.0f;
 			bReplicatedPresentationBoost = false;
 		}
-		UpdateAutomaticLanding(DeltaSeconds);
+
 	}
 	UpdateDisembarkInputGate();
 	UpdateFlightCamera(DeltaSeconds);
@@ -740,18 +744,21 @@ void AJTSSpacecraftActor::UnregisterFlightInputMappingContext()
 
 void AJTSSpacecraftActor::FlightMoveForward(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	LocalFlightInput.MoveForward = Value.Get<float>();
 	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightMoveRight(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	LocalFlightInput.MoveRight = Value.Get<float>();
 	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightTurnAround(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	LocalFlightInput.bTurnAround = Value.Get<bool>();
 	if (LocalFlightInput.bTurnAround && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
 	SubmitFlightInput();
@@ -777,12 +784,21 @@ void AJTSSpacecraftActor::FlightAscendStarted(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightMoveVertical(const FInputActionValue& Value)
 {
+    const auto* PC=Cast<APlayerController>(GetController());
+    LocalFlightInput.bDescentKeyHeld=Value.Get<float>() < -0.5f
+        || (PC && (PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl)));
+    if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest)
+    {
+        SubmitFlightInput();
+        return;
+    }
 	LocalFlightInput.Lift = Value.Get<float>();
 	SubmitFlightInput();
 }
 
 void AJTSSpacecraftActor::FlightSteerYaw(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	FlightKeyYaw = Value.Get<float>();
 	if (!FMath::IsNearlyZero(FlightKeyYaw) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
 	LocalFlightInput.Yaw = FlightKeyYaw;
@@ -791,6 +807,7 @@ void AJTSSpacecraftActor::FlightSteerYaw(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightSteerPitch(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	FlightKeyPitch = Value.Get<float>();
 	if (!FMath::IsNearlyZero(FlightKeyPitch) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
 	LocalFlightInput.Pitch = FlightKeyPitch;
@@ -799,6 +816,7 @@ void AJTSSpacecraftActor::FlightSteerPitch(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightRoll(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	LocalFlightInput.Roll = Value.Get<float>();
 	if (!FMath::IsNearlyZero(LocalFlightInput.Roll) && !bFlightFreeLookHeld) bFlightCameraRecentering = true;
 	SubmitFlightInput();
@@ -844,6 +862,7 @@ void AJTSSpacecraftActor::FlightCameraZoom(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightBoostStarted(const FInputActionValue& Value)
 {
+	if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest) return;
 	LocalFlightInput.bBoosting = Value.Get<bool>();
 	SubmitFlightInput();
 }
@@ -1343,6 +1362,15 @@ void AJTSSpacecraftActor::UpdateMouseFlightSteering(float DeltaSeconds)
 		SubmitFlightInput();
 		return;
 	}
+    if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest)
+    {
+        const bool Held = LocalFlightInput.bDescentKeyHeld;
+        LocalFlightInput = FJTSSpacecraftInputState();
+        LocalFlightInput.bDescentKeyHeld = Held;
+        FlightKeyYaw = FlightKeyPitch = 0;
+        SubmitFlightInput(true);
+        return;
+    }
 	const bool bLookInputIgnored = PlayerController->IsLookInputIgnored();
 	if (bLookInputIgnored)
 	{
@@ -1363,7 +1391,16 @@ void AJTSSpacecraftActor::UpdateMouseFlightSteering(float DeltaSeconds)
 			return FMath::Sign(Angle) * FMath::Clamp((FMath::Abs(Angle) - DeadAngle) / Range, 0.0f, 1.0f);
 		};
 		MouseYaw = SteeringFromAngle(FRotator::NormalizeAxis(Relative.Yaw));
-		MousePitch = SteeringFromAngle(FRotator::NormalizeAxis(Relative.Pitch));
+        MousePitch = SteeringFromAngle(FRotator::NormalizeAxis(Relative.Pitch));
+        if (SurfaceEnvelopeComponent->IsFollowing())
+        {
+            const FVector N = SurfaceEnvelopeComponent->GetFrame().Normal;
+            const FVector From = FVector::VectorPlaneProject(GetActorForwardVector(), N).GetSafeNormal();
+            const FVector To = FVector::VectorPlaneProject(FlightCameraAimRotation.GetForwardVector(), N).GetSafeNormal();
+            MouseYaw = From.IsNearlyZero() || To.IsNearlyZero() ? 0 : SteeringFromAngle(FMath::RadiansToDegrees(
+                FMath::Atan2(FVector::DotProduct(FVector::CrossProduct(From, To), N), FVector::DotProduct(From, To))));
+            MousePitch = 0;
+        }
 	}
 	LocalFlightInput.Yaw = FMath::Clamp(FlightKeyYaw + MouseYaw, -1.0f, 1.0f);
 	LocalFlightInput.Pitch = FMath::Clamp(FlightKeyPitch + MousePitch, -1.0f, 1.0f);
@@ -1717,6 +1754,13 @@ FVector AJTSSpacecraftActor::GetBoardingInteractionTargetWorldLocation(const FVe
 	return IsValid(BoardingTrigger) ? BoardingTrigger->GetComponentLocation() : GetActorLocation();
 }
 
+float AJTSSpacecraftActor::GetSurfaceFlightFootprintRadius() const
+{
+    const float X = FMath::Max(GetExteriorHullSupportDistance(GetActorForwardVector()), GetExteriorHullSupportDistance(-GetActorForwardVector()));
+    const float Y = FMath::Max(GetExteriorHullSupportDistance(GetActorRightVector()), GetExteriorHullSupportDistance(-GetActorRightVector()));
+    return FMath::Sqrt(X * X + Y * Y);
+}
+
 float AJTSSpacecraftActor::GetExteriorHullSupportDistance(const FVector& WorldDirection) const
 {
 	const FVector SafeDirection = WorldDirection.GetSafeNormal();
@@ -2006,6 +2050,11 @@ bool AJTSSpacecraftActor::RequestLandingInternal(bool bAllowControlledDescentCap
 		return false;
 	}
 
+    if (!bAllowControlledDescentCapture && !FlightMovementComponent->IsAtEnvelopeBoundary())
+    {
+        LastLandingFailure = EJTSLandingValidationFailure::TooHigh;
+        return false;
+    }
 	FlightState = EJTSSpacecraftFlightState::LandingRequest;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
 	AJTSPlanetLandingManager* const LandingManager = AJTSPlanetLandingManager::FindPlanetLandingManager(this);
@@ -2029,16 +2078,18 @@ bool AJTSSpacecraftActor::BeginLandingAssist(
 	}
 	if (FlightState != EJTSSpacecraftFlightState::LandingRequest
 		|| !ValidationResult.bIsValid
-		|| !IsValid(ValidationResult.LandingSite)
+		|| !IsValid(ValidationResult.Planet)
 		|| FlightMovementComponent == nullptr)
 	{
 		return false;
 	}
 
-	if (!IsValid(FlightPlanet))
+	FJTSPlanetLandingValidationResult FreshSupport;
+	if (!LandingSupportComponent->ValidatePose(ValidationResult.Planet, ValidationResult.LandingTransform, FreshSupport))
 	{
-		SetFlightTargetPlanet(ValidationResult.LandingSite->GetPlanetAnchor());
+		return false;
 	}
+	SetFlightTargetPlanet(ValidationResult.Planet);
 	if (!IsValid(FlightPlanet))
 	{
 		return false;
@@ -2046,21 +2097,30 @@ bool AJTSSpacecraftActor::BeginLandingAssist(
 
 	GroundedPlanet = nullptr;
 	bIsGroundedOnPlanet = false;
-	ActiveLandingSite = ValidationResult.LandingSite;
-	PendingLandingSite = ValidationResult.LandingSite;
+	ActiveLandingSite = nullptr;
+	PendingLandingSite = nullptr;
 	PendingLandingTransform = ValidationResult.LandingTransform;
 	PendingLandingClearance = ValidationResult.LandingClearance;
-	if (!FlightMovementComponent->BeginAssistedLanding(FlightPlanet.Get(), PendingLandingClearance, DurationSeconds))
+	LandingSupportComponent->SetContacts(ValidationResult.FootContacts);
+	FlightState = EJTSSpacecraftFlightState::LandingAssist;
+    const bool Held = LocalFlightInput.bDescentKeyHeld;
+	LocalFlightInput = FJTSSpacecraftInputState();
+    LocalFlightInput.bDescentKeyHeld = Held;
+	FlightKeyYaw = FlightKeyPitch = 0;
+	ReplicatedPresentationForward = ReplicatedPresentationLift = 0;
+	bReplicatedPresentationBoost = false;
+	if (!FlightMovementComponent->BeginAssistedLanding(FlightPlanet.Get(), PendingLandingTransform, DurationSeconds))
 	{
 		PendingLandingSite = nullptr;
 		ActiveLandingSite = nullptr;
 		PendingLandingClearance = 0.0f;
+		LandingSupportComponent->SetContacts({});
+		FlightState = EJTSSpacecraftFlightState::Flying;
 		return false;
 	}
 
 	bAutomaticLandingDescentHeld = false;
 	bAutomaticLandingBlockedUntilDescentReleased = false;
-	AutomaticLandingCheckElapsed = 0.0f;
 	FlightState = EJTSSpacecraftFlightState::LandingAssist;
 	return true;
 }
@@ -2083,35 +2143,18 @@ void AJTSSpacecraftActor::CancelLandingRequest(EJTSLandingValidationFailure Fail
 		PendingLandingSite = nullptr;
 		PendingLandingTransform = FTransform::Identity;
 		PendingLandingClearance = 0.0f;
+		LandingSupportComponent->SetContacts({});
 	}
 	LastLandingFailure = Failure;
 	if (FlightState != EJTSSpacecraftFlightState::Landed)
 	{
 		LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 	}
-	AutomaticLandingCheckElapsed = 0.0f;
 }
 
-void AJTSSpacecraftActor::UpdateAutomaticLanding(float DeltaSeconds)
+bool AJTSSpacecraftActor::TryLandingAtEnvelopeBoundary()
 {
-	if (!bAutomaticLandingDescentHeld
-		|| bAutomaticLandingBlockedUntilDescentReleased
-		|| FlightState != EJTSSpacecraftFlightState::Flying
-		|| FlightMovementComponent == nullptr
-		|| !FlightMovementComponent->IsActive())
-	{
-		AutomaticLandingCheckElapsed = 0.0f;
-		return;
-	}
-
-	AutomaticLandingCheckElapsed += FMath::Max(0.0f, DeltaSeconds);
-	if (AutomaticLandingCheckElapsed < FMath::Max(0.02f, AutomaticLandingCheckInterval))
-	{
-		return;
-	}
-
-	AutomaticLandingCheckElapsed = 0.0f;
-	RequestLandingInternal(true);
+    return HasAuthority() && !bAutomaticLandingBlockedUntilDescentReleased && RequestLandingInternal(true);
 }
 
 void AJTSSpacecraftActor::AbortLandingAssist()
@@ -2122,6 +2165,7 @@ void AJTSSpacecraftActor::AbortLandingAssist()
 	}
 
 	CancelLandingRequest(EJTSLandingValidationFailure::None);
+	FlightMovementComponent->BeginEnvelopeEscape();
 	bAutomaticLandingBlockedUntilDescentReleased = true;
 	if (AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
@@ -2169,31 +2213,8 @@ AJTSPlanetAnchor* AJTSSpacecraftActor::GetFlightPlanet() const
 
 bool AJTSSpacecraftActor::BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds)
 {
-	if (!HasAuthority())
-	{
-		return false;
-	}
-	ClearGroundedPlanet();
-	AJTSPlanetAnchor* const Planet = FlightPlanet.Get();
-	if (FlightMovementComponent != nullptr && IsValid(Planet))
-	{
-		const FVector SurfaceUp = LandingTransform.GetUnitAxis(EAxis::Z).GetSafeNormal();
-		const FQuat LandingRotation = LandingTransform.GetRotation();
-		PendingLandingSite = nullptr;
-		PendingLandingTransform = LandingTransform;
-		PendingLandingClearance = GetLandingCollisionClearanceForRotation(
-			LandingRotation,
-			SurfaceUp.IsNearlyZero() ? Planet->GetRadialUpVector(GetActorLocation()) : SurfaceUp);
-		LastLandingFailure = EJTSLandingValidationFailure::None;
-		if (FlightMovementComponent->BeginAssistedLanding(Planet, PendingLandingClearance, DurationSeconds))
-		{
-			FlightState = EJTSSpacecraftFlightState::LandingAssist;
-			bHeadlightsRequested = false;
-			return true;
-		}
-	}
-	FlightState = EJTSSpacecraftFlightState::Flying;
-	return false;
+	// Serialized Blueprint compatibility: an authored transform no longer grants landing permission.
+	return RequestLandingInternal(false);
 }
 
 void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
@@ -2261,6 +2282,7 @@ bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 	}
 	SetFlightTargetPlanet(Planet);
 	ClearGroundedPlanet();
+	FlightMovementComponent->BeginEnvelopeEscape(true);
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 	if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
@@ -2283,6 +2305,7 @@ void AJTSSpacecraftActor::ClearGroundedPlanet()
 	PendingLandingSite = nullptr;
 	PendingLandingTransform = FTransform::Identity;
 	PendingLandingClearance = 0.0f;
+	LandingSupportComponent->SetContacts({});
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::None;
 	if (FlightState == EJTSSpacecraftFlightState::Landed)
 	{
@@ -2334,6 +2357,20 @@ bool AJTSSpacecraftActor::SnapSpacecraftToSurfaceTransform(
 	{
 		FVector SurfaceRight;
 		SurfaceUp.FindBestAxisVectors(SurfaceForward, SurfaceRight);
+	}
+
+	if (!LandingSupportComponent->GetFeet().IsEmpty())
+	{
+		FJTSPlanetLandingValidationResult Fit;
+		if (!LandingSupportComponent->FitAtSurface(InPlanetAnchor, SurfaceTransform.GetLocation(), SurfaceForward, Fit))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Authored arrival has no safe landing support: Ship=%s Failure=%d"), *GetName(), int32(Fit.Failure));
+			return false;
+		}
+		SetActorTransform(Fit.LandingTransform, false, nullptr, ETeleportType::TeleportPhysics);
+		LandingSupportComponent->SetContacts(Fit.FootContacts);
+		SetGroundedPlanet(InPlanetAnchor);
+		return true;
 	}
 
 	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
@@ -2394,12 +2431,98 @@ bool AJTSSpacecraftActor::CanOccupyLandingTransform(const FTransform& LandingTra
 	FCollisionQueryParams QueryParameters(SCENE_QUERY_STAT(JTSSpacecraftLandingClearance), false, this);
 	QueryParameters.AddIgnoredActor(this);
 	const FTransform CollisionTransform = GetFlightCollisionTransformForSpacecraftTransform(LandingTransform);
-	return !World->OverlapBlockingTestByChannel(
+	if (World->OverlapBlockingTestByChannel(
 		CollisionTransform.GetLocation(),
 		CollisionTransform.GetRotation(),
 		ECC_Visibility,
 		FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent()),
-		QueryParameters);
+		QueryParameters)) return false;
+
+	// An authored narrow movement proxy is not sufficient to clear the wings and visible hull.
+	FBox Bounds(ForceInit);
+	if (GetPhysicalSpacecraftMeshLocalBounds(Bounds))
+	{
+		const FTransform MeshRelative = SpacecraftMesh->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+		const FTransform MeshPose = MeshRelative * LandingTransform;
+		if (World->OverlapBlockingTestByChannel(MeshPose.TransformPosition(Bounds.GetCenter()), MeshPose.GetRotation(),
+			ECC_Visibility, FCollisionShape::MakeBox(Bounds.GetExtent() * MeshPose.GetScale3D().GetAbs()), QueryParameters)) return false;
+	}
+	return true;
+}
+
+bool AJTSSpacecraftActor::CanTraverseLandingSegment(const FVector& Start, const FVector& End, const FQuat& Rotation) const
+{
+	if (!GetWorld() || !FlightCollision) return false;
+	const FTransform From = GetFlightCollisionTransformForSpacecraftTransform(FTransform(Rotation, Start, GetActorScale3D()));
+	const FTransform To = GetFlightCollisionTransformForSpacecraftTransform(FTransform(Rotation, End, GetActorScale3D()));
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSLandingApproach), false, this);
+	FHitResult Hit;
+	if (GetWorld()->SweepSingleByChannel(Hit, From.GetLocation(), To.GetLocation(), From.GetRotation(),
+		ECC_Visibility, FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent()), Params)) return false;
+	FBox Bounds(ForceInit);
+	if (GetPhysicalSpacecraftMeshLocalBounds(Bounds))
+	{
+		const FTransform Relative = SpacecraftMesh->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+		const FTransform MeshFrom = Relative * FTransform(Rotation, Start, GetActorScale3D());
+		const FTransform MeshTo = Relative * FTransform(Rotation, End, GetActorScale3D());
+		if (GetWorld()->SweepSingleByChannel(Hit, MeshFrom.TransformPosition(Bounds.GetCenter()), MeshTo.TransformPosition(Bounds.GetCenter()),
+			MeshFrom.GetRotation(), ECC_Visibility, FCollisionShape::MakeBox(Bounds.GetExtent() * MeshFrom.GetScale3D().GetAbs()), Params)) return false;
+	}
+	return true;
+}
+
+bool AJTSSpacecraftActor::CanRecoverFlightPenetration(const FVector& Delta) const
+{
+	UWorld* const World = GetWorld();
+	if (!World || !FlightCollision || Delta.IsNearlyZero() || Delta.Size() > 25.01) return false;
+	bool bPenetrating = false;
+	const auto CanRecoverShape = [&](const FTransform& Pose, const FCollisionShape& Shape)
+	{
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSFlightPenetrationRecovery), false, this);
+		TArray<FOverlapResult> Overlaps;
+		World->OverlapMultiByChannel(Overlaps, Pose.GetLocation(), Pose.GetRotation(), ECC_Visibility, Shape, Params);
+		TSet<UPrimitiveComponent*> Existing;
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			UPrimitiveComponent* const Component = Overlap.GetComponent();
+			if (!Overlap.bBlockingHit || !IsValid(Component) || Existing.Contains(Component)) continue;
+			Existing.Add(Component);
+			FHitResult StartHit;
+			const FVector ProbeStep = Delta.GetSafeNormal() * 0.01;
+			if (!Component->SweepComponent(StartHit, Pose.GetLocation(), Pose.GetLocation() + ProbeStep,
+				Pose.GetRotation(), Shape) || !StartHit.bStartPenetrating) return false;
+			bPenetrating = true;
+			// Collision normals, rather than planet up, also permit backing out of a vertical rim.
+			if (FVector::DotProduct(Delta, StartHit.Normal) <= KINDA_SMALL_NUMBER) return false;
+			for (const double Alpha : {0.5, 1.0})
+			{
+				FHitResult Check;
+				const FVector Position = Pose.GetLocation() + Delta * Alpha;
+				if (Component->SweepComponent(Check, Position, Position + ProbeStep, Pose.GetRotation(), Shape)
+					&& Check.bStartPenetrating && Check.PenetrationDepth > StartHit.PenetrationDepth + 0.01f) return false;
+			}
+			Params.AddIgnoredComponent(Component);
+		}
+		// Ignore only verified existing overlaps for this sweep. Every other obstacle still blocks.
+		FHitResult NewHit;
+		return !World->SweepSingleByChannel(NewHit, Pose.GetLocation(), Pose.GetLocation() + Delta,
+			Pose.GetRotation(), ECC_Visibility, Shape, Params);
+	};
+	if (!CanRecoverShape(GetFlightCollisionTransformForSpacecraftTransform(GetActorTransform()),
+		FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent()))) return false;
+	FBox Bounds(ForceInit);
+	if (GetPhysicalSpacecraftMeshLocalBounds(Bounds))
+	{
+		const FTransform Mesh = SpacecraftMesh->GetComponentTransform();
+		const FTransform Pose(Mesh.GetRotation(), Mesh.TransformPosition(Bounds.GetCenter()));
+		if (!CanRecoverShape(Pose, FCollisionShape::MakeBox(Bounds.GetExtent() * Mesh.GetScale3D().GetAbs()))) return false;
+	}
+	return bPenetrating;
+}
+
+bool AJTSSpacecraftActor::IsLandingGearDeployed() const
+{
+	return PresentationComponent && PresentationComponent->GetGearDeployAlpha() >= 0.995f;
 }
 
 bool AJTSSpacecraftActor::FindClearLandingTransform(
@@ -2580,54 +2703,31 @@ float AJTSSpacecraftActor::GetPlayerRespawnClearance() const
 
 void AJTSSpacecraftActor::HandleAssistedLandingCompleted()
 {
-	if (FlightState != EJTSSpacecraftFlightState::LandingAssist)
+	if (!HasAuthority() || FlightState != EJTSSpacecraftFlightState::LandingAssist) return;
+	AJTSPlanetAnchor* Planet = FlightPlanet.Get();
+	FJTSPlanetLandingValidationResult Result;
+	if (!IsLandingGearDeployed() || !LandingSupportComponent->ValidatePose(Planet, GetActorTransform(), Result)
+		|| FVector::DistSquared(GetActorLocation(), PendingLandingTransform.GetLocation()) > FMath::Square(12.0f))
 	{
+		HandleAssistedLandingFailed(Result.bIsValid ? EJTSLandingValidationFailure::InvalidLandingTarget : Result.Failure);
 		return;
 	}
-
-	AJTSPlanetAnchor* const Planet = FlightPlanet.Get();
-	if (!IsValid(Planet) || !RefreshGroundInfo(Planet))
-	{
-		CancelLandingRequest(EJTSLandingValidationFailure::NoSurface);
-		return;
-	}
-
-	const FJTSSpacecraftGroundInfo GroundInfo = GetGroundInfo();
-	const float AllowedHeightError = FMath::Max(12.0f, PendingLandingClearance * 0.05f);
-	const bool bAtResolvedSurfaceHeight = GroundInfo.bHasGround
-		&& FMath::Abs(GroundInfo.DockingHeight - PendingLandingClearance) <= AllowedHeightError;
-	const bool bSurfaceAligned = GroundInfo.bHasGround
-		&& FVector::DotProduct(GetActorUpVector().GetSafeNormal(), GroundInfo.SurfaceNormal.GetSafeNormal())
-			>= FMath::Cos(FMath::DegreesToRadians(8.0f));
-	if (!bAtResolvedSurfaceHeight || !bSurfaceAligned)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Landing Assist failed final surface check: Spacecraft=%s Height=%.1f Clearance=%.1f Aligned=%s"),
-			*GetName(),
-			GroundInfo.DockingHeight,
-			PendingLandingClearance,
-			bSurfaceAligned ? TEXT("TRUE") : TEXT("FALSE"));
-		CancelLandingRequest(EJTSLandingValidationFailure::CollisionBlocked);
-		return;
-	}
-
+	LandingSupportComponent->SetContacts(Result.FootContacts);
 	SetGroundedPlanet(Planet);
 	PendingLandingSite = nullptr;
 	PendingLandingTransform = FTransform::Identity;
-	PendingLandingClearance = 0.0f;
-
-	if (AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+	PendingLandingClearance = 0;
+	RefreshGroundInfo(Planet);
+	if (auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
 	{
-		if (SpaceWorldManager->GetCurrentPlanet() == Planet)
+		if (Manager->GetCurrentPlanet() == Planet)
 		{
-			SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
-			SpaceWorldManager->SetSurfaceGameplayReady(true);
+			Manager->SetTravelState(EJTSSpaceTravelState::Surface);
+			Manager->SetSurfaceGameplayReady(true);
 		}
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("Landing Complete: Spacecraft=%s Planet=%s Site=%s"),
-		*GetName(),
-		*Planet->GetPlanetId().ToString(),
-		*GetNameSafe(ActiveLandingSite));
+	UE_LOG(LogTemp, Log, TEXT("Landing Complete: Spacecraft=%s Planet=%s Feet=%d StabilityMargin=%.1f"),
+		*GetName(), *Planet->GetPlanetId().ToString(), Result.FootContacts.Num(), Result.StabilityMargin);
 }
 
 void AJTSSpacecraftActor::HandleAssistedLandingPhaseChanged(EJTSSpacecraftLandingAssistPhase NewPhase)
@@ -3015,6 +3115,7 @@ void AJTSSpacecraftActor::SubmitFlightInput(bool bHeartbeat)
 		&& FMath::IsNearlyEqual(LocalFlightInput.Yaw, Previous.Yaw)
 		&& FMath::IsNearlyEqual(LocalFlightInput.Pitch, Previous.Pitch)
 		&& FMath::IsNearlyEqual(LocalFlightInput.Roll, Previous.Roll)
+		&& LocalFlightInput.bDescentKeyHeld == Previous.bDescentKeyHeld
 		&& LocalFlightInput.bTurnAround == Previous.bTurnAround
 		&& LocalFlightInput.bBoosting == Previous.bBoosting
 		&& LocalFlightInput.bBraking == Previous.bBraking
@@ -3043,22 +3144,16 @@ void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputStat
 		return FMath::IsFinite(Value) ? FMath::Clamp(Value, -1.0f, 1.0f) : 0.0f;
 	};
 	LastFlightInputTimeSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0;
-	const float ClampedLift = SafeAxis(InputState.Lift);
-	const bool bWasAutomaticLandingDescentHeld = bAutomaticLandingDescentHeld;
-	bAutomaticLandingDescentHeld = ClampedLift <= -FMath::Clamp(
-		AutomaticLandingDescentInputThreshold,
-		0.05f,
-		1.0f);
-	if (!bAutomaticLandingDescentHeld)
-	{
-		bAutomaticLandingBlockedUntilDescentReleased = false;
-	}
-	if (bAutomaticLandingDescentHeld
-		&& !bWasAutomaticLandingDescentHeld
-		&& !bAutomaticLandingBlockedUntilDescentReleased)
-	{
-		AutomaticLandingCheckElapsed = FMath::Max(0.02f, AutomaticLandingCheckInterval);
-	}
+    const float ClampedLift = SafeAxis(InputState.Lift);
+    bAutomaticLandingDescentHeld = InputState.bDescentKeyHeld || ClampedLift <= -FMath::Clamp(AutomaticLandingDescentInputThreshold,0.05f,1.0f);
+    if (!bAutomaticLandingDescentHeld) bAutomaticLandingBlockedUntilDescentReleased = false;
+    if (FlightState == EJTSSpacecraftFlightState::LandingAssist || FlightState == EJTSSpacecraftFlightState::LandingRequest)
+    {
+        FlightMovementComponent->ClearInput();
+        ReplicatedPresentationForward = ReplicatedPresentationLift = 0;
+        bReplicatedPresentationBoost = false;
+        return;
+    }
 	if (IsLanded())
 	{
 		bAutomaticLandingDescentHeld = false;

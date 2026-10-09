@@ -1,0 +1,478 @@
+{
+  "date": "2026-10-09",
+  "engine": "5.8.2",
+  "build": {
+    "target": "spaceEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "result": "Succeeded",
+    "live_coding": false
+  },
+  "native_unreal_mcp_automation": {
+    "tests": [
+      {
+        "name": "JTS.Moon.Ants.EscapesBlockedCorner",
+        "state": "Success",
+        "duration": 0.06397190690040588,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.MassRegistrationMovementAndCleanup",
+        "state": "Success",
+        "duration": 1.5852771997451782,
+        "errors": [],
+        "warnings": [
+          "LogUObjectGlobals: 未找到Object“JTSItemDefinition /Game/Space/Data/Items/DA_Item_MoonAntCorpse.DA_Item_MoonAntCorpse”"
+        ]
+      },
+      {
+        "name": "JTS.Moon.Ants.MassStatusMovementControls",
+        "state": "Success",
+        "duration": 0.04729690030217171,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.RadialSlopeLimit",
+        "state": "Success",
+        "duration": 0.017681200057268143,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.CoincidentAndWeights",
+        "state": "Success",
+        "duration": 0.020584996789693832,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.DenseBoundedDeterministic",
+        "state": "Success",
+        "duration": 0.6287142038345337,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.HeadOnAndConstrainedResidual",
+        "state": "Success",
+        "duration": 0.015457101166248322,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.RadiusHeightAndGrid",
+        "state": "Success",
+        "duration": 0.015380900353193283,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.RuntimeDenseCurvedSurface",
+        "state": "Fail",
+        "duration": 3.615644693374634,
+        "errors": [
+          "Expected 'All solver iterations obey the total step budget' to be true."
+        ],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.RuntimeLifecycle",
+        "state": "Success",
+        "duration": 0.03206710144877434,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.BodyCollision.RuntimeMovementAndEnvironment",
+        "state": "Success",
+        "duration": 0.05581109970808029,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Resources.AuthoredMeshAndCollision",
+        "state": "Success",
+        "duration": 0.03480220213532448,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Resources.MixedMiningYield",
+        "state": "Success",
+        "duration": 0.029895998537540436,
+        "errors": [],
+        "warnings": [
+          "LogUObjectGlobals: 未找到Object“JTSItemDefinition /Game/Space/Data/Items/DA_Item_PowerHammer.DA_Item_PowerHammer”"
+        ]
+      },
+      {
+        "name": "JTS.Moon.CrowdAcquisitionAndBudgets",
+        "state": "Success",
+        "duration": 6.627234935760498,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.CrowdEveryFrameMotion",
+        "state": "Success",
+        "duration": 0.9655174016952515,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.CrowdPhysicalFieldAndBudgets",
+        "state": "Fail",
+        "duration": 1.9497476816177368,
+        "errors": [
+          "Expected 'An enemy born overlapping the caster's capsule is expelled instead of sweep-locked' to be true."
+        ],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.CrowdSnapshotInterpolation",
+        "state": "Success",
+        "duration": 0.018989097326993942,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.CubeCombatAndCriticalAbility",
+        "state": "Success",
+        "duration": 0.025599997490644455,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.PursuitDistanceAndFixedDeadline",
+        "state": "Success",
+        "duration": 0.023474499583244324,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.SettlementMaintains200Cubes",
+        "state": "Success",
+        "duration": 0.5121166110038757,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.SharedSphericalObstacleRoute",
+        "state": "Success",
+        "duration": 0.034529298543930054,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.AllTwelveCombatDefinitions",
+        "state": "Success",
+        "duration": 0.347983717918396,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.CorrosionArmorAndOneGeneration",
+        "state": "Success",
+        "duration": 0.0306381992995739,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.CoverFriendlyAndEnergyValidation",
+        "state": "Success",
+        "duration": 0.10247470438480377,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.DisassemblyLockAndEngineeringFilter",
+        "state": "Success",
+        "duration": 0.042761899530887604,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.EngineeringPreservesResourceYield",
+        "state": "Success",
+        "duration": 0.03486350178718567,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.ExplosionChargeAndResidualLimits",
+        "state": "Success",
+        "duration": 0.039242297410964966,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.FreezingAndSharedControlImmunity",
+        "state": "Success",
+        "duration": 0.04522409662604332,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.RadialSurfaceAndRaisedCoreVisuals",
+        "state": "Success",
+        "duration": 0.0331588014960289,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.RobotQuotaSwitchAndCancellation",
+        "state": "Success",
+        "duration": 0.037821799516677856,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.ShapingReleaseAndParry",
+        "state": "Success",
+        "duration": 0.03149350360035896,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Abilities.SupportCapsAndNoRevive",
+        "state": "Success",
+        "duration": 0.04199719801545143,
+        "errors": [],
+        "warnings": [
+          "LogRHICore: Total reserved resource allocated virtual size (258 GB) exceeds the budget (256 GB). Use `rhi.DumpMemory` and `rhi.DumpResourceMemory` console commands to investigate."
+        ]
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.AdditivePhysicalForces",
+        "state": "Success",
+        "duration": 0.026274200528860092,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.BoundedGroundPlacement",
+        "state": "Success",
+        "duration": 0.032729897648096085,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.ContinuousHeldRepulsion",
+        "state": "Success",
+        "duration": 0.02962610125541687,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.NonSolidCoreAndStableSubsteps",
+        "state": "Success",
+        "duration": 0.024935998022556305,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.RepulsionBoundaryEquilibrium",
+        "state": "Success",
+        "duration": 0.026863500475883484,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.ReticleDistanceAndCameraValidation",
+        "state": "Success",
+        "duration": 0.029719002544879913,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.ShallowEntryAndBoundedPush",
+        "state": "Success",
+        "duration": 0.02416599914431572,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.SinglePressLifetimeAndEnergy",
+        "state": "Success",
+        "duration": 0.048194099217653275,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.BlackHole.UpgradeCapacityAndIndependentForces",
+        "state": "Success",
+        "duration": 0.031653597950935364,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Presentation.ConcurrentBodyStatusesAndCleanup",
+        "state": "Success",
+        "duration": 0.03302120044827461,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Presentation.DownwardHailAndNoCoreEmission",
+        "state": "Success",
+        "duration": 0.03602289780974388,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Progression.CoreIndependentAndAttachmentActivation",
+        "state": "Success",
+        "duration": 0.030486296862363815,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Targets.MassAntWeaponHitAndModelBuffs",
+        "state": "Success",
+        "duration": 0.14094169437885284,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.ActivatedWeaponKeyboardSelection",
+        "state": "Success",
+        "duration": 0.0348873995244503,
+        "errors": [],
+        "warnings": [
+          "LogUObjectGlobals: 未找到Object“JTSItemDefinition /Game/Space/Data/Items/DA_Item_AssaultRifle.DA_Item_AssaultRifle”"
+        ]
+      },
+      {
+        "name": "JTS.Stellar.AdjacencyAndFractionalBudget",
+        "state": "Success",
+        "duration": 0.02400810271501541,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.CombatPresentationMatchesCoverage",
+        "state": "Success",
+        "duration": 0.035017602145671844,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.FocusZeroPointsPiercingAndEnergy",
+        "state": "Success",
+        "duration": 0.041604701429605484,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.HeldWeaponPresentation",
+        "state": "Success",
+        "duration": 0.04606049880385399,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.JetChannel",
+        "state": "Success",
+        "duration": 0.0291144996881485,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.JetSecondaryConeAndRelease",
+        "state": "Success",
+        "duration": 0.049896400421857834,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.MatureCombatRangesAndCrowds",
+        "state": "Success",
+        "duration": 0.10011740028858185,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.ParticipantsSealingAndPersistence",
+        "state": "Success",
+        "duration": 0.02397410199046135,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.RestrictedInventoryTransfers",
+        "state": "Success",
+        "duration": 0.03212819993495941,
+        "errors": [],
+        "warnings": [
+          "LogUObjectGlobals: 未找到Object“JTSItemDefinition /Game/Space/Data/Items/DA_Item_RailPistol.DA_Item_RailPistol”"
+        ]
+      },
+      {
+        "name": "JTS.Stellar.StatusCapsResistanceAndRadialControl",
+        "state": "Success",
+        "duration": 0.03844920173287392,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.ThousandTargetBoundedQuery",
+        "state": "Success",
+        "duration": 0.20316019654273987,
+        "errors": [],
+        "warnings": []
+      }
+    ],
+    "passed": 55,
+    "failed": 2,
+    "skipped": 0,
+    "total": 57,
+    "duration": 18.280508041381836
+  },
+  "new_test_repeat": {
+    "tests": [
+      {
+        "name": "JTS.Moon.Ants.MassRegistrationMovementAndCleanup",
+        "state": "Success",
+        "duration": 1.647706151008606,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.MassStatusMovementControls",
+        "state": "Success",
+        "duration": 0.35382330417633057,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Stellar.Targets.MassAntWeaponHitAndModelBuffs",
+        "state": "Success",
+        "duration": 0.11496129631996155,
+        "errors": [],
+        "warnings": []
+      }
+    ],
+    "passed": 3,
+    "failed": 0,
+    "skipped": 0,
+    "total": 3,
+    "duration": 2.1164908409118652
+  },
+  "blueprints_compiled_without_warnings": [
+    "BP_MoonAnt",
+    "BP_MoonAntNestEntrance"
+  ],
+  "remaining_cube_test_failures": [
+    {
+      "name": "JTS.Moon.BodyCollision.RuntimeDenseCurvedSurface",
+      "detail": "Test asserts 5.001 cm; unchanged solver defaults allow min(900/60, 45) = 15 cm per step."
+    },
+    {
+      "name": "JTS.Moon.CrowdPhysicalFieldAndBudgets",
+      "detail": "Born-overlapping cube is outside player attack reach but does not satisfy the test-specific >600 cm force-boundary assertion."
+    }
+  ],
+  "multiplayer_client_validation": "Not run"
+}

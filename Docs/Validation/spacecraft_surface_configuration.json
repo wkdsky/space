@@ -1,0 +1,19 @@
+{
+  "asset": "/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1",
+  "envelope": {
+    "flat_clearance": 100.0,
+    "maximum_terrain_grade_degrees": 14.0,
+    "shoulder_rounding_distance": 600.0,
+    "smooth_maximum_width": 5.0,
+    "minimum_sampling_radius": 3600.0,
+    "maximum_sampling_radius": 12000.0,
+    "prediction_time": 1.7999999523162842,
+    "sampling_interval": 0.10000000149011612,
+    "maximum_roughness_clearance": 400.0,
+    "hover_offset": 20.0,
+    "following_enter_height": 300.0,
+    "following_exit_height": 700.0
+  },
+  "correction_speed_cm_s": 350.0,
+  "gear_deploy_seconds": 0.6499999761581421
+}

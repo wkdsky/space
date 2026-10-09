@@ -43,6 +43,9 @@
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/UI/JTSStellarAttachmentDialog.h"
+#include "space/Tests/JTSMoonAntTestHabitat.h"
+#include "space/Systems/JTSPlanetEnemySubsystem.h"
+#include "Components/SkeletalMeshComponent.h"
 
 namespace
 {
@@ -1306,6 +1309,69 @@ bool FStellarLayeredStatusTest::RunTest(const FString&)
 	Target->FindComponentByClass<UJTSHealthComponent>()->ApplyDamage(100000,nullptr,R.Character);
 	TestFalse(TEXT("Death immediately clears all burning state"),Status->IsBurning());
 	TestNull(TEXT("Death removes mesh stains immediately"),Body->GetOverlayMaterial());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarAntWeaponTest, "JTS.Stellar.Targets.MassAntWeaponHitAndModelBuffs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FStellarAntWeaponTest::RunTest(const FString&)
+{
+	for (FName Attachment : {FName("JetTube"), FName("FocusTube"), FName("FreezingTube"), FName("DiffusionTube")})
+	{
+		FAbilityRig R(Attachment);
+		FJTSMoonAntTestHabitat Habitat(R.W.World);
+		auto* Ant = Habitat.SpawnAnt(FVector(300, 0, 0));
+		if (!TestTrue(TEXT("Weapon target is the real authored Mass ant"), IsValid(Ant) && Ant->HasMassEntity())) return false;
+		// Survive several production weapon pulses to observe status feedback without changing game balance.
+		Ant->GetHealthComponent()->SetMaxHealth(10000, true);
+		R.Step(.5f);
+		auto* Status = Ant->FindComponentByClass<UJTSStellarTargetComponent>();
+		TArray<AActor*> Targets;
+		UJTSStellarTargetComponent::QueryTargets(R.W.World, Ant->GetActorLocation(), 40, 8, Targets);
+		TestTrue(TEXT("Area weapons discover ant hit collider"), Targets.Contains(Ant));
+		TestTrue(TEXT("Caster can use combat input"), R.Character->CanUseCombatInput());
+		TestTrue(TEXT("Real mesh surface does not occlude ant"), UJTSStellarTargetComponent::HasLineOfSight(
+			R.W.World, R.Character->GetPawnViewLocation(), Ant, R.Character));
+		auto* Wall = R.W.Ground(FVector(150, 0, 50), FVector(12, 300, 200));
+		CastAt(R.Character, Ant->GetActorLocation());
+		R.Step(.3f);
+		ReleaseCast(R.Weapon);
+		TestEqual(TEXT("Static wall prevents weapon damage to directly aimed ant"), Ant->GetHealthComponent()->GetHealth(), 10000.f);
+		TestFalse(TEXT("Static wall prevents all model buffs"), Status->IsBurning() || Status->IsFrozen() || Status->IsCorroded());
+		Wall->Destroy();
+		CastAt(R.Character, Ant->GetActorLocation());
+		TestTrue(TEXT("Validated input starts the weapon channel"), R.Weapon->IsCasting());
+		// Keep the validated server aim on the small moving body instead of the fixture's default forward direction.
+		for (int32 I = 0; I < (Attachment == TEXT("FreezingTube") ? 42 : 10); ++I)
+		{
+			const FVector Aim = (Ant->GetActorLocation() - R.Character->GetPawnViewLocation()).GetSafeNormal();
+			R.Character->GetController()->SetControlRotation(Aim.Rotation());
+			R.Weapon->ServerUpdateAim(Aim);
+			R.W.Step(.05f);
+		}
+		AddInfo(FString::Printf(TEXT("%s: view %s, ant %s, health %.1f, energy %.1f, casting %d"),
+			*Attachment.ToString(), *R.Character->GetPawnViewLocation().ToString(), *Ant->GetActorLocation().ToString(),
+			Ant->GetHealthComponent()->GetHealth(), R.Loadout->GetEnergy(), R.Weapon->IsCasting()));
+		ReleaseCast(R.Weapon);
+		TestTrue(TEXT("Production weapon damages ant through its real query collider"), Ant->GetHealthComponent()->GetHealth() < 10000);
+		if (Attachment == TEXT("FreezingTube")) TestTrue(TEXT("Ice weapon freezes ant"), Status->IsFrozen());
+		else if (Attachment == TEXT("DiffusionTube")) TestTrue(TEXT("Diffusion weapon corrodes ant"), Status->IsCorroded());
+		else TestTrue(TEXT("Fire/light weapon burns ant"), Status->IsBurning());
+		AJTSStellarStatusEffectActor* FX = nullptr;
+		for (TActorIterator<AJTSStellarStatusEffectActor> It(R.W.World); It; ++It)
+			if (It->GetOwner() == Ant && !It->IsActorBeingDestroyed()) FX = *It;
+		if (!TestNotNull(TEXT("Ant owns authored status presentation"), FX)) continue;
+		UMeshComponent* Body = Ant->FindComponentByClass<USkeletalMeshComponent>();
+		if (!Body || !Body->IsVisible()) Body = Ant->FindComponentByClass<UStaticMeshComponent>();
+		TestNotNull(TEXT("Buff overlays the actual visible ant mesh"), Body ? Body->GetOverlayMaterial() : nullptr);
+		TestTrue(TEXT("The appropriate status geometry is visible on the body"),
+			Attachment == TEXT("FreezingTube") ? FX->IceShards->IsVisible()
+			: Attachment == TEXT("DiffusionTube") ? Status->IsCorroded() : FX->Flames->IsVisible());
+		Ant->GetHealthComponent()->ApplyDamage(100000, nullptr, R.Character);
+		TestEqual(TEXT("Weapon kill releases Mass identity"), R.W.World->GetSubsystem<UJTSPlanetEnemySubsystem>()->GetRegisteredAntCount(), 0);
+		TestTrue(TEXT("Death removes body effect"), FX->IsActorBeingDestroyed());
+		TestNull(TEXT("Death restores original ant body overlay"), Body->GetOverlayMaterial());
+	}
 	return true;
 }
 

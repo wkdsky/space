@@ -24,7 +24,7 @@ DECLARE_MULTICAST_DELEGATE_FourParams(
 	AJTSSpacecraftActor* /* Spacecraft */);
 
 /**
- * Runtime coordinator for first arrival, legal landing-site queries, and landed-spacecraft respawn
+ * Runtime coordinator for first arrival, spacecraft terrain/gear queries, and landed-spacecraft respawn
  * resolution. It stores a dynamic site registry rather than putting level configuration on a planet.
  */
 UCLASS(BlueprintType)
@@ -45,16 +45,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Landing")
 	TArray<AJTSPlanetLandingSite*> GetLandingSitesForPlanet(AJTSPlanetAnchor* Planet) const;
 
-	/** The union-area query: true when Location belongs to any enabled site for Planet. */
-	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
+	/** Legacy volume query, retained for old assets; does not grant runtime landing permission. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Landing", meta = (DeprecatedFunction, DeprecationMessage = "Landing uses spacecraft terrain and gear support."))
 	bool IsLocationInsideLandingArea(AJTSPlanetAnchor* Planet, const FVector& Location) const;
 
 	/** Returns the enabled site with the closest legal-area point, or nullptr when this planet has none. */
-	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
+	UFUNCTION(BlueprintPure, Category = "Planet|Landing", meta = (DeprecatedFunction, DeprecationMessage = "Use spacecraft LandingSupportComponent for landing targets."))
 	AJTSPlanetLandingSite* GetNearestLandingSite(AJTSPlanetAnchor* Planet, const FVector& Location) const;
 
 	/** Distance from Location to the closest enabled legal landing area. Returns -1 when no area exists. */
-	UFUNCTION(BlueprintPure, Category = "Planet|Landing")
+	UFUNCTION(BlueprintPure, Category = "Planet|Landing", meta = (DeprecatedFunction, DeprecationMessage = "Use LandingSupportComponent terrain preview."))
 	float GetLandingDistance(AJTSPlanetAnchor* Planet, const FVector& Location) const;
 
 	/** Non-mutating landing-rule query intended for flight HUDs and future Blueprint UI. */
@@ -100,13 +100,6 @@ protected:
 private:
 	void DiscoverPersistentLandingSites();
 	AJTSPlanetAnchor* ResolvePlanetForSpacecraft(AJTSSpacecraftActor* Spacecraft) const;
-	bool ValidateLandingSite(
-		AJTSSpacecraftActor* Spacecraft,
-		AJTSPlanetAnchor* Planet,
-		AJTSPlanetLandingSite* LandingSite,
-		const struct FJTSSpacecraftGroundInfo& GroundInfo,
-		FJTSPlanetLandingValidationResult& OutResult,
-		bool bAllowControlledDescentCapture) const;
 	bool QueryLandingAvailability(
 		AJTSSpacecraftActor* Spacecraft,
 		FJTSPlanetLandingValidationResult& OutResult,

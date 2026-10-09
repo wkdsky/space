@@ -7,6 +7,7 @@
 #include "JTSPlanetLandingTypes.generated.h"
 
 class AJTSPlanetLandingSite;
+class AJTSPlanetAnchor;
 
 /** Runtime state of one spacecraft. Ground contact alone never changes this state to Landed. */
 UENUM(BlueprintType)
@@ -43,7 +44,13 @@ enum class EJTSLandingValidationFailure : uint8
 	NoSurface UMETA(DisplayName = "No Surface"),
 	CollisionBlocked UMETA(DisplayName = "Collision Blocked"),
 	InvalidLandingTarget UMETA(DisplayName = "Invalid Landing Target"),
-	InvalidFlightState UMETA(DisplayName = "Invalid Flight State")
+	InvalidFlightState UMETA(DisplayName = "Invalid Flight State"),
+	MissingLandingGear UMETA(DisplayName = "Landing Gear Not Configured"),
+	UnsupportedFoot UMETA(DisplayName = "Landing Foot Has No Support"),
+	UnevenFootSurface UMETA(DisplayName = "Landing Foot Surface Too Rough"),
+	GearTravelExceeded UMETA(DisplayName = "Landing Gear Travel Exceeded"),
+	UnstableSupport UMETA(DisplayName = "Centre Of Mass Outside Safe Support"),
+	ApproachBlocked UMETA(DisplayName = "Landing Approach Blocked")
 };
 
 /** Which fallback produced a respawn transform near a landed spacecraft. */
@@ -57,7 +64,7 @@ enum class EJTSRespawnTransformSource : uint8
 	SpacecraftExit UMETA(DisplayName = "Spacecraft Exit")
 };
 
-/** Per-site rules. The site owns data only; it never moves a spacecraft. */
+/** Legacy serialized site data. Runtime landing rules now belong to the ship's support component. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSPlanetLandingValidationData
 {
@@ -102,7 +109,33 @@ struct SPACE_API FJTSPlanetLandingValidationData
 	float TargetSurfaceProbeDistance = 3000.0f;
 };
 
-/** One complete landing decision returned by the LandingManager to a spacecraft. */
+/** A measured contact, also replicated for the visible telescopic strut and swivelling foot. */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSLandingFootContact
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	FName FootComponentName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	FName StrutComponentName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	FVector Normal = FVector::UpVector;
+
+	/** Positive extends downwards; negative compresses, in world centimetres. */
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	float Extension = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	float Roughness = 0.0f;
+};
+
+/** One complete terrain/gear decision returned by the LandingManager to a spacecraft. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSPlanetLandingValidationResult
 {
@@ -112,9 +145,13 @@ struct SPACE_API FJTSPlanetLandingValidationResult
 	bool bIsValid = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Landing")
-	EJTSLandingValidationFailure Failure = EJTSLandingValidationFailure::NoLandingSite;
+	EJTSLandingValidationFailure Failure = EJTSLandingValidationFailure::InvalidLandingTarget;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	TObjectPtr<AJTSPlanetAnchor> Planet = nullptr;
+
+	/** Compatibility field; runtime terrain landing always leaves this null. */
+	UPROPERTY(BlueprintReadOnly, Category = "Landing", meta = (DeprecatedProperty, DeprecationMessage = "Use Planet, LandingTransform and FootContacts."))
 	TObjectPtr<AJTSPlanetLandingSite> LandingSite = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Landing")
@@ -135,6 +172,16 @@ struct SPACE_API FJTSPlanetLandingValidationResult
 	/** Root-to-surface clearance along GroundNormal that the spacecraft must preserve while landing. */
 	UPROPERTY(BlueprintReadOnly, Category = "Landing")
 	float LandingClearance = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	TArray<FJTSLandingFootContact> FootContacts;
+
+	/** Tangent displacement from the pilot's original ground point, in centimetres. */
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	float PositionCorrection = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Landing")
+	float StabilityMargin = 0.0f;
 };
 
 /** Result returned when a landed spacecraft resolves a player respawn transform. */

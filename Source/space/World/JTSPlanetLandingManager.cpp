@@ -14,6 +14,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
@@ -56,6 +57,12 @@ namespace
 			return TEXT("InvalidLandingTarget");
 		case EJTSLandingValidationFailure::InvalidFlightState:
 			return TEXT("InvalidFlightState");
+		case EJTSLandingValidationFailure::MissingLandingGear: return TEXT("MissingLandingGear");
+		case EJTSLandingValidationFailure::UnsupportedFoot: return TEXT("UnsupportedFoot");
+		case EJTSLandingValidationFailure::UnevenFootSurface: return TEXT("UnevenFootSurface");
+		case EJTSLandingValidationFailure::GearTravelExceeded: return TEXT("GearTravelExceeded");
+		case EJTSLandingValidationFailure::UnstableSupport: return TEXT("UnstableSupport");
+		case EJTSLandingValidationFailure::ApproachBlocked: return TEXT("ApproachBlocked");
 		default:
 			return TEXT("Unknown");
 		}
@@ -249,8 +256,8 @@ float AJTSPlanetLandingManager::GetLandingDistance(AJTSPlanetAnchor* Planet, con
 bool AJTSPlanetLandingManager::IsLandingAvailable(AJTSSpacecraftActor* Spacecraft) const
 {
 	FJTSPlanetLandingValidationResult ValidationResult;
-	AJTSPlanetAnchor* Planet = nullptr;
-	return QueryLandingAvailability(Spacecraft, ValidationResult, Planet, true) && ValidationResult.bIsValid;
+	const auto* Support = IsValid(Spacecraft) ? Spacecraft->GetLandingSupportComponent() : nullptr;
+	return Support && Support->GetLandingPreview(ResolvePlanetForSpacecraft(Spacecraft), ValidationResult);
 }
 
 void AJTSPlanetLandingManager::DrawDebugLandingAreas(AJTSPlanetAnchor* Planet, float Duration) const
@@ -406,10 +413,10 @@ bool AJTSPlanetLandingManager::RequestLanding(
 					SpaceWorldManager->SetTravelState(EJTSSpaceTravelState::Landing);
 				}
 			}
-			UE_LOG(LogJTSPlanetLanding, Log, TEXT("%s accepted: Planet=%s Site=%s GroundDistance=%.1f Slope=%.1f"),
+			UE_LOG(LogJTSPlanetLanding, Log, TEXT("%s accepted: Planet=%s Correction=%.1f GroundDistance=%.1f Slope=%.1f"),
 				bAllowControlledDescentCapture ? TEXT("Automatic landing capture") : TEXT("Landing Request"),
 				*Planet->GetPlanetId().ToString(),
-				*GetNameSafe(OutResult.LandingSite),
+				OutResult.PositionCorrection,
 				OutResult.GroundDistance,
 				OutResult.GroundSlopeDegrees);
 			return true;
@@ -596,10 +603,8 @@ AJTSPlanetAnchor* AJTSPlanetLandingManager::ResolvePlanetForSpacecraft(AJTSSpace
 }
 
 bool AJTSPlanetLandingManager::QueryLandingAvailability(
-	AJTSSpacecraftActor* Spacecraft,
-	FJTSPlanetLandingValidationResult& OutResult,
-	AJTSPlanetAnchor*& OutPlanet,
-	bool bAllowControlledDescentCapture) const
+	AJTSSpacecraftActor* Spacecraft, FJTSPlanetLandingValidationResult& OutResult,
+	AJTSPlanetAnchor*& OutPlanet, bool bAllowControlledDescentCapture) const
 {
 	OutResult = FJTSPlanetLandingValidationResult();
 	OutPlanet = ResolvePlanetForSpacecraft(Spacecraft);
@@ -608,171 +613,8 @@ bool AJTSPlanetLandingManager::QueryLandingAvailability(
 		OutResult.Failure = EJTSLandingValidationFailure::NoPlanet;
 		return false;
 	}
-
-	const TArray<AJTSPlanetLandingSite*> LandingSites = GetLandingSitesForPlanet(OutPlanet);
-	if (LandingSites.IsEmpty())
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::NoLandingSite;
-		return false;
-	}
-
-	const FVector RadialUp = OutPlanet->GetRadialUpVector(Spacecraft->GetActorLocation());
-	float RequiredProbeDistance = FMath::Max(100.0f, InitialGroundProbeDistance);
-	for (AJTSPlanetLandingSite* const LandingSite : LandingSites)
-	{
-		if (!IsValid(LandingSite) || !LandingSite->IsLandingEnabled())
-		{
-			continue;
-		}
-
-		const FJTSPlanetLandingValidationData ValidationData = LandingSite->GetLandingValidationData();
-		RequiredProbeDistance = FMath::Max(
-			RequiredProbeDistance,
-			FMath::Max(ValidationData.MaxLandingHeight, ValidationData.TargetSurfaceProbeDistance)
-				+ Spacecraft->GetLandingCollisionClearance(RadialUp) + 100.0f);
-	}
-
-	if (!Spacecraft->RefreshGroundInfo(OutPlanet, RequiredProbeDistance))
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::NoSurface;
-		return false;
-	}
-
-	const FJTSSpacecraftGroundInfo GroundInfo = Spacecraft->GetGroundInfo();
-	if (!GroundInfo.bHasGround)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::NoSurface;
-		return false;
-	}
-
-	bool bInsideAnyLandingArea = false;
-	FJTSPlanetLandingValidationResult FirstFailure;
-	for (AJTSPlanetLandingSite* const LandingSite : LandingSites)
-	{
-		if (!IsValid(LandingSite) || !LandingSite->IsLandingEnabled()
-			|| !LandingSite->IsLocationInsideLandingArea(GroundInfo.GroundLocation))
-		{
-			continue;
-		}
-
-		bInsideAnyLandingArea = true;
-		FJTSPlanetLandingValidationResult SiteResult;
-		if (ValidateLandingSite(
-			Spacecraft,
-			OutPlanet,
-			LandingSite,
-			GroundInfo,
-			SiteResult,
-			bAllowControlledDescentCapture))
-		{
-			OutResult = SiteResult;
-			return true;
-		}
-
-		if (FirstFailure.Failure == EJTSLandingValidationFailure::NoLandingSite)
-		{
-			FirstFailure = SiteResult;
-		}
-	}
-
-	OutResult = bInsideAnyLandingArea ? FirstFailure : FJTSPlanetLandingValidationResult();
-	if (!bInsideAnyLandingArea)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::OutsideLandingArea;
-	}
-	return false;
-}
-
-bool AJTSPlanetLandingManager::ValidateLandingSite(
-	AJTSSpacecraftActor* Spacecraft,
-	AJTSPlanetAnchor* Planet,
-	AJTSPlanetLandingSite* LandingSite,
-	const FJTSSpacecraftGroundInfo& GroundInfo,
-	FJTSPlanetLandingValidationResult& OutResult,
-	bool bAllowControlledDescentCapture) const
-{
-	OutResult = FJTSPlanetLandingValidationResult();
-	OutResult.LandingSite = LandingSite;
-	if (!IsValid(Spacecraft) || !IsValid(Planet) || !IsValid(LandingSite)
-		|| !GroundInfo.bHasGround)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::InvalidLandingTarget;
-		return false;
-	}
-
-	const FJTSPlanetLandingValidationData ValidationData = LandingSite->GetLandingValidationData();
-	OutResult.GroundDistance = GroundInfo.Distance;
-	OutResult.GroundLocation = GroundInfo.GroundLocation;
-	OutResult.GroundNormal = GroundInfo.SurfaceNormal.GetSafeNormal();
-	OutResult.GroundSlopeDegrees = GroundInfo.SlopeDegrees;
-	if (OutResult.GroundDistance > ValidationData.MaxLandingHeight)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::TooHigh;
-		return false;
-	}
-
-	const FVector LandingUp = OutResult.GroundNormal;
-	if (LandingUp.IsNearlyZero())
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::InvalidLandingTarget;
-		return false;
-	}
-
-	const FVector SpacecraftVelocity = Spacecraft->GetFlightVelocity();
-	if (bAllowControlledDescentCapture)
-	{
-		FVector RadialUp = Planet->GetRadialUpVector(Spacecraft->GetActorLocation()).GetSafeNormal();
-		if (RadialUp.IsNearlyZero())
-		{
-			RadialUp = LandingUp;
-		}
-		const float SignedRadialSpeed = FVector::DotProduct(SpacecraftVelocity, RadialUp);
-		const float TangentialSpeed = FVector::VectorPlaneProject(SpacecraftVelocity, RadialUp).Size();
-		if (TangentialSpeed > ValidationData.MaxLandingSpeed
-			|| SignedRadialSpeed > ValidationData.MaxLandingSpeed
-			|| -SignedRadialSpeed > ValidationData.MaxAutomaticLandingRadialSpeed)
-		{
-			OutResult.Failure = EJTSLandingValidationFailure::TooFast;
-			return false;
-		}
-	}
-	else if (SpacecraftVelocity.Size() > ValidationData.MaxLandingSpeed)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::TooFast;
-		return false;
-	}
-
-	if (OutResult.GroundSlopeDegrees > ValidationData.MaxSlopeDegrees)
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::TooSteep;
-		return false;
-	}
-
-	// Surface Alignment intentionally replaces the historical attitude gate. A valid landing request
-	// keeps its tangential heading but rotates the craft's local Z onto this real mesh normal.
-	const FVector LandingForward = MakeTangentForward(Spacecraft->GetActorForwardVector(), LandingUp);
-	const FQuat LandingRotation = FRotationMatrix::MakeFromXZ(LandingForward, LandingUp).ToQuat();
-	OutResult.LandingClearance = Spacecraft->GetLandingCollisionClearanceForRotation(LandingRotation, LandingUp)
-		+ FMath::Max(0.0f, ValidationData.SurfaceOffset);
-	const FTransform DesiredLandingTransform(
-		LandingRotation,
-		GroundInfo.GroundLocation + LandingUp * OutResult.LandingClearance);
-	float ClearanceAdjustment = 0.0f;
-	if (!Spacecraft->FindClearLandingTransform(
-		DesiredLandingTransform,
-		LandingUp,
-		ValidationData.MaxSurfaceClearanceAdjustment,
-		OutResult.LandingTransform,
-		ClearanceAdjustment))
-	{
-		OutResult.Failure = EJTSLandingValidationFailure::CollisionBlocked;
-		return false;
-	}
-	OutResult.LandingClearance += ClearanceAdjustment;
-
-	OutResult.bIsValid = true;
-	OutResult.Failure = EJTSLandingValidationFailure::None;
-	return true;
+	const auto* Support = Spacecraft->GetLandingSupportComponent();
+	return Support && Support->FindLanding(OutPlanet, bAllowControlledDescentCapture, OutResult);
 }
 
 bool AJTSPlanetLandingManager::BuildRespawnTransformAtAreaPoint(
@@ -856,7 +698,6 @@ bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
 	constexpr int32 RingCount = 6;
 	const int32 SafePreferredSlot = FMath::Max(0, PreferredSlot);
 	const auto FindCandidate = [this, Spacecraft, Planet, SpacecraftLocation, SurfaceUp, PreferredDirection, SearchRadius, BaseRadius, SafePreferredSlot](
-		const bool bRequireLandingArea,
 		FTransform& CandidateOutTransform)
 	{
 		float PreviousRadius = -1.0f;
@@ -882,35 +723,14 @@ bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
 					continue;
 				}
 
-				const FVector CandidateSurfacePoint = CandidateTransform.GetLocation()
-					- CandidateTransform.GetUnitAxis(EAxis::Z).GetSafeNormal()
-						* (Spacecraft->GetPlayerRespawnCapsuleHalfHeight() + Spacecraft->GetPlayerRespawnClearance());
-				if (!bRequireLandingArea || IsLocationInsideLandingArea(Planet, CandidateSurfacePoint))
-				{
-					CandidateOutTransform = CandidateTransform;
-					return true;
-				}
+				CandidateOutTransform = CandidateTransform;
+				return true;
 			}
 		}
 		return false;
 	};
 
-	if (FindCandidate(true, OutTransform))
-	{
-		return true;
-	}
-
-	// A landing site constrains the ship, not a player's capsule. An author may reasonably make the
-	// marked footprint only as wide as the craft. Preserve the no-overlap guarantee by falling back
-	// to a collision-checked airlock-side position rather than failing the entire SpaceWorld entry.
-	if (FindCandidate(false, OutTransform))
-	{
-		UE_LOG(LogJTSPlanetLanding, Log, TEXT("Landing exit used safe exterior fallback: Spacecraft=%s Planet=%s"),
-			*GetNameSafe(Spacecraft), *GetNameSafe(Planet));
-		return true;
-	}
-
-	return false;
+	return FindCandidate(OutTransform);
 }
 
 bool AJTSPlanetLandingManager::IsRespawnTransformClear(const AJTSSpacecraftActor* Spacecraft, const FTransform& Transform) const

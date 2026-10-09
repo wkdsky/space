@@ -9,6 +9,7 @@
 #include "JTSSpacecraftFlightMovementComponent.generated.h"
 
 class AJTSPlanetAnchor;
+struct FJTSSurfaceEnvelopeFrame;
 
 /** Tuning values shared by the third-person flight model and future spacecraft upgrades. */
 USTRUCT(BlueprintType)
@@ -89,13 +90,16 @@ public:
 	void ClearInput();
 
 	/**
-	 * Starts a ground-probe-driven landing. The movement component continuously resolves real surface
-	 * data rather than interpolating to a fixed transform authored in level space.
+	 * Follows a terrain/gear-fitted pose with concurrent swept correction, alignment and descent.
+	 * The support component rechecks that pose throughout the approach and at touchdown.
 	 */
-	bool BeginAssistedLanding(AJTSPlanetAnchor* Planet, float LandingClearance, float DurationSeconds);
+	bool BeginAssistedLanding(AJTSPlanetAnchor* Planet, const FTransform& LandingPose, float DurationSeconds);
 
 	/** Ends an unfinished controlled landing without reporting a successful touchdown. */
 	void CancelAssistedLanding();
+	/** Takeoff/abort may leave the hull below the shell; lift out without landing recapture. */
+	void BeginEnvelopeEscape(bool bRequireTakeoffClearance = false);
+	bool IsAtEnvelopeBoundary() const;
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	bool IsBoosting() const;
@@ -185,47 +189,38 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
 	float SurfaceProximityProbeDistance = 300.0f;
 
-	/** Extra free-flight clearance kept between the physical hull and real terrain. LandingAssist is exempt. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceClearanceSafetyMargin = 120.0f;
 
-	/** Time horizon used to cap descent before the hull reaches its terrain clearance envelope. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.1", UIMin = "0.1", UIMax = "3.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceClearanceLookAheadTime = 0.75f;
 
 	/** Maximum automatic upward recovery speed if terrain or replication places the hull inside the envelope. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float SurfaceClearanceRecoverySpeed = 450.0f;
 
-	/** Only this close above the hull clearance envelope can terrain limit a commanded nose-down turn. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceNosePitchGuardDistance = 450.0f;
 
-	/** Minimum distance ahead used to measure the real terrain slope along the ship's heading. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceNosePitchTerrainSampleDistance = 300.0f;
 
-	/** Forward prediction time for raising an unsafe nose before the hull reaches an uphill surface. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.1", UIMin = "0.1", UIMax = "2.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceTerrainAvoidanceLookAheadTime = 1.0f;
 
-	/** Small extra climb angle during an actual predicted terrain conflict. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "10.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceTerrainAvoidancePitchMarginDegrees = 3.0f;
 
-	/** Clearance above the entry threshold required before the nose guard can release. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceNosePitchReleaseDistance = 120.0f;
 
-	/** Time the predicted path must remain clear before releasing the pitch limit. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "0.5"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceNosePitchReleaseDelay = 0.18f;
 
-	/** Rise promptly toward an uphill safety angle, then relax more gently over uneven samples. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceTerrainPitchAttackDegreesPerSecond = 90.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Surface Assist", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Configure SurfaceEnvelopeComponent.Settings instead."))
 	float SurfaceTerrainPitchRelaxDegreesPerSecond = 12.0f;
 
 	/** Fallback desired descent duration used to derive a controlled initial vertical speed. */
@@ -241,15 +236,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", UIMin = "0.1"))
 	float AssistedLandingRotationInterpolationSpeed = 5.0f;
 
-	/** Landing holds altitude until the local Z axis is this close to the real surface normal. */
+	/** Slow final-area translation; the support component independently bounds the total correction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	float AssistedLandingCorrectionSpeed = 350.0f;
+
+	/** Alignment tolerance for marking the final descent phase; movement begins immediately. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.1", ClampMax = "45.0", UIMin = "0.1", UIMax = "15.0"))
 	float AssistedLandingAlignmentToleranceDegrees = 4.0f;
 
 	/** Temporary clearance used while rotating the complete hull into its landing attitude. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Concurrent descent no longer uses a staging altitude."))
 	float AssistedLandingAlignmentClearance = 75.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Landing now uses a bounded position approach."))
 	float AssistedLandingVelocityResponse = 1800.0f;
 
 	/** The final metres slow smoothly to this cap instead of creeping for the whole descent. */
@@ -260,8 +259,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "1.0", UIMin = "1.0"))
 	float AssistedLandingBrakingDistance = 220.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float LandingContactTolerance = 12.0f;
+	/** Final root position tolerance, capped at 2 cm to preserve measured sole contact. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.25", ClampMax = "2.0", UIMin = "0.25", UIMax = "2.0"))
+	float LandingContactTolerance = 1.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Flight|Landing", meta = (ClampMin = "0.0", ClampMax = "90.0", UIMin = "0.0", UIMax = "45.0"))
 	float LandingCompletionAlignmentDegrees = 6.0f;
@@ -274,29 +274,14 @@ protected:
 	float PlanetGravityScale = 0.0f;
 
 private:
-	struct FSurfaceAvoidance
-	{
-		FVector RadialUp = FVector::UpVector;
-		FVector Heading = FVector::ForwardVector;
-		float MinimumPitch = 0.0f;
-		float MinimumUpSpeed = -BIG_NUMBER;
-		bool bConstrainPitch = false;
-		bool bRaiseNose = false;
-		bool bAssistVelocity = false;
-	};
-
 	void TickAssistedLanding(float DeltaTime);
 	void TickFlight(float DeltaTime);
 	void RefreshSurfaceProximity(float DeltaTime);
 	void UpdateReferenceFrame();
 	void ApplyPlanetGravity(float DeltaTime);
-	FSurfaceAvoidance EvaluateSurfaceAvoidance(float DeltaTime);
-	void ResetSurfaceNoseGuard();
-	void ApplySurfaceClearanceProtection(float DeltaTime, const FSurfaceAvoidance& Avoidance);
-	FQuat UpdateRotation(float DeltaTime, const FSurfaceAvoidance& Avoidance);
-	FQuat BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation, const FSurfaceAvoidance& Avoidance) const;
-	float ConstrainDownwardPitchNearSurface(const FQuat& CurrentRotation, float PitchRadians,
-		const FSurfaceAvoidance& Avoidance) const;
+	bool ApplySurfaceEnvelope(float DeltaTime);
+	FQuat UpdateRotation(float DeltaTime);
+	FQuat BuildFreeFlightDesiredRotation(const FQuat& CurrentRotation) const;
 	FQuat InterpolateTowardRotation(float DeltaTime, const FQuat& CurrentRotation, const FQuat& DesiredRotation);
 	void SubmitExteriorAltitude(float DeltaTime);
 	void CompleteAssistedLanding();
@@ -328,15 +313,20 @@ private:
 	float SurfaceFlightAssistAlpha = 0.0f;
 	float CachedSurfaceAltitude = 0.0f;
 	float SurfaceProximityProbeElapsed = 0.0f;
-	float SurfaceNosePitchClearElapsed = 0.0f;
-	float SmoothedSurfaceMinimumPitch = 0.0f;
+	float EnvelopeLandingRetryElapsed = 0.0f;
+
 	bool bBoosting = false;
 	bool bBraking = false;
 	bool bAssistedLanding = false;
 	bool bInertialReferenceUpInitialized = false;
 	bool bHasSurfaceProximity = false;
-	bool bSurfaceNoseGuardActive = false;
-	float AssistedLandingClearance = 0.0f;
+	bool bEnvelopeEscape = false;
+	bool bTakeoffClearance = false;
+	double TakeoffClearanceRadius = 0;
+	FTransform AssistedLandingPose = FTransform::Identity;
+
+	float LandingSupportCheckElapsed = 0.0f;
+
 	float AssistedLandingDescentSpeed = 0.0f;
 	float AssistedLandingElapsed = 0.0f;
 	EJTSSpacecraftLandingAssistPhase AssistedLandingPhase = EJTSSpacecraftLandingAssistPhase::None;

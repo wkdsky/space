@@ -811,6 +811,14 @@ bool AJTSPlanetAnchor::TraceGameplaySurfaceSegment(
 	}
 
 	UWorld* const World = GetWorld();
+	FHitResult NearestHit;
+	bool bFoundSurface = false;
+	const auto KeepNearest = [&]()
+	{
+		if (!bFoundSurface || FVector::DistSquared(TraceStart, OutTraceHit.ImpactPoint)
+			< FVector::DistSquared(TraceStart, NearestHit.ImpactPoint)) NearestHit = OutTraceHit;
+		bFoundSurface = true;
+	};
 	for (UPrimitiveComponent* const SurfaceComponent : CandidateSurfaceComponents)
 	{
 		FCollisionQueryParams ComponentTraceParameters(SCENE_QUERY_STAT(JTSPlanetConfiguredSurfaceTrace), true, this);
@@ -818,7 +826,7 @@ bool AJTSPlanetAnchor::TraceGameplaySurfaceSegment(
 		if (SurfaceComponent->LineTraceComponent(OutTraceHit, TraceStart, TraceEnd, ComponentTraceParameters)
 			&& OutTraceHit.bBlockingHit)
 		{
-			return true;
+			KeepNearest(); continue;
 		}
 
 		// Some authored mesh collision is simple-only. Keep the trace tied to this configured
@@ -828,7 +836,7 @@ bool AJTSPlanetAnchor::TraceGameplaySurfaceSegment(
 		if (SurfaceComponent->LineTraceComponent(OutTraceHit, TraceStart, TraceEnd, ComponentTraceParameters)
 			&& OutTraceHit.bBlockingHit)
 		{
-			return true;
+			KeepNearest(); continue;
 		}
 
 		if (!IsValid(World))
@@ -868,11 +876,11 @@ bool AJTSPlanetAnchor::TraceGameplaySurfaceSegment(
 		if (TracePhysicsSceneForComponent(true, OutTraceHit)
 			|| TracePhysicsSceneForComponent(false, OutTraceHit))
 		{
-			return true;
+			KeepNearest();
 		}
 	}
-
-	return false;
+	OutTraceHit = bFoundSurface ? NearestHit : FHitResult();
+	return bFoundSurface;
 }
 
 FVector AJTSPlanetAnchor::GetFallbackTangent(const FVector& UpVector) const

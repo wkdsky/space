@@ -135,7 +135,7 @@ void UJTSStellarAbilityComponent::RayAttack(const FJTSStellarWeaponDefinition& D
 	for (int32 I = 0; I < Pierce && Visited.Num() < Limit; ++I)
 	{
 		FHitResult Hit;
-		if (!GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(FMath::Max(1.f, Def.BeamRadiusCentimeters)), Params)) break;
+		if (!JTSStellarCombat::TraceBeam(GetWorld(), Start, End, FMath::Max(1.f, Def.BeamRadiusCentimeters), Params, Hit)) break;
 		LastPoint = Hit.ImpactPoint; Impact = true; auto* Target = Hit.GetActor();
 		const auto* Status = IsValid(Target) ? Target->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
 		if (!Status || !Status->IsAliveTarget()) break;

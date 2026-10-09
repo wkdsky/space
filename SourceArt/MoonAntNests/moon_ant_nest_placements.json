@@ -1,0 +1,312 @@
+{
+  "count": 9,
+  "foot_perimeter_world_m": 295.44579715175956,
+  "placements": [
+    {
+      "name": "Moon_AntNest_01",
+      "mesh": "SM_MoonAntNestEntrance_01",
+      "point_local_cm": [
+        -51.29130172729491,
+        123.53088378906251,
+        81.11602401733398
+      ],
+      "forward_local": [
+        -0.008059591514619756,
+        0.2692772936025251,
+        -0.9630289622512488
+      ],
+      "right_local": [
+        -0.9633531662093117,
+        -0.2603102710151895,
+        -0.06472433822367796
+      ],
+      "up_local": [
+        -0.2681151247861857,
+        0.9272153482088711,
+        0.2615071278317093
+      ],
+      "edge_vertices": [
+        842,
+        1140
+      ],
+      "edge_fraction": 0.4999999999999994,
+      "wall_triangle": 789,
+      "floor_triangle": 1935,
+      "slope_break_degrees": 48.15259612946499,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_02",
+      "mesh": "SM_MoonAntNestEntrance_02",
+      "point_local_cm": [
+        -84.61865399907383,
+        116.869803032988,
+        63.08251831864993
+      ],
+      "forward_local": [
+        0.6744507428333928,
+        0.3364374384303703,
+        -0.6572108075145261
+      ],
+      "right_local": [
+        -0.6734432546826753,
+        -0.0845440012410027,
+        -0.7343885174596392
+      ],
+      "up_local": [
+        -0.30263902295290673,
+        0.9379030663541794,
+        0.16955075909454917
+      ],
+      "edge_vertices": [
+        843,
+        1141
+      ],
+      "edge_fraction": 0.511375159279139,
+      "wall_triangle": 805,
+      "floor_triangle": 1931,
+      "slope_break_degrees": 46.93642155007276,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_03",
+      "mesh": "SM_MoonAntNestEntrance_03",
+      "point_local_cm": [
+        -98.75364823257547,
+        119.49347088006783,
+        27.052174613328482
+      ],
+      "forward_local": [
+        0.9740137487956985,
+        0.22064208776789,
+        -0.05113009155455107
+      ],
+      "right_local": [
+        -0.08706407657285375,
+        0.15634774408311677,
+        -0.9838573217141987
+      ],
+      "up_local": [
+        -0.20908625905942813,
+        0.9627421524092248,
+        0.17149485195476494
+      ],
+      "edge_vertices": [
+        840,
+        1138
+      ],
+      "edge_fraction": 0.5860831672512962,
+      "wall_triangle": 812,
+      "floor_triangle": 1919,
+      "slope_break_degrees": 41.22755852331415,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_04",
+      "mesh": "SM_MoonAntNestEntrance_04",
+      "point_local_cm": [
+        -86.46694582195958,
+        130.08675277321214,
+        -8.445999649133071
+      ],
+      "forward_local": [
+        0.7934916865291779,
+        0.2225866796498074,
+        0.5664151423219149
+      ],
+      "right_local": [
+        0.47486012024372415,
+        0.3556547632588793,
+        -0.8049953761192585
+      ],
+      "up_local": [
+        -0.38062949125257856,
+        0.9077251012359108,
+        0.17651156045726474
+      ],
+      "edge_vertices": [
+        839,
+        1137
+      ],
+      "edge_fraction": 0.4999988506033251,
+      "wall_triangle": 837,
+      "floor_triangle": 1925,
+      "slope_break_degrees": 52.75753384880367,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_05",
+      "mesh": "SM_MoonAntNestEntrance_05",
+      "point_local_cm": [
+        -56.52844634523395,
+        144.28730881816875,
+        -27.999001587207665
+      ],
+      "forward_local": [
+        0.2553718609927799,
+        -0.124253412922794,
+        0.9588254804656174
+      ],
+      "right_local": [
+        0.9227341356393014,
+        0.32744502329631053,
+        -0.20332602303805072
+      ],
+      "up_local": [
+        -0.2886986794896638,
+        0.9366647458378672,
+        0.1982731105455505
+      ],
+      "edge_vertices": [
+        855,
+        1136
+      ],
+      "edge_fraction": 0.5113731932575791,
+      "wall_triangle": 844,
+      "floor_triangle": 1963,
+      "slope_break_degrees": 50.51711093421801,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_06",
+      "mesh": "SM_MoonAntNestEntrance_06",
+      "point_local_cm": [
+        -19.877527699635255,
+        154.71831121901874,
+        -20.734584036830057
+      ],
+      "forward_local": [
+        -0.3646661398045359,
+        -0.3940147662091654,
+        0.8436652004730284
+      ],
+      "right_local": [
+        0.8703902547558509,
+        0.17766304476566844,
+        0.45919129668433106
+      ],
+      "up_local": [
+        -0.33081627968723654,
+        0.9017694863620795,
+        0.2781589160177458
+      ],
+      "edge_vertices": [
+        838,
+        1135
+      ],
+      "edge_fraction": 0.5860813673610814,
+      "wall_triangle": 780,
+      "floor_triangle": 1969,
+      "slope_break_degrees": 41.227507560327496,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_07",
+      "mesh": "SM_MoonAntNestEntrance_07",
+      "point_local_cm": [
+        4.643031533498788,
+        156.0664518157491,
+        9.60063111953343
+      ],
+      "forward_local": [
+        -0.8522150500173069,
+        -0.28633013082344133,
+        0.43788647467880343
+      ],
+      "right_local": [
+        0.45471383446378943,
+        0.008612263576176036,
+        0.8905959564602414
+      ],
+      "up_local": [
+        -0.25877565046046513,
+        0.9580923155410055,
+        0.12285877107491236
+      ],
+      "edge_vertices": [
+        837,
+        1134
+      ],
+      "edge_fraction": 0.4999988510848337,
+      "wall_triangle": 796,
+      "floor_triangle": 1981,
+      "slope_break_degrees": 52.75743749889626,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_08",
+      "mesh": "SM_MoonAntNestEntrance_08",
+      "point_local_cm": [
+        7.567105277256041,
+        149.957367499991,
+        47.47435382604811
+      ],
+      "forward_local": [
+        -0.8863358776039814,
+        -0.32981234463771963,
+        -0.32501158348057424
+      ],
+      "right_local": [
+        -0.2380600243242857,
+        -0.27746469904921295,
+        0.9307742828421133
+      ],
+      "up_local": [
+        -0.397160089750595,
+        0.9023509063031409,
+        0.16741178274900348
+      ],
+      "edge_vertices": [
+        860,
+        1133
+      ],
+      "edge_fraction": 0.5113733370425625,
+      "wall_triangle": 821,
+      "floor_triangle": 1989,
+      "slope_break_degrees": 41.980418910577505,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    },
+    {
+      "name": "Moon_AntNest_09",
+      "mesh": "SM_MoonAntNestEntrance_09",
+      "point_local_cm": [
+        -14.932709210448582,
+        136.85318394036574,
+        76.23032652578775
+      ],
+      "forward_local": [
+        -0.5190883710303388,
+        -0.10441458459539298,
+        -0.84831884193671
+      ],
+      "right_local": [
+        -0.7723232372707687,
+        -0.3678744873537926,
+        0.5178659852952155
+      ],
+      "up_local": [
+        -0.36614762082071395,
+        0.9239945649612641,
+        0.1103175583911047
+      ],
+      "edge_vertices": [
+        841,
+        1139
+      ],
+      "edge_fraction": 0.58608172114602,
+      "wall_triangle": 828,
+      "floor_triangle": 1959,
+      "slope_break_degrees": 41.227514136103856,
+      "opening_width_cm": 75,
+      "opening_height_cm": 45
+    }
+  ]
+}

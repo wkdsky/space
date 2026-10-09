@@ -104,6 +104,10 @@ struct SPACE_API FJTSSpacecraftInputState
 	UPROPERTY()
 	float Lift = 0.0f;
 
+	/** Physical descend-key state survives landing input lock, so Space abort requires a real release. */
+	UPROPERTY()
+	bool bDescentKeyHeld = false;
+
 	/** Hull yaw rate. Positive yaws to the ship's right. */
 	UPROPERTY()
 	float Yaw = 0.0f;

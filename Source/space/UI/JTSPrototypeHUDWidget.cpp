@@ -39,6 +39,8 @@
 #include "space/UI/JTSGameUILayout.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/Core/JTSGameInstance.h"
 #include "space/Interaction/IInteractable.h"
 #include "space/Interaction/InteractionComponent.h"
@@ -1751,13 +1753,12 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	}
 	const int32 AltitudeMeters = FMath::Max(0, FMath::RoundToInt(SurfaceAltitude / 100.0f));
 	const EJTSSpacecraftFlightState FlightState = Spacecraft->GetFlightState();
-	const AJTSPlanetLandingManager* const LandingManager = AJTSPlanetLandingManager::FindPlanetLandingManager(this);
-	const bool bLandingAvailable = FlightState == EJTSSpacecraftFlightState::Flying
-		&& IsValid(LandingManager)
-		&& LandingManager->IsLandingAvailable(Spacecraft);
-	const float LandingZoneDistance = IsValid(LandingManager)
-		? LandingManager->GetLandingDistance(const_cast<AJTSPlanetAnchor*>(Planet), Spacecraft->GetActorLocation())
-		: -1.0f;
+	FJTSPlanetLandingValidationResult LandingPreview;
+    const auto* Envelope = Spacecraft->GetSurfaceEnvelopeComponent();
+    const auto Frame = Envelope->GetFrame();
+    const bool bAtBoundary = Frame.bValid && FVector::DotProduct(Spacecraft->GetActorLocation()-Frame.Location,Frame.RadialUp)<100;
+    const bool bLandingAvailable = !bAtBoundary || Spacecraft->GetLastLandingFailure()==EJTSLandingValidationFailure::None;
+    LandingPreview.Failure=Spacecraft->GetLastLandingFailure();
 	FString StateLine;
 	FLinearColor StateColor(0.70f, 0.92f, 1.0f, 1.0f);
 	switch (FlightState)
@@ -1766,10 +1767,10 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		switch (Spacecraft->GetLandingAssistPhase())
 		{
 		case EJTSSpacecraftLandingAssistPhase::Aligning:
-			StateLine = TEXT("LANDING ASSIST\nALIGNING");
+			StateLine = TEXT("LANDING ASSIST\nDESCENDING / GEAR DEPLOY\nSPACE TO ABORT");
 			break;
 		case EJTSSpacecraftLandingAssistPhase::Descending:
-			StateLine = TEXT("LANDING ASSIST\nCONTROLLED DESCENT");
+			StateLine = TEXT("LANDING ASSIST\nCONTROLLED DESCENT\nSPACE TO ABORT");
 			break;
 		case EJTSSpacecraftLandingAssistPhase::Touchdown:
 			StateLine = TEXT("LANDING ASSIST\nTOUCHDOWN");
@@ -1788,7 +1789,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		break;
 
 	case EJTSSpacecraftFlightState::LandingRequest:
-		StateLine = TEXT("CHECKING LANDING ZONE");
+		StateLine = TEXT("CHECKING TERRAIN / LANDING GEAR");
 		StateColor = FLinearColor(1.0f, 0.84f, 0.32f, 1.0f);
 		break;
 
@@ -1796,15 +1797,23 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	default:
 		if (bLandingAvailable)
 		{
-			StateLine = TEXT("HOLD CTRL TO AUTO-LAND");
-		}
-		else if (LandingZoneDistance >= 0.0f)
-		{
-			StateLine = FString::Printf(TEXT("LANDING ZONE %dm"), FMath::RoundToInt(LandingZoneDistance / 100.0f));
+			StateLine = Envelope->IsFollowing() ? TEXT("LOW FLIGHT\nCTRL DESCEND TO LAND") : TEXT("FLYING\nCTRL DESCEND");
 		}
 		else
 		{
-			StateLine = TEXT("CANNOT LAND HERE");
+			switch (LandingPreview.Failure)
+			{
+			case EJTSLandingValidationFailure::TooHigh: StateLine = TEXT("DESCEND TO CHECK LANDING"); break;
+			case EJTSLandingValidationFailure::TooFast: StateLine = TEXT("SLOW DOWN TO LAND"); break;
+			case EJTSLandingValidationFailure::TooSteep: StateLine = TEXT("TERRAIN TOO STEEP"); break;
+			case EJTSLandingValidationFailure::UnsupportedFoot: StateLine = TEXT("LANDING FOOT UNSUPPORTED"); break;
+			case EJTSLandingValidationFailure::UnevenFootSurface: StateLine = TEXT("FOOTPAD TERRAIN TOO ROUGH"); break;
+			case EJTSLandingValidationFailure::GearTravelExceeded: StateLine = TEXT("TERRAIN EXCEEDS GEAR TRAVEL"); break;
+			case EJTSLandingValidationFailure::UnstableSupport: StateLine = TEXT("LANDING SUPPORT UNSTABLE"); break;
+			case EJTSLandingValidationFailure::CollisionBlocked:
+			case EJTSLandingValidationFailure::ApproachBlocked: StateLine = TEXT("LANDING PATH OBSTRUCTED"); break;
+			default: StateLine = TEXT("CANNOT LAND HERE"); break;
+			}
 		}
 		StateColor = bLandingAvailable
 			? FLinearColor(0.35f, 1.0f, 0.68f, 1.0f)

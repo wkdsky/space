@@ -1,0 +1,110 @@
+{
+  "build": {
+    "target": "spaceEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "engine": "5.8.2",
+    "result": "Succeeded"
+  },
+  "automation": {
+    "suite": "JTS.Spacecraft",
+    "passed": 18,
+    "failed": 0,
+    "passed_with_warnings": 1,
+    "tests": [
+      {
+        "name": "JTS.Spacecraft.LandingSupport.BoundedCorrection",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.LandingSupport.DeployMoveAndRecheck",
+        "state": "Success",
+        "warnings": [
+          "LogTemp: Landing Assist cancelled: Spacecraft=BP_Twinfork_R1_C_0 Reason=13"
+        ]
+      },
+      {
+        "name": "JTS.Spacecraft.LandingSupport.TerrainAndFeet",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.AutomaticLandingControls",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.HullClearanceAndCamera",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.InterplanetaryCruise",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.MarIILandingMap",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.NearSurfaceNosePitchGuard",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.PlanetFrameHandoff",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.PossessionAndDisembark",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.PredictiveTerrainAvoidance",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.ShipLockerAndStellarLoot",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.SixAxisInertialFlight",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.StellarDebugGrant",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.StellarFirmwareDrag",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.TakeoffLandingCycle",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.TerrainIndependentAttitude",
+        "state": "Success",
+        "warnings": []
+      },
+      {
+        "name": "JTS.Spacecraft.ThirdPersonFlightControls",
+        "state": "Success",
+        "warnings": []
+      }
+    ]
+  },
+  "network_integration": "Not run; authoritative state and replicated contacts are implemented, validated here in standalone/server tests."
+}

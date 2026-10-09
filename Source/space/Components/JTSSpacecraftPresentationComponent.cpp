@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -68,6 +69,10 @@ void UJTSSpacecraftPresentationComponent::TickComponent(
 	}
 	UpdateHeadlights();
 	UpdateGear(DeltaTime);
+	if (const auto* Support = Owner->FindComponentByClass<UJTSSpacecraftLandingSupportComponent>())
+	{
+		Support->ApplyContactPresentation(GearAlpha);
+	}
 	UpdateCruiseMode(DeltaTime);
 	UpdateExhaust(DeltaTime);
 }
@@ -585,7 +590,7 @@ void UJTSSpacecraftPresentationComponent::ApplyGearPose(const FGearBinding& Leg,
 void UJTSSpacecraftPresentationComponent::UpdateGear(float DeltaTime)
 {
 	const float Desired = GetDesiredGearAlpha();
-	const float Duration = FMath::Max(0.05f, GearTransitionDuration);
+	const float Duration = FMath::Max(0.05f, Desired > GearAlpha ? GearDeploymentDuration : GearTransitionDuration);
 	GearAlpha = FMath::FInterpConstantTo(GearAlpha, Desired, DeltaTime, 1.0f / Duration);
 
 	for (const FGearBinding& Leg : Gear)

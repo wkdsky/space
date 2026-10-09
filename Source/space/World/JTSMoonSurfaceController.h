@@ -142,6 +142,10 @@ private:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSMoonCorpseActor> PlacedCorpseLandmark;
 
+	/** Optional independently authored nests. Their transforms and visuals belong to the level. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
+	TArray<TObjectPtr<AJTSMoonAntNestActor>> PlacedMoonAntNests;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;
 

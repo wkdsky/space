@@ -1,0 +1,249 @@
+{
+  "feet": [
+    {
+      "foot": "Gear_FL_Foot",
+      "strut": "Gear_FL_Shin",
+      "root_contact": [
+        250.0,
+        -380.0,
+        -192.0
+      ],
+      "sole_local": [
+        0.0,
+        0.0,
+        -18.0
+      ],
+      "half_extent": [
+        26.0,
+        18.0
+      ],
+      "rest_length": 34.0,
+      "flat_sole_triangles": 4,
+      "flat_sole_area": 2752.0
+    },
+    {
+      "foot": "Gear_FR_Foot",
+      "strut": "Gear_FR_Shin",
+      "root_contact": [
+        250.0,
+        380.0,
+        -192.0
+      ],
+      "sole_local": [
+        0.0,
+        0.0,
+        -18.0
+      ],
+      "half_extent": [
+        26.0,
+        18.0
+      ],
+      "rest_length": 34.0,
+      "flat_sole_triangles": 4,
+      "flat_sole_area": 2752.0
+    },
+    {
+      "foot": "Gear_BL_Foot",
+      "strut": "Gear_BL_Shin",
+      "root_contact": [
+        -470.0,
+        -380.0,
+        -192.0
+      ],
+      "sole_local": [
+        0.0,
+        0.0,
+        -18.0
+      ],
+      "half_extent": [
+        26.0,
+        18.0
+      ],
+      "rest_length": 34.0,
+      "flat_sole_triangles": 4,
+      "flat_sole_area": 2752.0
+    },
+    {
+      "foot": "Gear_BR_Foot",
+      "strut": "Gear_BR_Shin",
+      "root_contact": [
+        -470.0,
+        380.0,
+        -192.0
+      ],
+      "sole_local": [
+        0.0,
+        0.0,
+        -18.0
+      ],
+      "half_extent": [
+        26.0,
+        18.0
+      ],
+      "rest_length": 34.0,
+      "flat_sole_triangles": 4,
+      "flat_sole_area": 2752.0
+    }
+  ],
+  "removed_sites": [
+    "BP_JTSPlanetLandingSite",
+    "BP_JTSPlanetLandingSite2",
+    "MarII_LandingZone",
+    "MarII_LandingZone2",
+    "BP_JTSPlanetLandingSite3"
+  ],
+  "arrival_anchors": [
+    {
+      "name": "BP_JTSPlanetArrivalAnchor_C_1",
+      "label": "BP_JTSPlanetArrivalAnchor",
+      "location": [
+        50098.1,
+        91358.4,
+        33383.4
+      ],
+      "rotation": "<Struct 'Rotator' (0x000001C40BC10A10) {pitch: 2.300000, yaw: 0.200000, roll: 8.200000}>",
+      "ship_location": [
+        50090.05617595104,
+        91386.89788217415,
+        33581.19577246811
+      ]
+    },
+    {
+      "name": "BP_JTSPlanetArrivalAnchor_C_0",
+      "label": "MarII_ArrivalAnchor",
+      "location": [
+        -86754.0,
+        -20680.0,
+        -31451.1
+      ],
+      "rotation": "<Struct 'Rotator' (0x000001C40BBCB6C0) {pitch: -24.800000, yaw: -5.800000, roll: 28.000000}>",
+      "ship_location": [
+        -85754.02713785986,
+        -20569.224258200687,
+        -31467.92290141658
+      ]
+    }
+  ],
+  "former_landing_volumes": [
+    {
+      "label": "BP_JTSPlanetLandingSite",
+      "location": [
+        49071.1,
+        91295.5,
+        32916.6
+      ],
+      "rotation_quat": [
+        -0.028206,
+        -0.101138,
+        0.001429,
+        0.994471
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "default_half_extent": [
+        1000,
+        1000,
+        300
+      ]
+    },
+    {
+      "label": "BP_JTSPlanetLandingSite2",
+      "location": [
+        41055.8890226583,
+        95840.95013611265,
+        26932.73669848687
+      ],
+      "rotation_quat": [
+        -0.184496,
+        -0.433383,
+        0.001186,
+        0.882122
+      ],
+      "scale": [
+        3.0,
+        3.0,
+        1.0
+      ],
+      "default_half_extent": [
+        1000,
+        1000,
+        300
+      ]
+    },
+    {
+      "label": "MarII_LandingZone",
+      "location": [
+        -87097.0,
+        -20424.2,
+        -31410.5
+      ],
+      "rotation_quat": [
+        -0.215768,
+        0.228763,
+        0.043024,
+        0.948294
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "default_half_extent": [
+        1000,
+        1000,
+        300
+      ]
+    },
+    {
+      "label": "MarII_LandingZone2",
+      "location": [
+        -74507.6,
+        -24194.0,
+        -37579.2
+      ],
+      "rotation_quat": [
+        -0.25145,
+        0.263316,
+        -0.084083,
+        0.92756
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "default_half_extent": [
+        1000,
+        1000,
+        300
+      ]
+    },
+    {
+      "label": "BP_JTSPlanetLandingSite3",
+      "location": [
+        38362.114746624706,
+        96788.90604572179,
+        19403.91201681056
+      ],
+      "rotation_quat": [
+        -0.271727,
+        -0.638289,
+        0.000968,
+        0.720244
+      ],
+      "scale": [
+        3.0,
+        3.0,
+        1.0
+      ],
+      "default_half_extent": [
+        1000,
+        1000,
+        300
+      ]
+    }
+  ]
+}

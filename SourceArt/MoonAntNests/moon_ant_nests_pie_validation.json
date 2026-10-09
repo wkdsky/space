@@ -1,0 +1,61 @@
+{
+  "nest_count": 9,
+  "live_ant_count": 268,
+  "legacy_random_nests": 0,
+  "nests": [
+    {
+      "name": "Moon_AntNest_01",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_02",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_03",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_04",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_05",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_06",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_07",
+      "active_ants": 30,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_08",
+      "active_ants": 29,
+      "transform_preserved": true,
+      "replicates": true
+    },
+    {
+      "name": "Moon_AntNest_09",
+      "active_ants": 29,
+      "transform_preserved": true,
+      "replicates": true
+    }
+  ]
+}

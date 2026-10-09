@@ -171,7 +171,7 @@ void UJTSStellarAbilityComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
 	if (IsValid(LocalChannelArea)) LocalChannelArea->Destroy();
 	if (IsValid(LocalChannelLink)) LocalChannelLink->Destroy();
-	GetWorld()->GetTimerManager().ClearTimer(MaintenanceTimer);
+	if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(MaintenanceTimer);
 	for (auto& R : Robots) if (R.IsValid()) R->Destroy();
 	for (auto& A : Areas) if (A.IsValid()) A->Destroy();
 	for (auto& A : Projectiles) if (A.IsValid()) A->Destroy();

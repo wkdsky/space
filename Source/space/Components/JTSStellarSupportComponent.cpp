@@ -122,7 +122,9 @@ void UJTSStellarSupportComponent::UpdatePresentation()
 }
 void UJTSStellarSupportComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
-	GetWorld()->GetTimerManager().ClearTimer(PresentationTimer); if (IsValid(LocalShield)) LocalShield->Destroy(); Super::EndPlay(Reason);
+	if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(PresentationTimer);
+	if (IsValid(LocalShield)) LocalShield->Destroy();
+	Super::EndPlay(Reason);
 }
 void UJTSStellarSupportComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {

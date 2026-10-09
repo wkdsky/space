@@ -12,6 +12,8 @@
 
 class AJTSCharacter;
 class AJTSPlanetAnchor;
+class AJTSMoonAntActor;
+struct FJTSPlanetAntConfigFragment;
 struct FMassEntityManager;
 struct FComponentQueryParams;
 
@@ -39,6 +41,11 @@ public:
 	FMassEntityHandle RegisterEnemy(AActor* Actor, AJTSPlanetAnchor* Planet,
 		const FVector& HomeLocation, const FVector& GroundLocation, const FJTSPlanetEnemyBehavior& Behavior);
 	void UnregisterEnemy(FMassEntityHandle Entity);
+	FMassEntityHandle RegisterAnt(AJTSMoonAntActor* Actor, AJTSPlanetAnchor* Planet,
+		const FVector& Home, const FVector& Ground, const FJTSPlanetAntConfigFragment& Config);
+	void NotifyAntDamaged(FMassEntityHandle Entity, const FVector& SourceLocation);
+	UFUNCTION(BlueprintPure, Category = "Planet|AI|Diagnostics")
+	int32 GetRegisteredAntCount() const;
 	/** Pool release uses UnregisterEnemy; re-acquisition registers a fresh identity. */
 	void SetBodyCollisionEnabled(FMassEntityHandle Entity, bool bEnabled);
 	bool GetBodyCollisionData(FMassEntityHandle Entity, FJTSPlanetEnemyBodyFragment& OutBody) const;

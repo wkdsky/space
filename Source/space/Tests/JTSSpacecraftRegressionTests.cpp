@@ -21,6 +21,7 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
@@ -29,6 +30,9 @@
 #include "UObject/UObjectGlobals.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
+#include "space/World/JTSPlanetArrivalAnchor.h"
 #include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSStellarLootTable.h"
@@ -39,6 +43,7 @@
 #include "space/UI/JTSCruiseNavigationWidget.h"
 #include "space/Items/JTSStellarProgression.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSMoonAntNestActor.h"
 #include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSPlanetLandingSite.h"
 #include "space/World/JTSSpaceWorldManager.h"
@@ -95,6 +100,28 @@ namespace
 				&& Ship->SnapSpacecraftToSurfaceTransform(Planet, Frame.Transform);
 		}
 
+		void ConfigureLandingRig()
+		{
+			auto* Support = Ship->GetLandingSupportComponent();
+			Support->Feet.Reset();
+			const float Height = Ship->GetLandingCollisionClearance(FVector::UpVector);
+			for (int32 I = 0; I < 4; ++I)
+			{
+				FJTSLandingFootDefinition Foot;
+				Foot.FootComponentName = FName(*FString::Printf(TEXT("TestFoot%d"), I));
+				Foot.StrutComponentName = FName(*FString::Printf(TEXT("TestStrut%d"), I));
+				Foot.DeployedContactFrame.SetLocation(FVector(I < 2 ? 100 : -100, I % 2 ? 100 : -100, -Height));
+				for (const FName Name : {Foot.FootComponentName, Foot.StrutComponentName})
+				{
+					auto* Marker = NewObject<USceneComponent>(Ship, Name);
+					Ship->AddInstanceComponent(Marker);
+					Marker->SetupAttachment(Ship->GetRootComponent());
+					Marker->RegisterComponent();
+				}
+				Support->Feet.Add(Foot);
+			}
+		}
+
 		AJTSPlanetAnchor* AddFlightPlanet(const FName PlanetId, const FVector& PlanetCenter)
 		{
 			FActorSpawnParameters SpawnParameters;
@@ -142,6 +169,7 @@ namespace
 			Character = World->SpawnActor<AJTSCharacter>(AJTSCharacter::StaticClass(),
 				Ship->GetActorLocation() + Ship->GetActorRightVector() * 600.0, Ship->GetActorRotation(), Params);
 			Character->SetGameplayPlanet(Planet);
+			Character->DispatchBeginPlay();
 			Controller->Possess(Character);
 			return Controller;
 		}
@@ -691,6 +719,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSBoardingRegression, "JTS.Spacecraft.Possess
 bool FJTSBoardingRegression::RunTest(const FString& Parameters)
 {
 	FShipTestWorld Fixture;
+	// Match the real planet contract: placement traces and movement floor sweeps use the
+	// same mesh surface, rather than the engine sphere's different simple collision shell.
+	UStaticMeshComponent* const Ground = Fixture.Planet->GetGameplaySurfaceActor()->FindComponentByClass<UStaticMeshComponent>();
+	UStaticMesh* const GroundMesh = DuplicateObject<UStaticMesh>(Ground->GetStaticMesh(), Fixture.World);
+	GroundMesh->GetBodySetup()->CollisionTraceFlag = CTF_UseComplexAsSimple;
+	Ground->SetStaticMesh(GroundMesh);
+	Ground->RecreatePhysicsState();
 	if (!TestTrue(TEXT("Actual Blueprint parks on spherical terrain"), Fixture.Park(FVector(0.3, 0.4, 0.8660254)))) return false;
 	TArray<APlayerController*> Controllers;
 	TArray<AJTSCharacter*> Characters;
@@ -1251,11 +1286,12 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 	{
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
-	float ProtectedSurfaceAltitude = 0.0f;
-	const float ProtectedHullClearance = Fixture.Ship->GetLandingCollisionClearance(InitialUp);
-	TestTrue(TEXT("Holding Ctrl outside a landing capture cannot drive the physical hull into terrain"),
-		Movement->GetResolvedSurfaceAltitude(Fixture.Planet, ProtectedSurfaceAltitude)
-		&& ProtectedSurfaceAltitude >= ProtectedHullClearance + 90.0f);
+    float ProtectedSurfaceAltitude=0;
+    const FVector ProtectedUp=Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation());
+    Fixture.Planet->GetAltitudeAboveSurface(Fixture.Ship->GetActorLocation(),ProtectedSurfaceAltitude);
+    const float ProtectedHullClearance=Fixture.Ship->GetLandingCollisionClearance(ProtectedUp);
+    AddInfo(FString::Printf(TEXT("Protected height %.2f hull %.2f"),ProtectedSurfaceAltitude,ProtectedHullClearance));
+    TestTrue(TEXT("Invalid landing retains safe hull clearance at the envelope"),ProtectedSurfaceAltitude>=ProtectedHullClearance+40);
 
 	Movement->SetVerticalInput(0.0f);
 	Movement->StopMovementImmediately();
@@ -1272,7 +1308,9 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 	Movement->SetSteeringInput(FVector2D::ZeroVector);
 	Movement->SetMoveInput(FVector2D(0.0f, 1.0f));
 	const FVector DepartureStart = Fixture.Ship->GetActorLocation();
-	for (int32 DepartureStep = 0; DepartureStep < 30; ++DepartureStep)
+	// This deliberately forced pitch embeds the long hull. Allow bounded recovery to clear it
+	// before measuring ordinary forward flight; the ship must never rotate farther into terrain.
+	for (int32 DepartureStep = 0; DepartureStep < 180; ++DepartureStep)
 	{
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
@@ -1281,9 +1319,14 @@ bool FJTSThirdPersonFlightRegression::RunTest(const FString& Parameters)
 		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), DepartureUp),
 		FVector::DotProduct(Fixture.Ship->GetActorLocation() - DepartureStart, DepartureUp),
 		Movement->GetCurrentSpeed()));
-	TestTrue(TEXT("Nose-up hull thrust climbs while terrain clearance remains active"),
-		FVector::DotProduct(Fixture.Ship->GetActorLocation() - DepartureStart, DepartureUp) > 150.0f
-		&& FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), DepartureUp) > 0.25f);
+    TestTrue(TEXT("Forward thrust follows the shell rather than forcing a nose-up climb"),
+        Fixture.Ship->GetSurfaceEnvelopeComponent()->IsFollowing() && Movement->GetCurrentSpeed()>500);
+    Movement->SetVerticalInput(1);
+    const FVector LiftAwayStart=Fixture.Ship->GetActorLocation();
+    const FVector LiftAwayUp=Fixture.Planet->GetRadialUpVector(LiftAwayStart);
+    for(int32 I=0;I<30;++I) Movement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Space climbs out of the shell while forward thrust remains available"),
+        FVector::DotProduct(Fixture.Ship->GetActorLocation()-LiftAwayStart,LiftAwayUp)>150);
 
 	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
 	Movement->StopMovementImmediately();
@@ -1386,6 +1429,10 @@ bool FJTSSurfaceAttitudeRegression::RunTest(const FString& Parameters)
 	for (const float Height : {2200.0f, 2600.0f, 2900.0f, 3200.0f})
 	{
 		Fixture.Ship->SetActorLocation(TerrainFrame.Location + RadialUp * Height);
+        auto* E=Fixture.Ship->GetSurfaceEnvelopeComponent();
+        E->Reset(); E->Refresh(Fixture.Planet,Fixture.Ship->GetActorLocation(),FVector::ZeroVector,Height,1);
+        if(E->GetFrame().bValid) Fixture.Ship->SetActorLocation(E->GetFrame().Location+RadialUp*(E->Settings.FollowingExitHeight+Height));
+        E->Refresh(Fixture.Planet,Fixture.Ship->GetActorLocation(),FVector::ZeroVector,Height,1);
 		Movement->StopMovementImmediately();
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Fixture.Ship->Tick(1.0f / 60.0f);
@@ -1401,6 +1448,11 @@ bool FJTSSurfaceAttitudeRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Test terrain faces have different normals"),
 		FVector::DotProduct(TerrainFrame.Up, OtherFrame.Up) < 0.5f);
 	Fixture.Ship->SetActorLocation(OtherFrame.Location + OtherRadial * 2200.0f);
+    auto* E=Fixture.Ship->GetSurfaceEnvelopeComponent();
+    E->Reset(); E->Refresh(Fixture.Planet,Fixture.Ship->GetActorLocation(),FVector::ZeroVector,2200,1);
+    const auto OtherEnvelope=E->GetFrame();
+    Fixture.Ship->SetActorLocation(OtherEnvelope.Location+OtherRadial*(E->Settings.FollowingExitHeight+2200));
+    E->Refresh(Fixture.Planet,Fixture.Ship->GetActorLocation(),FVector::ZeroVector,2200,1);
 	Movement->StopMovementImmediately();
 	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	Fixture.Ship->Tick(1.0f / 60.0f);
@@ -1415,6 +1467,8 @@ bool FJTSSurfaceAttitudeRegression::RunTest(const FString& Parameters)
 	SurfaceFrameSetting->SetPropertyValue_InContainer(Movement, false);
 	TestFalse(TEXT("Pilot can disable radial lift without disabling clearance"),
 		Movement->IsUsingPlanetSurfaceFlightFrame());
+    Fixture.Ship->SetActorLocation(OtherEnvelope.Location+OtherRadial*100);
+    E->Refresh(Fixture.Planet,Fixture.Ship->GetActorLocation(),FVector::ZeroVector,2200,1);
 	Movement->SetVerticalInput(-1.0f);
 	for (int32 DescentStep = 0; DescentStep < 240; ++DescentStep)
 	{
@@ -1429,146 +1483,284 @@ bool FJTSSurfaceAttitudeRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Uneven terrain stops descent before the physical hull reaches the mesh"),
 		bResolvedProtectedAltitude
 		&& ProtectedAltitude >= HullClearance + 60.0f
-		&& ProtectedAltitude < 2150.0f);
+		&& E->GetFrame().bValid
+        && FVector::DotProduct(Fixture.Ship->GetActorLocation()-E->GetFrame().Location,E->GetFrame().RadialUp)>=-2);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSNosePitchGuardRegression, "JTS.Spacecraft.NearSurfaceNosePitchGuard",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSNosePitchGuardRegression, "JTS.Spacecraft.SurfaceEnvelope.StableAttitude",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FJTSNosePitchGuardRegression::RunTest(const FString& Parameters)
 {
+    FShipTestWorld Fixture;
+    if (!Fixture.Park(FVector::UpVector)) return false;
+    AJTSCharacter* Driver = nullptr;
+    Fixture.AddPlayer(Driver, true);
+    if (!Fixture.Ship->TryBoardPlayer(Driver) || !Fixture.Ship->BeginSurfaceTakeoff()) return false;
+    auto* Ship = Fixture.Ship;
+    auto* Movement = Ship->GetFlightMovementComponent();
+    auto* Envelope = Ship->GetSurfaceEnvelopeComponent();
+    FJTSPlanetSurfaceFrame Ground;
+    Fixture.Planet->GetSurfaceFrameAt(FVector(0,0,12000), FVector::ForwardVector, Ground);
+    Ship->SetActorRotation(Ground.Transform.GetRotation());
+    Ship->SetActorLocation(Ground.Location + Ground.Up * (Ship->GetLandingCollisionClearance(Ground.Up) + 220));
+    Movement->TickComponent(1.0f/60, LEVELTICK_All, nullptr);
+    TestTrue(TEXT("Close flight engages the terrain envelope"), Envelope->IsFollowing());
+    Ship->ActivateFlightCameraThirdPerson(); Ship->Tick(1);
+    Ship->FlightLookPitch(FInputActionValue(-50.0f / Ship->FlightCameraLookSensitivity)); Ship->Tick(0.06f);
+    TestEqual(TEXT("Camera pitch cannot compete with terrain pitch"), Ship->LocalFlightInput.Pitch, 0.0f);
+    Movement->SetSteeringInput(FVector2D(0,-1));
+    float Low = BIG_NUMBER, High = -BIG_NUMBER;
+    for (int32 I=0; I<180; ++I)
+    {
+        Movement->TickComponent(1.0f/60, LEVELTICK_All, nullptr);
+        if (I>90)
+        {
+            const float Pitch = FMath::RadiansToDegrees(FMath::Asin(FVector::DotProduct(Ship->GetActorForwardVector(), Ground.Up)));
+            Low=FMath::Min(Low,Pitch); High=FMath::Max(High,Pitch);
+        }
+    }
+    TestTrue(TEXT("Held pitch settles with no camera/terrain oscillation"), High-Low<0.5f && FMath::Abs(High)<3);
+    AddInfo(FString::Printf(TEXT("Envelope pitch range %.3f..%.3f"),Low,High));
+    // Dither around the entry threshold, well below the distinct release threshold.
+    for (int32 I=0; I<20; ++I)
+    {
+        const auto Frame=Envelope->GetFrame();
+        Ship->SetActorLocation(Frame.Location + Frame.RadialUp * (Envelope->Settings.FollowingEnterHeight + (I%2 ? 20 : -20)));
+        Movement->TickComponent(0.02f, LEVELTICK_All, nullptr);
+        TestTrue(TEXT("Entry-edge dither never toggles the active attitude source"),Envelope->IsFollowing());
+    }
+    const auto Crest=Envelope->GetFrame();
+    Ship->SetActorLocation(Crest.Location+Crest.RadialUp*1000);
+    Movement->TickComponent(0.05f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("A crest dropping away never restores held camera pitch"),Envelope->IsFollowing());
+    Ship->SetActorLocation(Ground.Location + Ground.Up * 3000);
+    Ship->SetActorRotation(Ground.Transform.GetRotation()); Movement->StopMovementImmediately();
+    Movement->SetVerticalInput(1);
+    Movement->SetSteeringInput(FVector2D(0,-1));
+    for(int32 I=0;I<8;++I) Movement->TickComponent(0.05f,LEVELTICK_All,nullptr);
+    TestFalse(TEXT("Climbing out of the shell restores free attitude"),Envelope->IsFollowing());
+    TestTrue(TEXT("Free flight retains full downward pitch"),FVector::DotProduct(Ship->GetActorForwardVector(),Ground.Up)<-0.3);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSCraterTakeoffRegression,
+	"JTS.Spacecraft.SurfaceEnvelope.CraterTakeoffClearance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSCraterTakeoffRegression::RunTest(const FString& Parameters)
+{
 	FShipTestWorld Fixture;
-	if (!TestTrue(TEXT("Nose-guard test parks above a real surface"), Fixture.Park(FVector::UpVector))) return false;
-	AJTSCharacter* Driver = nullptr;
-	APlayerController* const DriverController = Fixture.AddPlayer(Driver, true);
-	if (!TestTrue(TEXT("Nose-guard test boards a local pilot"), Fixture.Ship->TryBoardPlayer(Driver))
-		|| !TestTrue(TEXT("Nose-guard test takes off"), Fixture.Ship->BeginSurfaceTakeoff())) return false;
-	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
-	AStaticMeshActor* const Surface = Cast<AStaticMeshActor>(Fixture.Planet->GetGameplaySurfaceActor());
-	if (!TestNotNull(TEXT("Nose-guard test has a real collision mesh"), Surface)) return false;
-	Surface->GetStaticMeshComponent()->SetStaticMesh(
-		LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
-	Surface->SetActorScale3D(FVector(200.0f));
-	FJTSPlanetSurfaceHit GroundHit;
-	if (!TestTrue(TEXT("Nose-guard test resolves the mesh"),
-		Fixture.Planet->TraceToSurface(FVector::UpVector * 12000.0f, GroundHit))) return false;
-	const FQuat LevelRotation = FRotationMatrix::MakeFromXZ(
-		FVector::ForwardVector, FVector::UpVector).ToQuat();
-	Fixture.Ship->SetActorRotation(LevelRotation);
-	const float LowAltitude = Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector) + 220.0f;
-	Fixture.Ship->SetActorLocation(GroundHit.ImpactPoint + FVector::UpVector * LowAltitude);
-	Movement->ClearInput();
-	Movement->StopMovementImmediately();
-	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-	Fixture.Ship->ActivateFlightCameraThirdPerson();
-	Fixture.Ship->Tick(1.0f);
-	Fixture.Ship->FlightLookPitch(FInputActionValue(
-		-50.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER)));
-	Fixture.Ship->Tick(0.06f);
-	TestTrue(TEXT("Looking down without Alt still requests hull pitch"),
-		Fixture.Ship->LocalFlightInput.Pitch < -0.1f);
-	for (int32 Step = 0; Step < 12; ++Step)
+	Cast<AStaticMeshActor>(Fixture.Planet->GetGameplaySurfaceActor())->GetStaticMeshComponent()
+		->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AActor* Terrain = Fixture.World->SpawnActor<AActor>();
+	auto* Root = NewObject<USceneComponent>(Terrain);
+	Terrain->AddInstanceComponent(Root); Terrain->SetRootComponent(Root); Root->RegisterComponent();
+	const FVector Up = FVector(1, 2, 3).GetSafeNormal();
+	const FQuat Rotation = FQuat::FindBetweenNormals(FVector::UpVector, Up);
+	Terrain->SetActorRotation(Rotation);
+	const auto AddBox = [&](FVector Location, FVector Extent)
 	{
-		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
-		Fixture.Ship->Tick(0.05f);
-	}
-	AddInfo(FString::Printf(TEXT("Near-surface pitch: camera=%.3f nose=%.3f altitude=%.1f"),
-		FVector::DotProduct(DriverController->GetControlRotation().Vector(), FVector::UpVector),
-		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector),
-		FVector::Distance(Fixture.Ship->GetActorLocation(), GroundHit.ImpactPoint)));
-	TestTrue(TEXT("Near the surface the camera can look down while the nose stays at terrain pitch"),
-		FVector::DotProduct(DriverController->GetControlRotation().Vector(), FVector::UpVector) < -0.4f
-		&& FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector) > -0.03f);
-	// A held down command must settle against the same safety pitch used by automatic
-	// recovery. Different floors caused repeated small corrections even on a flat mesh.
-	Fixture.Ship->SetActorRotation(FRotationMatrix::MakeFromXZ(
-		FVector(1.0f, 0.0f, 0.18f).GetSafeNormal(), FVector::UpVector).ToQuat());
-	Movement->StopMovementImmediately();
-	Movement->SetSteeringInput(FVector2D(0.0f, -1.0f));
-	float LowestSettledPitch = BIG_NUMBER;
-	float HighestSettledPitch = -BIG_NUMBER;
-	for (int32 Step = 0; Step < 120; ++Step)
+		auto* Box = NewObject<UBoxComponent>(Terrain);
+		Terrain->AddInstanceComponent(Box); Box->SetupAttachment(Root);
+		Box->SetBoxExtent(Extent); Box->SetRelativeLocation(Location);
+		Box->SetCollisionProfileName(TEXT("BlockAll")); Box->RegisterComponent();
+	};
+	AddBox(FVector(0, 0, 9900), FVector(5000, 5000, 100));
+	AddBox(FVector(2200, 0, 11250), FVector(200, 2400, 1250));
+	AddBox(FVector(-2200, 0, 11250), FVector(200, 2400, 1250));
+	AddBox(FVector(0, 2200, 11250), FVector(2400, 200, 1250));
+	AddBox(FVector(0, -2200, 11250), FVector(2400, 200, 1250));
+	FindFProperty<FObjectProperty>(Fixture.Planet->GetClass(), TEXT("GameplaySurfaceActor"))
+		->SetObjectPropertyValue_InContainer(Fixture.Planet, Terrain);
+	auto* Ship = Fixture.Ship;
+	auto* Movement = Ship->GetFlightMovementComponent();
+	Ship->SetActorRotation(Rotation);
+	Ship->SetActorLocation(Up * (10000 + Ship->GetLandingCollisionClearance(Up) + 20));
+	Ship->SetGroundedPlanet(Fixture.Planet);
+	if (!TestTrue(TEXT("The crater floor fits the whole ship"), Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
+		|| !TestTrue(TEXT("Crater takeoff starts"), Ship->BeginSurfaceTakeoff())) return false;
+	const FVector Start = Ship->GetActorLocation();
+	Movement->SetVerticalInput(1);
+	Movement->SetMoveInput(FVector2D(1, 1)); Movement->SetBoosting(true);
+	Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+	// Releasing Space immediately must still finish the automatic departure lift.
+	Movement->SetVerticalInput(0);
+	bool bDeparted = false;
+	float DepartureHeight = 0;
+	for (int32 I = 0; I < 480; ++I)
 	{
-		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-		if (Step >= 60)
+		Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+		const FVector Offset = Ship->GetActorLocation() - Start;
+		if (!bDeparted && FVector::VectorPlaneProject(Offset, Up).Size() > 1)
 		{
-			const float PitchDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
-				FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector), -1.0f, 1.0f)));
-			LowestSettledPitch = FMath::Min(LowestSettledPitch, PitchDegrees);
-			HighestSettledPitch = FMath::Max(HighestSettledPitch, PitchDegrees);
+			bDeparted = true;
+			DepartureHeight = FVector::DotProduct(Ship->GetActorLocation(), Up);
+			TestTrue(TEXT("Horizontal thrust begins only after the whole hull clears the rim"),
+				DepartureHeight > 12500 + Ship->GetLandingCollisionClearance(Up));
 		}
+		if (!Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
+		{
+			AddError(TEXT("The takeoff/crossing penetrated the crater collision")); return false;
+		}
+		if (bDeparted && FVector::VectorPlaneProject(Offset, Up).Size() > 3500) break;
 	}
-	TestTrue(TEXT("Held nose-down input settles above flat terrain without repeated pitch corrections"),
-		LowestSettledPitch >= 1.0f && HighestSettledPitch - LowestSettledPitch < 1.0f);
-	AddInfo(FString::Printf(TEXT("Settled flat-terrain pitch: min=%.2f max=%.2f"),
-		LowestSettledPitch, HighestSettledPitch));
-	const FFloatProperty* const SafetyMarginProperty = FindFProperty<FFloatProperty>(
-		Movement->GetClass(), TEXT("SurfaceClearanceSafetyMargin"));
-	const FFloatProperty* const GuardDistanceProperty = FindFProperty<FFloatProperty>(
-		Movement->GetClass(), TEXT("SurfaceNosePitchGuardDistance"));
-	const FFloatProperty* const ReleaseDistanceProperty = FindFProperty<FFloatProperty>(
-		Movement->GetClass(), TEXT("SurfaceNosePitchReleaseDistance"));
-	if (!TestNotNull(TEXT("Surface safety margin is configurable"), SafetyMarginProperty)
-		|| !TestNotNull(TEXT("Nose guard distance is configurable"), GuardDistanceProperty)
-		|| !TestNotNull(TEXT("Nose guard release distance is configurable"), ReleaseDistanceProperty)) return false;
-	const float EdgeDither = FMath::Max(1.0f, FMath::Min(25.0f,
-		ReleaseDistanceProperty->GetPropertyValue_InContainer(Movement) * 0.25f));
-	float LowestThresholdPitch = BIG_NUMBER;
-	float HighestThresholdPitch = -BIG_NUMBER;
-	for (int32 Step = 0; Step < 24; ++Step)
-	{
-		const float GuardEdgeAltitude = Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector)
-			+ SafetyMarginProperty->GetPropertyValue_InContainer(Movement)
-			+ GuardDistanceProperty->GetPropertyValue_InContainer(Movement);
-		Fixture.Ship->SetActorLocation(GroundHit.ImpactPoint + FVector::UpVector
-			* (GuardEdgeAltitude + (Step % 2 == 0 ? EdgeDither : -EdgeDither)));
-		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
-		const float PitchDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
-			FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector), -1.0f, 1.0f)));
-		LowestThresholdPitch = FMath::Min(LowestThresholdPitch, PitchDegrees);
-		HighestThresholdPitch = FMath::Max(HighestThresholdPitch, PitchDegrees);
-	}
-	TestTrue(TEXT("Crossing the surface guard edge repeatedly does not pump the nose"),
-		LowestThresholdPitch >= 1.0f && HighestThresholdPitch - LowestThresholdPitch < 1.0f);
+	AddInfo(FString::Printf(TEXT("Crater departure height %.1f; travel %.1f"), DepartureHeight,
+		FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size()));
+	TestTrue(TEXT("A short Space press followed by forward/strafe/boost crosses the crater rim"),
+		bDeparted && FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size() > 3500);
+	return true;
+}
 
-	// The same held input must regain full pitch authority after climbing away from the mesh.
-	Fixture.Ship->SetActorLocation(GroundHit.ImpactPoint + FVector::UpVector * 2500.0f);
-	Fixture.Ship->SetActorRotation(LevelRotation);
-	Movement->StopMovementImmediately();
-	Movement->SetSteeringInput(FVector2D(0.0f, -1.0f));
-	for (int32 Step = 0; Step < 8; ++Step)
-	{
-		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
-	}
-	TestTrue(TEXT("Away from terrain the pilot can pitch the nose below the horizon"),
-		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), FVector::UpVector) < -0.3f);
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMoonCraterTakeoffRegression,
+	"JTS.Spacecraft.SurfaceEnvelope.MoonCraterTakeoffMap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-	// A tilted radial direction over a flat cube face gives a genuine non-radial ground slope.
-	const FVector RadialUp = FVector(0.4f, 0.0f, 0.916515f).GetSafeNormal();
-	FJTSPlanetSurfaceFrame TerrainFrame;
-	if (!TestTrue(TEXT("Slope test resolves the uneven terrain face"),
-		Fixture.Planet->GetSurfaceFrameAt(RadialUp * 20000.0f, FVector::ForwardVector, TerrainFrame))) return false;
-	const FQuat TerrainParallelRotation = FRotationMatrix::MakeFromXZ(
-		FVector::ForwardVector, TerrainFrame.Up).ToQuat();
-	Fixture.Ship->SetActorRotation(TerrainParallelRotation);
-	const float SlopedLowAltitude = Fixture.Ship->GetLandingCollisionClearance(RadialUp) + 220.0f;
-	Fixture.Ship->SetActorLocation(TerrainFrame.Location + RadialUp * SlopedLowAltitude);
-	Movement->ClearInput();
-	Movement->StopMovementImmediately();
-	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-	Movement->SetSteeringInput(FVector2D(0.0f, -1.0f));
-	for (int32 Step = 0; Step < 12; ++Step)
+bool FJTSMoonCraterTakeoffRegression::RunTest(const FString& Parameters)
+{
+	UWorld* SourceMap = LoadObject<UWorld>(nullptr, TEXT("/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld"));
+	if (!TestNotNull(TEXT("The actual SpaceWorld map loads"), SourceMap)) return false;
+	AJTSPlanetAnchor* SourceMoon = nullptr;
+	FVector Basin = FVector::ZeroVector;
+	int32 NestCount = 0;
+	for (AActor* Actor : SourceMap->PersistentLevel->Actors)
 	{
-		Movement->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		if (auto* Anchor = Cast<AJTSPlanetAnchor>(Actor); Anchor && Anchor->GetPlanetId() == TEXT("Moon")) SourceMoon = Anchor;
+		// The map-authored crater-foot entrances locate the basin without runtime coordinates.
+		if (Cast<AJTSMoonAntNestActor>(Actor)) { Basin += Actor->GetActorLocation(); ++NestCount; }
 	}
-	TestTrue(TEXT("A non-radial surface stops the nose before it dips below its local slope"),
-		FVector::DotProduct(Fixture.Ship->GetActorForwardVector(), TerrainFrame.Up) > -0.03f);
+	if (!TestNotNull(TEXT("Moon exists in the map"), SourceMoon)
+		|| !TestTrue(TEXT("Authored crater entrances locate its basin"), NestCount > 0)) return false;
+	Basin /= NestCount;
+	AActor* SourceSurface = SourceMoon->GetGameplaySurfaceActor();
+	auto* SourceMesh = SourceSurface ? SourceSurface->FindComponentByClass<UStaticMeshComponent>() : nullptr;
+	if (!TestNotNull(TEXT("Moon has its real terrain mesh"), SourceMesh)) return false;
+	FShipTestWorld Fixture;
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Fixture.Manager->UnregisterPlanet(Fixture.Planet);
+	Fixture.Planet->Destroy();
+	auto* Moon = Fixture.World->SpawnActor<AJTSPlanetAnchor>(AJTSPlanetAnchor::StaticClass(), SourceMoon->GetActorTransform(), Params);
+	Moon->SetActorLocation(SourceMoon->GetPlanetCenter());
+	auto* Terrain = Fixture.World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), SourceMesh->GetComponentTransform(), Params);
+	auto* Mesh = Terrain->GetStaticMeshComponent();
+	Mesh->SetMobility(EComponentMobility::Movable); Mesh->SetStaticMesh(SourceMesh->GetStaticMesh());
+	Mesh->SetCollisionProfileName(SourceMesh->GetCollisionProfileName());
+	// A loaded editor-map actor may be hidden by world presentation. Copy its authored body
+	// collision, not the transient owner-level collision override from another regression.
+	Mesh->SetCollisionEnabled(SourceMesh->BodyInstance.GetCollisionEnabled(false));
+	Mesh->SetCollisionObjectType(SourceMesh->GetCollisionObjectType());
+	Mesh->SetCollisionResponseToChannel(ECC_Visibility, SourceMesh->GetCollisionResponseToChannel(ECC_Visibility));
+	Mesh->UpdateBounds(); Mesh->RecreatePhysicsState();
+	FindFProperty<FObjectProperty>(Moon->GetClass(), TEXT("GameplaySurfaceActor"))->SetObjectPropertyValue_InContainer(Moon, Terrain);
+	FindFProperty<FFloatProperty>(Moon->GetClass(), TEXT("ApproximateRadius"))->SetPropertyValue_InContainer(Moon, SourceMoon->GetApproximateRadius());
+	Fixture.Manager->RegisterPlanet(Moon); Fixture.Manager->SetCurrentPlanet(Moon);
+	Fixture.Manager->SetSurfaceGameplayReady(true);
+	Fixture.Ship->Destroy();
+	UClass* ShipClass = LoadClass<AJTSSpacecraftActor>(nullptr, TEXT("/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1.BP_Twinfork_R1_C"));
+	Fixture.Ship = Fixture.World->SpawnActor<AJTSSpacecraftActor>(ShipClass, Basin, FRotator::ZeroRotator, Params);
+	auto* Ship = Fixture.Ship; Ship->DispatchBeginPlay();
+	FJTSPlanetSurfaceFrame Ground;
+	AddInfo(FString::Printf(TEXT("Moon crater setup: nests=%d basin=%s centre=%s mesh=%s transform=%s"),
+		NestCount, *Basin.ToCompactString(), *Moon->GetPlanetCenter().ToCompactString(),
+		*GetNameSafe(Mesh->GetStaticMesh()), *Terrain->GetActorTransform().ToString()));
+	AddInfo(FString::Printf(TEXT("Moon collision: source=%d clone=%d visibility=%d triangles=%d complex=%d bounds=%s"),
+		int32(SourceMesh->GetCollisionEnabled()), int32(Mesh->GetCollisionEnabled()),
+		int32(Mesh->GetCollisionResponseToChannel(ECC_Visibility)), Mesh->GetStaticMesh()->GetNumTriangles(0),
+		Mesh->GetStaticMesh()->ContainsPhysicsTriMeshData(true), *Mesh->Bounds.GetBox().ToString()));
+	if (!TestTrue(TEXT("The actual crater basin resolves"), Moon->GetSurfaceFrameAt(Basin, FVector::ForwardVector, Ground))) return false;
+	Ship->SetActorRotation(Ground.Transform.GetRotation());
+	Ship->SetActorLocation(Ground.Location + Ground.Up * (Ship->GetLandingCollisionClearance(Ground.Up) + 30));
+	Ship->SetGroundedPlanet(Moon);
+	if (!TestTrue(TEXT("Twinfork fits inside the actual crater"), Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
+		|| !TestTrue(TEXT("Twinfork starts its crater departure"), Ship->BeginSurfaceTakeoff())) return false;
+	auto* Movement = Ship->GetFlightMovementComponent();
+	Movement->SetMoveInput(FVector2D(0, 1)); Movement->SetBoosting(true);
+	const FVector Start = Ship->GetActorLocation();
+	const FVector Up = Moon->GetRadialUpVector(Start);
+	bool bMoved = false;
+	for (int32 I = 0; I < 900; ++I)
+	{
+		Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+		if (!Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
+		{
+			AddError(TEXT("Twinfork penetrated the actual Moon terrain during departure")); return false;
+		}
+		bMoved |= FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size() > 100;
+		if (FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size() > 6000) break;
+	}
+	AddInfo(FString::Printf(TEXT("Actual Moon crater: nests=%d departure=%s final=%s speed=%.1f"),
+		NestCount, *Start.ToCompactString(), *Ship->GetActorLocation().ToCompactString(), Movement->GetCurrentSpeed()));
+	TestTrue(TEXT("Immediate boosted forward intent leaves the real Moon crater without sticking"),
+		bMoved && FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size() > 6000);
+	// Reproduce an already embedded nose against this same complex Moon mesh, as in the report.
+	Ship->SetActorLocationAndRotation(Start, Ground.Transform.GetRotation());
+	Ship->GetSurfaceEnvelopeComponent()->Reset(); Movement->ClearInput(); Movement->StopMovementImmediately();
+	const FVector Forward = Ship->GetActorForwardVector();
+	int32 ContactStep = 0;
+	for (; ContactStep < 800 && Ship->CanOccupyLandingTransform(Ship->GetActorTransform()); ++ContactStep)
+		Ship->AddActorWorldOffset(Forward * 10);
+	if (!TestTrue(TEXT("The basin path encounters a real Moon crater wall"), ContactStep < 800)) return false;
+	Ship->AddActorWorldOffset(Forward * 35);
+	const FVector Embedded = Ship->GetActorLocation();
+	Movement->SetMoveInput(FVector2D(0, -1));
+	for (int32 I = 0; I < 240; ++I) Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+	const float ReverseDistance = FVector::DotProduct(Embedded - Ship->GetActorLocation(), Forward);
+	AddInfo(FString::Printf(TEXT("Actual Moon wall recovery: reverse=%.1f cm clear=%d"), ReverseDistance,
+		Ship->CanOccupyLandingTransform(Ship->GetActorTransform())));
+	TestTrue(TEXT("Reverse intent escapes a forced penetration of the real complex Moon terrain"),
+		ReverseDistance > 100 && Ship->CanOccupyLandingTransform(Ship->GetActorTransform()));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSReversePenetrationRegression,
+	"JTS.Spacecraft.SurfaceEnvelope.ReverseOutOfPenetration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSReversePenetrationRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	auto* Ship = Fixture.Ship;
+	auto* Movement = Ship->GetFlightMovementComponent();
+	Ship->SetActorLocation(FVector(0, 0, 22000)); Ship->SetActorRotation(FRotator::ZeroRotator);
+	Movement->SetTargetPlanet(nullptr); Movement->StopMovementImmediately();
+	auto* Wall = Fixture.World->SpawnActor<AActor>();
+	auto* Box = NewObject<UBoxComponent>(Wall);
+	Wall->AddInstanceComponent(Box); Wall->SetRootComponent(Box);
+	Box->SetBoxExtent(FVector(100, 2000, 2000)); Box->SetCollisionProfileName(TEXT("BlockAll"));
+	Box->RegisterComponent();
+	Wall->SetActorLocation(Ship->GetActorLocation() + FVector(1500, 0, 0));
+	// Find first actual complete-hull overlap, then force a 35 cm nose penetration.
+	int32 Contact = 0;
+	for (; Contact < 2000 && Ship->CanOccupyLandingTransform(Ship->GetActorTransform()); Contact += 10)
+		Ship->AddActorWorldOffset(FVector(10, 0, 0));
+	Ship->AddActorWorldOffset(FVector(35, 0, 0));
+	const FVector Embedded = Ship->GetActorLocation();
+	TestFalse(TEXT("The test starts with a genuinely embedded full hull"), Ship->CanOccupyLandingTransform(Ship->GetActorTransform()));
+	TestFalse(TEXT("Recovery cannot go deeper into the wall"), Ship->CanRecoverFlightPenetration(FVector(5, 0, 0)));
+	TestTrue(TEXT("Recovery accepts a bounded reverse step"), Ship->CanRecoverFlightPenetration(FVector(-5, 0, 0)));
+	Movement->SetMoveInput(FVector2D(0, -1));
+	for (int32 I = 0; I < 120; ++I) Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Holding reverse backs the ship out and resumes ordinary swept flight"),
+		Ship->GetActorLocation().X < Embedded.X - 100
+		&& Ship->CanOccupyLandingTransform(Ship->GetActorTransform()));
+	// Repeat with a second obstacle just behind the ship: reverse recovery must not ignore it.
+	Ship->SetActorLocation(Embedded); Movement->StopMovementImmediately();
+	auto* Behind = NewObject<UBoxComponent>(Wall);
+	Wall->AddInstanceComponent(Behind); Behind->SetupAttachment(Box);
+	Behind->SetBoxExtent(FVector(100, 2000, 2000)); Behind->SetCollisionProfileName(TEXT("BlockAll"));
+	Behind->RegisterComponent(); Behind->SetWorldLocation(Embedded - FVector(1500, 0, 0));
+	// Place the second collider at the full-hull boundary using the same occupancy check.
+	while (Ship->CanRecoverFlightPenetration(FVector(-5, 0, 0))
+		&& Behind->GetComponentLocation().X < Embedded.X)
+		Behind->AddWorldOffset(FVector(10, 0, 0));
+	TestFalse(TEXT("A second blocker stops reverse recovery"), Ship->CanRecoverFlightPenetration(FVector(-5, 0, 0)));
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPredictiveTerrainAvoidanceRegression,
-	"JTS.Spacecraft.PredictiveTerrainAvoidance",
+	"JTS.Spacecraft.SurfaceEnvelope.PredictiveMountain",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FJTSPredictiveTerrainAvoidanceRegression::RunTest(const FString& Parameters)
@@ -1579,6 +1771,9 @@ bool FJTSPredictiveTerrainAvoidanceRegression::RunTest(const FString& Parameters
 	APlayerController* const DriverController = Fixture.AddPlayer(Driver, true);
 	if (!TestTrue(TEXT("Terrain-avoidance test boards the pilot"), Fixture.Ship->TryBoardPlayer(Driver))
 		|| !TestTrue(TEXT("Terrain-avoidance test takes off"), Fixture.Ship->BeginSurfaceTakeoff())) return false;
+	// This regression measures cruising over a ramp; crater departure is tested separately.
+	for (int32 I = 0; I < 120; ++I)
+		Fixture.Ship->GetFlightMovementComponent()->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
 	AStaticMeshActor* const OldSurface = Cast<AStaticMeshActor>(Fixture.Planet->GetGameplaySurfaceActor());
 	if (!TestNotNull(TEXT("Test has an original surface"), OldSurface)) return false;
 	OldSurface->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -1618,106 +1813,34 @@ bool FJTSPredictiveTerrainAvoidanceRegression::RunTest(const FString& Parameters
 	TestTrue(TEXT("The valley rises toward the ship's flight path"),
 		RampHit.ImpactPoint.Z > ValleyHit.ImpactPoint.Z + 150.0f);
 
-	Fixture.Ship->SetActorLocation(FVector(-400.0f, 0.0f, 11800.0f));
-	Fixture.Ship->SetActorRotation(FRotator(-30.0f, 0.0f, 0.0f).Quaternion());
-	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
-	FJTSSpacecraftFlightStats CruiseStats = Movement->GetEffectiveStats();
-	CruiseStats.MaxMoveSpeed = 1900.0f;
-	Movement->SetEffectiveStats(CruiseStats);
-	Movement->ClearInput();
-	Movement->StopMovementImmediately();
-	const FQuat HoverAttitude = Fixture.Ship->GetActorQuat();
-	Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-	TestTrue(TEXT("A stationary nose-down hover is not auto-levelled"),
-		Fixture.Ship->GetActorQuat().AngularDistance(HoverAttitude) < 0.001f);
-	Movement->Velocity = FVector(1700.0f, 0.0f, -900.0f);
-	Fixture.Ship->ActivateFlightCameraThirdPerson();
-	Fixture.Ship->FlightLookPitch(FInputActionValue(
-		-40.0f / FMath::Max(Fixture.Ship->FlightCameraLookSensitivity, KINDA_SMALL_NUMBER)));
-	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
-	Fixture.Ship->Tick(0.06f);
-	TestTrue(TEXT("Downward coupled view still submits pilot pitch before terrain assistance"),
-		Fixture.Ship->LocalFlightInput.Pitch < -0.1f);
-	const FVector PilotView = DriverController->GetControlRotation().Vector();
-	const float InitialNoseHeight = Fixture.Ship->GetActorForwardVector().Z;
-	float MinimumHullSeparation = BIG_NUMBER;
-	const auto TrackHullSeparation = [&Fixture, &MinimumHullSeparation]()
-	{
-		float Altitude = 0.0f;
-		if (Fixture.Planet->GetAltitudeAboveSurface(Fixture.Ship->GetActorLocation(), Altitude))
-		{
-			const FVector Up = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation());
-			MinimumHullSeparation = FMath::Min(MinimumHullSeparation,
-				Altitude - Fixture.Ship->GetLandingCollisionClearance(Up));
-		}
-	};
-	for (int32 Step = 0; Step < 15; ++Step)
-	{
-		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-		TrackHullSeparation();
-		Fixture.Ship->Tick(1.0f / 60.0f);
-	}
-	AddInfo(FString::Printf(TEXT("Approach recovery: x=%.1f noseZ=%.3f startZ=%.3f"),
-		Fixture.Ship->GetActorLocation().X,
-		Fixture.Ship->GetActorForwardVector().Z, InitialNoseHeight));
-	TestTrue(TEXT("The existing nose-down attitude starts rising before reaching the ramp"),
-		Fixture.Ship->GetActorLocation().X < 1000.0f
-		&& Fixture.Ship->GetActorForwardVector().Z > InitialNoseHeight + 0.1f);
-	TestTrue(TEXT("The coupled view keeps looking down while terrain assistance raises the hull"),
-		FVector::DotProduct(DriverController->GetControlRotation().Vector(), PilotView) > 0.999f);
-	Fixture.Ship->FlightFreeLookStarted(FInputActionValue(true));
-	Fixture.Ship->Tick(0.06f);
-	const FVector FreeLookView = DriverController->GetControlRotation().Vector();
-	for (int32 Step = 0; Step < 120; ++Step)
-	{
-		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-		TrackHullSeparation();
-		Fixture.Ship->Tick(1.0f / 60.0f);
-	}
-	float FinalAltitude = 0.0f;
-	const bool bHasFinalAltitude = Fixture.Planet->GetAltitudeAboveSurface(
-		Fixture.Ship->GetActorLocation(), FinalAltitude);
-	const FVector FinalUp = Fixture.Planet->GetRadialUpVector(Fixture.Ship->GetActorLocation());
-	const float HullClearance = Fixture.Ship->GetLandingCollisionClearance(FinalUp);
-	AddInfo(FString::Printf(TEXT("Ramp traversal: x=%.1f altitude=%.1f hull=%.1f noseZ=%.3f"),
-		Fixture.Ship->GetActorLocation().X, FinalAltitude, HullClearance,
-		Fixture.Ship->GetActorForwardVector().Z));
-	TestTrue(TEXT("The ship climbs across the valley ramp without remaining stuck at its foot"),
-		Fixture.Ship->GetActorLocation().X > 1250.0f
-		&& bHasFinalAltitude
-		&& FinalAltitude >= HullClearance - 20.0f
-		&& FinalAltitude < 2600.0f);
-	TestTrue(TEXT("The hull stays outside the real terrain during the whole ramp approach"),
-		MinimumHullSeparation >= -20.0f && MinimumHullSeparation < BIG_NUMBER);
-	TestTrue(TEXT("Alt free look remains independent while the ship climbs the ramp"),
-		FVector::DotProduct(DriverController->GetControlRotation().Vector(), FreeLookView) > 0.999f);
-
-	// A nearly vertical nose has no horizontal forward projection. Recovery must use the
-	// hull's deck direction instead of rotating toward the opposite side of the valley.
-	Movement->ClearInput();
-	Movement->StopMovementImmediately();
-	Movement->SetFlightAssistEnabled(false);
-	Fixture.Ship->SetActorRotation(FRotator(-90.0f, 0.0f, 0.0f).Quaternion());
-	const float VerticalHullClearance = Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector);
-	Fixture.Ship->SetActorLocation(FVector(0.0f, 0.0f, 10000.0f + VerticalHullClearance + 850.0f));
-	Movement->Velocity = FVector(0.0f, 0.0f, -1800.0f);
-	for (int32 Step = 0; Step < 60; ++Step)
-	{
-		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
-	}
-	float VerticalAltitude = 0.0f;
-	const bool bHasVerticalAltitude = Fixture.Planet->GetAltitudeAboveSurface(
-		Fixture.Ship->GetActorLocation(), VerticalAltitude);
-	AddInfo(FString::Printf(TEXT("Vertical recovery: noseX=%.3f noseZ=%.3f altitude=%.1f hull=%.1f"),
-		Fixture.Ship->GetActorForwardVector().X, Fixture.Ship->GetActorForwardVector().Z,
-		VerticalAltitude, Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector)));
-	TestTrue(TEXT("A vertical nose recovers toward its original forward heading"),
-		Fixture.Ship->GetActorForwardVector().X > 0.9f
-		&& Fixture.Ship->GetActorForwardVector().Z > -0.1f);
-	TestTrue(TEXT("Vertical recovery maintains physical clearance"),
-		bHasVerticalAltitude && VerticalAltitude >=
-			Fixture.Ship->GetLandingCollisionClearance(FVector::UpVector) - 20.0f);
-	return true;
+    auto* Ship=Fixture.Ship;
+    auto* Movement=Ship->GetFlightMovementComponent();
+    auto* Envelope=Ship->GetSurfaceEnvelopeComponent();
+    Ship->SetActorLocation(FVector(-400,0,11000)); Ship->SetActorRotation(FRotator::ZeroRotator);
+    Envelope->Refresh(Fixture.Planet,Ship->GetActorLocation(),FVector(1900,0,0),1000,0.1f);
+    const auto StartFrame=Envelope->GetFrame();
+    TestTrue(TEXT("Mountain shoulder lifts the shell before the ramp"),StartFrame.bValid && StartFrame.Location.Z > ValleyHit.ImpactPoint.Z+StartFrame.HullClearance+200);
+    TestTrue(TEXT("Rounded shoulder does not demand a steep nose-up"),FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(StartFrame.Normal,StartFrame.RadialUp)))<=15);
+    Ship->SetActorLocation(StartFrame.Location + StartFrame.RadialUp*30);
+    FJTSSpacecraftFlightStats Stats=Movement->GetEffectiveStats(); Stats.MaxMoveSpeed=1900; Movement->SetEffectiveStats(Stats);
+    Movement->ClearInput(); Movement->Velocity=FVector(1900,0,0); Movement->SetMoveInput(FVector2D(0,1));
+    Movement->SetSteeringInput(FVector2D(0,-1));
+    float MinimumClearance=BIG_NUMBER, MaximumTurn=0;
+    for(int32 I=0;I<120;++I)
+    {
+        const FQuat Before=Ship->GetActorQuat();
+        Movement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
+        MaximumTurn=FMath::Max(MaximumTurn,float(FMath::RadiansToDegrees(Before.AngularDistance(Ship->GetActorQuat()))));
+        float Altitude;
+        if(Fixture.Planet->GetAltitudeAboveSurface(Ship->GetActorLocation(),Altitude))
+            MinimumClearance=FMath::Min(MinimumClearance,Altitude-Ship->GetLandingCollisionClearance(Fixture.Planet->GetRadialUpVector(Ship->GetActorLocation())));
+    }
+    AddInfo(FString::Printf(TEXT("Envelope ramp x=%.1f speed=%.1f minClearance=%.1f maxTurn=%.2f"),Ship->GetActorLocation().X,Movement->GetCurrentSpeed(),MinimumClearance,MaximumTurn));
+    TestTrue(TEXT("Fast flight crosses the ramp without getting stuck"),Ship->GetActorLocation().X>2200 && Movement->GetCurrentSpeed()>1400);
+    TestTrue(TEXT("Whole hull remains above the actual terrain"),MinimumClearance>=60);
+    TestTrue(TEXT("No single-frame terrain pitch jerk"),MaximumTurn<2);
+    TestFalse(TEXT("Mountain lift never counts as a landing attempt"),Movement->IsAssistedLanding());
+    return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSSpaceFlightFrameRegression, "JTS.Spacecraft.PlanetFrameHandoff",
@@ -2343,28 +2466,8 @@ bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FJTSPlanetSurfaceFrame LandingFrame;
-	if (!TestTrue(TEXT("Landing site resolves a real surface frame"), Fixture.Planet->GetSurfaceFrameAt(
-		Fixture.Ship->GetActorLocation(),
-		Fixture.Ship->GetActorForwardVector(),
-		LandingFrame)))
-	{
-		return false;
-	}
-
-	FActorSpawnParameters SiteSpawnParameters;
-	SiteSpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AJTSPlanetLandingManager* const PlanetLandingManager = Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
-	AJTSPlanetLandingSite* const LandingSite = Fixture.World->SpawnActor<AJTSPlanetLandingSite>(
-		AJTSPlanetLandingSite::StaticClass(),
-		LandingFrame.Transform,
-		SiteSpawnParameters);
-	FindFProperty<FObjectProperty>(LandingSite->GetClass(), TEXT("PlanetAnchor"))
-		->SetObjectPropertyValue_InContainer(LandingSite, Fixture.Planet);
-	TestTrue(TEXT("Landing site registers with the landing manager"),
-		PlanetLandingManager->RegisterLandingSite(LandingSite));
-	TestTrue(TEXT("Landing site contains the spacecraft surface point"),
-		LandingSite->IsLocationInsideLandingArea(LandingFrame.Location));
+	Fixture.ConfigureLandingRig();
+	Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
 
 	AJTSCharacter* DriverCharacter = nullptr;
 	Fixture.AddPlayer(DriverCharacter);
@@ -2379,12 +2482,23 @@ bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
 		++Step)
 	{
 		Fixture.Ship->Tick(1.0f / 60.0f);
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
-	TestEqual(TEXT("Holding Ctrl inside the landing site triggers automatic takeover"),
+	TestEqual(TEXT("Holding Ctrl over unmarked terrain triggers automatic takeover"),
 		Fixture.Ship->GetFlightState(),
 		EJTSSpacecraftFlightState::LandingAssist);
 	TestTrue(TEXT("Automatic takeover uses the existing landing movement"), Movement->IsAssistedLanding());
+    Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
+    Fixture.Ship->FlightMoveRight(FInputActionValue(-1.0f));
+    Fixture.Ship->FlightSteerYaw(FInputActionValue(1.0f));
+    TestEqual(TEXT("Local forward input is locked during landing"),Fixture.Ship->LocalFlightInput.MoveForward,0.0f);
+    TestEqual(TEXT("Local lateral input is locked during landing"),Fixture.Ship->LocalFlightInput.MoveRight,0.0f);
+    FJTSSpacecraftInputState Forged; Forged.MoveForward=1; Forged.MoveRight=1; Forged.Lift=-1; Forged.Yaw=1; Forged.Pitch=1; Forged.Roll=1; Forged.bBoosting=true;
+    Fixture.Ship->ApplyFlightInputOnServer(Forged);
+    TestEqual(TEXT("Server ignores flight intent during landing"),Movement->GetVerticalInput(),0.0f);
+    TestFalse(TEXT("Server ignores boost during landing"),Movement->IsBoosting());
+
 
 	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
 	Fixture.Ship->FlightMoveForward(FInputActionValue(1.0f));
@@ -2405,14 +2519,17 @@ bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
 		Fixture.Ship->GetFlightState(),
 		EJTSSpacecraftFlightState::Flying);
 
-	Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
-	Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
-	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
+    Fixture.Ship->FlightMoveForward(FInputActionValue(0.0f));
+    Fixture.Ship->FlightMoveVertical(FInputActionValue(1.0f));
+    for(int32 I=0;I<30;++I) Movement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
+    Fixture.Ship->FlightMoveVertical(FInputActionValue(0.0f));
+    Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
 	for (int32 Step = 0; Step < 120
 		&& Fixture.Ship->GetFlightState() != EJTSSpacecraftFlightState::LandingAssist;
 		++Step)
 	{
 		Fixture.Ship->Tick(1.0f / 60.0f);
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
 	TestEqual(TEXT("Ctrl can engage automatic landing again after an abort"),
@@ -2422,6 +2539,7 @@ bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
 	for (int32 Step = 0; Step < 1200 && !Fixture.Ship->IsLanded(); ++Step)
 	{
 		Fixture.Ship->Tick(1.0f / 60.0f);
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
 	TestTrue(TEXT("Automatic landing completes after Ctrl is released"), Fixture.Ship->IsLanded());
@@ -2435,18 +2553,24 @@ bool FJTSLandingCycleRegression::RunTest(const FString& Parameters)
 {
 	FShipTestWorld Fixture;
 	if (!TestTrue(TEXT("Initial parking succeeds"), Fixture.Park(FVector::UpVector))) return false;
+	Fixture.ConfigureLandingRig();
+	Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
 	AJTSCharacter* Character = nullptr;
 	APlayerController* Controller = Fixture.AddPlayer(Character);
 	TestTrue(TEXT("Driver boards"), Fixture.Ship->TryBoardPlayer(Character));
 	TestTrue(TEXT("Takeoff clears landed state"), Fixture.Ship->BeginSurfaceTakeoff());
 	TestFalse(TEXT("Cannot disembark in flight"), Fixture.Ship->TryDisembarkPlayerForController(Controller));
 	UJTSSpacecraftFlightMovementComponent* Movement = Fixture.Ship->GetFlightMovementComponent();
-	Fixture.Ship->AddActorWorldOffset(FVector(0, 0, 1200));
+	Fixture.Ship->AddActorWorldOffset(FVector(0, 0, 900));
 	Fixture.Ship->RefreshGroundInfo(Fixture.Planet);
 	const FTransform LandingFrame = Fixture.Ship->GetGroundInfo().SurfaceTransform;
-	TestTrue(TEXT("Assisted landing begins"), Fixture.Ship->BeginAssistedLanding(LandingFrame, 2.0f));
+	TestFalse(TEXT("Landing cannot capture from above the envelope"), Fixture.Ship->BeginAssistedLanding(LandingFrame, 2.0f));
+    Movement->SetVerticalInput(-1);
+    for(int32 I=0;I<240 && !Movement->IsAssistedLanding();++I) Movement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Attempted envelope crossing begins landing"),Movement->IsAssistedLanding());
 	for (int32 Step = 0; Step < 1200 && !Fixture.Ship->IsLanded(); ++Step)
 	{
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
 	AddInfo(FString::Printf(TEXT("Landing end: state=%d phase=%d height=%.2f speed=%.2f location=%s assisted=%d bound=%d begun=%d alignment=%.4f"),
@@ -2468,7 +2592,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMarIILandingMapRegression, "JTS.Spacecraft.
 bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 {
 	// This is deliberately a map-data regression rather than a synthetic sphere test. The actor
-	// transforms, static mesh, collision profile, and LandingSite Blueprint all come from the
+	// transforms, static mesh, collision profile, and arrival anchor all come from the
 	// shipped SpaceWorld map, but are exercised inside an isolated game world.
 	UWorld* const SourceMap = LoadObject<UWorld>(nullptr, TEXT("/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld"));
 	if (!TestNotNull(TEXT("SpaceWorld map asset loads"), SourceMap)
@@ -2478,7 +2602,7 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 	}
 
 	AJTSPlanetAnchor* SourceMarII = nullptr;
-	AJTSPlanetLandingSite* SourceLandingSite = nullptr;
+	AJTSPlanetArrivalAnchor* SourceArrival = nullptr;
 	for (AActor* const Actor : SourceMap->PersistentLevel->Actors)
 	{
 		if (AJTSPlanetAnchor* const CandidateAnchor = Cast<AJTSPlanetAnchor>(Actor);
@@ -2489,15 +2613,15 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 	}
 	for (AActor* const Actor : SourceMap->PersistentLevel->Actors)
 	{
-		if (AJTSPlanetLandingSite* const CandidateSite = Cast<AJTSPlanetLandingSite>(Actor);
+		if (AJTSPlanetArrivalAnchor* const CandidateSite = Cast<AJTSPlanetArrivalAnchor>(Actor);
 			IsValid(CandidateSite) && CandidateSite->GetPlanetAnchor() == SourceMarII)
 		{
-			SourceLandingSite = CandidateSite;
+			SourceArrival = CandidateSite;
 			break;
 		}
 	}
 	if (!TestNotNull(TEXT("MarII PlanetAnchor exists in SpaceWorld"), SourceMarII)
-		|| !TestNotNull(TEXT("MarII LandingSite exists and is directly bound"), SourceLandingSite))
+		|| !TestNotNull(TEXT("MarII draggable arrival anchor exists and is directly bound"), SourceArrival))
 	{
 		return false;
 	}
@@ -2530,6 +2654,7 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 	}
 
 	UStaticMeshComponent* const MarIISurfaceMesh = MarIISurface->GetStaticMeshComponent();
+	MarIISurfaceMesh->SetMobility(EComponentMobility::Movable);
 	MarIISurfaceMesh->SetStaticMesh(SourceStaticMesh);
 	MarIISurfaceMesh->SetCollisionEnabled(SourceSurfaceMesh->GetCollisionEnabled());
 	MarIISurfaceMesh->SetCollisionProfileName(SourceSurfaceMesh->GetCollisionProfileName());
@@ -2548,27 +2673,10 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 	FindFProperty<FObjectProperty>(MarII->GetClass(), TEXT("GameplaySurfaceActor"))
 		->SetObjectPropertyValue_InContainer(MarII, MarIISurface);
 	Fixture.Manager->RegisterPlanet(MarII);
+	Fixture.Manager->SetCurrentPlanet(MarII);
 
-	AJTSPlanetLandingSite* const LandingSite = Fixture.World->SpawnActor<AJTSPlanetLandingSite>(
-		SourceLandingSite->GetClass(), SourceLandingSite->GetActorTransform(), SpawnParameters);
-	AJTSPlanetLandingManager* const LandingManager = Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
-	if (!TestNotNull(TEXT("Isolated MarII LandingSite spawns from its authored Blueprint"), LandingSite)
-		|| !TestNotNull(TEXT("Isolated LandingManager spawns"), LandingManager))
-	{
-		return false;
-	}
-	FindFProperty<FObjectProperty>(LandingSite->GetClass(), TEXT("PlanetAnchor"))
-		->SetObjectPropertyValue_InContainer(LandingSite, MarII);
-	UBoxComponent* const SourceVolume = SourceLandingSite->FindComponentByClass<UBoxComponent>();
-	UBoxComponent* const LandingVolume = LandingSite->FindComponentByClass<UBoxComponent>();
-	if (!TestNotNull(TEXT("MarII LandingSite source has a LandingVolume"), SourceVolume)
-		|| !TestNotNull(TEXT("Isolated MarII LandingSite has a LandingVolume"), LandingVolume))
-	{
-		return false;
-	}
-	LandingVolume->SetRelativeTransform(SourceVolume->GetRelativeTransform());
-	LandingVolume->SetBoxExtent(SourceVolume->GetUnscaledBoxExtent(), true);
-	TestTrue(TEXT("MarII LandingSite registers"), LandingManager->RegisterLandingSite(LandingSite));
+	Fixture.ConfigureLandingRig();
+	Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
 
 	FJTSPlanetSurfaceFrame LandingFrame;
 	AddInfo(FString::Printf(TEXT("MarII surface setup: SourceMesh=%s Collision=%d Visibility=%d Bounds=%s"),
@@ -2577,12 +2685,10 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		static_cast<int32>(MarIISurfaceMesh->GetCollisionResponseToChannel(ECC_Visibility)),
 		*MarIISurfaceMesh->Bounds.GetBox().ToString()));
 	if (!TestTrue(TEXT("MarII authored landing frame resolves against its actual mesh collision"),
-		MarII->GetSurfaceFrameAt(LandingSite->GetActorLocation(), FVector::ForwardVector, LandingFrame)))
+		MarII->GetSurfaceFrameAt(SourceArrival->GetSpacecraftArrivalTransform().GetLocation(), FVector::ForwardVector, LandingFrame)))
 	{
 		return false;
 	}
-	TestTrue(TEXT("MarII real mesh point at the cyan marker belongs to the legal LandingSite footprint"),
-		LandingSite->IsLocationInsideLandingArea(LandingFrame.Location));
 
 	const FQuat SurfaceRotation = FRotationMatrix::MakeFromXZ(LandingFrame.Forward, LandingFrame.Up).ToQuat();
 	Fixture.Ship->SetActorLocationAndRotation(
@@ -2593,12 +2699,23 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		ETeleportType::TeleportPhysics);
 	Fixture.Ship->SetFlightTargetPlanet(MarII);
 	Fixture.Ship->GetFlightMovementComponent()->StopMovementImmediately();
-	const bool bAccepted = Fixture.Ship->RequestLanding();
+	FJTSPlanetLandingValidationResult AuthoredFit;
+	Fixture.Ship->GetLandingSupportComponent()->FitAtSurface(MarII, LandingFrame.Location, LandingFrame.Forward, AuthoredFit);
+	AddInfo(FString::Printf(TEXT("MarII exact fit: Failure=%d Pose=%s Clearance=%.2f Slope=%.2f FootLocal=%s"),
+		int32(AuthoredFit.Failure), *AuthoredFit.LandingTransform.ToString(), AuthoredFit.LandingClearance, AuthoredFit.GroundSlopeDegrees,
+		*Fixture.Ship->GetLandingSupportComponent()->Feet[0].DeployedContactFrame.GetLocation().ToString()));
+	FJTSPlanetLandingValidationResult PreCapture;
+	Fixture.Ship->GetLandingSupportComponent()->FindLanding(MarII,true,PreCapture);
+	AddInfo(FString::Printf(TEXT("MarII before crossing: valid=%d failure=%d position=%s ground=%s"),PreCapture.bIsValid,int32(PreCapture.Failure),*Fixture.Ship->GetActorLocation().ToCompactString(),*Fixture.Ship->GetGroundInfo().GroundLocation.ToCompactString()));
+	auto* CaptureMovement=Fixture.Ship->GetFlightMovementComponent();
+    CaptureMovement->SetVerticalInput(-1);
+    for(int32 I=0;I<240 && !CaptureMovement->IsAssistedLanding();++I) CaptureMovement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
+    const bool bAccepted = CaptureMovement->IsAssistedLanding();
 	AddInfo(FString::Printf(TEXT("MarII landing request: Accepted=%d Failure=%d Ground=%s"),
 		bAccepted,
 		static_cast<int32>(Fixture.Ship->GetLastLandingFailure()),
 		*Fixture.Ship->GetGroundInfo().GroundLocation.ToCompactString()));
-	if (!TestTrue(TEXT("MarII accepts a stationary spacecraft centred over the real landing marker"), bAccepted))
+	if (!TestTrue(TEXT("MarII accepts a stationary spacecraft over unmarked real terrain"), bAccepted))
 	{
 		return false;
 	}
@@ -2607,6 +2724,7 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 	for (int32 Step = 0; Step < 1800 && !Fixture.Ship->IsLanded(); ++Step)
 	{
 		Fixture.Ship->Tick(1.0f / 60.0f);
+		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
 	AddInfo(FString::Printf(TEXT("MarII landing result: State=%d Phase=%d Failure=%d Height=%.2f"),

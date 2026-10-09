@@ -1,8 +1,14 @@
 # 月球骷髅宇航员尸体
 
-`L_SpaceWorld` 中的环形洼地使用新骷髅宇航员尸体。`Moon_CorpseAnchor_A` 仍绑定原来的真实月球，位置改为对模型坑沿拟合得到的圆心，再由 PlanetAnchor 的真实网格查询贴合月面。
+`L_SpaceWorld` 中的环形洼地使用骷髅宇航员尸体。巢穴改造已移除 `Moon_CorpseAnchor_A`，地表控制器通过 `PlacedCorpseLandmark` 保留这具独立尸体。九个独立蚂蚁巢穴沿环形山内侧山脚分布，详见 [MoonAntNestEntrances.md](MoonAntNestEntrances.md)。
 
-## 配置
+## 当前中心摆放
+
+通过真实山脚闭合环拟合盆地中心，再投影到实际月面。`Moon_Corpse_SkeletonAstronaut` 的横向中心误差约 0.0017 cm，实例使用 `SM_SkeletonAstronaut_Corpse_CraterCenter`。中心处跨六个低模折面，新的静态躺姿连续适应实际折面高度；靴子最近接触间隙为左 0.30、右 0.33 cm，头部 1.66 cm、背部 1.27 cm、骨盆 0.78 cm。原绑定玩家骨骼的 `SK_SkeletonAstronaut` 保留原状。
+
+源文件与配置工具为 `SourceArt/MoonAntNests/CenteredMoonCorpse.blend`、`SM_SkeletonAstronaut_Corpse_CraterCenter.fbx`、`Tools/Art/fit_centered_moon_corpse.py` 和 `configure_moon_ant_ecology.py`。新的数量及游走规则见 [MoonAntEcology.md](MoonAntEcology.md)。下文保留早期原始躺姿、锚点和五巢穴配置及验证记录，当前关卡已改用上述独立中心尸体和九巢穴配置。
+
+## 早期配置记录
 
 - `BP_MoonSkeletonAstronautCorpse` 继承现有 `AJTSMoonCorpseActor`，选择 `SM_SkeletonAstronaut_Corpse` 与现有六种角色材质。
 - 关卡放置 `Moon_Corpse_SkeletonAstronaut`，月球地表控制器通过 `PlacedCorpseLandmark` 引用复用它；`MoonCorpseClass` 配置为同一 Blueprint，供未放置实例时生成使用。
@@ -16,7 +22,7 @@
 
 ## 编辑器查看
 
-打开 `/Game/Space/Maps/L_SpaceWorld`，在 World Outliner 搜索 `Moon_Corpse_SkeletonAstronaut`，选中后按 **F**。完整角色可直接在关卡中查看。相关材质和尸体类型通过 Blueprint 调整；地表方向通过锚点调整。
+打开 `/Game/Space/Maps/L_SpaceWorld`，在 World Outliner 搜索 `Moon_Corpse_SkeletonAstronaut`，选中后按 **F**。完整角色可直接在关卡中查看。相关材质和尸体类型通过 Blueprint 调整；当前尸体以关卡实例和控制器引用配置。
 
 ## 可重建文件
 

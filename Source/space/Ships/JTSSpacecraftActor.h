@@ -38,6 +38,8 @@ class USpringArmComponent;
 class UStaticMeshComponent;
 class UJTSSpacecraftFlightMovementComponent;
 class UJTSSpacecraftPresentationComponent;
+class UJTSSpacecraftLandingSupportComponent;
+class UJTSSpacecraftSurfaceEnvelopeComponent;
 struct FHitResult;
 struct FInputActionValue;
 
@@ -124,6 +126,11 @@ public:
 	 * relying on the smaller flight collision proxy.
 	 */
 	float GetExteriorHullSupportDistance(const FVector& WorldDirection) const;
+	float GetSurfaceFlightFootprintRadius() const;
+	UFUNCTION(BlueprintPure, Category = "Flight|Surface Envelope")
+	UJTSSpacecraftSurfaceEnvelopeComponent* GetSurfaceEnvelopeComponent() const { return SurfaceEnvelopeComponent; }
+	/** Called only by authoritative movement when a descent would cross the terrain envelope. */
+	bool TryLandingAtEnvelopeBoundary();
 
 	USceneComponent* GetBoardingPoint() const;
 	USceneComponent* GetExitPoint() const;
@@ -223,7 +230,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	AJTSPlanetAnchor* GetFlightPlanet() const;
 
-	/** Compatibility entry point for callers that already resolved a surface-aligned landing transform. */
+	/** Compatibility wrapper; authored transforms grant no permission. Queries terrain below this ship. */
 	bool BeginAssistedLanding(const FTransform& LandingTransform, float DurationSeconds);
 
 	/** Marks this persistent spacecraft as parked on one real gameplay planet and disables flight movement. */
@@ -254,6 +261,14 @@ public:
 
 	/** Tests the flight collision hull at a candidate landing transform without moving the ship. */
 	bool CanOccupyLandingTransform(const FTransform& LandingTransform) const;
+	bool CanTraverseLandingSegment(const FVector& Start, const FVector& End, const FQuat& Rotation) const;
+	/** Fixed-attitude, bounded recovery must reduce existing overlaps and hit no new obstacles. */
+	bool CanRecoverFlightPenetration(const FVector& Delta) const;
+
+	UFUNCTION(BlueprintPure, Category = "Ship|Landing")
+	UJTSSpacecraftLandingSupportComponent* GetLandingSupportComponent() const { return LandingSupportComponent; }
+
+	bool IsLandingGearDeployed() const;
 	/** Raises a surface-aligned candidate only as far as needed for the complete hull to clear terrain. */
 	bool FindClearLandingTransform(
 		const FTransform& DesiredLandingTransform,
@@ -460,7 +475,7 @@ private:
 	FVector GetFlightReferenceUp() const;
 	FVector GetFlightCameraForward(const FVector& ReferenceUp) const;
 	bool RequestLandingInternal(bool bAllowControlledDescentCapture);
-	void UpdateAutomaticLanding(float DeltaSeconds);
+
 	void AbortLandingAssist();
 	FTransform GetFlightCollisionTransformForSpacecraftTransform(const FTransform& SpacecraftTransform) const;
 	void HandleAssistedLandingCompleted();
@@ -523,6 +538,13 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Ground Probe", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftGroundProbeComponent> GroundProbeComponent;
 
+	/** Blueprint-configured feet and terrain fit; no ownership of movement or arrival markers. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Landing", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftLandingSupportComponent> LandingSupportComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftSurfaceEnvelopeComponent> SurfaceEnvelopeComponent;
+
 	/** Cosmetic gear fold and exhaust. It reads flight state and does not move the ship. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Presentation", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftPresentationComponent> PresentationComponent;
@@ -574,7 +596,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Collision", meta = (AllowPrivateAccess = "true"))
 	bool bAutoSizeFlightCollisionFromSpacecraftMesh = true;
 
-	/** Search extent for a respawn inside the union of nearby legal landing areas. */
+	/** Search extent for a collision-safe respawn beside the landed spacecraft. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Respawn", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlayerRespawnSearchRadius = 1200.0f;
 
@@ -823,9 +845,9 @@ private:
 	UPROPERTY(Replicated, Transient)
 	float ReplicatedFlightSpeedLimit = 1.0f;
 
-	/** Server check cadence while Ctrl is held; LandingSite data owns the actual capture height. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.02", UIMin = "0.02", UIMax = "0.5"))
-	float AutomaticLandingCheckInterval = 0.08f;
+	/** Serialized legacy setting; capture now occurs at the envelope crossing. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Landing capture is driven by the surface envelope."))
+	float AutomaticLandingCheckInterval = 0.25f;
 
 	/** Analog threshold below which downward lift is treated as a deliberate automatic-landing request. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Landing|Automatic", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", ClampMax = "1.0", UIMin = "0.05", UIMax = "1.0"))
@@ -864,7 +886,6 @@ private:
 	bool bFlightCameraCruiseMode = false;
 	bool bMediumWaveWithdrawing = false;
 	bool bBaseFlightCameraFringeOverride = false;
-	float AutomaticLandingCheckElapsed = 0.0f;
 	bool bDisembarkInputArmed = false;
 	bool bDisembarkRequestPending = false;
 	bool bDriverRelinquishHoldActive = false;

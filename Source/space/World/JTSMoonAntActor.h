@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "space/Interaction/JTSMeleeTarget.h"
 #include "TimerManager.h"
+#include "Mass/EntityHandle.h"
+#include "space/Systems/JTSReplicatedMotionBuffer.h"
 
 #include "JTSMoonAntActor.generated.h"
 
@@ -21,6 +23,7 @@ class UJTSHealthComponent;
 class UJTSExperienceRewardComponent;
 class IJTSMoonSurfaceGameplaySettings;
 class AJTSPlanetAnchor;
+class UJTSPlanetSurfaceSteeringComponent;
 
 /** Lightweight MoonAnt behavior states. The legacy native class name is retained for asset compatibility. */
 UENUM(BlueprintType)
@@ -34,8 +37,8 @@ enum class EJTSMoonAntState : uint8
 };
 
 /**
- * Runtime MoonAnt actor. One instance represents exactly one surface activity cycle and is always
- * destroyed after burrowing. The legacy class name remains only for existing Blueprint parent references.
+ * Replicated presentation, hit target and corpse-drop identity for one Mass ant entity.
+ * Activity, steering and lifetime rules run on the shared server enemy subsystem.
  */
 UCLASS()
 class SPACE_API AJTSMoonAntActor : public AActor, public IJTSMeleeTarget
@@ -60,15 +63,24 @@ public:
 	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
 
 	AJTSPlanetAnchor* GetSurfacePlanet() const;
+	UJTSPlanetSurfaceSteeringComponent* GetSurfaceSteering() const { return SurfaceSteering; }
+	/** Presentation and hit identity only; the Mass entity owns activity and movement. */
+	void ApplyMassPresentation(const FVector& Ground, const FVector& Up, EJTSMoonAntState Phase, float BurrowOffset);
+	UFUNCTION(BlueprintPure, Category = "Moon|MoonAnt|ECS")
+	bool HasMassEntity() const;
+	FMassEntityHandle GetMassEntityHandle() const { return EnemyEntity; }
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void OnRep_ReplicatedMovement() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Moon|MoonAnt|Movement", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSPlanetSurfaceSteeringComponent> SurfaceSteering;
 	UFUNCTION()
 	void OnRep_MoonAntState();
 
@@ -77,13 +89,7 @@ private:
 	void ConfigureMoonAntVisuals();
 	void CaptureBaseVisualTransforms();
 	void RecalculateGroundMetrics();
-	void ChooseRoamTarget(bool bForceNearNest = false);
-	bool GetOriginNestLocation(FVector& OutNestLocation) const;
-	float GetDistanceToOriginNest() const;
 	bool IsUsingRealPlanetSurface() const;
-	FVector GetSurfaceTangentTo(const FVector& TargetLocation) const;
-	bool MoveAlongGround(const FVector& Direction, float Speed, float DeltaSeconds);
-	void RotateTowardsDirection(const FVector& Direction, float DeltaSeconds);
 	void PlaceOnGround(const FVector& NewGroundLocation);
 	UPrimitiveComponent* GetActiveVisualComponent() const;
 	void SetMeleeHitCollisionEnabled(bool bEnabled);
@@ -92,12 +98,8 @@ private:
 	void UpdateMoonAntHealthBarTransform();
 	void ShowMoonAntHealthBar();
 	void HideMoonAntHealthBar();
-	void SetVisualBurrowOffset(float RelativeZ);
-	void BeginFleeing();
-	void BeginBurrowing();
 	/** Completes the full deferred corpse spawn before the MoonAnt is allowed to destroy itself. */
 	bool SpawnMoonAntCorpse();
-	void SetMoonAntState(EJTSMoonAntState NewState);
 	void UpdateFallbackMaterial();
 
 	UFUNCTION()
@@ -163,9 +165,6 @@ private:
 
 	TWeakObjectPtr<AJTSMoonAntNestActor> OriginNest;
 	FVector GroundLocation = FVector::ZeroVector;
-	FVector RoamTargetWorldLocation = FVector::ZeroVector;
-	FVector FleeSourceLocation = FVector::ZeroVector;
-	FVector FleeDirection = FVector::ForwardVector;
 	FVector MoonAntMeshBaseRelativeLocation = FVector::ZeroVector;
 	FRotator MoonAntMeshBaseRelativeRotation = FRotator::ZeroRotator;
 	FVector MoonAntFallbackBaseRelativeLocation = FVector::ZeroVector;
@@ -173,14 +172,12 @@ private:
 	float MoonAntMeshUniformScale = 1.0f;
 	float GroundSupportHeight = 12.0f;
 	float BurrowDepth = 30.0f;
+	UPROPERTY(ReplicatedUsing = OnRep_MoonAntState)
 	float BurrowVisualOffset = 0.0f;
-	float StateElapsed = 0.0f;
-	float SurfaceElapsed = 0.0f;
-	float SurfaceDuration = 0.0f;
-	float RoamRetargetElapsed = 0.0f;
-	float RoamRetargetInterval = 0.0f;
-	float FleeDuration = 0.0f;
-	float FleeDistanceTravelled = 0.0f;
+	FMassEntityHandle EnemyEntity;
+	FJTSReplicatedMotionBuffer MotionBuffer;
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|MoonAnt|Network", meta = (ClampMin = "0.05", ClampMax = "0.2"))
+	float MovementInterpolationDelay = 0.1f;
 	float NextMoonAntVisualDebugLogTime = 0.0f;
 	FTimerHandle MoonAntHealthBarHideTimerHandle;
 	UPROPERTY(Replicated)

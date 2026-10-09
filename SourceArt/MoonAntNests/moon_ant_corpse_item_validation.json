@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-09",
+  "engine": "5.8.2",
+  "validation_editor_pid": 31184,
+  "fresh_editor_process_after_full_build": true,
+  "optional_corpse_asset_exists": false,
+  "registered_item_definition_assets": [
+    "/Game/Space/Data/Items/DA_Item_Rock",
+    "/Game/Space/Data/Items/DA_Item_Ore"
+  ],
+  "decision": "Keep the corpse item, pickup and Organic conversion. The absent optional Data Asset is not required because the native fallback already defines this item.",
+  "change": "Check whether an override object or package exists before loading it. Existing overrides and loader error reporting remain enabled.",
+  "build": {
+    "target": "spaceEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "result": "Succeeded"
+  },
+  "tests": {
+    "tests": [
+      {
+        "name": "JTS.Items.NormalWeaponsRangedOnly",
+        "state": "Success",
+        "duration": 0.016863998025655746,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.CorpsePickupAndOrganicDeposit",
+        "state": "Success",
+        "duration": 0.1356617957353592,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.MassRegistrationMovementAndCleanup",
+        "state": "Success",
+        "duration": 1.7573020458221436,
+        "errors": [],
+        "warnings": []
+      },
+      {
+        "name": "JTS.Moon.Ants.MassStatusMovementControls",
+        "state": "Success",
+        "duration": 0.06403359770774841,
+        "errors": [],
+        "warnings": [
+          "LogConsoleManager: Console variable 'r.MotionVectorSimulation' used in the render thread. Rendering artifacts could happen. Use ECVF_RenderThreadSafe or don't use in render thread."
+        ]
+      },
+      {
+        "name": "JTS.Stellar.Targets.MassAntWeaponHitAndModelBuffs",
+        "state": "Success",
+        "duration": 0.37072479724884033,
+        "errors": [],
+        "warnings": []
+      }
+    ],
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "total": 5,
+    "duration": 2.3445863723754883
+  },
+  "missing_corpse_asset_warning_count_in_fresh_session_log": 0,
+  "editor": {
+    "world": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld",
+    "dirty_maps": [],
+    "dirty_content": [],
+    "play_active": false,
+    "python_remote_execution": false
+  },
+  "editor_restored_pid": 9756,
+  "automation_cleanup_note": "After the successful tests, disabling Python remote execution from the active remote script crashed the engine PythonScriptPlugin. The editor was restarted; settings were restored and verified through native MCP after the script completed. No project assets were changed.",
+  "editor_steps_required": [],
+  "git_diff_check": "Passed"
+}

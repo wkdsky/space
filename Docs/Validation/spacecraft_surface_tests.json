@@ -1,0 +1,239 @@
+{
+  "engine": "Unreal Engine 5.8.2",
+  "build": "spaceEditor Win64 Development: Succeeded",
+  "succeeded": 18,
+  "succeeded_with_expected_cancellation_warning": 1,
+  "failed": 0,
+  "tests": [
+    {
+      "name": "JTS.Spacecraft.LandingSupport.BoundedCorrection",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.LandingSupport.DeployMoveAndRecheck",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Foot=Gear_FL_Foot Sole=X=28003.577 Y=-12021.872 Z=16152.247 Contact=X=28003.577 Y=-12021.872 Z=16152.247 Error=0.000",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Foot=Gear_FR_Foot Sole=X=28003.577 Y=-11389.514 Z=15730.675 Contact=X=28003.577 Y=-11389.514 Z=15730.675 Error=0.000",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Foot=Gear_BL_Foot Sole=X=27309.767 Y=-11915.132 Z=16312.357 Contact=X=27309.767 Y=-11915.132 Z=16312.357 Error=0.000",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Foot=Gear_BR_Foot Sole=X=27309.767 Y=-11282.774 Z=15890.785 Contact=X=27309.767 Y=-11282.774 Z=15890.785 Error=0.000",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Landing Assist cancelled: Spacecraft=BP_Twinfork_R1_C_0 Reason=13",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.LandingSupport.TerrainAndFeet",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.SurfaceEnvelope.FlatClearanceAndInvalidLanding",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Flat envelope extra clearance 110.44 cm",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.SurfaceEnvelope.PredictiveMountain",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Envelope ramp x=2959.4 speed=1867.1 minClearance=1109.7 maxTurn=1.02",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.SurfaceEnvelope.StableAttitude",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Envelope pitch range 0.527..0.527",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.AutomaticLandingControls",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.HullClearanceAndCamera",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.InterplanetaryCruise",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Departure medium: configured=0.0220 runtime=0.0093 material=0.0093 radius=0.1497 fringe=0.507",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Approach medium: runtime=-0.0093 material=-0.0093 radius=0.7203",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.MarIILandingMap",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "MarII source geometry: Triangles=2268 HasComplexData=1",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "MarII surface setup: SourceMesh=MarII__2_ Collision=3 Visibility=2 Bounds=IsValid=true, Min=(X=-107737.034 Y=-40049.415 Z=-54291.699), Max=(X=-71322.902 Y=-10776.862 Z=-29677.176)",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "MarII exact fit: Failure=9 Pose=-85762.295850,-20746.242749,-31739.041635|-20.698410,-13.207432,33.583465|1.000000,1.000000,1.000000 Clearance=234.00 Slope=13.18 FootLocal=X=100.000 Y=-100.000 Z=-202.000",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "MarII before crossing: valid=1 failure=0 position=V(X=-85487.21, Y=-20432.39, Z=-31220.02) ground=V(X=-85675.87, Y=-20914.74, Z=-31983.23)",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "MarII landing request: Accepted=1 Failure=0 Ground=V(X=-85675.86, Y=-20914.74, Z=-31983.23)",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "MarII landing result: State=3 Phase=3 Failure=0 Height=234.00",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.PlanetFrameHandoff",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.PossessionAndDisembark",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.ShipLockerAndStellarLoot",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.SixAxisInertialFlight",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.StellarDebugGrant",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.StellarFirmwareDrag",
+      "state": "Success",
+      "events": []
+    },
+    {
+      "name": "JTS.Spacecraft.TakeoffLandingCycle",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Landing end: state=3 phase=3 height=243.16 speed=0.00 location=V(X=2.57, Y=-26.10, Z=10241.76) assisted=0 bound=1 begun=1 alignment=0.9966",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.TerrainIndependentAttitude",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Uneven terrain descent: altitude=4166.3 clearance=320.1",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "JTS.Spacecraft.ThirdPersonFlightControls",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Info",
+          "message": "Surface pitch authority: assist=0.6349 hullVertical=-0.5878",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Protected height 388.02 hull 206.36",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Info",
+          "message": "Surface climb: assist=1.000 vertical=-0.029 displacement=32.9 speed=999.8",
+          "context": "",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    }
+  ]
+}

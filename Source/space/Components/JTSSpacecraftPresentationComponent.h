@@ -36,9 +36,13 @@ public:
 	float GetGearDeployAlpha() const;
 
 protected:
-	/** Seconds for a full gear deploy or retract. The landing assist itself is about two seconds. */
+	/** Retraction duration after takeoff. */
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Gear", meta = (ClampMin = "0.05", UIMin = "0.05"))
 	float GearTransitionDuration = 2.4f;
+
+	/** Deployment begins with landing; descent and deployment run concurrently. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Gear", meta = (ClampMin = "0.05", UIMin = "0.05"))
+	float GearDeploymentDuration = 0.65f;
 
 	/** How quickly a plume catches the commanded throttle. */
 	UPROPERTY(EditDefaultsOnly, Category = "Ship|Presentation|Exhaust", meta = (ClampMin = "0.1", UIMin = "0.1"))

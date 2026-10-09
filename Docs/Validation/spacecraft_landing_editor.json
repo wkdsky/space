@@ -1,0 +1,21 @@
+{
+  "anchors": [
+    {
+      "label": "BP_JTSPlanetArrivalAnchor",
+      "location_preserved": true,
+      "rotation_preserved": true,
+      "child_ship_point_preserved": true
+    },
+    {
+      "label": "MarII_ArrivalAnchor",
+      "location_preserved": true,
+      "rotation_preserved": true,
+      "child_ship_point_preserved": true
+    }
+  ],
+  "configured_feet": 4,
+  "landing_site_count": 0,
+  "moon_nest_count": 9,
+  "pie_stopped": true,
+  "dirty_packages": []
+}

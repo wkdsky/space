@@ -1,5 +1,7 @@
 #include "space/Systems/JTSPlanetEnemySubsystem.h"
 #include "space/Systems/JTSPlanetEnemyPursuit.h"
+#include "space/Systems/JTSPlanetAntFragments.h"
+#include "space/Systems/JTSPlanetAntSimulation.h"
 #include "space/Components/JTSStellarTargetComponent.h"
 
 #include "Engine/World.h"
@@ -141,6 +143,60 @@ FMassEntityHandle UJTSPlanetEnemySubsystem::RegisterEnemy(AActor* Actor, AJTSPla
 	Actor->OnDestroyed.AddUniqueDynamic(this, &ThisClass::HandleRegisteredEnemyDestroyed);
 	ActiveEntities.Add(Entity);
 	return Entity;
+}
+
+FMassEntityHandle UJTSPlanetEnemySubsystem::RegisterAnt(AJTSMoonAntActor* Actor, AJTSPlanetAnchor* Planet,
+	const FVector& Home, const FVector& Ground, const FJTSPlanetAntConfigFragment& Config)
+{
+	FJTSPlanetEnemyBehavior Behavior;
+	Behavior.HoverHeight = Config.SupportHeight;
+	Behavior.RoamRadius = Config.RoamRadius;
+	Behavior.LeashRadius = Config.HomeRadius;
+	Behavior.bAcquireOnSpawn = false;
+	Behavior.bShareSettlementAlert = false;
+	Behavior.AggroRadius = Behavior.SightRadius = 0;
+	Behavior.AttackDamage = 0;
+	// Ants retain their visibility-only hit sphere; they do not physically block the player.
+	Behavior.bBodyCollisionEnabled = false;
+	Behavior.CollisionRadius = 12;
+	const FMassEntityHandle Entity = RegisterEnemy(Actor, Planet, Home, Ground, Behavior);
+	if (!Entity.IsValid()) return Entity;
+	FMassEntityManager& Manager = GetWorld()->GetSubsystem<UMassEntitySubsystem>()->GetMutableEntityManager();
+	if (Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity)) return Entity;
+	Manager.AddFragmentToEntity(Entity, FJTSPlanetAntConfigFragment::StaticStruct());
+	Manager.AddFragmentToEntity(Entity, FJTSPlanetAntActivityFragment::StaticStruct());
+	Manager.GetFragmentDataChecked<FJTSPlanetAntConfigFragment>(Entity) = Config;
+	auto& State = Manager.GetFragmentDataChecked<FJTSPlanetAntActivityFragment>(Entity);
+	State.ActivityRadius = FVector::Distance(Home, Ground);
+	State.BurrowOffset = -Config.BurrowDepth;
+	auto& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
+	FJTSPlanetSurfaceHit Hit;
+	if (Planet->ProjectPointToSurface(Ground, Hit)) Movement.SurfaceUp = Hit.ImpactNormal.GetSafeNormal();
+	return Entity;
+}
+
+void UJTSPlanetEnemySubsystem::NotifyAntDamaged(FMassEntityHandle Entity, const FVector& SourceLocation)
+{
+	auto* Mass = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+	if (!Mass || !Mass->GetEntityManager().IsEntityActive(Entity)) return;
+	if (auto* State = Mass->GetMutableEntityManager().GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity))
+	{
+		State->FleeSource = SourceLocation;
+		State->Phase = EJTSMoonAntState::ReactingToHit;
+		State->PhaseElapsed = 0;
+		State->BurrowOffset = 0;
+	}
+}
+
+int32 UJTSPlanetEnemySubsystem::GetRegisteredAntCount() const
+{
+	const auto* Mass = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+	if (!Mass) return 0;
+	const auto& Manager = Mass->GetEntityManager();
+	int32 Count = 0;
+	for (const auto Entity : ActiveEntities)
+		if (Manager.IsEntityActive(Entity) && Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity)) ++Count;
+	return Count;
 }
 
 void UJTSPlanetEnemySubsystem::UnregisterEnemy(FMassEntityHandle Entity)
@@ -627,10 +683,15 @@ void UJTSPlanetEnemySubsystem::ResolveBodyOverlap(FMassEntityManager& Manager,
 		AActor* Actor = Binding.Actor.Get();
 		Actor->SetActorLocationAndRotation(Bodies[I].Position, Movement.ProposedRotation, false);
 		Body.Position = Actor->GetActorLocation();
-		Movement.SurfaceUp = Binding.Planet->GetRadialUpVector(Body.Position);
-		Movement.GroundLocation = Body.Position - Movement.SurfaceUp
-			* Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values.HoverHeight;
-		if (auto* Root = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+		if (const auto* Ant = Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity))
+			FJTSPlanetAntSimulation::CommitPresentation(Binding, Movement, *Ant);
+		else
+		{
+			Movement.SurfaceUp = Binding.Planet->GetRadialUpVector(Body.Position);
+			Movement.GroundLocation = Body.Position - Movement.SurfaceUp
+				* Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values.HoverHeight;
+		}
+		if (auto* Root = Actor->GetRootComponent())
 			Root->ComponentVelocity = DeltaSeconds > SMALL_NUMBER
 				? (Body.Position - Movement.PreviousLocation) / DeltaSeconds : FVector::ZeroVector;
 		// Position corrections never feed back into the next frame's steering/force acceleration.
@@ -769,19 +830,22 @@ void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
         if (const auto* Health = Actor->FindComponentByClass<UJTSHealthComponent>(); Health && Health->IsDead()) { UnregisterEnemy(Entity); continue; }
         auto& Navigation = Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity);
         auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
-        const bool bWasReturning = Navigation.bReturningHome;
-        const TWeakObjectPtr<AJTSCharacter> PreviousTarget = Perception.Target;
-        // A validated hit alert arrives before leash evaluation, so the colony can join this episode.
-        ReceiveAlert(Planet, Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
-        FJTSPlanetEnemyPursuit::Update(Planet,
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).GroundLocation,
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
-        if (bWasReturning != Navigation.bReturningHome || PreviousTarget != Perception.Target)
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).NextUpdateTime = Now;
+        if (!Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity))
+        {
+            const bool bWasReturning = Navigation.bReturningHome;
+            const TWeakObjectPtr<AJTSCharacter> PreviousTarget = Perception.Target;
+            // A validated hit alert arrives before leash evaluation, so the colony can join this episode.
+            ReceiveAlert(Planet, Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
+            FJTSPlanetEnemyPursuit::Update(Planet,
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).GroundLocation,
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now);
+            if (bWasReturning != Navigation.bReturningHome || PreviousTarget != Perception.Target)
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity).NextUpdateTime = Now;
+        }
         SightParams.AddIgnoredActor(Actor); // Build the crowd ignore list once, rather than once per ray.
 		// This solver is the sole owner of registered monster/monster contacts. Terrain/player responses remain native.
 		EnvironmentParams.AddIgnoredActor(Actor);
@@ -801,6 +865,7 @@ void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
     {
         const FMassEntityHandle Entity = LiveEntities[ScanCursor];
         ScanCursor = (ScanCursor + 1) % LiveEntities.Num(); ++Visited;
+        if (Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity)) continue;
         auto& Perception = Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity);
         if (Perception.NextScanTime > Now) continue;
         const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
@@ -821,6 +886,7 @@ void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
     {
         const FMassEntityHandle Entity = LiveEntities[MovementCursor];
         MovementCursor = (MovementCursor + 1) % LiveEntities.Num(); ++Visited;
+        if (Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity)) continue;
         auto& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
         if (Movement.NextUpdateTime > Now) continue;
         const auto& Binding = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity);
@@ -837,11 +903,16 @@ void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
     for (const FMassEntityHandle Entity : LiveEntities)
     {
         auto& Movement = Manager.GetFragmentDataChecked<FJTSPlanetEnemyMovementFragment>(Entity);
-        UpdateMovement(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity), Movement,
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
-            Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now,
-            FMath::Clamp(DeltaTime, 0.0f, 0.25f), EnvironmentParams);
+        if (auto* Ant = Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity))
+            FJTSPlanetAntSimulation::Advance(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity), Movement,
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetAntConfigFragment>(Entity), *Ant, Now, FMath::Clamp(DeltaTime, 0.f, .25f));
+        else
+            UpdateMovement(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity), Movement,
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyNavigationFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
+                Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now,
+                FMath::Clamp(DeltaTime, 0.0f, 0.25f), EnvironmentParams);
         Movement.LastUpdateTime = Now;
         ++LastMovementCount;
     }
@@ -850,10 +921,21 @@ void UJTSPlanetEnemySubsystem::Tick(float DeltaTime)
     LastWorkStats.MovementMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
     PhaseStarted = FPlatformTime::Seconds();
     for (const FMassEntityHandle Entity : LiveEntities)
+    {
+        if (Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity)) continue;
         UpdateCombat(Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity),
             Manager.GetFragmentDataChecked<FJTSPlanetEnemyPerceptionFragment>(Entity),
             Manager.GetFragmentDataChecked<FJTSPlanetEnemyCombatFragment>(Entity),
             Manager.GetFragmentDataChecked<FJTSPlanetEnemyBehaviorFragment>(Entity).Values, Now, SightParams);
+    }
+    // Destruction may unregister an entity. Defer it until all fragment/transform passes have finished.
+    for (const FMassEntityHandle Entity : LiveEntities)
+    {
+        if (!Manager.IsEntityActive(Entity)) continue;
+        const auto* Ant = Manager.GetFragmentDataPtr<FJTSPlanetAntActivityFragment>(Entity);
+        if (Ant && Ant->bDespawnRequested)
+            if (AActor* Actor = Manager.GetFragmentDataChecked<FJTSPlanetEnemyActorFragment>(Entity).Actor.Get()) Actor->Destroy();
+    }
     LastWorkStats.CombatMilliseconds = float((FPlatformTime::Seconds() - PhaseStarted) * 1000);
     LastTickMilliseconds = float((FPlatformTime::Seconds() - Started) * 1000);
 }

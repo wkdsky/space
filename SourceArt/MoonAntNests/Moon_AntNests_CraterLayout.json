@@ -1,0 +1,173 @@
+{
+  "cameraLocation": {
+    "x": 45980.88520414404,
+    "y": 117113.44559696446,
+    "z": 24333.534774788528
+  },
+  "cameraRotation": {
+    "pitch": -8.38802885796488,
+    "yaw": -75.00493582618851,
+    "roll": 28.434859266052754
+  },
+  "cameraFOV": 90,
+  "grid": {
+    "spacingCm": 0,
+    "extentCm": 0,
+    "height": 0
+  },
+  "labeledActors": [
+    {
+      "name": "BP_MoonAntNestEntrance_C_4",
+      "label": "Moon_AntNest_05 @(469,1018,187)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 879,
+        "y": 614
+      },
+      "worldLocation": {
+        "x": 46873.27398772414,
+        "y": 101831.55932308984,
+        "z": 18688.64270191398
+      },
+      "distanceCm": 16315.55078125
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_5",
+      "label": "Moon_AntNest_06 @(497,1027,175)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 1069,
+        "y": 591
+      },
+      "worldLocation": {
+        "x": 49697.94433589022,
+        "y": 102686.90151995953,
+        "z": 17501.901103248463
+      },
+      "distanceCm": 16389.4140625
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_3",
+      "label": "Moon_AntNest_04 @(457,1007,214)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 730,
+        "y": 502
+      },
+      "worldLocation": {
+        "x": 45734.60222516622,
+        "y": 100667.1137274034,
+        "z": 21390.67141820393
+      },
+      "distanceCm": 16709.3671875
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_6",
+      "label": "Moon_AntNest_07 @(528,1028,184)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 1188,
+        "y": 448
+      },
+      "worldLocation": {
+        "x": 52755.86389538237,
+        "y": 102797.44904889143,
+        "z": 18439.7605580053
+      },
+      "distanceCm": 16899.25
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_2",
+      "label": "Moon_AntNest_03 @(465,998,244)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 681,
+        "y": 327
+      },
+      "worldLocation": {
+        "x": 46527.06573895395,
+        "y": 99798.46461216557,
+        "z": 24367.267893496275
+      },
+      "distanceCm": 17323.626953125
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_7",
+      "label": "Moon_AntNest_08 @(547,1023,209)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 1197,
+        "y": 272
+      },
+      "worldLocation": {
+        "x": 54691.300380430235,
+        "y": 102296.50413499927,
+        "z": 20880.377221664094
+      },
+      "distanceCm": 17531.041015625
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_1",
+      "label": "Moon_AntNest_02 @(491,996,262)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 759,
+        "y": 172
+      },
+      "worldLocation": {
+        "x": 49140.10675195199,
+        "y": 99583.32384870501,
+        "z": 26168.50615135665
+      },
+      "distanceCm": 17906.78515625
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_8",
+      "label": "Moon_AntNest_09 @(545,1012,239)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 1086,
+        "y": 139
+      },
+      "worldLocation": {
+        "x": 54480.309811412175,
+        "y": 101221.96108310999,
+        "z": 23866.941730003575
+      },
+      "distanceCm": 18027.6796875
+    },
+    {
+      "name": "BP_MoonAntNestEntrance_C_0",
+      "label": "Moon_AntNest_01 @(522,1001,259)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance.BP_MoonAntNestEntrance_C"
+      },
+      "screenPosition": {
+        "x": 917,
+        "y": 107
+      },
+      "worldLocation": {
+        "x": 52232.641274307825,
+        "y": 100129.53247070312,
+        "z": 25866.25701375083
+      },
+      "distanceCm": 18162.791015625
+    }
+  ]
+}

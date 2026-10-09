@@ -1,0 +1,142 @@
+{
+  "independent_nest_count": 9,
+  "replaced_anchor": false,
+  "blueprint": "/Game/Space/Blueprints/Planets/Moon/BP_MoonAntNestEntrance",
+  "nests": [
+    {
+      "name": "Moon_AntNest_01",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_0",
+      "location_cm": [
+        52232.641274307825,
+        100129.53247070312,
+        25866.25701375083
+      ],
+      "rotation": {
+        "pitch": -52.54962725212058,
+        "yaw": 153.71500707284082,
+        "roll": -52.90800872960041
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_01.SM_MoonAntNestEntrance_01"
+    },
+    {
+      "name": "Moon_AntNest_02",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_1",
+      "location_cm": [
+        49140.10675195199,
+        99583.32384870501,
+        26168.50615135665
+      ],
+      "rotation": {
+        "pitch": -67.22031930269777,
+        "yaw": 60.33382378891045,
+        "roll": 36.858394445016565
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_02.SM_MoonAntNestEntrance_02"
+    },
+    {
+      "name": "Moon_AntNest_03",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_2",
+      "location_cm": [
+        46527.06573895395,
+        99798.46461216557,
+        24367.267893496275
+      ],
+      "rotation": {
+        "pitch": -35.94796980827596,
+        "yaw": 15.815998397223725,
+        "roll": 71.33415493153782
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_03.SM_MoonAntNestEntrance_03"
+    },
+    {
+      "name": "Moon_AntNest_04",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_3",
+      "location_cm": [
+        45734.60222516622,
+        100667.1137274034,
+        21390.67141820393
+      ],
+      "rotation": {
+        "pitch": 1.4820928025597873,
+        "yaw": 12.865384516739494,
+        "roll": 68.94277319352291
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_04.SM_MoonAntNestEntrance_04"
+    },
+    {
+      "name": "Moon_AntNest_05",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_4",
+      "location_cm": [
+        46873.27398772414,
+        101831.55932308984,
+        18688.64270191398
+      ],
+      "rotation": {
+        "pitch": 40.700136985754284,
+        "yaw": -9.432990678618172,
+        "roll": 64.54775625261423
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_05.SM_MoonAntNestEntrance_05"
+    },
+    {
+      "name": "Moon_AntNest_06",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_5",
+      "location_cm": [
+        49697.94433589022,
+        102686.90151995953,
+        17501.901103248463
+      ],
+      "rotation": {
+        "pitch": 64.60181329871062,
+        "yaw": -66.7294342915717,
+        "roll": 14.312369725316898
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_06.SM_MoonAntNestEntrance_06"
+    },
+    {
+      "name": "Moon_AntNest_07",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_6",
+      "location_cm": [
+        52755.86389538237,
+        102797.44904889143,
+        18439.7605580053
+      ],
+      "rotation": {
+        "pitch": 57.0954733265175,
+        "yaw": -148.19177786498457,
+        "roll": -63.007824315533185
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_07.SM_MoonAntNestEntrance_07"
+    },
+    {
+      "name": "Moon_AntNest_08",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_7",
+      "location_cm": [
+        54691.300380430235,
+        102296.50413499927,
+        20880.377221664094
+      ],
+      "rotation": {
+        "pitch": 13.072624238933242,
+        "yaw": -160.20918298671512,
+        "roll": -68.25470904512699
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_08.SM_MoonAntNestEntrance_08"
+    },
+    {
+      "name": "Moon_AntNest_09",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_8",
+      "location_cm": [
+        54480.309811412175,
+        101221.96108310999,
+        23866.941730003575
+      ],
+      "rotation": {
+        "pitch": -24.394540990698637,
+        "yaw": -173.41654991482793,
+        "roll": -71.0198182004077
+      },
+      "mesh": "/Game/Space/Meshes/Creatures/MoonAnt/SM_MoonAntNestEntrance_09.SM_MoonAntNestEntrance_09"
+    }
+  ]
+}

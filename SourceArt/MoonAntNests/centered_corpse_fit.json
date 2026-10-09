@@ -1,0 +1,28 @@
+{
+  "mesh": "SM_SkeletonAstronaut_Corpse_CraterCenter",
+  "minimum_support_clearance_cm": 0.3,
+  "region_contacts_cm": {
+    "head": 1.6619571924209595,
+    "back": 1.266775417327881,
+    "pelvis": 0.7753530025482178,
+    "left_boot": 0.3,
+    "right_boot": 0.33249645233154296
+  },
+  "vertical_pose_adjustment_cm": [
+    -20.283457271445222,
+    -0.000384777992863905
+  ],
+  "actor_transform": {
+    "location": [
+      50156.38815317861,
+      101737.17054901748,
+      22086.60567309281
+    ],
+    "rotation": [
+      -0.14947396132167107,
+      0.5664399434074443,
+      0.7876586149184235,
+      0.1907805853439226
+    ]
+  }
+}

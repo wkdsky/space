@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/Game/Space/Blueprints/Ships/BP_Spacecraft",
+    "result": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"returnValue\":null}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1",
+    "result": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"returnValue\":null}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1_Equipped",
+    "result": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"returnValue\":null}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "/Game/Space/Blueprints/Modes/BP_SpaceWorldGameMode",
+    "result": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"returnValue\":null}"
+          }
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,151 @@
+{
+  "assignment_seed": 20261009,
+  "count": 9,
+  "randomized_once_and_saved": true,
+  "nests": [
+    {
+      "name": "Moon_AntNest_01",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_0",
+      "profile": "<JTSNestEntranceProfile.SLIT: 2>",
+      "wall_slope": 0.8955930471420288,
+      "rim_width": 2.0242199897766113,
+      "shape": {
+        "width": 107.26887512207031,
+        "height": 6.442844390869141,
+        "profile_power": 2.4732143878936768,
+        "floor_roundness": 0.7649102210998535,
+        "lean": 0.07230030000209808,
+        "irregularity": 0.14124029874801636,
+        "seed": 1699957988
+      }
+    },
+    {
+      "name": "Moon_AntNest_02",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_1",
+      "profile": "<JTSNestEntranceProfile.LEANING: 3>",
+      "wall_slope": 0.9345918297767639,
+      "rim_width": 6.350921154022217,
+      "shape": {
+        "width": 48.669803619384766,
+        "height": 57.28140640258789,
+        "profile_power": 1.122365951538086,
+        "floor_roundness": 0.0,
+        "lean": -0.4101748764514923,
+        "irregularity": 0.11319955438375473,
+        "seed": 203629980
+      }
+    },
+    {
+      "name": "Moon_AntNest_03",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_2",
+      "profile": "<JTSNestEntranceProfile.LEANING: 3>",
+      "wall_slope": 1.141182780265808,
+      "rim_width": 5.154308319091797,
+      "shape": {
+        "width": 48.76832580566406,
+        "height": 50.02653884887695,
+        "profile_power": 1.0039539337158203,
+        "floor_roundness": 0.0,
+        "lean": 0.40246137976646423,
+        "irregularity": 0.1653778851032257,
+        "seed": 1456765321
+      }
+    },
+    {
+      "name": "Moon_AntNest_04",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_3",
+      "profile": "<JTSNestEntranceProfile.OLIVE: 1>",
+      "wall_slope": 0.7602101564407349,
+      "rim_width": 6.429204940795898,
+      "shape": {
+        "width": 105.45426940917969,
+        "height": 29.07765007019043,
+        "profile_power": 1.910804033279419,
+        "floor_roundness": 0.9287068843841553,
+        "lean": 0.0024948837235569954,
+        "irregularity": 0.12384223937988281,
+        "seed": 1432030805
+      }
+    },
+    {
+      "name": "Moon_AntNest_05",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_4",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "wall_slope": 0.8238349556922913,
+      "rim_width": 4.644783973693848,
+      "shape": {
+        "width": 67.43081665039062,
+        "height": 36.279296875,
+        "profile_power": 1.1271048784255981,
+        "floor_roundness": 0.0,
+        "lean": -0.1363055258989334,
+        "irregularity": 0.13783764839172363,
+        "seed": 733904680
+      }
+    },
+    {
+      "name": "Moon_AntNest_06",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_5",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "wall_slope": 1.1411848068237305,
+      "rim_width": 4.7522664070129395,
+      "shape": {
+        "width": 66.3399658203125,
+        "height": 49.38102340698242,
+        "profile_power": 1.0648208856582642,
+        "floor_roundness": 0.0,
+        "lean": 0.0049141934141516685,
+        "irregularity": 0.09418769180774689,
+        "seed": 2088665740
+      }
+    },
+    {
+      "name": "Moon_AntNest_07",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_6",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "wall_slope": 0.7602128386497498,
+      "rim_width": 5.343912124633789,
+      "shape": {
+        "width": 74.47122192382812,
+        "height": 52.472450256347656,
+        "profile_power": 0.8278545141220093,
+        "floor_roundness": 0.0,
+        "lean": 0.07307929545640945,
+        "irregularity": 0.1546340435743332,
+        "seed": 838266552
+      }
+    },
+    {
+      "name": "Moon_AntNest_08",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_7",
+      "profile": "<JTSNestEntranceProfile.SLIT: 2>",
+      "wall_slope": 1.1113760471343994,
+      "rim_width": 1.6726481914520264,
+      "shape": {
+        "width": 98.72559356689453,
+        "height": 7.447532653808594,
+        "profile_power": 2.279158592224121,
+        "floor_roundness": 0.7197312712669373,
+        "lean": 0.17077161371707916,
+        "irregularity": 0.1581411212682724,
+        "seed": 1378055723
+      }
+    },
+    {
+      "name": "Moon_AntNest_09",
+      "actor": "/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_MoonAntNestEntrance_C_8",
+      "profile": "<JTSNestEntranceProfile.OLIVE: 1>",
+      "wall_slope": 1.1411845684051514,
+      "rim_width": 6.231410026550293,
+      "shape": {
+        "width": 94.98590850830078,
+        "height": 33.63822555541992,
+        "profile_power": 2.1057066917419434,
+        "floor_roundness": 0.928447425365448,
+        "lean": -0.122251957654953,
+        "irregularity": 0.1611606329679489,
+        "seed": 71480841
+      }
+    }
+  ]
+}

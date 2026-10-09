@@ -1,4 +1,7 @@
 #include "space/World/JTSMoonAntNestActor.h"
+#include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
+#include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSNestEntranceMeshComponent.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -33,6 +36,9 @@ AJTSMoonAntNestActor::AJTSMoonAntNestActor()
 	NestMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	NestMesh->SetGenerateOverlapEvents(false);
 	NestMesh->SetCanEverAffectNavigation(false);
+
+	EntranceShape = CreateDefaultSubobject<UJTSNestEntranceMeshComponent>(TEXT("EntranceShape"));
+	EntranceShape->SetupAttachment(NestMesh);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMeshAsset.Succeeded())
@@ -89,10 +95,11 @@ void AJTSMoonAntNestActor::PlaceOnPlanetSurface(
 	SurfacePlanet = Planet;
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
-	NestMesh->UpdateBounds();
+	UPrimitiveComponent* const Visual = GetNestVisual();
+	Visual->UpdateBounds();
 	FJTSSurfaceVisualProjectionBounds VisualBounds;
 	const float SurfaceSupport = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-		NestMesh,
+		Visual,
 		GetActorLocation(),
 		SurfaceUp,
 		VisualBounds)
@@ -127,6 +134,79 @@ void AJTSMoonAntNestActor::SetMoonAntActorClass(TSubclassOf<AJTSMoonAntActor> In
 		return;
 	}
 	MoonAntActorClass = InMoonAntActorClass;
+}
+
+bool AJTSMoonAntNestActor::ActivateAuthoredPlanetNest(
+	AJTSPlanetAnchor* Planet,
+	TSubclassOf<AJTSMoonAntActor> InMoonAntActorClass)
+{
+	if (!HasAuthority() || !IsValid(Planet) || !Planet->HasGameplaySurface())
+	{
+		return false;
+	}
+	SetMoonAntActorClass(InMoonAntActorClass);
+	SurfacePlanet = Planet;
+	bUsesRealPlanetSurface = true;
+	SurfaceUp = GetActorUpVector().GetSafeNormal();
+	StartSurfaceActivity();
+	ForceNetUpdate();
+	return true;
+}
+
+void AJTSMoonAntNestActor::DeactivateSurfaceNest()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MoonAntSpawnTimerHandle);
+	}
+	bSurfaceActivityStarted = false;
+	const auto AntsToRemove = MoveTemp(ActiveMoonAnts);
+	for (const TWeakObjectPtr<AJTSMoonAntActor>& Ant : AntsToRemove)
+	{
+		if (Ant.IsValid()) Ant->Destroy();
+	}
+	ActiveMoonAnts.Reset();
+	bSurfaceActivityStarted = false;
+}
+
+int32 AJTSMoonAntNestActor::GetActiveMoonAntCount() const
+{
+	int32 Count = 0;
+	for (const auto& Ant : ActiveMoonAnts)
+	{
+		if (Ant.IsValid() && !Ant->IsActorBeingDestroyed()
+			&& IsValid(Ant->GetHealthComponent()) && !Ant->GetHealthComponent()->IsDead()) ++Count;
+	}
+	return Count;
+}
+
+float AJTSMoonAntNestActor::GetPopulationSpawnInterval() const
+{
+	const auto* Settings = GetMoonGameMode();
+	if (!Settings) return 1.0f;
+	const float Fullness = FMath::Clamp(static_cast<float>(GetActiveMoonAntCount())
+		/ FMath::Max(1, Settings->GetMaxActiveMoonAntsPerNest()), 0.0f, 1.0f);
+	return FMath::Lerp(Settings->GetMoonAntSpawnIntervalMin(), Settings->GetMoonAntSpawnIntervalMax(),
+		Fullness * Fullness * Fullness);
+}
+
+void AJTSMoonAntNestActor::NotifyMoonAntEnded(AJTSMoonAntActor* Ant)
+{
+	if (!HasAuthority()) return;
+	ActiveMoonAnts.RemoveAll([Ant](const auto& Existing) { return !Existing.IsValid() || Existing.Get() == Ant; });
+	if (bMaintainPopulation && bSurfaceActivityStarted && !IsActorBeingDestroyed())
+	{
+		// Shorten a pending slow refill after losses; repeated notifications must not postpone it forever.
+		const float Delay = GetPopulationSpawnInterval();
+		const float Remaining = GetWorld()->GetTimerManager().GetTimerRemaining(MoonAntSpawnTimerHandle);
+		if (Remaining < 0 || Remaining > Delay)
+			GetWorld()->GetTimerManager().SetTimer(MoonAntSpawnTimerHandle, this,
+				&AJTSMoonAntNestActor::TrySpawnMoonAnt, Delay, false);
+	}
 }
 
 bool AJTSMoonAntNestActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const
@@ -169,13 +249,14 @@ FText AJTSMoonAntNestActor::GetMeleeTargetPrompt_Implementation(APawn* Attacking
 
 FVector AJTSMoonAntNestActor::GetMeleeTargetAnchorWorldLocation_Implementation() const
 {
-	if (IsValid(NestMesh) && NestMesh->IsRegistered())
+	UPrimitiveComponent* const Visual = GetNestVisual();
+	if (IsValid(Visual) && Visual->IsRegistered())
 	{
 		if (IsUsingRealPlanetSurface())
 		{
 			FJTSSurfaceVisualProjectionBounds VisualBounds;
 			if (JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-				NestMesh,
+				Visual,
 				GetActorLocation(),
 				SurfaceUp,
 				VisualBounds))
@@ -184,54 +265,60 @@ FVector AJTSMoonAntNestActor::GetMeleeTargetAnchorWorldLocation_Implementation()
 			}
 		}
 
-		const float BoundsScale = FMath::Max(FMath::Abs(NestMesh->BoundsScale), KINDA_SMALL_NUMBER);
-		const FVector PhysicalExtent = NestMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
-		return NestMesh->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 24.0f);
+		const float BoundsScale = FMath::Max(FMath::Abs(Visual->BoundsScale), KINDA_SMALL_NUMBER);
+		const FVector PhysicalExtent = Visual->Bounds.BoxExtent.GetAbs() / BoundsScale;
+		return Visual->Bounds.Origin + SurfaceUp * (PhysicalExtent.Z + 24.0f);
 	}
 
 	return GetActorLocation() + SurfaceUp * 55.0f;
 }
 
+void AJTSMoonAntNestActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	EntranceShape->RebuildEntrance();
+}
+
 void AJTSMoonAntNestActor::BeginPlay()
 {
 	Super::BeginPlay();
-
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	if (MoonGameMode == nullptr)
-	{
-		if (HasAuthority())
-		{
-			Destroy();
-		}
-		return;
-	}
-
-	if (HasAuthority())
-	{
-		PunchHitsRemaining = MoonGameMode->GetMoonAntNestPunchHitsToDestroy();
-	}
 	MoonAntNestMaterial = NestMesh != nullptr ? NestMesh->CreateAndSetMaterialInstanceDynamic(0) : nullptr;
 	if (MoonAntNestMaterial != nullptr)
 	{
-		const FLinearColor MoonAntNestColor(0.18f, 0.055f, 0.025f, 1.0f);
-		MoonAntNestMaterial->SetVectorParameterValue(TEXT("Color"), MoonAntNestColor);
-		MoonAntNestMaterial->SetVectorParameterValue(TEXT("BaseColor"), MoonAntNestColor);
-		MoonAntNestMaterial->SetVectorParameterValue(TEXT("Tint"), MoonAntNestColor);
+		MoonAntNestMaterial->SetVectorParameterValue(TEXT("Color"), NestTint);
+		MoonAntNestMaterial->SetVectorParameterValue(TEXT("BaseColor"), NestTint);
+		MoonAntNestMaterial->SetVectorParameterValue(TEXT("Tint"), NestTint);
 	}
+	// Placed entrances may begin play before the GameMode supplies surface settings.
+	// The surface controller activates them once its existing context is ready.
+	StartSurfaceActivity();
+}
+
+void AJTSMoonAntNestActor::StartSurfaceActivity()
+{
+	if (!HasAuthority() || !HasActorBegunPlay() || bSurfaceActivityStarted)
+	{
+		return;
+	}
+	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
+	if (MoonGameMode == nullptr)
+	{
+		return;
+	}
+	PunchHitsRemaining = MoonGameMode->GetMoonAntNestPunchHitsToDestroy();
+	bSurfaceActivityStarted = true;
 	UE_LOG(
 		LogTemp,
 		Log,
 		TEXT("MoonAnt Nest created: Nest=%s MoonAntClass=%s"),
 		*GetNameSafe(this),
 		MoonAntActorClass != nullptr ? *GetNameSafe(MoonAntActorClass.Get()) : TEXT("None (native fallback)"));
-	if (HasAuthority())
-	{
-		ScheduleNextMoonAntSpawn();
-	}
+	ScheduleNextMoonAntSpawn();
 }
 
 void AJTSMoonAntNestActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	DeactivateSurfaceNest();
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(MoonAntSpawnTimerHandle);
@@ -274,10 +361,11 @@ bool AJTSMoonAntNestActor::IsUsingRealPlanetSurface() const
 
 FVector AJTSMoonAntNestActor::GetVisualBoundsExtent() const
 {
-	if (IsValid(NestMesh) && NestMesh->IsRegistered())
+	UPrimitiveComponent* const Visual = GetNestVisual();
+	if (IsValid(Visual) && Visual->IsRegistered())
 	{
-		const float BoundsScale = FMath::Max(FMath::Abs(NestMesh->BoundsScale), KINDA_SMALL_NUMBER);
-		const FVector PhysicalExtent = NestMesh->Bounds.BoxExtent.GetAbs() / BoundsScale;
+		const float BoundsScale = FMath::Max(FMath::Abs(Visual->BoundsScale), KINDA_SMALL_NUMBER);
+		const FVector PhysicalExtent = Visual->Bounds.BoxExtent.GetAbs() / BoundsScale;
 		if (!PhysicalExtent.IsNearlyZero())
 		{
 			return PhysicalExtent;
@@ -285,6 +373,13 @@ FVector AJTSMoonAntNestActor::GetVisualBoundsExtent() const
 	}
 
 	return FVector(34.0f, 34.0f, 10.0f);
+}
+
+UPrimitiveComponent* AJTSMoonAntNestActor::GetNestVisual() const
+{
+	return IsValid(EntranceShape) && EntranceShape->bEnabled
+		? static_cast<UPrimitiveComponent*>(EntranceShape.Get())
+		: static_cast<UPrimitiveComponent*>(NestMesh.Get());
 }
 
 float AJTSMoonAntNestActor::ChooseMoonAntSpawnDistance(const IJTSMoonSurfaceGameplaySettings& MoonGameMode) const
@@ -332,7 +427,8 @@ void AJTSMoonAntNestActor::ScheduleNextMoonAntSpawn()
 		MoonAntSpawnTimerHandle,
 		this,
 		&AJTSMoonAntNestActor::TrySpawnMoonAnt,
-		FMath::FRandRange(MoonGameMode->GetMoonAntSpawnIntervalMin(), MoonGameMode->GetMoonAntSpawnIntervalMax()),
+		bMaintainPopulation ? GetPopulationSpawnInterval() * FMath::FRandRange(0.9f, 1.1f)
+			: FMath::FRandRange(MoonGameMode->GetMoonAntSpawnIntervalMin(), MoonGameMode->GetMoonAntSpawnIntervalMax()),
 		false);
 }
 
@@ -353,15 +449,13 @@ void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 	{
 		return !MoonAnt.IsValid();
 	});
-	if (ActiveMoonAnts.Num() >= MoonGameMode->GetMaxActiveMoonAntsPerNest()
-		|| FMath::FRand() > MoonGameMode->GetMoonAntSpawnChance())
+	if (GetActiveMoonAntCount() >= MoonGameMode->GetMaxActiveMoonAntsPerNest()
+		|| (!bMaintainPopulation && FMath::FRand() > MoonGameMode->GetMoonAntSpawnChance()))
 	{
 		ScheduleNextMoonAntSpawn();
 		return;
 	}
 
-	const float SpawnAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
-	const float SpawnDistance = ChooseMoonAntSpawnDistance(*MoonGameMode);
 	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
 	if (!IsValid(Planet))
 	{
@@ -373,11 +467,36 @@ void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 	FJTSPlanetSurfaceHit SpawnSurfaceHit;
 	if (Planet->GetSurfaceFrameAt(GetActorLocation(), GetActorForwardVector(), NestSurfaceFrame))
 	{
-		const FVector SpawnDirection = (
-			NestSurfaceFrame.Forward * FMath::Cos(SpawnAngle)
-			+ NestSurfaceFrame.Right * FMath::Sin(SpawnAngle)).GetSafeNormal();
-		const FVector CandidateLocation = GetActorLocation() + SpawnDirection * SpawnDistance;
-		if (Planet->ProjectPointToSurface(CandidateLocation, SpawnSurfaceHit))
+		const AJTSMoonAntActor* Defaults = MoonAntActorClass
+			? MoonAntActorClass->GetDefaultObject<AJTSMoonAntActor>() : GetDefault<AJTSMoonAntActor>();
+		FVector SpawnDirection = FVector::ZeroVector;
+		bool bFoundPoint = false;
+		// Keep the selected density band while rejecting the steep wall half of a crater-foot nest.
+		const float SpawnDistance = ChooseMoonAntSpawnDistance(*MoonGameMode);
+		for (int32 Attempt = 0; Attempt < 16 && !bFoundPoint; ++Attempt)
+		{
+			const float SpawnAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
+			SpawnDirection = (NestSurfaceFrame.Forward * FMath::Cos(SpawnAngle)
+				+ NestSurfaceFrame.Right * FMath::Sin(SpawnAngle)).GetSafeNormal();
+			bFoundPoint = Planet->ProjectPointToSurface(GetActorLocation() + SpawnDirection * SpawnDistance, SpawnSurfaceHit)
+				&& Defaults->GetSurfaceSteering()->IsWalkable(Planet, SpawnSurfaceHit);
+			// A walkable far endpoint behind the crater wall is not a reachable part of this colony.
+			for (float Along = FMath::Min(80.0f, SpawnDistance); bFoundPoint && Along < SpawnDistance; Along += 180.0f)
+			{
+				FJTSPlanetSurfaceHit RouteHit;
+				bFoundPoint = Planet->ProjectPointToSurface(GetActorLocation() + SpawnDirection * Along, RouteHit)
+					&& Defaults->GetSurfaceSteering()->IsWalkable(Planet, RouteHit);
+			}
+			if (bFoundPoint)
+			{
+				for (const auto& Existing : ActiveMoonAnts)
+				{
+					if (Existing.IsValid() && FVector::DistSquared(Existing->GetActorLocation(), SpawnSurfaceHit.ImpactPoint) < FMath::Square(35.0f))
+					{ bFoundPoint = false; break; }
+				}
+			}
+		}
+		if (bFoundPoint)
 		{
 			const FVector SpawnForward = FQuat(
 				SpawnSurfaceHit.ImpactNormal,
@@ -404,7 +523,7 @@ void AJTSMoonAntNestActor::TrySpawnMoonAnt()
 					SurfaceController->RegisterSurfaceRuntimeActor(MoonAnt);
 				}
 				MoonAnt->FinishSpawning(SpawnTransform);
-				ActiveMoonAnts.Add(MoonAnt);
+				if (IsValid(MoonAnt) && !MoonAnt->IsActorBeingDestroyed()) ActiveMoonAnts.Add(MoonAnt);
 			}
 		}
 	}

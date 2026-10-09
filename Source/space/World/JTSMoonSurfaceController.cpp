@@ -233,7 +233,6 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::SpawnCorpseAtPlanetSurfaceAnchor
 	{
 		return RealSurfaceMoonCorpse.Get();
 	}
-
 	if (!IsValid(InCorpseSurfaceAnchor))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Moon surface controller %s received an invalid real-surface corpse anchor."), *GetName());
@@ -486,6 +485,15 @@ AJTSMoonCorpseActor* AJTSMoonSurfaceController::FindLevelCorpseLandmark()
 		CachedLevelMoonCorpseLandmarks.Add(RealSurfaceMoonCorpse);
 		return RealSurfaceMoonCorpse.Get();
 	}
+	if (IsValid(PlacedCorpseLandmark)
+		&& PlacedCorpseLandmark->GetWorld() == GetWorld()
+		&& PlacedCorpseLandmark->GetLevel() == GetLevel())
+	{
+		RegisterSurfaceRuntimeActor(PlacedCorpseLandmark);
+		LevelMoonCorpseLandmark = PlacedCorpseLandmark;
+		CachedLevelMoonCorpseLandmarks.Add(PlacedCorpseLandmark);
+		return PlacedCorpseLandmark;
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Moon surface %s has no configured corpse landmark; MoonAnt Nest generation is skipped."),
 		*PlanetId.ToString());
@@ -502,7 +510,8 @@ void AJTSMoonSurfaceController::ClearGeneratedMoonAntNests()
 	{
 		if (Nest.IsValid())
 		{
-			Nest->Destroy();
+			if (PlacedMoonAntNests.Contains(Nest.Get())) Nest->DeactivateSurfaceNest();
+			else Nest->Destroy();
 		}
 	}
 	GeneratedMoonAntNests.Reset();
@@ -553,6 +562,22 @@ void AJTSMoonSurfaceController::InitializeMoonLandmarksAndMoonAntNests()
 		|| !IsValid(Planet)
 		|| !IsValid(Spacecraft))
 	{
+		return;
+	}
+
+	if (!PlacedMoonAntNests.IsEmpty())
+	{
+		if (IsValid(PlacedCorpseLandmark)) FindLevelCorpseLandmark();
+		for (AJTSMoonAntNestActor* const Nest : PlacedMoonAntNests)
+		{
+			if (!IsValid(Nest) || Nest->GetWorld() != World || Nest->GetLevel() != GetLevel()
+				|| GeneratedMoonAntNests.Contains(Nest)) continue;
+			RegisterSurfaceRuntimeActor(Nest);
+			if (!Nest->ActivateAuthoredPlanetNest(Planet, MoonSettings->GetMoonAntActorClass())) continue;
+			GeneratedMoonAntNests.Add(Nest);
+		}
+		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Authored MoonAnt Nests: Planet=%s Activated=%d"),
+			*PlanetId.ToString(), GeneratedMoonAntNests.Num());
 		return;
 	}
 

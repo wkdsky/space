@@ -1,4 +1,5 @@
 #include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Weapons/JTSStellarCombat.h"
 #include "space/Components/JTSStellarAbilityComponent.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
@@ -387,10 +388,7 @@ void UJTSStellarWeaponComponent::FocusShot(const FJTSStellarWeaponDefinition& De
 	for (int32 Pass = 0; Pass < PierceHits; ++Pass)
 	{
 		FHitResult Hit;
-		const bool bHit = Def.BeamRadiusCentimeters > 0
-			? GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Visibility,
-				FCollisionShape::MakeSphere(Def.BeamRadiusCentimeters), Params)
-			: GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+		const bool bHit = JTSStellarCombat::TraceBeam(GetWorld(), Start, End, Def.BeamRadiusCentimeters, Params, Hit);
 		if (!bHit) break;
 		LastHit = Hit.ImpactPoint;
 		AActor* Target = Hit.GetActor();

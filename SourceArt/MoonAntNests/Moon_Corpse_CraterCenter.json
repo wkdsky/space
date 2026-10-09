@@ -1,0 +1,37 @@
+{
+  "cameraLocation": {
+    "x": 45980.88520414404,
+    "y": 117113.44559696446,
+    "z": 24333.534774788528
+  },
+  "cameraRotation": {
+    "pitch": -8.38802885796488,
+    "yaw": -75.00493582618851,
+    "roll": 28.434859266052754
+  },
+  "cameraFOV": 90,
+  "grid": {
+    "spacingCm": 0,
+    "extentCm": 0,
+    "height": 0
+  },
+  "labeledActors": [
+    {
+      "name": "BP_MoonSkeletonAstronautCorpse_C_0",
+      "label": "Moon_Corpse_SkeletonAstronaut @(502,1017,221)",
+      "class": {
+        "refPath": "/Game/Space/Blueprints/Planets/Moon/BP_MoonSkeletonAstronautCorpse.BP_MoonSkeletonAstronautCorpse_C"
+      },
+      "screenPosition": {
+        "x": 946,
+        "y": 339
+      },
+      "worldLocation": {
+        "x": 50156.38815317861,
+        "y": 101737.17054901748,
+        "z": 22086.60567309281
+      },
+      "distanceCm": 16090.7841796875
+    }
+  ]
+}

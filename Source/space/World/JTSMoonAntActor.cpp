@@ -1,4 +1,7 @@
 #include "space/World/JTSMoonAntActor.h"
+#include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
+#include "space/Systems/JTSPlanetEnemySubsystem.h"
+#include "space/Systems/JTSPlanetAntFragments.h"
 
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
@@ -55,12 +58,15 @@ namespace
 AJTSMoonAntActor::AJTSMoonAntActor()
 {
 	CreateDefaultSubobject<UJTSStellarTargetComponent>(TEXT("StellarTarget"));
+	SurfaceSteering = CreateDefaultSubobject<UJTSPlanetSurfaceSteeringComponent>(TEXT("SurfaceSteering"));
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
+	PrimaryActorTick.TickInterval = 0.0f;
 	SetActorEnableCollision(true);
 	bReplicates = true;
 	SetReplicateMovement(true);
+	SetNetUpdateFrequency(30.f);
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -235,7 +241,8 @@ void AJTSMoonAntActor::OnConstruction(const FTransform& Transform)
 void AJTSMoonAntActor::BeginPlay()
 {
 	Super::BeginPlay();
-	SetActorTickEnabled(true);
+	SetActorTickInterval(0.f);
+	SetActorTickEnabled(!HasAuthority());
 	bDeathSequenceStarted = false;
 	bHasDroppedCorpse = false;
 
@@ -265,7 +272,31 @@ void AJTSMoonAntActor::BeginPlay()
 	ConfigureMoonAntHealthBar();
 	HideMoonAntHealthBar();
 	PlaceOnGround(GroundLocation);
-	SetMoonAntState(EJTSMoonAntState::Emerging);
+	MoonAntState = EJTSMoonAntState::Emerging;
+	BurrowVisualOffset = -BurrowDepth;
+	OnRep_MoonAntState();
+	FJTSPlanetAntConfigFragment Config;
+	Config.EmergingDuration = MoonGameMode->GetMoonAntEmergingDuration();
+	Config.ReactionDuration = MoonGameMode->GetMoonAntHitReactionDuration();
+	Config.BurrowDuration = MoonGameMode->GetMoonAntBurrowDuration();
+	Config.SurfaceDurationMin = MoonGameMode->GetMoonAntSurfaceDurationMin();
+	Config.SurfaceDurationMax = MoonGameMode->GetMoonAntSurfaceDurationMax();
+	Config.RoamSpeed = MoonGameMode->GetMoonAntRoamSpeed();
+	Config.RoamRadius = MoonGameMode->GetMoonAntRoamRadius();
+	Config.HomeRadius = MoonGameMode->GetMoonAntMaxHomeRadius();
+	Config.NearRadius = MoonGameMode->GetMoonAntSpawnNearDistanceMax();
+	Config.RetargetMin = MoonGameMode->GetMoonAntRoamRetargetIntervalMin();
+	Config.RetargetMax = MoonGameMode->GetMoonAntRoamRetargetIntervalMax();
+	Config.FleeSpeed = MoonGameMode->GetMoonAntFleeSpeed();
+	Config.FleeDurationMin = MoonGameMode->GetMoonAntFleeDurationMin();
+	Config.FleeDurationMax = MoonGameMode->GetMoonAntFleeDurationMax();
+	Config.FleeDistance = MoonGameMode->GetMoonAntMaxFleeDistance();
+	Config.TurnDegrees = MoonGameMode->GetMoonAntTurnSpeed();
+	Config.SupportHeight = GroundSupportHeight;
+	Config.BurrowDepth = BurrowDepth;
+	if (auto* Enemies = GetWorld()->GetSubsystem<UJTSPlanetEnemySubsystem>())
+		EnemyEntity = Enemies->RegisterAnt(this, GetSurfacePlanet(), OriginNest->GetActorLocation(), GroundLocation, Config);
+	if (!EnemyEntity.IsValid()) { Destroy(); return; }
 	UpdateMoonAntVisualTransform();
 	UpdateMoonAntHealthBarTransform();
 
@@ -291,6 +322,10 @@ void AJTSMoonAntActor::BeginPlay()
 
 void AJTSMoonAntActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (HasAuthority() && EndPlayReason == EEndPlayReason::Destroyed && OriginNest.IsValid())
+	{
+		OriginNest->NotifyMoonAntEnded(this);
+	}
 	if (IsValid(HealthComponent))
 	{
 		HealthComponent->OnDamaged.RemoveDynamic(this, &AJTSMoonAntActor::HandleHealthDamaged);
@@ -299,6 +334,9 @@ void AJTSMoonAntActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(MoonAntHealthBarHideTimerHandle);
+		if (HasAuthority() && EnemyEntity.IsValid())
+			if (auto* Enemies = World->GetSubsystem<UJTSPlanetEnemySubsystem>()) Enemies->UnregisterEnemy(EnemyEntity);
+		EnemyEntity = FMassEntityHandle();
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -307,131 +345,43 @@ void AJTSMoonAntActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AJTSMoonAntActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!HasAuthority())
+	if (HasAuthority()) return;
+	FVector Location;
+	FQuat Rotation;
+	if (MotionBuffer.Sample(GetWorld()->GetTimeSeconds(), MovementInterpolationDelay, Location, Rotation))
 	{
-		UpdateMoonAntVisualTransform();
-		UpdateMoonAntHealthBarTransform();
-		return;
+		const FVector Before = GetActorLocation();
+		SetActorLocationAndRotation(Location, Rotation, false);
+		SceneRoot->ComponentVelocity = DeltaSeconds > SMALL_NUMBER ? (Location - Before) / DeltaSeconds : FVector::ZeroVector;
 	}
+	UpdateMoonAntVisualTransform();
+	UpdateMoonAntHealthBarTransform();
+}
 
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	if (MoonGameMode == nullptr)
-	{
-		Destroy();
-		return;
-	}
+void AJTSMoonAntActor::OnRep_ReplicatedMovement()
+{
+	if (HasAuthority() || !GetWorld() || !IsReplicatingMovement()) { Super::OnRep_ReplicatedMovement(); return; }
+	const FRepMovement& Snapshot = GetReplicatedMovement();
+	MotionBuffer.Push(GetWorld()->GetTimeSeconds(), FRepMovement::RebaseOntoLocalOrigin(Snapshot.Location, this),
+		Snapshot.Rotation.Quaternion(), Snapshot.LinearVelocity);
+}
 
-	const float SafeDeltaSeconds = FMath::Max(0.0f, DeltaSeconds);
-	StateElapsed += SafeDeltaSeconds;
+bool AJTSMoonAntActor::HasMassEntity() const
+{
+	const auto* Enemies = GetWorld() ? GetWorld()->GetSubsystem<UJTSPlanetEnemySubsystem>() : nullptr;
+	FJTSPlanetEnemyBodyFragment Body;
+	return Enemies && EnemyEntity.IsValid() && Enemies->GetBodyCollisionData(EnemyEntity, Body);
+}
 
-	switch (MoonAntState)
-	{
-	case EJTSMoonAntState::Emerging:
-	{
-		const float Duration = MoonGameMode->GetMoonAntEmergingDuration();
-		const float Progress = Duration > KINDA_SMALL_NUMBER ? FMath::Clamp(StateElapsed / Duration, 0.0f, 1.0f) : 1.0f;
-		const float SmoothedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, Progress, 2.0f);
-		SetVisualBurrowOffset(FMath::Lerp(-BurrowDepth, 0.0f, SmoothedProgress));
-		if (Progress >= 1.0f)
-		{
-			SetVisualBurrowOffset(0.0f);
-			SetMeleeHitCollisionEnabled(true);
-			SurfaceElapsed = 0.0f;
-			SurfaceDuration = FMath::FRandRange(
-				MoonGameMode->GetMoonAntSurfaceDurationMin(),
-				MoonGameMode->GetMoonAntSurfaceDurationMax());
-			SetMoonAntState(EJTSMoonAntState::Roaming);
-		}
-		break;
-	}
-
-	case EJTSMoonAntState::Roaming:
-	{
-		SurfaceElapsed += SafeDeltaSeconds;
-		if (SurfaceElapsed >= SurfaceDuration)
-		{
-			BeginBurrowing();
-			break;
-		}
-
-		AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
-		if (!IsValid(Planet))
-		{
-			BeginBurrowing();
-			break;
-		}
-
-		RoamRetargetElapsed += SafeDeltaSeconds;
-		const float HomeDistance = GetDistanceToOriginNest();
-		FVector ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-		if (HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius())
-		{
-			FVector NestLocation;
-			const FVector ToNest = GetOriginNestLocation(NestLocation)
-				? GetSurfaceTangentTo(NestLocation)
-				: FVector::ZeroVector;
-			const float TargetAlignment = FVector::DotProduct(
-				ToRoamTarget.GetSafeNormal(),
-				ToNest.GetSafeNormal());
-			if (ToRoamTarget.IsNearlyZero() || TargetAlignment < 0.25f)
-			{
-				ChooseRoamTarget(true);
-				ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-			}
-		}
-
-		const float TargetDistance = Planet->ApproximateSurfaceArcDistance(GetActorLocation(), RoamTargetWorldLocation);
-		if (TargetDistance <= 30.0f || RoamRetargetElapsed >= RoamRetargetInterval)
-		{
-			ChooseRoamTarget(HomeDistance > MoonGameMode->GetMoonAntMaxHomeRadius());
-			ToRoamTarget = GetSurfaceTangentTo(RoamTargetWorldLocation);
-		}
-
-		MoveAlongGround(ToRoamTarget, MoonGameMode->GetMoonAntRoamSpeed(), SafeDeltaSeconds);
-		break;
-	}
-
-	case EJTSMoonAntState::ReactingToHit:
-		if (StateElapsed >= MoonGameMode->GetMoonAntHitReactionDuration())
-		{
-			BeginFleeing();
-		}
-		break;
-
-	case EJTSMoonAntState::Fleeing:
-	{
-		const FVector PreviousLocation = GetActorLocation();
-		if (MoveAlongGround(FleeDirection, MoonGameMode->GetMoonAntFleeSpeed(), SafeDeltaSeconds))
-		{
-			if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
-			{
-				FleeDistanceTravelled += Planet->ApproximateSurfaceArcDistance(PreviousLocation, GetActorLocation());
-			}
-		}
-		if (StateElapsed >= FleeDuration || FleeDistanceTravelled >= MoonGameMode->GetMoonAntMaxFleeDistance())
-		{
-			BeginBurrowing();
-		}
-		break;
-	}
-
-	case EJTSMoonAntState::Burrowing:
-	{
-		const float Duration = MoonGameMode->GetMoonAntBurrowDuration();
-		const float Progress = Duration > KINDA_SMALL_NUMBER ? FMath::Clamp(StateElapsed / Duration, 0.0f, 1.0f) : 1.0f;
-		const float SmoothedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, Progress, 2.0f);
-		SetVisualBurrowOffset(FMath::Lerp(0.0f, -BurrowDepth, SmoothedProgress));
-		if (Progress >= 1.0f)
-		{
-			Destroy();
-		}
-		break;
-	}
-
-	default:
-		break;
-	}
-
+void AJTSMoonAntActor::ApplyMassPresentation(const FVector& Ground, const FVector& Up, EJTSMoonAntState Phase, float Offset)
+{
+	if (!HasAuthority()) return;
+	GroundLocation = Ground;
+	SurfaceUp = Up;
+	const bool bChanged = MoonAntState != Phase;
+	MoonAntState = Phase;
+	BurrowVisualOffset = Offset;
+	if (bChanged) { OnRep_MoonAntState(); ForceNetUpdate(); }
 	UpdateMoonAntVisualTransform();
 	UpdateMoonAntHealthBarTransform();
 }
@@ -583,89 +533,6 @@ void AJTSMoonAntActor::RecalculateGroundMetrics()
 	BurrowDepth = FMath::Max(4.0f, PhysicalExtent.Z * 2.0f + 2.0f);
 }
 
-void AJTSMoonAntActor::ChooseRoamTarget(bool bForceNearNest)
-{
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	FVector NestLocation;
-	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
-	if (!IsValid(Planet) || MoonGameMode == nullptr || !GetOriginNestLocation(NestLocation))
-	{
-		RoamTargetWorldLocation = GetActorLocation();
-		RoamRetargetElapsed = 0.0f;
-		RoamRetargetInterval = 0.5f;
-		return;
-	}
-
-	const float RoamRadius = MoonGameMode->GetMoonAntRoamRadius();
-	float MinDistance = FMath::Min(40.0f, RoamRadius);
-	float MaxDistance = FMath::Clamp(170.0f, MinDistance, RoamRadius);
-	if (!bForceNearNest)
-	{
-		const float BandSelection = FMath::FRand();
-		if (BandSelection >= 0.60f && BandSelection < 0.90f)
-		{
-			MinDistance = FMath::Min(140.0f, RoamRadius);
-			MaxDistance = FMath::Clamp(300.0f, MinDistance, RoamRadius);
-		}
-		else if (BandSelection >= 0.90f)
-		{
-			MinDistance = FMath::Min(270.0f, RoamRadius);
-			MaxDistance = RoamRadius;
-		}
-	}
-
-	const float BaseDistance = FMath::FRandRange(MinDistance, MaxDistance);
-	const float RadialJitter = (MaxDistance - MinDistance) * 0.08f;
-	const float Distance = FMath::Clamp(
-		BaseDistance + FMath::FRandRange(-RadialJitter, RadialJitter),
-		MinDistance,
-		MaxDistance);
-	const float Angle = FMath::FRandRange(0.0f, UE_TWO_PI);
-	FJTSPlanetSurfaceFrame SurfaceFrame;
-	FJTSPlanetSurfaceHit SurfaceHit;
-	if (Planet->GetSurfaceFrameAt(NestLocation, FVector::ForwardVector, SurfaceFrame)
-		&& Planet->ProjectPointToSurface(
-			NestLocation + (SurfaceFrame.Forward * FMath::Cos(Angle)
-				+ SurfaceFrame.Right * FMath::Sin(Angle)).GetSafeNormal() * Distance,
-			SurfaceHit))
-	{
-		RoamTargetWorldLocation = SurfaceHit.ImpactPoint;
-	}
-	else
-	{
-		RoamTargetWorldLocation = NestLocation;
-	}
-
-	RoamRetargetElapsed = 0.0f;
-	RoamRetargetInterval = FMath::FRandRange(
-		MoonGameMode->GetMoonAntRoamRetargetIntervalMin(),
-		MoonGameMode->GetMoonAntRoamRetargetIntervalMax());
-}
-
-bool AJTSMoonAntActor::GetOriginNestLocation(FVector& OutNestLocation) const
-{
-	if (!OriginNest.IsValid())
-	{
-		return false;
-	}
-
-	OutNestLocation = OriginNest->GetActorLocation();
-	return true;
-}
-
-float AJTSMoonAntActor::GetDistanceToOriginNest() const
-{
-	FVector NestLocation;
-	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
-	{
-		return GetOriginNestLocation(NestLocation)
-			? Planet->ApproximateSurfaceArcDistance(GetActorLocation(), NestLocation)
-			: TNumericLimits<float>::Max();
-	}
-
-	return TNumericLimits<float>::Max();
-}
-
 AJTSPlanetAnchor* AJTSMoonAntActor::GetSurfacePlanet() const
 {
 	if (IsValid(SurfacePlanet))
@@ -685,73 +552,6 @@ AJTSPlanetAnchor* AJTSMoonAntActor::GetSurfacePlanet() const
 bool AJTSMoonAntActor::IsUsingRealPlanetSurface() const
 {
 	return bUsesRealPlanetSurface && IsValid(GetSurfacePlanet());
-}
-
-FVector AJTSMoonAntActor::GetSurfaceTangentTo(const FVector& TargetLocation) const
-{
-	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
-	{
-		return Planet->ProjectDirectionToSurfaceTangent(TargetLocation - GetActorLocation(), GetActorLocation());
-	}
-
-	return FVector::ZeroVector;
-}
-
-bool AJTSMoonAntActor::MoveAlongGround(const FVector& Direction, float Speed, float DeltaSeconds)
-{
-	AJTSPlanetAnchor* const Planet = GetSurfacePlanet();
-	if (!IsValid(Planet))
-	{
-		return false;
-	}
-
-	const FVector SurfaceDirection = Planet->ProjectDirectionToSurfaceTangent(Direction, GetActorLocation());
-	if (SurfaceDirection.IsNearlyZero())
-	{
-		return false;
-	}
-
-	FJTSPlanetSurfaceHit SurfaceHit;
-	const FVector CandidateLocation = GetActorLocation()
-		+ SurfaceDirection * FMath::Max(0.0f, Speed) * FMath::Max(0.0f, DeltaSeconds);
-	if (!Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
-	{
-		return false;
-	}
-
-	PlaceOnGround(SurfaceHit.ImpactPoint);
-	RotateTowardsDirection(SurfaceDirection, DeltaSeconds);
-	return true;
-}
-
-void AJTSMoonAntActor::RotateTowardsDirection(const FVector& Direction, float DeltaSeconds)
-{
-	if (AJTSPlanetAnchor* const Planet = GetSurfacePlanet())
-	{
-		const FVector SurfaceDirection = Planet->ProjectDirectionToSurfaceTangent(Direction, GetActorLocation());
-		if (SurfaceDirection.IsNearlyZero())
-		{
-			return;
-		}
-
-		const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-		if (MoonGameMode == nullptr)
-		{
-			return;
-		}
-
-		FJTSPlanetSurfaceFrame SurfaceFrame;
-		if (Planet->GetSurfaceFrameAt(GetActorLocation(), SurfaceDirection, SurfaceFrame))
-		{
-			SetActorRotation(
-				FMath::RInterpConstantTo(
-					GetActorRotation(),
-					SurfaceFrame.Transform.Rotator(),
-					FMath::Max(0.0f, DeltaSeconds),
-					MoonGameMode->GetMoonAntTurnSpeed()),
-				ETeleportType::TeleportPhysics);
-		}
-	}
 }
 
 void AJTSMoonAntActor::PlaceOnGround(const FVector& NewGroundLocation)
@@ -895,11 +695,12 @@ void AJTSMoonAntActor::HandleHealthDamaged(float CurrentHealth, float MaxHealth,
 		return;
 	}
 
-	FleeSourceLocation = IsValid(DamageCauser)
+	const FVector Source = IsValid(DamageCauser)
 		? DamageCauser->GetActorLocation()
 		: GetActorLocation() - GetActorForwardVector() * 100.0f;
 	ShowMoonAntHealthBar();
-	SetMoonAntState(EJTSMoonAntState::ReactingToHit);
+	if (auto* Enemies = GetWorld()->GetSubsystem<UJTSPlanetEnemySubsystem>())
+		Enemies->NotifyAntDamaged(EnemyEntity, Source);
 }
 
 void AJTSMoonAntActor::HandleHealthDeath(AController* InstigatorController, AActor* DamageCauser)
@@ -1113,117 +914,6 @@ void AJTSMoonAntActor::UpdateMoonAntVisualTransform()
 	}
 }
 
-void AJTSMoonAntActor::SetVisualBurrowOffset(float RelativeZ)
-{
-	BurrowVisualOffset = RelativeZ;
-}
-
-void AJTSMoonAntActor::BeginFleeing()
-{
-	const IJTSMoonSurfaceGameplaySettings* const MoonGameMode = GetMoonGameMode();
-	if (MoonGameMode == nullptr)
-	{
-		BeginBurrowing();
-		return;
-	}
-
-	if (AJTSPlanetAnchor* const Planet = IsUsingRealPlanetSurface() ? GetSurfacePlanet() : nullptr)
-	{
-		FVector AwayDirection = Planet->ProjectDirectionToSurfaceTangent(
-			GetActorLocation() - FleeSourceLocation,
-			GetActorLocation());
-		if (AwayDirection.IsNearlyZero())
-		{
-			AwayDirection = Planet->ProjectDirectionToSurfaceTangent(GetActorForwardVector(), GetActorLocation());
-		}
-		if (AwayDirection.IsNearlyZero())
-		{
-			FJTSPlanetSurfaceFrame SurfaceFrame;
-			if (Planet->GetSurfaceFrameAt(GetActorLocation(), FVector::ForwardVector, SurfaceFrame))
-			{
-				AwayDirection = SurfaceFrame.Forward;
-			}
-		}
-
-		const float SignedJitter = (FMath::RandBool() ? 1.0f : -1.0f)
-			* FMath::FRandRange(15.0f, 30.0f);
-		FleeDirection = FQuat(
-			Planet->GetRadialUpVector(GetActorLocation()),
-			FMath::DegreesToRadians(SignedJitter)).RotateVector(AwayDirection).GetSafeNormal();
-		FleeDuration = FMath::FRandRange(MoonGameMode->GetMoonAntFleeDurationMin(), MoonGameMode->GetMoonAntFleeDurationMax());
-		FleeDistanceTravelled = 0.0f;
-		SetMoonAntState(EJTSMoonAntState::Fleeing);
-		return;
-	}
-
-	FVector AwayDirection = GetActorLocation() - FleeSourceLocation;
-	AwayDirection.Z = 0.0f;
-	if (AwayDirection.IsNearlyZero())
-	{
-		AwayDirection = GetActorForwardVector();
-		AwayDirection.Z = 0.0f;
-	}
-	if (AwayDirection.IsNearlyZero())
-	{
-		const float RandomAngle = FMath::FRandRange(0.0f, UE_TWO_PI);
-		AwayDirection = FVector(FMath::Cos(RandomAngle), FMath::Sin(RandomAngle), 0.0f);
-	}
-
-	const float JitterMagnitude = FMath::FRandRange(15.0f, 30.0f);
-	const float SignedJitter = FMath::RandBool() ? JitterMagnitude : -JitterMagnitude;
-	FleeDirection = FRotator(0.0f, SignedJitter, 0.0f).RotateVector(AwayDirection.GetSafeNormal()).GetSafeNormal();
-	FleeDuration = FMath::FRandRange(MoonGameMode->GetMoonAntFleeDurationMin(), MoonGameMode->GetMoonAntFleeDurationMax());
-	FleeDistanceTravelled = 0.0f;
-	SetMoonAntState(EJTSMoonAntState::Fleeing);
-}
-
-void AJTSMoonAntActor::BeginBurrowing()
-{
-	if (MoonAntState != EJTSMoonAntState::Burrowing)
-	{
-		SetMoonAntState(EJTSMoonAntState::Burrowing);
-	}
-}
-
-void AJTSMoonAntActor::SetMoonAntState(EJTSMoonAntState NewState)
-{
-	MoonAntState = NewState;
-	StateElapsed = 0.0f;
-
-	switch (NewState)
-	{
-	case EJTSMoonAntState::Emerging:
-		SetMeleeHitCollisionEnabled(false);
-		SetVisualBurrowOffset(-BurrowDepth);
-		break;
-
-	case EJTSMoonAntState::Roaming:
-		SetMeleeHitCollisionEnabled(true);
-		SetVisualBurrowOffset(0.0f);
-		ChooseRoamTarget();
-		break;
-
-	case EJTSMoonAntState::ReactingToHit:
-		SetMeleeHitCollisionEnabled(true);
-		SetVisualBurrowOffset(0.0f);
-		break;
-
-	case EJTSMoonAntState::Fleeing:
-		SetMeleeHitCollisionEnabled(true);
-		break;
-
-	case EJTSMoonAntState::Burrowing:
-		SetMeleeHitCollisionEnabled(false);
-		SetVisualBurrowOffset(0.0f);
-		break;
-
-	default:
-		break;
-	}
-
-	UpdateFallbackMaterial();
-}
-
 void AJTSMoonAntActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -1232,6 +922,7 @@ void AJTSMoonAntActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(AJTSMoonAntActor, SurfacePlanet);
 	DOREPLIFETIME(AJTSMoonAntActor, SurfaceUp);
 	DOREPLIFETIME(AJTSMoonAntActor, bUsesRealPlanetSurface);
+	DOREPLIFETIME(AJTSMoonAntActor, BurrowVisualOffset);
 }
 
 void AJTSMoonAntActor::OnRep_MoonAntState()
@@ -1241,6 +932,7 @@ void AJTSMoonAntActor::OnRep_MoonAntState()
 		&& (!IsValid(HealthComponent) || !HealthComponent->IsDead());
 	SetMeleeHitCollisionEnabled(bCanBeHit);
 	UpdateFallbackMaterial();
+	UpdateMoonAntVisualTransform();
 }
 
 void AJTSMoonAntActor::UpdateFallbackMaterial()

@@ -1,0 +1,409 @@
+{
+  "initial_landed": true,
+  "landing_site_count": 0,
+  "samples": [
+    {
+      "t": 0.3120000000017171,
+      "stage": "settle",
+      "position": [
+        57986.99454229123,
+        93477.75565899447,
+        32935.436142704086
+      ],
+      "envelope_height": 669.9868283146142,
+      "speed": 0.0,
+      "gear": 0.861111044883728,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": false
+    },
+    {
+      "t": 0.6399999999994179,
+      "stage": "settle",
+      "position": [
+        57986.99454229123,
+        93477.75565899447,
+        32935.436142704086
+      ],
+      "envelope_height": 669.9868283146142,
+      "speed": 0.0,
+      "gear": 0.7222219705581665,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": false
+    },
+    {
+      "t": 0.9840000000003783,
+      "stage": "cruise",
+      "position": [
+        57751.294301042224,
+        93340.84091119576,
+        32347.447315066485
+      ],
+      "envelope_height": 21.888754473733663,
+      "speed": 24.333724975585938,
+      "gear": 0.5833330154418945,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 1.3120000000017171,
+      "stage": "cruise",
+      "position": [
+        58476.73863103182,
+        93277.16061071739,
+        32068.022067977745
+      ],
+      "envelope_height": 35.82018247962819,
+      "speed": 2340.004150390625,
+      "gear": 0.4444440007209778,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 1.6560000000026776,
+      "stage": "cruise",
+      "position": [
+        59925.34057326579,
+        93151.97123066698,
+        31509.456531083073
+      ],
+      "envelope_height": 49.962148798485615,
+      "speed": 4672.79541015625,
+      "gear": 0.3055550456047058,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 1.9840000000003783,
+      "stage": "cruise",
+      "position": [
+        61806.209093325415,
+        92862.83550566419,
+        30163.56437328954
+      ],
+      "envelope_height": 64.1707260667709,
+      "speed": 6980.7197265625,
+      "gear": 0.1664329618215561,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 2.312000000001717,
+      "stage": "cruise",
+      "position": [
+        63788.94739972873,
+        92546.80815388788,
+        28651.544164925344
+      ],
+      "envelope_height": 153.03362951000852,
+      "speed": 7540.2861328125,
+      "gear": 0.02754400670528412,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 2.639999999999418,
+      "stage": "cruise",
+      "position": [
+        65320.61327356037,
+        92133.65424423148,
+        26725.102818420382
+      ],
+      "envelope_height": 307.45742170452456,
+      "speed": 7486.70849609375,
+      "gear": 0.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 2.9840000000003783,
+      "stage": "cruise",
+      "position": [
+        66467.29123729293,
+        91660.72674955339,
+        24552.493415063225
+      ],
+      "envelope_height": 340.7912718576083,
+      "speed": 7505.24951171875,
+      "gear": 0.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 3.312000000001717,
+      "stage": "cruise",
+      "position": [
+        67324.8811692063,
+        91157.22778786362,
+        22267.720854828374
+      ],
+      "envelope_height": 323.8495865568774,
+      "speed": 7475.45263671875,
+      "gear": 0.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 3.6560000000026776,
+      "stage": "cruise",
+      "position": [
+        67852.77812371473,
+        90625.25485359142,
+        19899.315746838118
+      ],
+      "envelope_height": 258.4373123702516,
+      "speed": 7452.4443359375,
+      "gear": 0.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 3.9840000000003783,
+      "stage": "descend",
+      "position": [
+        57795.50400680009,
+        93366.52166859346,
+        32457.734911383846
+      ],
+      "envelope_height": 142.60539777277455,
+      "speed": 1579.6070556640625,
+      "gear": 0.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 4.328000000001339,
+      "stage": "descend",
+      "position": [
+        57795.50400680009,
+        93366.52166859346,
+        32457.734911383846
+      ],
+      "envelope_height": 149.90269684878575,
+      "speed": 0.0,
+      "gear": 0.5128207802772522,
+      "phase": "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+      "following": true
+    },
+    {
+      "t": 4.6560000000026776,
+      "stage": "lock_and_abort",
+      "position": [
+        57705.98877851301,
+        93311.87078753606,
+        32248.97022940811
+      ],
+      "envelope_height": -83.76400823089834,
+      "speed": 700.8860473632812,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+      "following": true
+    },
+    {
+      "t": 4.984000000000378,
+      "stage": "held_ctrl_after_abort",
+      "position": [
+        57746.47930408277,
+        93335.3723039273,
+        32350.082992824187
+      ],
+      "envelope_height": 20.000015550789595,
+      "speed": 334.2757873535156,
+      "gear": 0.8611111044883728,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 5.312000000001717,
+      "stage": "held_ctrl_after_abort",
+      "position": [
+        57740.33448479782,
+        93331.80572707718,
+        32334.738176972813
+      ],
+      "envelope_height": -8.338574666207092e-05,
+      "speed": 50.7294921875,
+      "gear": 0.7222221493721008,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 5.6560000000026776,
+      "stage": "escape",
+      "position": [
+        57738.656982372566,
+        93330.83207089,
+        32330.549125251015
+      ],
+      "envelope_height": 6.092405290626114e-06,
+      "speed": 13.848876953125,
+      "gear": 0.5833331942558289,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 5.984000000000378,
+      "stage": "escape",
+      "position": [
+        57946.93699674534,
+        93451.72198532979,
+        32850.66506648
+      ],
+      "envelope_height": 571.8964076970619,
+      "speed": 1719.486328125,
+      "gear": 0.4444441497325897,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 6.312000000001717,
+      "stage": "descend_again",
+      "position": [
+        57784.31800822829,
+        93357.33464976467,
+        32444.573639374226
+      ],
+      "envelope_height": 124.1275661110283,
+      "speed": 1342.0386962890625,
+      "gear": 0.30550479888916016,
+      "phase": "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+      "following": true
+    },
+    {
+      "t": 6.703000000001339,
+      "stage": "descend_again",
+      "position": [
+        57784.31800822829,
+        93357.33464976467,
+        32444.573639374226
+      ],
+      "envelope_height": 131.24816983312823,
+      "speed": 0.0,
+      "gear": 0.8183255791664124,
+      "phase": "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+      "following": true
+    },
+    {
+      "t": 6.984000000000378,
+      "stage": "touchdown",
+      "position": [
+        57695.13026102279,
+        93307.53606232637,
+        32234.568825702463
+      ],
+      "envelope_height": -102.32448130578753,
+      "speed": 700.3506469726562,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+      "following": true
+    },
+    {
+      "t": 7.312000000001717,
+      "stage": "touchdown",
+      "position": [
+        57648.00026382457,
+        93279.5598933561,
+        32112.86238923802
+      ],
+      "envelope_height": -235.77956482377155,
+      "speed": 400.4333801269531,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.DESCENDING: 2>",
+      "following": true
+    },
+    {
+      "t": 7.6560000000026776,
+      "stage": "touchdown",
+      "position": [
+        57631.96545574482,
+        93270.04169842904,
+        32071.454804540543
+      ],
+      "envelope_height": -281.1826453772926,
+      "speed": 136.23756408691406,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.DESCENDING: 2>",
+      "following": true
+    },
+    {
+      "t": 8.0,
+      "stage": "touchdown",
+      "position": [
+        57620.24279960945,
+        93263.08317883812,
+        32041.182731785382
+      ],
+      "envelope_height": -314.37499221332183,
+      "speed": 99.59992218017578,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.DESCENDING: 2>",
+      "following": true
+    },
+    {
+      "t": 8.328000000001339,
+      "stage": "touchdown",
+      "position": [
+        57616.58034448837,
+        93260.90916081554,
+        32031.724968407583
+      ],
+      "envelope_height": -324.74508732650855,
+      "speed": 31.11671257019043,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.DESCENDING: 2>",
+      "following": true
+    },
+    {
+      "t": 8.656000000002678,
+      "stage": "touchdown",
+      "position": [
+        57616.58034457847,
+        93260.90916086902,
+        32031.724968640254
+      ],
+      "envelope_height": -324.7450870713484,
+      "speed": 0.0,
+      "gear": 1.0,
+      "phase": "<JTSSpacecraftLandingAssistPhase.TOUCHDOWN: 3>",
+      "following": true
+    }
+  ],
+  "phases": [
+    "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+    "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+    "<JTSSpacecraftLandingAssistPhase.NONE: 0>",
+    "<JTSSpacecraftLandingAssistPhase.ALIGNING: 1>",
+    "<JTSSpacecraftLandingAssistPhase.DESCENDING: 2>",
+    "<JTSSpacecraftLandingAssistPhase.TOUCHDOWN: 3>"
+  ],
+  "cruise_following_every_sample": true,
+  "test_ground": [
+    57586.19943959895,
+    93225.1953125,
+    31832.904257887836
+  ],
+  "planned_slope": 0.9807989597320557,
+  "four_feet": 4,
+  "cruise_distance_cm": 16595.50787098193,
+  "locked_vertical_input": 0.0,
+  "locked_boost": false,
+  "gear_deploy_started": true,
+  "descent_started_without_staging": true,
+  "touchdown_seconds": 1.9530000000013388,
+  "stage": "touchdown",
+  "error": null,
+  "elapsed": 8.656000000002678,
+  "aborted": true,
+  "min_hull_clearance_cm": 397.75486392556263,
+  "max_cruise_speed_cm_s": 7540.2861328125,
+  "max_turn_per_tick_degrees": 9.36238796733557,
+  "landed": true,
+  "failure": "<JTSLandingValidationFailure.NONE: 0>",
+  "capture_height_above_envelope_cm": 149.90269684878575,
+  "final_support_valid": true,
+  "visible_sole_errors_cm": [
+    5.560974451364409e-05,
+    0.0003767868409854332,
+    0.0002661837824099612,
+    0.0002657677617296082
+  ]
+}

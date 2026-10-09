@@ -2,6 +2,7 @@
 
 #include "space/Items/JTSItemDefinitionLibrary.h"
 
+#include "Misc/PackageName.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/StrongObjectPtr.h"
 #include "space/Items/JTSItemDefinition.h"
@@ -403,7 +404,10 @@ UJTSItemDefinition* UJTSItemDefinitionLibrary::GetItemDefinition(const UObject* 
 	}
 
 	const FString AssetPath = AssetPathFor(ItemId);
-	if (!AssetPath.IsEmpty())
+	// Definitions are optional overrides. Do not ask the loader to load a missing package
+	// before using the native default; still load existing assets normally so real errors are reported.
+	if (!AssetPath.IsEmpty() && (FindObject<UObject>(nullptr, *AssetPath) != nullptr
+		|| FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(AssetPath))))
 	{
 		if (UJTSItemDefinition* const Loaded = LoadObject<UJTSItemDefinition>(nullptr, *AssetPath);
 			IsValid(Loaded) && Loaded->ItemId == ItemId)

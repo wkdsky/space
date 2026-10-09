@@ -1,0 +1,79 @@
+{
+  "mode": "Editor",
+  "count": 9,
+  "profiles": 4,
+  "nests": [
+    {
+      "name": "Moon_AntNest_01",
+      "profile": "<JTSNestEntranceProfile.SLIT: 2>",
+      "mouth_triangles": 32,
+      "maximum_surface_gap_cm": 0.2500001720632832,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_02",
+      "profile": "<JTSNestEntranceProfile.LEANING: 3>",
+      "mouth_triangles": 18,
+      "maximum_surface_gap_cm": 0.2500010754073543,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_03",
+      "profile": "<JTSNestEntranceProfile.LEANING: 3>",
+      "mouth_triangles": 18,
+      "maximum_surface_gap_cm": 0.25000114967451026,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_04",
+      "profile": "<JTSNestEntranceProfile.OLIVE: 1>",
+      "mouth_triangles": 32,
+      "maximum_surface_gap_cm": 0.25000073864458194,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_05",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "mouth_triangles": 18,
+      "maximum_surface_gap_cm": 0.25000030771969506,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_06",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "mouth_triangles": 18,
+      "maximum_surface_gap_cm": 0.2500009671224568,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_07",
+      "profile": "<JTSNestEntranceProfile.IRREGULAR_ARCH: 0>",
+      "mouth_triangles": 18,
+      "maximum_surface_gap_cm": 0.2500014721701689,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_08",
+      "profile": "<JTSNestEntranceProfile.SLIT: 2>",
+      "mouth_triangles": 32,
+      "maximum_surface_gap_cm": 0.250000156839413,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    },
+    {
+      "name": "Moon_AntNest_09",
+      "profile": "<JTSNestEntranceProfile.OLIVE: 1>",
+      "mouth_triangles": 32,
+      "maximum_surface_gap_cm": 0.2500009665935927,
+      "stable_rebuild": true,
+      "visibility_trace_hits_nest": true
+    }
+  ]
+}

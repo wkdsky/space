@@ -1,0 +1,14 @@
+{
+  "sampled_ants": 7,
+  "moved_ants": 7,
+  "distances_cm": {
+    "BP_MoonAnt_C_2": 231.29,
+    "BP_MoonAnt_C_3": 476.4,
+    "BP_MoonAnt_C_5": 198.58,
+    "BP_MoonAnt_C_7": 601.74,
+    "BP_MoonAnt_C_8": 503.16,
+    "BP_MoonAnt_C_9": 172.17,
+    "BP_MoonAnt_C_10": 800.53
+  },
+  "corpse_count": 1
+}

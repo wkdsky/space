@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "weapon": "FreezingTube",
+  "target": "BP_MoonAnt_C_1577",
+  "mass_entity_active": true,
+  "server_actor_tick": false,
+  "frozen": true,
+  "actual_model": "/Engine/BasicShapes/Sphere.Sphere",
+  "overlay": "/Game/Space/Maps/UEDPIE_0_L_SpaceWorld.L_SpaceWorld:PersistentLevel.BP_StellarTargetStatusFX_C_0.MID_M_StellarStatusBodyTint_0",
+  "ice_shards": 8,
+  "initial_health": 10000.0,
+  "remaining_health": 9000.0,
+  "test_health_is_pie_only": true,
+  "production_health_unchanged": 3,
+  "camera_location": "<Struct 'Vector' (0x0000021F6BABDFF0) {x: 46447.029291, y: 101639.731795, z: 19243.893337}>",
+  "camera_rotation": "<Struct 'Rotator' (0x0000021F6BABDFF0) {pitch: -34.067399, yaw: 2.115966, roll: 98.823075}>"
+}

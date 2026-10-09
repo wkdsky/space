@@ -8,6 +8,8 @@
 #include "GameFramework/Pawn.h"
 #include "Math/RotationMatrix.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
@@ -66,7 +68,7 @@ void UJTSSpacecraftFlightMovementComponent::BeginPlay()
 void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (GetOwner() == nullptr || ShouldSkipUpdate(DeltaTime) || !IsValid(UpdatedComponent))
+	if (!IsActive() || GetOwner() == nullptr || ShouldSkipUpdate(DeltaTime) || !IsValid(UpdatedComponent))
 	{
 		return;
 	}
@@ -181,7 +183,7 @@ void UJTSSpacecraftFlightMovementComponent::ClearInput()
 
 bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
 	AJTSPlanetAnchor* Planet,
-	float LandingClearance,
+	const FTransform& LandingPose,
 	float DurationSeconds)
 {
 	if (!IsValid(UpdatedComponent) || !IsValid(Planet))
@@ -191,11 +193,13 @@ bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
 
 	ClearInput();
 	bAssistedLanding = true;
-	ResetSurfaceNoseGuard();
+	EnvelopeLandingRetryElapsed = 0;
 	Velocity = FVector::ZeroVector;
 	TargetPlanet = Planet;
 	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Aligning);
-	AssistedLandingClearance = FMath::Max(0.0f, LandingClearance);
+	AssistedLandingPose = LandingPose;
+	const FVector Up = LandingPose.GetUnitAxis(EAxis::Z);
+	LandingSupportCheckElapsed = 0;
 	AssistedLandingDescentSpeed = AssistedLandingMaximumDescentSpeed;
 	if (AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
 	{
@@ -205,7 +209,8 @@ bool UJTSSpacecraftFlightMovementComponent::BeginAssistedLanding(
 			const float DesiredDuration = FMath::Max(
 				0.1f,
 				DurationSeconds > 0.0f ? DurationSeconds : DefaultLandingDuration);
-			const float HeightToLose = FMath::Max(0.0f, GroundInfo.DockingHeight - AssistedLandingClearance);
+			const float HeightToLose = FMath::Max(0.0f,
+				float(FVector::DotProduct(Spacecraft->GetActorLocation() - LandingPose.GetLocation(), Up)));
 			AssistedLandingDescentSpeed = FMath::Clamp(
 				HeightToLose / DesiredDuration,
 				AssistedLandingMinimumDescentSpeed,
@@ -226,7 +231,6 @@ void UJTSSpacecraftFlightMovementComponent::CancelAssistedLanding()
 	bAssistedLanding = false;
 	ClearInput();
 	Velocity = FVector::ZeroVector;
-	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
 	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::None);
 }
@@ -314,7 +318,12 @@ void UJTSSpacecraftFlightMovementComponent::SetTargetPlanet(AJTSPlanetAnchor* Ne
 	}
 
 	TargetPlanet = NewTargetPlanet;
-	ResetSurfaceNoseGuard();
+	if (auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner()); Ship && Ship->HasAuthority())
+		Ship->GetSurfaceEnvelopeComponent()->Reset();
+	EnvelopeLandingRetryElapsed = 0;
+	bTakeoffClearance = false;
+	TakeoffClearanceRadius = 0;
+	bEnvelopeEscape = false;
 	bHasSurfaceProximity = false;
 	SurfaceFlightAssistAlpha = 0.0f;
 	SurfaceProximityProbeElapsed = FMath::Max(0.0f, SurfaceProximityProbeInterval);
@@ -338,163 +347,81 @@ void UJTSSpacecraftFlightMovementComponent::CaptureInertialReferenceUp(const FVe
 
 void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 {
-	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner());
-	AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
-	if (!IsValid(Spacecraft) || !IsValid(Planet))
-	{
-		FailAssistedLanding(EJTSLandingValidationFailure::NoPlanet);
-		return;
-	}
-
-	if (!Spacecraft->RefreshGroundInfo(Planet))
-	{
-		FailAssistedLanding(EJTSLandingValidationFailure::NoSurface);
-		return;
-	}
-
-	const FJTSSpacecraftGroundInfo GroundInfo = Spacecraft->GetGroundInfo();
-	const FVector SurfaceUp = GroundInfo.SurfaceNormal.GetSafeNormal();
-	if (!GroundInfo.bHasGround || SurfaceUp.IsNearlyZero())
-	{
-		FailAssistedLanding(EJTSLandingValidationFailure::NoSurface);
-		return;
-	}
-
-	FVector SurfaceForward = FVector::VectorPlaneProject(Spacecraft->GetActorForwardVector(), SurfaceUp).GetSafeNormal();
-	if (SurfaceForward.IsNearlyZero())
-	{
-		SurfaceForward = GroundInfo.SurfaceTransform.GetUnitAxis(EAxis::X).GetSafeNormal();
-	}
-	if (SurfaceForward.IsNearlyZero())
-	{
-		FVector FallbackRight;
-		SurfaceUp.FindBestAxisVectors(SurfaceForward, FallbackRight);
-	}
-
-	const FQuat DesiredRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceUp).ToQuat();
-	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
-	const float RotationAlpha = FMath::Clamp(
-		1.0f - FMath::Exp(-FMath::Max(0.1f, AssistedLandingRotationInterpolationSpeed) * DeltaTime),
-		0.0f,
-		1.0f);
-	const FQuat NewRotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
-	const float NewAlignment = FVector::DotProduct(NewRotation.GetAxisZ().GetSafeNormal(), SurfaceUp);
-	const float AlignmentCosine = FMath::Cos(FMath::DegreesToRadians(
-		FMath::Clamp(AssistedLandingAlignmentToleranceDegrees, 0.1f, 45.0f)));
-	if (AssistedLandingPhase == EJTSSpacecraftLandingAssistPhase::Aligning)
-	{
-		// Rotating a long hull directly above terrain can make its future collision box overlap the
-		// mesh even though the current attitude is valid. Stage upward first, then align in place.
-		const float RequiredAlignmentHeight = FMath::Max(
-			AssistedLandingClearance,
-			Spacecraft->GetLandingCollisionClearanceForRotation(DesiredRotation, SurfaceUp))
-			+ FMath::Max(0.0f, AssistedLandingAlignmentClearance);
-		const float AlignmentHeightShortfall = RequiredAlignmentHeight - GroundInfo.DockingHeight;
-		if (AlignmentHeightShortfall > LandingContactTolerance)
-		{
-			const float LiftSpeed = FMath::Clamp(
-				AlignmentHeightShortfall * 3.0f,
-				FMath::Max(1.0f, AssistedLandingMinimumDescentSpeed),
-				FMath::Max(AssistedLandingMinimumDescentSpeed, AssistedLandingMaximumDescentSpeed));
-			Velocity = FMath::VInterpConstantTo(
-				Velocity,
-				SurfaceUp * LiftSpeed,
-				DeltaTime,
-				FMath::Max(1.0f, AssistedLandingVelocityResponse));
-			FHitResult LiftHit;
-			MoveWithCollisionSweep(Velocity * DeltaTime, CurrentRotation, LiftHit);
-			if (LiftHit.IsValidBlockingHit())
-			{
-				Velocity = FVector::ZeroVector;
-			}
-		}
-		else
-		{
-			Velocity = FVector::ZeroVector;
-			FHitResult AlignmentHit;
-			MoveWithCollisionSweep(FVector::ZeroVector, NewRotation, AlignmentHit);
-			if (!AlignmentHit.IsValidBlockingHit() && NewAlignment >= AlignmentCosine)
-			{
-				SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Descending);
-			}
-		}
-
-		AssistedLandingElapsed += DeltaTime;
-		if (AssistedLandingElapsed >= FMath::Max(1.0f, AssistedLandingTimeout))
-		{
-			FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked);
-		}
-		return;
-	}
-
-	const float HeightError = GroundInfo.DockingHeight - AssistedLandingClearance;
-	// The probe runs along radial gravity, but terrain normals need not be radial. Moving to
-	// HitPoint + Normal * Clearance also introduces an unwanted sideways step at touchdown.
-	const FVector TargetLocation = UpdatedComponent->GetComponentLocation() - SurfaceUp * HeightError;
-	const float CompletionCosine = FMath::Cos(FMath::DegreesToRadians(
-		FMath::Clamp(LandingCompletionAlignmentDegrees, 0.0f, 90.0f)));
-	const bool bAtLandingHeight = FMath::Abs(HeightError) <= LandingContactTolerance;
-	if (bAtLandingHeight && NewAlignment >= CompletionCosine)
-	{
-		FHitResult FinalMoveHit;
-		MoveWithCollisionSweep(TargetLocation - UpdatedComponent->GetComponentLocation(), DesiredRotation, FinalMoveHit);
-		if (FVector::DistSquared(UpdatedComponent->GetComponentLocation(), TargetLocation)
-			<= FMath::Square(FMath::Max(2.0f, LandingContactTolerance))
-			&& Spacecraft->CanOccupyLandingTransform(Spacecraft->GetActorTransform())
-			&& Spacecraft->RefreshGroundInfo(Planet))
-		{
-			const FJTSSpacecraftGroundInfo FinalGroundInfo = Spacecraft->GetGroundInfo();
-			const FVector FinalSurfaceUp = FinalGroundInfo.SurfaceNormal.GetSafeNormal();
-			const bool bFinalHeightValid = FinalGroundInfo.bHasGround
-				&& FMath::Abs(FinalGroundInfo.DockingHeight - AssistedLandingClearance) <= LandingContactTolerance;
-			const bool bFinalAlignmentValid = !FinalSurfaceUp.IsNearlyZero()
-				&& FVector::DotProduct(Spacecraft->GetActorUpVector(), FinalSurfaceUp) >= CompletionCosine;
-			if (bFinalHeightValid && bFinalAlignmentValid)
-			{
-				CompleteAssistedLanding();
-				return;
-			}
-		}
-	}
-
-	// Descend briskly while high, then ease into the last part of the approach. The proportional
-	// cap avoids overshooting a moving/uneven mesh surface while the braking band prevents a hard snap.
-	const float HeightAboveTouchdown = FMath::Max(0.0f, HeightError);
-	const float BrakingAlpha = FMath::SmoothStep(
-		0.0f,
-		FMath::Max(1.0f, AssistedLandingBrakingDistance),
-		HeightAboveTouchdown);
-	const float CruiseSpeed = FMath::Clamp(
-		FMath::Max(AssistedLandingDescentSpeed, HeightAboveTouchdown * 1.8f),
-		AssistedLandingMinimumDescentSpeed,
-		AssistedLandingMaximumDescentSpeed);
-	const float DesiredNormalSpeed = FMath::Min(
-		HeightAboveTouchdown * 3.0f,
-		FMath::Lerp(AssistedLandingTouchdownSpeed, CruiseSpeed, BrakingAlpha));
-	const FVector DesiredVelocity = -SurfaceUp * FMath::Max(0.0f, DesiredNormalSpeed);
-	Velocity = FMath::VInterpConstantTo(
-		Velocity,
-		DesiredVelocity,
-		DeltaTime,
-		FMath::Max(1.0f, AssistedLandingVelocityResponse));
-
-	FHitResult Hit;
-	MoveWithCollisionSweep(Velocity * DeltaTime, NewRotation, Hit);
-	if (Hit.IsValidBlockingHit())
-	{
-		Velocity = FVector::ZeroVector;
-	}
-
+	auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+	auto* Planet = TargetPlanet.Get();
+	auto* Support = Ship ? Ship->GetLandingSupportComponent() : nullptr;
+	if (!Ship || !IsValid(Planet) || !Support) { FailAssistedLanding(EJTSLandingValidationFailure::NoPlanet); return; }
 	AssistedLandingElapsed += DeltaTime;
+	LandingSupportCheckElapsed += DeltaTime;
 	if (AssistedLandingElapsed >= FMath::Max(1.0f, AssistedLandingTimeout))
 	{
-		FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked);
+		FailAssistedLanding(EJTSLandingValidationFailure::ApproachBlocked); return;
+	}
+	// The plan stays inside the original bounded correction. Never chase successive moving targets.
+	if (LandingSupportCheckElapsed >= 0.2f)
+	{
+		LandingSupportCheckElapsed = 0;
+		FJTSPlanetLandingValidationResult Check;
+		if (!Support->ValidatePose(Planet, AssistedLandingPose, Check))
+		{
+			FailAssistedLanding(Check.Failure); return;
+		}
+		Support->SetContacts(Check.FootContacts);
+	}
+	const FVector Up = AssistedLandingPose.GetUnitAxis(EAxis::Z);
+	const FVector Current = UpdatedComponent->GetComponentLocation();
+	const FQuat DesiredRotation = AssistedLandingPose.GetRotation();
+	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
+	const float RotationAlpha = FMath::Clamp(1 - FMath::Exp(-AssistedLandingRotationInterpolationSpeed * DeltaTime), 0.0f, 1.0f);
+	const FQuat NewRotation = FQuat::Slerp(CurrentRotation, DesiredRotation, RotationAlpha).GetNormalized();
+	const float AlignmentDegrees = FMath::RadiansToDegrees(NewRotation.AngularDistance(DesiredRotation));
+    const FVector Error = AssistedLandingPose.GetLocation() - Current;
+    const float Height = FMath::Max(0.0f, -float(FVector::DotProduct(Error, Up)));
+    const float Braking = FMath::SmoothStep(0.0f, FMath::Max(1.0f, AssistedLandingBrakingDistance), Height);
+    const float CruiseSpeed = FMath::Clamp(FMath::Max(AssistedLandingDescentSpeed, Height * 1.8f),
+        AssistedLandingMinimumDescentSpeed, AssistedLandingMaximumDescentSpeed);
+    const float Speed = FMath::Min(float(Error.Size()) * 4.0f, FMath::Lerp(AssistedLandingTouchdownSpeed, CruiseSpeed, Braking));
+    FVector Delta = FVector::VectorPlaneProject(Error, Up).GetClampedToMaxSize(AssistedLandingCorrectionSpeed * DeltaTime);
+    float DownStep = FMath::Min(Height, FMath::Max(1.0f, Speed) * DeltaTime);
+    // Feet must finish deploying before final contact, while the initial descent never waits for gear.
+    if (!Ship->IsLandingGearDeployed()) DownStep = FMath::Min(DownStep, FMath::Max(0.0f, Height - 20.0f));
+    Delta -= Up * DownStep;
+    if (AlignmentDegrees <= AssistedLandingAlignmentToleranceDegrees && Ship->IsLandingGearDeployed())
+        SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Descending);
+	if (!Ship->CanTraverseLandingSegment(Current, Current + Delta, NewRotation)
+		|| !Ship->CanOccupyLandingTransform(FTransform(NewRotation, Current + Delta, Ship->GetActorScale3D())))
+	{
+		FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked); return;
+	}
+	FHitResult Hit;
+	MoveWithCollisionSweep(Delta, NewRotation, Hit);
+	Velocity = Delta / FMath::Max(DeltaTime, SMALL_NUMBER);
+	if (Hit.IsValidBlockingHit()) { FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked); return; }
+	if (Error.Size() <= FMath::Clamp(LandingContactTolerance, 0.25f, 2.0f)
+		&& AlignmentDegrees <= LandingCompletionAlignmentDegrees && Ship->IsLandingGearDeployed())
+	{
+		// Finish the remaining centimetre with a sweep. A fully extended leg cannot support a
+		// hull that stops just above its fitted stance, even when the navigation tolerance passes.
+		if (!Ship->CanOccupyLandingTransform(AssistedLandingPose))
+		{
+			FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked); return;
+		}
+		FHitResult FinalHit;
+		MoveWithCollisionSweep(AssistedLandingPose.GetLocation() - UpdatedComponent->GetComponentLocation(),
+			DesiredRotation, FinalHit);
+		if (FinalHit.IsValidBlockingHit()) { FailAssistedLanding(EJTSLandingValidationFailure::CollisionBlocked); return; }
+		FJTSPlanetLandingValidationResult Check;
+		if (!Support->ValidatePose(Planet, Ship->GetActorTransform(), Check)) { FailAssistedLanding(Check.Failure); return; }
+		Support->SetContacts(Check.FootContacts);
+		CompleteAssistedLanding();
 	}
 }
 
 void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 {
-	const FVector ReferenceUp = GetReferenceUp();
+	const auto* ShipOwner = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+	const auto* Shell = ShipOwner ? ShipOwner->GetSurfaceEnvelopeComponent() : nullptr;
+	const FVector ReferenceUp = Shell && Shell->IsFollowing() ? Shell->GetFrame().RadialUp : GetReferenceUp();
 	if (bTurnAround)
 	{
 		if (!bTurnAroundLatched && IsValid(GetPawnOwner()))
@@ -531,11 +458,56 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 		Velocity = Velocity.GetClampedToMaxSize(FMath::Max(ExistingSpeed, MaximumSpeed));
 	}
 	ApplyPlanetGravity(DeltaTime);
-	const FSurfaceAvoidance Avoidance = EvaluateSurfaceAvoidance(DeltaTime);
-	ApplySurfaceClearanceProtection(DeltaTime, Avoidance);
+	if (ApplySurfaceEnvelope(DeltaTime)) return;
 
 	FHitResult Hit;
-	MoveWithCollisionSweep(Velocity * DeltaTime, UpdateRotation(DeltaTime, Avoidance), Hit);
+	FQuat Rotation = UpdateRotation(DeltaTime);
+	FVector Delta = Velocity * DeltaTime;
+	if (auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
+	{
+		const FVector Start = Ship->GetActorLocation();
+		// The authored movement proxy may be narrower than the visible hull. Guard both.
+		if (!Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
+		{
+			// A time-zero sweep cannot resolve an existing overlap. Check both hulls before
+			// committing a small, fixed-attitude step out, including reverse pilot thrust.
+			const float RecoveryStep = FMath::Min(25.0f, FMath::Max(1.0f, SurfaceClearanceRecoverySpeed) * DeltaTime);
+			FVector Recovery = Delta.GetClampedToMaxSize(RecoveryStep);
+			bool bCanRecover = Ship->CanRecoverFlightPenetration(Recovery);
+			if (!bCanRecover && TargetPlanet.IsValid())
+			{
+				// Forward intent into a slope must not cancel the shell's upward recovery.
+				const FVector Up = TargetPlanet->GetRadialUpVector(Start);
+				Recovery = Up * RecoveryStep;
+				bCanRecover = Ship->CanRecoverFlightPenetration(Recovery);
+			}
+			if (bCanRecover)
+			{
+				MoveUpdatedComponent(Recovery, Ship->GetActorQuat(), false, nullptr, ETeleportType::None);
+				Velocity = Recovery / FMath::Max(DeltaTime, SMALL_NUMBER);
+			}
+			else Velocity = FVector::ZeroVector;
+			return;
+		}
+		else
+		{
+			if (!Ship->CanOccupyLandingTransform(FTransform(Rotation, Start, Ship->GetActorScale3D())))
+				Rotation = Ship->GetActorQuat();
+			if (!Ship->CanTraverseLandingSegment(Start, Start + Delta, Rotation))
+			{
+				float Safe = 0, Blocked = 1;
+				for (int32 I = 0; I < 10; ++I)
+				{
+					const float Alpha = (Safe + Blocked) * 0.5f;
+					if (Ship->CanTraverseLandingSegment(Start, Start + Delta * Alpha, Rotation)) Safe = Alpha;
+					else Blocked = Alpha;
+				}
+				Delta *= Safe;
+				Velocity = Delta / FMath::Max(DeltaTime, SMALL_NUMBER);
+			}
+		}
+	}
+	MoveWithCollisionSweep(Delta, Rotation, Hit);
 	if (Hit.IsValidBlockingHit())
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
@@ -672,266 +644,118 @@ void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
 		* InfluenceAlpha * DeltaTime;
 }
 
-UJTSSpacecraftFlightMovementComponent::FSurfaceAvoidance
-UJTSSpacecraftFlightMovementComponent::EvaluateSurfaceAvoidance(float DeltaTime)
+void UJTSSpacecraftFlightMovementComponent::BeginEnvelopeEscape(bool bRequireTakeoffClearance)
 {
-	FSurfaceAvoidance Result;
-	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
-	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(GetPawnOwner());
-	if (!bHasSurfaceProximity || !IsValid(Planet) || !IsValid(Spacecraft)
-		|| !IsValid(UpdatedComponent))
-	{
-		ResetSurfaceNoseGuard();
-		return Result;
-	}
-
-	const FVector CraftLocation = UpdatedComponent->GetComponentLocation();
-	const FVector RadialUp = Planet->GetRadialUpVector(CraftLocation).GetSafeNormal();
-	const FVector Forward = UpdatedComponent->GetForwardVector().GetSafeNormal();
-	FVector Heading = FVector::VectorPlaneProject(Forward, RadialUp).GetSafeNormal();
-	if (Heading.IsNearlyZero())
-	{
-		// A vertical nose has no projected forward vector. Preserve the deck's last horizontal
-		// direction, then use travel direction if the ship is also rolled onto its side.
-		Heading = FVector::VectorPlaneProject(
-			Forward.Dot(RadialUp) < 0.0f ? UpdatedComponent->GetUpVector()
-				: -UpdatedComponent->GetUpVector(), RadialUp).GetSafeNormal();
-		if (Heading.IsNearlyZero())
-		{
-			Heading = FVector::VectorPlaneProject(Velocity, RadialUp).GetSafeNormal();
-		}
-	}
-	if (RadialUp.IsNearlyZero() || Heading.IsNearlyZero())
-	{
-		ResetSurfaceNoseGuard();
-		return Result;
-	}
-	Result.RadialUp = RadialUp;
-	Result.Heading = Heading;
-
-	const float RequiredClearance = Spacecraft->GetLandingCollisionClearanceForRotation(
-		UpdatedComponent->GetComponentQuat(), RadialUp) + FMath::Max(0.0f, SurfaceClearanceSafetyMargin);
-	const float GuardDistance = FMath::Max(0.0f, SurfaceNosePitchGuardDistance);
-	const float LookAheadTime = FMath::Max(0.1f, SurfaceTerrainAvoidanceLookAheadTime);
-	const float UpSpeed = FVector::DotProduct(Velocity, RadialUp);
-	const float ForwardSpeed = FMath::Max(0.0f, FVector::DotProduct(Velocity, Heading));
-	const bool bApproaching = ForwardSpeed > 20.0f || UpSpeed < -20.0f
-		|| MoveInput.Y > MovementDeadZone || VerticalInput < -MovementDeadZone;
-	const float CenterClearance = CachedSurfaceAltitude - RequiredClearance;
-	float ClosestPredictedClearance = FMath::Min(CenterClearance,
-		CenterClearance + UpSpeed * LookAheadTime);
-	if (ClosestPredictedClearance <= GuardDistance)
-	{
-		Result.MinimumUpSpeed = (RequiredClearance - CachedSurfaceAltitude) / LookAheadTime;
-	}
-
-	const UBoxComponent* const Hull = Spacecraft->FindComponentByClass<UBoxComponent>();
-	const float HullLength = IsValid(Hull) ? Hull->GetScaledBoxExtent().X * 2.0f : 0.0f;
-	const float BowDistance = FMath::Max(
-		FMath::Max(1.0f, SurfaceNosePitchTerrainSampleDistance), HullLength);
-	// Bounds provide a conservative skip in open space without assuming the authored planet radius
-	// equals the collision mesh. A distant mountain can still enter the prediction horizon.
-	float OuterSurfaceRadius = 0.0f;
-	TArray<UPrimitiveComponent*> SurfaceComponents;
-	if (const AActor* const SurfaceActor = Planet->GetGameplaySurfaceActor(); IsValid(SurfaceActor))
-	{
-		SurfaceActor->GetComponents<UPrimitiveComponent>(SurfaceComponents);
-	}
-	else if (UPrimitiveComponent* const SurfaceComponent = Planet->GetGameplaySurfaceComponent();
-		IsValid(SurfaceComponent))
-	{
-		SurfaceComponents.Add(SurfaceComponent);
-	}
-	for (const UPrimitiveComponent* const SurfaceComponent : SurfaceComponents)
-	{
-		if (IsValid(SurfaceComponent) && SurfaceComponent->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
-		{
-			OuterSurfaceRadius = FMath::Max(OuterSurfaceRadius,
-				FVector::Distance(Planet->GetPlanetCenter(), SurfaceComponent->Bounds.Origin)
-					+ SurfaceComponent->Bounds.SphereRadius);
-		}
-	}
-	if (OuterSurfaceRadius > 0.0f
-		&& FVector::Distance(CraftLocation, Planet->GetPlanetCenter()) - OuterSurfaceRadius
-			> RequiredClearance + GuardDistance + BowDistance + Velocity.Size() * LookAheadTime)
-	{
-		ResetSurfaceNoseGuard();
-		return Result;
-	}
-
-	const FVector CachedUp = Planet->GetRadialUpVector(CachedSurfaceProbeLocation).GetSafeNormal();
-	const FVector CenterSurfacePoint = CachedSurfaceProbeLocation - CachedUp * CachedSurfaceAltitude;
-	FVector PreviousSurfacePoint = CenterSurfacePoint;
-	float PreviousDistance = FVector::DotProduct(CachedSurfaceProbeLocation - CraftLocation, Heading);
-	float HighestGroundPitch = -HALF_PI;
-	bool bHasAheadSurface = false;
-	for (int32 SampleIndex = 0; SampleIndex < 3; ++SampleIndex)
-	{
-		const float Fraction = static_cast<float>(SampleIndex) * 0.5f;
-		const float TimeAhead = LookAheadTime * Fraction;
-		const float DistanceAhead = BowDistance + ForwardSpeed * TimeAhead;
-		if (SampleIndex > 0 && DistanceAhead - PreviousDistance < 1.0f)
-		{
-			continue;
-		}
-		const FVector SampleLocation = CraftLocation + Heading * DistanceAhead;
-		FJTSPlanetSurfaceHit SampleHit;
-		if (!Planet->TraceToSurface(SampleLocation, SampleHit) || !SampleHit.bBlockingHit)
-		{
-			continue;
-		}
-		bHasAheadSurface = true;
-		const FVector SampleUp = Planet->GetRadialUpVector(SampleLocation).GetSafeNormal();
-		const float SampleAltitude = FVector::DotProduct(
-			SampleLocation - SampleHit.ImpactPoint, SampleUp);
-		const float PredictedClearance = SampleAltitude + UpSpeed * TimeAhead - RequiredClearance;
-		ClosestPredictedClearance = FMath::Min(ClosestPredictedClearance, PredictedClearance);
-		if (PredictedClearance <= GuardDistance)
-		{
-			const float RecoveryTime = FMath::Max(0.2f, TimeAhead);
-			Result.MinimumUpSpeed = FMath::Max(Result.MinimumUpSpeed,
-				(RequiredClearance - SampleAltitude) / RecoveryTime);
-		}
-
-		const FVector GroundStep = SampleHit.ImpactPoint - PreviousSurfacePoint;
-		const float ForwardSpan = FVector::DotProduct(GroundStep, Heading);
-		if (ForwardSpan > (DistanceAhead - PreviousDistance) * 0.25f)
-		{
-			HighestGroundPitch = FMath::Max(HighestGroundPitch,
-				FMath::Atan2(FVector::DotProduct(GroundStep, RadialUp), ForwardSpan));
-		}
-		PreviousSurfacePoint = SampleHit.ImpactPoint;
-		PreviousDistance = DistanceAhead;
-	}
-
-	const bool bThreat = ClosestPredictedClearance <= GuardDistance;
-	const bool bWasGuardActive = bSurfaceNoseGuardActive;
-	if (bThreat && (CenterClearance <= GuardDistance || bApproaching))
-	{
-		bSurfaceNoseGuardActive = true;
-		SurfaceNosePitchClearElapsed = 0.0f;
-	}
-	else if (bSurfaceNoseGuardActive)
-	{
-		const float ReleaseDistance = FMath::Max(0.0f, SurfaceNosePitchReleaseDistance);
-		if (ClosestPredictedClearance > GuardDistance + 3.0f * ReleaseDistance)
-		{
-			// A genuine climb has cleared the envelope; only the narrow edge needs dwell.
-			ResetSurfaceNoseGuard();
-		}
-		else if (ClosestPredictedClearance > GuardDistance + ReleaseDistance)
-		{
-			SurfaceNosePitchClearElapsed += FMath::Max(0.0f, DeltaTime);
-			if (SurfaceNosePitchClearElapsed >= FMath::Max(0.0f, SurfaceNosePitchReleaseDelay))
-			{
-				ResetSurfaceNoseGuard();
-			}
-		}
-		else
-		{
-			SurfaceNosePitchClearElapsed = 0.0f;
-		}
-	}
-	Result.bConstrainPitch = bSurfaceNoseGuardActive;
-	Result.bAssistVelocity = bThreat && bApproaching;
-	if (Result.bConstrainPitch)
-	{
-		const float GroundPitch = bHasAheadSurface && HighestGroundPitch > -HALF_PI
-			? HighestGroundPitch : 0.0f;
-		const float SafePitch = FMath::Min(FMath::DegreesToRadians(80.0f),
-			GroundPitch + FMath::DegreesToRadians(FMath::Clamp(
-				SurfaceTerrainAvoidancePitchMarginDegrees, 0.0f, 20.0f)));
-		if (!bWasGuardActive)
-		{
-			SmoothedSurfaceMinimumPitch = SafePitch;
-		}
-		else
-		{
-			const float ResponseDegrees = SafePitch > SmoothedSurfaceMinimumPitch
-				? (ClosestPredictedClearance <= 0.0f
-					? 360.0f : SurfaceTerrainPitchAttackDegreesPerSecond)
-				: SurfaceTerrainPitchRelaxDegreesPerSecond;
-			SmoothedSurfaceMinimumPitch = FMath::FInterpConstantTo(
-				SmoothedSurfaceMinimumPitch, SafePitch, FMath::Max(0.0f, DeltaTime),
-				FMath::DegreesToRadians(FMath::Max(1.0f, ResponseDegrees)));
-		}
-		Result.MinimumPitch = SmoothedSurfaceMinimumPitch;
-	}
-	const float CurrentPitch = FMath::Atan2(
-		FVector::DotProduct(Forward, RadialUp), FVector::DotProduct(Forward, Heading));
-	Result.bRaiseNose = Result.bConstrainPitch && bHasAheadSurface && !bTurnAround
-		&& CurrentPitch < Result.MinimumPitch - FMath::DegreesToRadians(1.0f);
-	return Result;
+    bEnvelopeEscape = true;
+    bTakeoffClearance = bRequireTakeoffClearance;
+    TakeoffClearanceRadius = 0;
+    EnvelopeLandingRetryElapsed = 0;
+    ClearInput();
+    if (bTakeoffClearance)
+    {
+        Velocity = FVector::ZeroVector;
+        if (auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
+            Ship->GetSurfaceEnvelopeComponent()->Reset();
+    }
 }
 
-void UJTSSpacecraftFlightMovementComponent::ResetSurfaceNoseGuard()
+bool UJTSSpacecraftFlightMovementComponent::IsAtEnvelopeBoundary() const
 {
-	bSurfaceNoseGuardActive = false;
-	SurfaceNosePitchClearElapsed = 0.0f;
-	SmoothedSurfaceMinimumPitch = 0.0f;
+    const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+    const auto Frame = Ship ? Ship->GetSurfaceEnvelopeComponent()->GetFrame() : FJTSSurfaceEnvelopeFrame();
+    return Frame.bValid && FVector::DotProduct(Ship->GetActorLocation() - Frame.Location, Frame.RadialUp) <= 1.0;
 }
 
-void UJTSSpacecraftFlightMovementComponent::ApplySurfaceClearanceProtection(
-	float DeltaTime, const FSurfaceAvoidance& Avoidance)
+bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime)
 {
-	const APawn* const OwningPawn = GetPawnOwner();
-	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
-	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(OwningPawn);
-	if (!bHasSurfaceProximity || !IsValid(Planet) || !IsValid(Spacecraft))
-	{
-		return;
-	}
-
-	// Terrain normals can swing sharply across craters and ridges. The radial direction is stable;
-	// the real mesh supplies the separation and the collision sweep remains authoritative.
-	const FVector SurfaceUp = Planet->GetRadialUpVector(OwningPawn->GetActorLocation()).GetSafeNormal();
-	if (SurfaceUp.IsNearlyZero())
-	{
-		return;
-	}
-
-	if (CachedSurfaceAltitude <= Planet->GetTakeoffTransitionAltitude())
-	{
-		const float HullClearance = Spacecraft->GetLandingCollisionClearanceForRotation(
-			UpdatedComponent->GetComponentQuat(), SurfaceUp);
-		const float RequiredClearance = FMath::Max(0.0f, HullClearance + SurfaceClearanceSafetyMargin);
-		const float AvailableClearance = CachedSurfaceAltitude - RequiredClearance;
-		const float LookAheadTime = FMath::Max(0.1f, SurfaceClearanceLookAheadTime);
-		float MinimumNormalSpeed = -FMath::Max(0.0f, AvailableClearance) / LookAheadTime;
-		if (AvailableClearance < 0.0f)
-		{
-			MinimumNormalSpeed = FMath::Min(
-				FMath::Max(0.0f, SurfaceClearanceRecoverySpeed),
-				-AvailableClearance / LookAheadTime);
-		}
-
-		const float CurrentNormalSpeed = FVector::DotProduct(Velocity, SurfaceUp);
-		if (CurrentNormalSpeed < MinimumNormalSpeed)
-		{
-			Velocity += SurfaceUp * (MinimumNormalSpeed - CurrentNormalSpeed);
-		}
-	}
-
-	if (!Avoidance.bAssistVelocity || Avoidance.MinimumUpSpeed <= -BIG_NUMBER * 0.5f)
-	{
-		return;
-	}
-	const float MaximumClimbSpeed = FMath::Max(1.0f, EffectiveStats.LiftSpeed * SpeedLimit);
-	const float DesiredUpSpeed = FMath::Min(Avoidance.MinimumUpSpeed, MaximumClimbSpeed);
-	const float CurrentUpSpeed = FVector::DotProduct(Velocity, SurfaceUp);
-	if (DesiredUpSpeed > CurrentUpSpeed)
-	{
-		const float MaximumUpSpeedChange = FMath::Max(0.0f, EffectiveStats.Acceleration) * DeltaTime;
-		Velocity += SurfaceUp * FMath::Min(DesiredUpSpeed - CurrentUpSpeed, MaximumUpSpeedChange);
-	}
-	if (Avoidance.MinimumUpSpeed > MaximumClimbSpeed)
-	{
-		const float ForwardSpeed = FMath::Max(0.0f, FVector::DotProduct(Velocity, Avoidance.Heading));
-		const float SafeForwardSpeed = ForwardSpeed * MaximumClimbSpeed / Avoidance.MinimumUpSpeed;
-		const float SpeedReduction = FMath::Min(ForwardSpeed - SafeForwardSpeed,
-			FMath::Max(0.0f, EffectiveStats.BrakeStrength) * DeltaTime);
-		Velocity -= Avoidance.Heading * SpeedReduction;
-	}
+    auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+    if (!Ship) return false;
+    auto* Envelope = Ship->GetSurfaceEnvelopeComponent();
+    auto* Planet = TargetPlanet.Get();
+    Envelope->Refresh(Planet, Ship->GetActorLocation(), bTakeoffClearance ? FVector::ZeroVector : Velocity,
+        bHasSurfaceProximity ? CachedSurfaceAltitude : BIG_NUMBER, DeltaTime,
+        (VerticalInput > MovementDeadZone || bEnvelopeEscape) && !bTakeoffClearance, bTakeoffClearance);
+    const auto Frame = Envelope->GetFrame();
+    if (!Frame.bValid)
+    {
+        // Without a departure surface there is no authorised horizontal path out of the crater.
+        if (bTakeoffClearance) Velocity = FVector::ZeroVector;
+        return false;
+    }
+    const auto& Settings = Envelope->GetSettings();
+    const FVector Current = Ship->GetActorLocation();
+    const FVector Up = Frame.RadialUp;
+    const float Height = FVector::DotProduct(Current - Frame.Location, Up);
+    if (bTakeoffClearance)
+    {
+        double RequiredRadius;
+        if (!Envelope->GetTakeoffClearanceRadius(RequiredRadius))
+        {
+            Velocity = FVector::ZeroVector;
+            return false;
+        }
+        // Keep the highest departure target even if a later sample drops away. A brief Space
+        // press completes the lift; forward/strafe/boost cannot escape below the crater rim.
+        TakeoffClearanceRadius = FMath::Max(TakeoffClearanceRadius, RequiredRadius);
+        const double Remaining = TakeoffClearanceRadius - FVector::Distance(Current, Planet->GetPlanetCenter());
+        if (Remaining > 1.0)
+        {
+            const float LiftSpeed = FMath::Max(1.0f, EffectiveStats.LiftSpeed);
+            const float RadialSpeed = FMath::Max(0.0f, float(FVector::DotProduct(Velocity, Up)));
+            const float Speed = FMath::FInterpConstantTo(RadialSpeed, LiftSpeed, DeltaTime,
+                FMath::Max(1.0f, EffectiveStats.Acceleration));
+            Velocity = Up * FMath::Min(double(Speed), Remaining / FMath::Max(DeltaTime, SMALL_NUMBER));
+            return false;
+        }
+        bTakeoffClearance = false;
+        bEnvelopeEscape = false;
+        // A teleport/correction well above departure clearance has already left surface flight.
+        // Release the takeoff attitude latch immediately, including when no Space key is held.
+        if (Remaining < -Settings.FollowingExitHeight)
+            Envelope->Refresh(Planet, Current, Velocity, bHasSurfaceProximity ? CachedSurfaceAltitude : BIG_NUMBER,
+                0, true);
+    }
+    if (bEnvelopeEscape && Height >= Settings.HoverOffset) bEnvelopeEscape = false;
+    const bool bFollowing = Envelope->IsFollowing();
+    // Follow a single tangent field. Pilot pitch/camera error never fights terrain pitch.
+    if (bFollowing)
+    {
+        const float RadialSpeed = FVector::DotProduct(Velocity, Up);
+        FVector Tangent = FVector::VectorPlaneProject(Velocity, Up);
+        const float TangentSpeed = Tangent.Size();
+        Tangent = FVector::VectorPlaneProject(Tangent, Frame.Normal).GetSafeNormal() * TangentSpeed;
+        Velocity = Tangent;
+        if (FMath::Abs(VerticalInput) > MovementDeadZone)
+            Velocity += Up * (RadialSpeed - FVector::DotProduct(Tangent, Up));
+        else
+        {
+            const float Response = (1 - FMath::Exp(-Settings.HeightResponse * DeltaTime)) / FMath::Max(DeltaTime, SMALL_NUMBER);
+            Velocity += Up * FMath::Clamp((Settings.HoverOffset - Height) * Response, -EffectiveStats.LiftSpeed, SurfaceClearanceRecoverySpeed);
+        }
+    }
+    FJTSSurfaceEnvelopeFrame Next;
+    const FVector Proposed = Current + Velocity * DeltaTime;
+    if (!Envelope->Evaluate(Planet, Proposed, Next)) return false;
+    const float NextHeight = FVector::DotProduct(Proposed - Next.Location, Next.RadialUp);
+    EnvelopeLandingRetryElapsed += DeltaTime;
+    // Test the attempted crossing before committing it. An invalid stance cannot enter the shell.
+    // A rising mountain is not a landing command; takeoff and Space abort can escape from below.
+    if (!bEnvelopeEscape && VerticalInput < -MovementDeadZone && NextHeight < 0
+        && EnvelopeLandingRetryElapsed >= 0.2f)
+    {
+        EnvelopeLandingRetryElapsed = 0;
+        if (Ship->TryLandingAtEnvelopeBoundary()) return true;
+    }
+    const float FloorHeight = VerticalInput < -MovementDeadZone ? 0.0f : Settings.HoverOffset;
+    if (NextHeight < FloorHeight && (!bEnvelopeEscape || VerticalInput <= 0))
+    {
+        const float RequiredLift = (FloorHeight - NextHeight) / FMath::Max(DeltaTime, SMALL_NUMBER);
+        // Recover already displaced hulls gradually; ordinary flight clamps precisely at the shell.
+        const float RecoveryCap = Height < 0
+            ? FMath::Max(0.0f, SurfaceClearanceRecoverySpeed - float(FVector::DotProduct(Velocity, Up))) : BIG_NUMBER;
+        Velocity += Up * FMath::Min(RequiredLift, RecoveryCap);
+    }
+    return false;
 }
 
 FVector UJTSSpacecraftFlightMovementComponent::GetReferenceUp() const
@@ -940,37 +764,27 @@ FVector UJTSSpacecraftFlightMovementComponent::GetReferenceUp() const
 	return SafeReferenceUp.IsNearlyZero() ? FVector::UpVector : SafeReferenceUp;
 }
 
-FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(
-	float DeltaTime, const FSurfaceAvoidance& Avoidance)
+FQuat UJTSSpacecraftFlightMovementComponent::UpdateRotation(float DeltaTime)
 {
-	if (!IsValid(UpdatedComponent))
-	{
-		return FQuat::Identity;
-	}
-
-	const FQuat CurrentRotation = UpdatedComponent->GetComponentQuat();
-	FQuat DesiredRotation = BuildFreeFlightDesiredRotation(CurrentRotation, Avoidance);
-	if (Avoidance.bRaiseNose)
-	{
-		const FVector DesiredForward = DesiredRotation.GetForwardVector();
-		const float DesiredPitch = FMath::Atan2(
-			FVector::DotProduct(DesiredForward, Avoidance.RadialUp),
-			FVector::DotProduct(DesiredForward, Avoidance.Heading));
-		const float SafePitch = Avoidance.MinimumPitch;
-		if (DesiredPitch < SafePitch)
-		{
-			// Raise the complete hull around the local horizontal axis, leaving yaw and roll intact.
-			// InterpolateTowardRotation enforces the normal angular acceleration and turn-rate limits.
-			const FVector PitchAxis = FVector::CrossProduct(
-				Avoidance.RadialUp, Avoidance.Heading).GetSafeNormal();
-			DesiredRotation = (FQuat(PitchAxis, DesiredPitch - SafePitch) * DesiredRotation).GetNormalized();
-		}
-	}
-	return InterpolateTowardRotation(DeltaTime, CurrentRotation, DesiredRotation);
+    if (!IsValid(UpdatedComponent)) return FQuat::Identity;
+    const FQuat Current = UpdatedComponent->GetComponentQuat();
+    const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+    const auto* Envelope = Ship ? Ship->GetSurfaceEnvelopeComponent() : nullptr;
+    FQuat Desired = BuildFreeFlightDesiredRotation(Current);
+    if (Envelope && (Envelope->IsFollowing() || bTakeoffClearance) && Envelope->GetFrame().bValid)
+    {
+        const FVector Normal = Envelope->GetFrame().Normal;
+        FVector Forward = FVector::VectorPlaneProject(Current.GetForwardVector(), Normal).GetSafeNormal();
+        if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(Current.GetUpVector(), Normal).GetSafeNormal();
+        if (bTurnAroundLatched) Forward = FVector::VectorPlaneProject(TurnAroundTargetForward, Normal).GetSafeNormal();
+        else Forward = FQuat(Normal, SteeringInput.X * FMath::DegreesToRadians(12.0f)).RotateVector(Forward);
+        if (!Forward.IsNearlyZero()) Desired = FRotationMatrix::MakeFromXZ(Forward, Normal).ToQuat();
+    }
+    return InterpolateTowardRotation(DeltaTime, Current, Desired);
 }
 
 FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(
-	const FQuat& CurrentRotation, const FSurfaceAvoidance& Avoidance) const
+	const FQuat& CurrentRotation) const
 {
 	const float DeadZone = FMath::Clamp(MovementDeadZone, 0.0f, 1.0f);
 	const bool bYawing = FMath::Abs(SteeringInput.X) > DeadZone;
@@ -1002,55 +816,9 @@ FQuat UJTSSpacecraftFlightMovementComponent::BuildFreeFlightDesiredRotation(
 	const FQuat Yaw(CurrentRotation.GetUpVector(), bYawing ? SteeringInput.X * Step : 0.0f);
 	const float RequestedPitch = bPitching ? -SteeringInput.Y * Step : 0.0f;
 	const FQuat Pitch(CurrentRotation.GetRightVector(),
-		ConstrainDownwardPitchNearSurface(CurrentRotation, RequestedPitch, Avoidance));
+		RequestedPitch);
 	const FQuat Roll(CurrentRotation.GetForwardVector(), bRolling ? RollInput * Step : 0.0f);
 	return (Roll * Pitch * Yaw * CurrentRotation).GetNormalized();
-}
-
-float UJTSSpacecraftFlightMovementComponent::ConstrainDownwardPitchNearSurface(
-	const FQuat& CurrentRotation, float PitchRadians, const FSurfaceAvoidance& Avoidance) const
-{
-	if (FMath::IsNearlyZero(PitchRadians) || !Avoidance.bConstrainPitch)
-	{
-		return PitchRadians;
-	}
-	const FVector CurrentForward = CurrentRotation.GetForwardVector().GetSafeNormal();
-	const FVector Right = CurrentRotation.GetRightVector();
-	const auto PitchOfForward = [&Avoidance](const FVector& Forward)
-	{
-		return FMath::Atan2(
-			FVector::DotProduct(Forward, Avoidance.RadialUp),
-			FVector::DotProduct(Forward, Avoidance.Heading));
-	};
-	const float CurrentPitch = PitchOfForward(CurrentForward);
-	const float RequestedWorldPitch = PitchOfForward(FQuat(Right, PitchRadians).RotateVector(CurrentForward));
-	if (RequestedWorldPitch >= CurrentPitch || RequestedWorldPitch >= Avoidance.MinimumPitch)
-	{
-		return PitchRadians;
-	}
-	if (CurrentPitch <= Avoidance.MinimumPitch)
-	{
-		return 0.0f;
-	}
-
-	// Keep the largest pilot-requested step that remains parallel to or above the sampled surface.
-	// This only clips the downward turn; it never lifts a previously pitched hull automatically.
-	float AllowedStep = 0.0f;
-	float BlockedStep = PitchRadians;
-	for (int32 Iteration = 0; Iteration < 8; ++Iteration)
-	{
-		const float CandidateStep = (AllowedStep + BlockedStep) * 0.5f;
-		const FVector CandidateForward = FQuat(Right, CandidateStep).RotateVector(CurrentForward);
-		if (PitchOfForward(CandidateForward) >= Avoidance.MinimumPitch)
-		{
-			AllowedStep = CandidateStep;
-		}
-		else
-		{
-			BlockedStep = CandidateStep;
-		}
-	}
-	return AllowedStep;
 }
 
 FQuat UJTSSpacecraftFlightMovementComponent::InterpolateTowardRotation(
@@ -1118,7 +886,6 @@ void UJTSSpacecraftFlightMovementComponent::CompleteAssistedLanding()
 	bAssistedLanding = false;
 	ClearInput();
 	Velocity = FVector::ZeroVector;
-	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
 	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::Touchdown);
 	OnAssistedLandingCompleted.Broadcast();
@@ -1129,7 +896,6 @@ void UJTSSpacecraftFlightMovementComponent::FailAssistedLanding(EJTSLandingValid
 	bAssistedLanding = false;
 	ClearInput();
 	Velocity = FVector::ZeroVector;
-	AssistedLandingClearance = 0.0f;
 	AssistedLandingDescentSpeed = 0.0f;
 	SetAssistedLandingPhase(EJTSSpacecraftLandingAssistPhase::None);
 	OnAssistedLandingFailed.Broadcast(Failure);
@@ -1209,21 +975,6 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 			ECC_Visibility,
 			HullShape,
 			QueryParams);
-		// A correction or a forced spawn can leave the long hull already intersecting the real
-		// surface. Sweeping from penetration returns time zero forever. Allow only outward radial
-		// recovery against that surface, then resume ordinary swept motion once clear.
-		const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
-		if (bTranslationHit && TranslationHit.bStartPenetrating && bHasSurfaceProximity
-			&& IsValid(Planet) && TranslationHit.GetActor() == Planet->GetGameplaySurfaceActor())
-		{
-			const FVector RecoveryUp = Planet->GetRadialUpVector(OwningPawn->GetActorLocation()).GetSafeNormal();
-			const float OutwardStep = FVector::DotProduct(Delta, RecoveryUp);
-			if (OutwardStep > KINDA_SMALL_NUMBER)
-			{
-				MoveUpdatedComponent(RecoveryUp * OutwardStep, CurrentRotation, false, nullptr, ETeleportType::None);
-				return false;
-			}
-		}
 		const FVector AllowedTranslation = bTranslationHit
 			? Delta * FMath::Clamp(TranslationHit.Time, 0.0f, 1.0f)
 			: Delta;
