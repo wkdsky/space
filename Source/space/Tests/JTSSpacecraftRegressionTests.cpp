@@ -212,6 +212,33 @@ bool FJTSItemDefinitionCacheGcRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSLandedHeadlightsRegression, "JTS.Spacecraft.LandedHeadlights",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSLandedHeadlightsRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	AJTSCharacter* Character = nullptr;
+	Fixture.AddPlayer(Character, true);
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Fixture.Ship->ServerToggleHeadlights_Implementation();
+	TestFalse(TEXT("On-foot players cannot change ship lights"), Fixture.Ship->AreHeadlightsOn());
+	TestTrue(TEXT("Player boards the landed ship"), Fixture.Ship->TryBoardPlayer(Character));
+	Fixture.Ship->FlightHeadlightStarted(FInputActionValue(true));
+	TestTrue(TEXT("A boarded driver can enable landed headlights with L"), Fixture.Ship->AreHeadlightsOn());
+	Fixture.Ship->FlightState = EJTSSpacecraftFlightState::Flying;
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	TestTrue(TEXT("Touchdown preserves the requested light state"), Fixture.Ship->AreHeadlightsOn());
+	Fixture.Ship->ServerToggleHeadlights_Implementation();
+	TestFalse(TEXT("A landed driver can switch headlights off"), Fixture.Ship->AreHeadlightsOn());
+	Fixture.Ship->ServerToggleHeadlights_Implementation();
+	TestTrue(TEXT("Driver can switch lights on again"), Fixture.Ship->AreHeadlightsOn());
+	TestTrue(TEXT("Driver disembarks the landed ship"), Fixture.Ship->TryDisembarkPlayer(Character));
+	Fixture.Ship->ServerToggleHeadlights_Implementation();
+	TestTrue(TEXT("Disembarking preserves illumination and denies further control"), Fixture.Ship->AreHeadlightsOn());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSUnarmedAimRegression, "JTS.Character.UnarmedAim",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

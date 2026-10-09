@@ -76,6 +76,9 @@ namespace
 		case EJTSResourceType::Ore:
 			return TEXT("Ore");
 
+		case EJTSResourceType::Crystal:
+			return TEXT("Crystal");
+
 		case EJTSResourceType::Organic:
 			return TEXT("Organic");
 
@@ -93,6 +96,7 @@ namespace
 		case EJTSResourceType::Food:
 		case EJTSResourceType::Rock:
 		case EJTSResourceType::Ore:
+		case EJTSResourceType::Crystal:
 		case EJTSResourceType::Organic:
 			return true;
 
@@ -875,14 +879,13 @@ void AJTSSpacecraftActor::FlightBoostStopped(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::FlightHeadlightStarted(const FInputActionValue& Value)
 {
-	if (!Value.Get<bool>() || FlightState != EJTSSpacecraftFlightState::Flying)
+	if (!Value.Get<bool>() || !IsLocallyControlled())
 	{
 		return;
 	}
 	if (HasAuthority())
 	{
-		bHeadlightsRequested = !bHeadlightsRequested;
-		ForceNetUpdate();
+		ServerToggleHeadlights_Implementation();
 	}
 	else
 	{
@@ -892,7 +895,11 @@ void AJTSSpacecraftActor::FlightHeadlightStarted(const FInputActionValue& Value)
 
 void AJTSSpacecraftActor::ServerToggleHeadlights_Implementation()
 {
-	if (FlightState != EJTSSpacecraftFlightState::Flying)
+	const APlayerController* const DriverController = Cast<APlayerController>(GetController());
+	if (!HasAuthority() || !IsValid(DriverController) || !IsValid(DriverPlayerState)
+		|| DriverController->GetPawn() != this
+		|| DriverController->GetPlayerState<AJTSPlayerState>() != DriverPlayerState
+		|| !IsPlayerBoarded(FindBoardedCharacterForPlayerState(DriverPlayerState)))
 	{
 		return;
 	}
@@ -902,7 +909,7 @@ void AJTSSpacecraftActor::ServerToggleHeadlights_Implementation()
 
 bool AJTSSpacecraftActor::AreHeadlightsOn() const
 {
-	return bHeadlightsRequested && FlightState == EJTSSpacecraftFlightState::Flying;
+	return bHeadlightsRequested;
 }
 
 void AJTSSpacecraftActor::OnRep_Headlights()
@@ -2242,7 +2249,6 @@ void AJTSSpacecraftActor::SetGroundedPlanet(AJTSPlanetAnchor* InPlanetAnchor)
 		}
 	}
 	FlightState = EJTSSpacecraftFlightState::Landed;
-	bHeadlightsRequested = false;
 	LandingAssistPhase = EJTSSpacecraftLandingAssistPhase::Touchdown;
 	LastLandingFailure = EJTSLandingValidationFailure::None;
 
@@ -3458,6 +3464,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 
 	const int32 RockCount = Inventory->GetItemCount(EJTSItemId::Rock);
 	const int32 OreCount = Inventory->GetItemCount(EJTSItemId::Ore);
+	const int32 CrystalCount = Inventory->GetItemCount(EJTSItemId::Crystal);
 	const int32 MoonAntCorpseCount = Inventory->GetItemCount(EJTSItemId::MoonAntCorpse);
 	TMap<EJTSResourceType, int32> Materials;
 	if (RockCount > 0)
@@ -3468,6 +3475,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 	{
 		Materials.Add(EJTSResourceType::Ore, OreCount);
 	}
+	if (CrystalCount > 0) Materials.Add(EJTSResourceType::Crystal, CrystalCount);
 	if (MoonAntCorpseCount > 0)
 	{
 		// A corpse is a carried item, but it becomes processed Organic when submitted to the ship.
@@ -3480,8 +3488,9 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 
 	const bool bRemovedRock = RockCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Rock, RockCount);
 	const bool bRemovedOre = bRemovedRock && (OreCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Ore, OreCount));
-	const bool bRemovedCorpse = bRemovedOre && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
-	if (!bRemovedRock || !bRemovedOre || !bRemovedCorpse)
+	const bool bRemovedCrystal = bRemovedOre && (CrystalCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Crystal, CrystalCount));
+	const bool bRemovedCorpse = bRemovedCrystal && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
+	if (!bRemovedRock || !bRemovedOre || !bRemovedCrystal || !bRemovedCorpse)
 	{
 		if (bRemovedRock && RockCount > 0)
 		{
@@ -3491,6 +3500,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 		{
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
 		}
+		if (bRemovedCrystal && CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
 		if (bRemovedCorpse && MoonAntCorpseCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
@@ -3508,6 +3518,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 		{
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
 		}
+		if (CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
 		if (MoonAntCorpseCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);

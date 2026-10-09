@@ -47,6 +47,7 @@ namespace
 		case EJTSItemId::ArcGun: return TEXT("/Game/Space/Data/Items/DA_Item_ArcGun.DA_Item_ArcGun");
 		case EJTSItemId::Rock: return TEXT("/Game/Space/Data/Items/DA_Item_Rock.DA_Item_Rock");
 		case EJTSItemId::Ore: return TEXT("/Game/Space/Data/Items/DA_Item_Ore.DA_Item_Ore");
+		case EJTSItemId::Crystal: return TEXT("/Game/Space/Data/Items/DA_Item_Crystal.DA_Item_Crystal");
 		case EJTSItemId::Fuel: return TEXT("/Game/Space/Data/Items/DA_Item_Fuel.DA_Item_Fuel");
 		case EJTSItemId::Water: return TEXT("/Game/Space/Data/Items/DA_Item_Water.DA_Item_Water");
 		case EJTSItemId::Food: return TEXT("/Game/Space/Data/Items/DA_Item_Food.DA_Item_Food");
@@ -340,6 +341,9 @@ namespace
 			SetResource(TEXT("Ore"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.10f, 0.72f, 0.95f, 1.0f));
 			Definition->AffinityTags = { TEXT("Material"), TEXT("Conductive"), TEXT("Improvised") };
 			break;
+		case EJTSItemId::Crystal:
+			SetResource(TEXT("Crystal"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.45f, 0.25f, 1.0f, 1.0f));
+			break;
 		case EJTSItemId::Fuel:
 			SetResource(TEXT("Fuel"), ItemId, EJTSItemCategory::Resources, FLinearColor(1.0f, 0.44f, 0.12f, 1.0f));
 			break;
@@ -440,6 +444,7 @@ bool UJTSItemDefinitionLibrary::TryGetResourceType(EJTSItemId ItemId, EJTSResour
 	case EJTSItemId::Food: OutResourceType = EJTSResourceType::Food; return true;
 	case EJTSItemId::Rock: OutResourceType = EJTSResourceType::Rock; return true;
 	case EJTSItemId::Ore: OutResourceType = EJTSResourceType::Ore; return true;
+	case EJTSItemId::Crystal: OutResourceType = EJTSResourceType::Crystal; return true;
 	case EJTSItemId::MoonAntCorpse: OutResourceType = EJTSResourceType::MoonAntCorpse; return true;
 	default: return false;
 	}
@@ -454,6 +459,7 @@ EJTSItemId UJTSItemDefinitionLibrary::GetItemIdForResource(EJTSResourceType Reso
 	case EJTSResourceType::Food: return EJTSItemId::Food;
 	case EJTSResourceType::Rock: return EJTSItemId::Rock;
 	case EJTSResourceType::Ore: return EJTSItemId::Ore;
+	case EJTSResourceType::Crystal: return EJTSItemId::Crystal;
 	case EJTSResourceType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
 	default: return EJTSItemId::None;
 	}

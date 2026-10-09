@@ -4,9 +4,14 @@
 #include "GameFramework/Actor.h"
 #include "space/Items/JTSResourceType.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSMoonResourceDistribution.h"
 
 #include "JTSMoonResourceSpawner.generated.h"
 
+class USceneComponent;
+class ULineBatchComponent;
+class FJTSMoonResourceCoverage;
+class UJTSMoonSurfaceGameplayData;
 class AJTSMoonCorpseActor;
 class AJTSMoonSurfaceController;
 class AJTSPlanetAnchor;
@@ -14,13 +19,13 @@ class AJTSMoonAntNestActor;
 class AJTSSpacecraftActor;
 class AJTSWorldPickupActor;
 
-/** Moon resource distribution values owned by the Moon chapter ruleset. */
+/** Shared resource content defaults. Legacy count/weights are retained only for asset migration. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSMoonResourceSpawnSettings
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 TotalResourceCount = 75;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
@@ -30,22 +35,22 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float MinimumResourceSpacing = 200.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 SmallRockWeight = 55;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 MediumRockWeight = 20;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 LargeRockWeight = 10;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 OreWeight = 15;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "0", UIMin = "0"))
+	UPROPERTY()
 	int32 MediumMetalRockWeight = 0;
 
-	/** Large mixed deposits keep the existing OreWeight distribution slot. */
+	/** Secondary yield for medium metal-bearing rocks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "1", UIMin = "1"))
 	int32 MediumMetalYieldUnits = 2;
 
@@ -63,6 +68,15 @@ struct SPACE_API FJTSMoonResourceSpawnSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Random", meta = (EditCondition = "bUseDeterministicSeed"))
 	int32 RandomSeed = 1337;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (DisplayName = "Resource Kinds"))
+	FJTSMoonResourceKinds ResourceKinds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "1"))
+	int32 MediumCrystalYieldUnits = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (ClampMin = "1"))
+	int32 LargeCrystalYieldUnits = 6;
 };
 
 UCLASS()
@@ -73,8 +87,50 @@ class SPACE_API AJTSMoonResourceSpawner : public AActor
 public:
 	AJTSMoonResourceSpawner();
 
+	/** Refreshes content availability and the editor-only surface ring without replacing instance abundance. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Moon|Resources")
+	void RefreshResourceConfiguration();
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Resources")
+	int32 GetTargetResourceCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Resources")
+	float GetCoverageAreaSquareMeters() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Resources|Coverage")
+	int32 GetCoveragePreviewSegmentCount() const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Content")
+	TObjectPtr<UJTSMoonSurfaceGameplayData> ResourceGameplayData;
+
+	/** Number of resource objects per 100 square metres of spherical coverage. Zero disables spawning. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Distribution", meta = (DisplayName = "Resource Density (per 100 m2)", ClampMin = "0", UIMin = "0"))
+	float ResourceDensity = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Distribution")
+	FJTSMoonResourceDistribution ResourceRatios;
+
+	/** Compare priority whenever ratios or density differ; lower numbers cover higher numbers. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Distribution")
+	int32 OverlapPriority = 0;
+
+	UPROPERTY(EditInstanceOnly, Category = "Moon|Resources|Coverage")
+	bool bOverrideCoverageRadius = false;
+
+	/** Surface arc radius. The PDA supplies the base value unless this instance opts into an override. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Coverage", meta = (ClampMin = "0", UIMin = "0", EditCondition = "bOverrideCoverageRadius"))
+	float Radius = 2000;
+
+	/** Level-authored planet used to project the editor coverage circle onto real mesh collision. */
+	UPROPERTY(EditInstanceOnly, Category = "Moon|Resources|Coverage")
+	TObjectPtr<AJTSPlanetAnchor> CoveragePlanet;
+
+
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
 	int32 GenerateResources();
+
+	/** Regenerates a planet's configured regions together, clearing old winners and sharing spacing. */
+	static int32 GenerateResourceGroup(const TArray<AJTSMoonResourceSpawner*>& Spawners);
 
 	/** Applies Moon surface runtime balance values before this spawner generates its resources. */
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
@@ -97,8 +153,14 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+	virtual void PostEditUndo() override;
+#endif
 
 private:
+	int32 GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage);
 	void ClearGeneratedResources();
 	AJTSMoonResourceActor* SpawnMiningNode(
 		EJTSResourceType ResourceType,
@@ -117,33 +179,27 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonResourceActor> ResourceActorClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 ResourceCount = 75;
+	UPROPERTY(VisibleAnywhere, Category = "Moon|Resources|Coverage")
+	TObjectPtr<USceneComponent> SceneRoot;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
-	float Radius = 10000.0f;
+#if WITH_EDITORONLY_DATA
+	UPROPERTY(VisibleAnywhere, Category = "Moon|Resources|Coverage")
+	TObjectPtr<ULineBatchComponent> CoverageOutline;
+#endif
 
-	/** Runtime copy of the Moon surface settings' minimum surface spacing. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
-	float MinimumResourceSpacing = 0.0f;
+	UPROPERTY(VisibleInstanceOnly, Category = "Moon|Resources|Distribution")
+	int32 ResourceCount = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 SmallRockWeight = 55;
+	UPROPERTY(VisibleInstanceOnly, Category = "Moon|Resources")
+	float MinimumResourceSpacing = 200;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 MediumRockWeight = 20;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 LargeRockWeight = 10;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
-	int32 OreWeight = 15;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true", ClampMin = "0"))
-	int32 MediumMetalRockWeight = 0;
+	void UpdateCoveragePreview();
 
 	UPROPERTY(VisibleInstanceOnly, Category = "Moon|Resources")
 	int32 MediumMetalYieldUnits = 2;
+
+	int32 MediumCrystalYieldUnits = 2;
+	int32 LargeCrystalYieldUnits = 6;
 
 	/** Runtime copy of the Moon surface settings' spacecraft exclusion setting. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources", meta = (AllowPrivateAccess = "true"))
@@ -159,10 +215,10 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Ground", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
 	float GroundTraceDistance = 3000.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Random", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources|Random", meta = (AllowPrivateAccess = "true"))
 	bool bUseRandomSeed = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon|Resources|Random", meta = (AllowPrivateAccess = "true", EditCondition = "!bUseRandomSeed"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Moon|Resources|Random", meta = (AllowPrivateAccess = "true"))
 	int32 RandomSeed = 1337;
 
 	UPROPERTY(Transient)

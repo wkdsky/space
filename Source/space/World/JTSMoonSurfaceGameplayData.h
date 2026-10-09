@@ -92,6 +92,11 @@ public:
 	virtual float GetMoonAntGroundTraceDistance() const override;
 	virtual int32 GetMoonAntNestPunchHitsToDestroy() const override;
 
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+	virtual void PostEditUndo() override;
+#endif
+
 private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Survival", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 CrewCount = 1;

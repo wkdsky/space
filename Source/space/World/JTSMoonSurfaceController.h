@@ -149,7 +149,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;
 
-	/** Explicit generator binding for this real Moon surface. */
+	/** Optional legacy binding; all resource regions authored for this planet in the surface level are also initialized. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AJTSMoonResourceSpawner> MoonResourceSpawner;
 

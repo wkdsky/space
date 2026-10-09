@@ -15,7 +15,8 @@ enum class EJTSResourceType : uint8
 	/** A processed ship resource produced by submitting an MoonAnt Corpse. */
 	Organic = 5 UMETA(DisplayName = "Organic"),
 	/** A carried Moon item. It occupies one inventory slot and is converted to Organic only by the spacecraft. */
-	MoonAntCorpse = 6 UMETA(DisplayName = "MoonAnt Corpse")
+	MoonAntCorpse = 6 UMETA(DisplayName = "MoonAnt Corpse"),
+	Crystal = 7 UMETA(DisplayName = "Crystal")
 };
 
 USTRUCT(BlueprintType)

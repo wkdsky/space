@@ -136,6 +136,7 @@ namespace
 		{
 		case EJTSResourceType::Rock: return TEXT("ROCK");
 		case EJTSResourceType::Ore: return TEXT("ORE");
+		case EJTSResourceType::Crystal: return TEXT("CRYSTAL");
 		case EJTSResourceType::Fuel: return TEXT("FUEL");
 		case EJTSResourceType::Water: return TEXT("WATER");
 		case EJTSResourceType::Food: return TEXT("FOOD");

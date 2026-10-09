@@ -55,17 +55,12 @@ def configure():
     unreal.BlueprintEditorLibrary.compile_blueprint(spawner)
     save(spawner)
 
+    # Density and percentages are authored on each placed BP_MoonResourceSpawner.
+    # The shared PDA now owns only coverage/content defaults; do not overwrite instance abundance.
     data = unreal.load_asset('/Game/Space/Data/Planets/Moon/PDA_MoonSurfaceGameplay')
-    settings = data.get_editor_property('moon_resource_spawn_settings')
-    # Keep authored region size, count, exclusions and seed. Distribute five resource forms.
-    settings.small_rock_weight = 40
-    settings.medium_rock_weight = 20
-    settings.large_rock_weight = 15
-    settings.medium_metal_rock_weight = 15
-    settings.ore_weight = 10
-    settings.medium_metal_yield_units = 2
-    data.set_editor_property('moon_resource_spawn_settings', settings)
-    save(data)
+    unreal.get_default_object(spawner.generated_class()).set_editor_property('resource_gameplay_data', data)
+    unreal.BlueprintEditorLibrary.compile_blueprint(spawner)
+    save(spawner)
 
     rock = unreal.load_asset('/Game/Space/Data/Items/DA_Item_Rock')
     rock.set_editor_property('world_pickup_mesh', meshes['rocks_smallB'])

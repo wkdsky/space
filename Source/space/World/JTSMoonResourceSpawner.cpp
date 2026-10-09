@@ -1,6 +1,14 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Components/SceneComponent.h"
+#include "Components/LineBatchComponent.h"
+#include "Components/SplineComponent.h"
+#include "space/World/JTSMoonSurfaceGameplayData.h"
+#include "space/World/JTSMoonResourceCoverage.h"
+#include "space/World/JTSMoonResourcePreviewComponent.h"
+#include "UObject/UnrealType.h"
 #include "HAL/PlatformTime.h"
 #include "Math/RandomStream.h"
 #include "space/Items/JTSResourceType.h"
@@ -31,31 +39,159 @@ AJTSMoonResourceSpawner::AJTSMoonResourceSpawner()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	ResourceActorClass = AJTSMoonResourceActor::StaticClass();
+	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
+	SetRootComponent(SceneRoot);
+#if WITH_EDITORONLY_DATA
+	CoverageOutline = CreateEditorOnlyDefaultSubobject<UJTSMoonResourcePreviewComponent>(TEXT("CoverageOutline"));
+	CoverageOutline->SetupAttachment(SceneRoot);
+	CoverageOutline->bIsEditorOnly = true;
+	CoverageOutline->PrimaryComponentTick.bCanEverTick = false;
+	CoverageOutline->SetHiddenInGame(true);
+	CoverageOutline->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CoverageOutline->SetGenerateOverlapEvents(false);
+#endif
 }
 
 void AJTSMoonResourceSpawner::BeginPlay()
 {
 	Super::BeginPlay();
+#if WITH_EDITORONLY_DATA
+	if (IsValid(CoverageOutline))
+	{
+		CoverageOutline->Flush();
+		CoverageOutline->SetVisibility(false, true);
+		CoverageOutline->SetHiddenInGame(true);
+	}
+#endif
 
 	// The active MoonSurfaceController applies settings, landmarks, and its PlanetAnchor before generation.
 }
 
 void AJTSMoonResourceSpawner::ApplyMoonSpawnSettings(const FJTSMoonResourceSpawnSettings& Settings)
 {
-	ResourceCount = FMath::Max(0, Settings.TotalResourceCount);
-	Radius = FMath::Max(0.0f, Settings.SpawnRadius);
+	if (!bOverrideCoverageRadius) Radius = FMath::Max(0.0f, Settings.SpawnRadius);
 	MinimumResourceSpacing = FMath::Max(0.0f, Settings.MinimumResourceSpacing);
-	SmallRockWeight = FMath::Max(0, Settings.SmallRockWeight);
-	MediumRockWeight = FMath::Max(0, Settings.MediumRockWeight);
-	LargeRockWeight = FMath::Max(0, Settings.LargeRockWeight);
-	OreWeight = FMath::Max(0, Settings.OreWeight);
-	MediumMetalRockWeight = FMath::Max(0, Settings.MediumMetalRockWeight);
 	MediumMetalYieldUnits = FMath::Max(1, Settings.MediumMetalYieldUnits);
+	MediumCrystalYieldUnits = FMath::Max(1, Settings.MediumCrystalYieldUnits);
+	LargeCrystalYieldUnits = FMath::Max(1, Settings.LargeCrystalYieldUnits);
+	ResourceRatios.SetEnabledKinds(Settings.ResourceKinds);
+	ResourceRatios.Normalize();
+	ResourceCount = GetTargetResourceCount();
 	SpacecraftExclusionPadding = FMath::Max(0.0f, Settings.SpacecraftExclusionPadding);
 	LandmarkExclusionPadding = FMath::Max(0.0f, Settings.LandmarkExclusionPadding);
 	bUseRandomSeed = !Settings.bUseDeterministicSeed;
 	RandomSeed = Settings.RandomSeed;
 }
+
+void AJTSMoonResourceSpawner::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+#if WITH_EDITOR
+	// Remove serialized previews from the previous spline implementation during asset migration.
+	TInlineComponentArray<USplineComponent*> LegacyPreviews(this);
+	for (USplineComponent* Preview : LegacyPreviews)
+	{
+		if (Preview->GetFName() == TEXT("CoveragePreview")) Preview->DestroyComponent();
+	}
+#endif
+	RefreshResourceConfiguration();
+}
+
+void AJTSMoonResourceSpawner::RefreshResourceConfiguration()
+{
+	if (IsValid(ResourceGameplayData)) ApplyMoonSpawnSettings(ResourceGameplayData->GetMoonResourceSpawnSettings());
+	else ResourceRatios.Normalize();
+	ResourceDensity = FMath::IsFinite(ResourceDensity) ? FMath::Max(0.0f, ResourceDensity) : 0;
+	ResourceCount = GetTargetResourceCount();
+	UpdateCoveragePreview();
+}
+
+float AJTSMoonResourceSpawner::GetCoverageAreaSquareMeters() const
+{
+	const AJTSPlanetAnchor* Planet = OwningPlanet.IsValid() ? OwningPlanet.Get() : CoveragePlanet.Get();
+	const double SurfaceRadius = IsValid(Planet) ? Planet->GetApproximateRadius() : 0;
+	const double ArcRadius = FMath::IsFinite(Radius) ? FMath::Max(0.0, static_cast<double>(Radius)) : 0;
+	// Spherical cap area. The sine form avoids cancellation for small coverage angles.
+	const double Sine = SurfaceRadius > 0 ? FMath::Sin(FMath::Min(UE_DOUBLE_PI, ArcRadius / SurfaceRadius) * 0.5) : 0;
+	const double AreaCm2 = SurfaceRadius > 0 ? 4 * UE_DOUBLE_PI * SurfaceRadius * SurfaceRadius * Sine * Sine
+		: UE_DOUBLE_PI * ArcRadius * ArcRadius;
+	return static_cast<float>(AreaCm2 / 10000.0);
+}
+
+int32 AJTSMoonResourceSpawner::GetTargetResourceCount() const
+{
+	const double Target = static_cast<double>(GetCoverageAreaSquareMeters()) * ResourceDensity / 100.0;
+	return FMath::IsFinite(Target) ? FMath::RoundToInt(FMath::Clamp(Target, 0.0, 100000.0)) : 0;
+}
+
+void AJTSMoonResourceSpawner::UpdateCoveragePreview()
+{
+#if WITH_EDITOR
+	if (!IsValid(CoverageOutline) || !GetWorld()) return;
+	CoverageOutline->bIsEditorOnly = true;
+	CoverageOutline->Flush();
+	if (GetWorld()->IsGameWorld())
+	{
+		CoverageOutline->SetVisibility(false, true);
+		CoverageOutline->SetHiddenInGame(true);
+		return;
+	}
+	CoverageOutline->SetVisibility(true);
+	const AJTSPlanetAnchor* Planet = CoveragePlanet.Get();
+	const FVector Origin = GetActorLocation();
+	const FVector Up = IsValid(Planet) ? Planet->GetRadialUpVector(Origin) : GetActorUpVector();
+	FVector TangentX, TangentY;
+	Up.FindBestAxisVectors(TangentX, TangentY);
+	constexpr int32 SegmentCount = 192;
+	TArray<FVector, TInlineAllocator<SegmentCount>> Points;
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
+	{
+		const double Azimuth = UE_DOUBLE_TWO_PI * Index / SegmentCount;
+		const FVector Tangent = TangentX * FMath::Cos(Azimuth) + TangentY * FMath::Sin(Azimuth);
+		FVector Point = Origin + Tangent * Radius;
+		if (IsValid(Planet))
+		{
+			const double Angle = FMath::Min(UE_DOUBLE_PI, static_cast<double>(Planet->ArcDistanceToAngleRadians(Radius)));
+			const FVector Direction = Up * FMath::Cos(Angle) + Tangent * FMath::Sin(Angle);
+			Point = Planet->GetPlanetCenter() + Direction * Planet->GetApproximateRadius();
+			FJTSPlanetSurfaceHit Hit;
+			if (Planet->ProjectPointToSurface(Point, Hit)) Point = Hit.ImpactPoint + Hit.ImpactNormal * 10;
+		}
+		Points.Add(Point);
+	}
+	TArray<FBatchedLine> Lines;
+	Lines.Reserve(SegmentCount);
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
+	{
+		Lines.Emplace(Points[Index], Points[(Index + 1) % SegmentCount], FLinearColor(0.02f, 0.5f, 1), -1, 4, SDPG_World);
+	}
+	CoverageOutline->DrawLines(Lines);
+#endif
+}
+
+int32 AJTSMoonResourceSpawner::GetCoveragePreviewSegmentCount() const
+{
+#if WITH_EDITORONLY_DATA
+	return IsValid(CoverageOutline) ? CoverageOutline->BatchedLines.Num() : 0;
+#else
+	return 0;
+#endif
+}
+
+#if WITH_EDITOR
+void AJTSMoonResourceSpawner::PostEditChangeProperty(FPropertyChangedEvent& Event)
+{
+	ResourceRatios.Normalize(Event.GetPropertyName());
+	Super::PostEditChangeProperty(Event);
+	RefreshResourceConfiguration();
+}
+
+void AJTSMoonResourceSpawner::PostEditUndo()
+{
+	Super::PostEditUndo();
+	RefreshResourceConfiguration();
+}
+#endif
 
 void AJTSMoonResourceSpawner::SetLandmarkExclusions(
 	AJTSSpacecraftActor* InSpacecraft,
@@ -70,6 +206,7 @@ void AJTSMoonResourceSpawner::SetLandmarkExclusions(
 void AJTSMoonResourceSpawner::SetOwningPlanet(AJTSPlanetAnchor* InOwningPlanet)
 {
 	OwningPlanet = InOwningPlanet;
+	ResourceCount = GetTargetResourceCount();
 }
 
 AJTSPlanetAnchor* AJTSMoonResourceSpawner::GetOwningPlanet() const
@@ -84,13 +221,58 @@ void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AJTSMoonSurfaceContro
 
 int32 AJTSMoonResourceSpawner::GenerateResources()
 {
+	if (!HasAuthority() || !GetWorld()) return 0;
+	TArray<AJTSMoonResourceSpawner*> Spawners;
+	for (TActorIterator<AJTSMoonResourceSpawner> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsActorBeingDestroyed() && It->GetOwningPlanet() == GetOwningPlanet()
+			&& It->GetLevel() == GetLevel() && It->SurfaceGameplayController == SurfaceGameplayController)
+		{
+			Spawners.Add(*It);
+		}
+	}
+	GenerateResourceGroup(Spawners);
+	int32 Count = 0;
+	for (const auto& Resource : GeneratedResources) if (IsValid(Resource)) ++Count;
+	for (const auto& Pickup : GeneratedPickups) if (Pickup.IsValid()) ++Count;
+	return Count;
+}
+
+int32 AJTSMoonResourceSpawner::GenerateResourceGroup(const TArray<AJTSMoonResourceSpawner*>& Spawners)
+{
+	TArray<AJTSMoonResourceSpawner*> Ordered;
+	for (AJTSMoonResourceSpawner* Spawner : Spawners)
+	{
+		if (IsValid(Spawner) && Spawner->HasAuthority() && IsValid(Spawner->GetOwningPlanet())) Ordered.AddUnique(Spawner);
+	}
+	if (Ordered.IsEmpty()) return 0;
+	Ordered.Sort([](const AJTSMoonResourceSpawner& A, const AJTSMoonResourceSpawner& B) { return A.GetPathName() < B.GetPathName(); });
+	const AJTSPlanetAnchor* Planet = Ordered[0]->GetOwningPlanet();
+	Ordered.RemoveAll([Planet](const AJTSMoonResourceSpawner* Spawner) { return Spawner->GetOwningPlanet() != Planet; });
+	uint32 TieSeed = 0;
+	bool bRandomTieSeed = false;
+	for (AJTSMoonResourceSpawner* Spawner : Ordered)
+	{
+		Spawner->RefreshResourceConfiguration();
+		Spawner->ClearGeneratedResources();
+		TieSeed = HashCombineFast(TieSeed, GetTypeHash(Spawner->RandomSeed));
+		bRandomTieSeed |= Spawner->bUseRandomSeed;
+	}
+	if (bRandomTieSeed) TieSeed ^= static_cast<uint32>(FPlatformTime::Cycles64());
+	FJTSMoonResourceCoverage Coverage(Planet, Ordered, static_cast<int32>(TieSeed));
+	int32 Total = 0;
+	for (AJTSMoonResourceSpawner* Spawner : Ordered) Total += Spawner->GenerateResourcesInCoverage(Coverage);
+	return Total;
+}
+
+int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage)
+{
 	UWorld* const World = GetWorld();
 	if (!HasAuthority() || World == nullptr)
 	{
 		return 0;
 	}
 
-	ClearGeneratedResources();
 	AJTSPlanetAnchor* const Planet = OwningPlanet.Get();
 	if (!IsValid(Planet))
 	{
@@ -98,27 +280,16 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		return 0;
 	}
 
-	const int32 SafeResourceCount = FMath::Max(0, ResourceCount);
+	const int32 SafeResourceCount = FMath::RoundToInt(FMath::Clamp(
+		static_cast<double>(Coverage.GetOwnedAreaSquareMeters(this)) * ResourceDensity / 100.0, 0.0, 100000.0));
+	ResourceCount = SafeResourceCount;
 	if (SafeResourceCount <= 0)
 	{
 		return 0;
 	}
 
-	const int32 SafeSmallRockWeight = FMath::Max(0, SmallRockWeight);
-	const int32 SafeMediumRockWeight = FMath::Max(0, MediumRockWeight);
-	const int32 SafeLargeRockWeight = FMath::Max(0, LargeRockWeight);
-	const int32 SafeOreWeight = FMath::Max(0, OreWeight);
-	const int32 SafeMediumMetalWeight = FMath::Max(0, MediumMetalRockWeight);
-	const int64 TotalResourceWeight = static_cast<int64>(SafeSmallRockWeight)
-		+ static_cast<int64>(SafeMediumRockWeight)
-		+ static_cast<int64>(SafeLargeRockWeight)
-		+ static_cast<int64>(SafeOreWeight)
-		+ static_cast<int64>(SafeMediumMetalWeight);
-	if (TotalResourceWeight <= 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("JumpToSpace Moon Resource Spawn Skipped: all resource weights are zero or negative."));
-		return 0;
-	}
+	const float TotalResourceWeight = ResourceRatios.GetTotalPercentage();
+	if (TotalResourceWeight <= 0) return 0;
 
 	uint64 SeedEntropy = FPlatformTime::Cycles64() ^ static_cast<uint64>(GetUniqueID());
 	const int32 Seed = bUseRandomSeed
@@ -139,8 +310,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 	int32 RejectedLandmarkCount = 0;
 	int32 RejectedSpacingCount = 0;
 	int32 CandidateAttemptCount = 0;
-	const int32 MaxCandidateAttempts = FMath::Max(64, SafeResourceCount * 32);
-	TArray<FVector> AcceptedResourceLocations;
+	const int32 MaxCandidateAttempts = FMath::Max(64, GetTargetResourceCount() * 32);
 
 	const auto FindRealSurfaceCandidate = [Planet, Origin, SafeRadius, &RandomStream](FVector& OutCandidateLocation)
 	{
@@ -150,7 +320,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		}
 
 		const FVector CapCenterDirection = Planet->GetRadialUpVector(Origin);
-		const float MaximumAngle = Planet->ArcDistanceToAngleRadians(SafeRadius);
+		const float MaximumAngle = FMath::Min(UE_PI, Planet->ArcDistanceToAngleRadians(SafeRadius));
 		const float CosineOfAngle = FMath::Lerp(1.0f, FMath::Cos(MaximumAngle), RandomStream.FRand());
 		const float SineOfAngle = FMath::Sqrt(FMath::Max(0.0f, 1.0f - FMath::Square(CosineOfAngle)));
 		const float Azimuth = RandomStream.FRandRange(0.0f, UE_TWO_PI);
@@ -179,6 +349,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		{
 			continue;
 		}
+		if (Coverage.ResolveOwner(CandidateLocation) != this) continue;
 		if (IsCandidateExcludedByLandmarks(CandidateLocation))
 		{
 			++RejectedLandmarkCount;
@@ -190,65 +361,45 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 		{
 			continue;
 		}
+		if (Coverage.ResolveOwner(GroundLocation) != this) continue;
 
-		if (SafeMinimumSpacing > 0.0f)
+		if (!Coverage.CanPlace(GroundLocation, SafeMinimumSpacing))
 		{
-			const bool bTooCloseToExistingResource = AcceptedResourceLocations.ContainsByPredicate(
-				[Planet, &GroundLocation, SafeMinimumSpacing](const FVector& ExistingLocation)
-				{
-					return Planet->ApproximateSurfaceArcDistance(ExistingLocation, GroundLocation) < SafeMinimumSpacing;
-				});
-			if (bTooCloseToExistingResource)
-			{
-				++RejectedSpacingCount;
-				continue;
-			}
+			++RejectedSpacingCount;
+			continue;
 		}
 
-		const double ResourceRoll = static_cast<double>(RandomStream.FRand()) * static_cast<double>(TotalResourceWeight);
-		const double MediumRockThreshold = static_cast<double>(SafeSmallRockWeight)
-			+ static_cast<double>(SafeMediumRockWeight);
-		const double LargeRockThreshold = MediumRockThreshold + static_cast<double>(SafeLargeRockWeight);
-		const double MediumMetalThreshold = LargeRockThreshold + static_cast<double>(SafeMediumMetalWeight);
-		EJTSResourceType ResourceType = EJTSResourceType::Rock;
-		FVector BaseResourceScale(0.5f);
-		bool bMiningNode = false;
-		int32 TotalYieldUnits = 0;
-		int32 MetalYieldUnits = 0;
+		const float ResourceRoll = RandomStream.FRand() * TotalResourceWeight;
+		float Threshold = 0;
+		EJTSMoonResourceKind Kind = EJTSMoonResourceKind::SmallRock;
+		for (int32 Index = 0; Index < static_cast<int32>(EJTSMoonResourceKind::Count); ++Index)
+		{
+			const auto CandidateKind = static_cast<EJTSMoonResourceKind>(Index);
+			const float Percentage = ResourceRatios.GetPercentage(CandidateKind);
+			if (Percentage <= 0) continue;
+			Kind = CandidateKind;
+			Threshold += Percentage;
+			if (ResourceRoll < Threshold) break;
+		}
+		const bool bMiningNode = Kind != EJTSMoonResourceKind::SmallRock;
+		const bool bLarge = Kind == EJTSMoonResourceKind::LargeRock || Kind == EJTSMoonResourceKind::LargeMetalRock
+			|| Kind == EJTSMoonResourceKind::LargeCrystalRock;
+		const FVector BaseResourceScale(bMiningNode ? (bLarge ? 2.0f : 1.0f) : 0.5f);
+		const int32 TotalYieldUnits = bLarge ? LargeRockYieldUnits : 2;
+		const int32 MetalYieldUnits = Kind == EJTSMoonResourceKind::MediumMetalRock ? MediumMetalYieldUnits
+			: Kind == EJTSMoonResourceKind::LargeMetalRock ? OreDepositYieldUnits
+			: Kind == EJTSMoonResourceKind::MediumCrystalRock ? MediumCrystalYieldUnits
+			: Kind == EJTSMoonResourceKind::LargeCrystalRock ? LargeCrystalYieldUnits : 0;
+		const EJTSResourceType ResourceType = EJTSResourceType::Rock;
 		EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::MediumRock;
-		if (ResourceRoll < static_cast<double>(SafeSmallRockWeight))
+		switch (Kind)
 		{
-			BaseResourceScale = FVector(0.5f);
-		}
-		else if (ResourceRoll < MediumRockThreshold)
-		{
-			BaseResourceScale = FVector(1.0f);
-			bMiningNode = true;
-			TotalYieldUnits = 2;
-			NodeSize = EJTSMoonResourceNodeSize::MediumRock;
-		}
-		else if (ResourceRoll < LargeRockThreshold)
-		{
-			BaseResourceScale = FVector(2.0f);
-			bMiningNode = true;
-			TotalYieldUnits = LargeRockYieldUnits;
-			NodeSize = EJTSMoonResourceNodeSize::LargeRock;
-		}
-		else if (ResourceRoll < MediumMetalThreshold)
-		{
-			BaseResourceScale = FVector(1.0f);
-			bMiningNode = true;
-			TotalYieldUnits = 2;
-			MetalYieldUnits = MediumMetalYieldUnits;
-			NodeSize = EJTSMoonResourceNodeSize::MediumMetalRock;
-		}
-		else
-		{
-			BaseResourceScale = FVector(2.0f);
-			bMiningNode = true;
-			TotalYieldUnits = LargeRockYieldUnits;
-			MetalYieldUnits = OreDepositYieldUnits;
-			NodeSize = EJTSMoonResourceNodeSize::LargeMetalRock;
+		case EJTSMoonResourceKind::LargeRock: NodeSize = EJTSMoonResourceNodeSize::LargeRock; break;
+		case EJTSMoonResourceKind::MediumMetalRock: NodeSize = EJTSMoonResourceNodeSize::MediumMetalRock; break;
+		case EJTSMoonResourceKind::LargeMetalRock: NodeSize = EJTSMoonResourceNodeSize::LargeMetalRock; break;
+		case EJTSMoonResourceKind::MediumCrystalRock: NodeSize = EJTSMoonResourceNodeSize::MediumCrystalRock; break;
+		case EJTSMoonResourceKind::LargeCrystalRock: NodeSize = EJTSMoonResourceNodeSize::LargeCrystalRock; break;
+		default: break;
 		}
 
 		const FVector ResourceScale(
@@ -292,7 +443,7 @@ int32 AJTSMoonResourceSpawner::GenerateResources()
 
 		if (bSpawnedResourceAtCandidate)
 		{
-			AcceptedResourceLocations.Add(GroundLocation);
+			Coverage.RecordPlacement(GroundLocation, SafeMinimumSpacing);
 		}
 	}
 

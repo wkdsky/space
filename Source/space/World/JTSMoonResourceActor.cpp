@@ -132,6 +132,11 @@ int32 AJTSMoonResourceActor::GetMetalYieldUnits() const
 	return FMath::Clamp(MetalYieldUnits, 0, GetTotalYieldUnits());
 }
 
+int32 AJTSMoonResourceActor::GetCrystalYieldUnits() const
+{
+	return FMath::Clamp(CrystalYieldUnits, 0, GetTotalYieldUnits());
+}
+
 FText AJTSMoonResourceActor::GetInteractionDisplayName() const
 {
 	return FText::FromString(TEXT("Rocks"));
@@ -284,7 +289,7 @@ void AJTSMoonResourceActor::InitializeMiningNode(
 	EJTSResourceType NewResourceType,
 	int32 NewTotalYieldUnits,
 	EJTSMoonResourceNodeSize NewNodeSize,
-	int32 NewMetalYieldUnits,
+	int32 NewSecondaryYieldUnits,
 	int32 NewVisualVariantIndex)
 {
 	if (!HasAuthority())
@@ -294,10 +299,12 @@ void AJTSMoonResourceActor::InitializeMiningNode(
 	ResourceType = NewResourceType;
 	NodeSize = NewResourceType == EJTSResourceType::Ore ? EJTSMoonResourceNodeSize::OreVein : NewNodeSize;
 	const bool bMixedNode = NodeSize == EJTSMoonResourceNodeSize::MediumMetalRock || NodeSize == EJTSMoonResourceNodeSize::LargeMetalRock;
-	MetalYieldUnits = bMixedNode ? FMath::Max(0, NewMetalYieldUnits) : 0;
+	MetalYieldUnits = bMixedNode ? FMath::Max(0, NewSecondaryYieldUnits) : 0;
+	const bool bCrystalNode = NodeSize == EJTSMoonResourceNodeSize::MediumCrystalRock || NodeSize == EJTSMoonResourceNodeSize::LargeCrystalRock;
+	CrystalYieldUnits = bCrystalNode ? FMath::Max(0, NewSecondaryYieldUnits) : 0;
 	VisualVariantIndex = FMath::Max(0, NewVisualVariantIndex);
 	const int32 PrimaryYieldUnits = FMath::Max(1, NewTotalYieldUnits);
-	TotalYieldUnits = PrimaryYieldUnits + MetalYieldUnits;
+	TotalYieldUnits = PrimaryYieldUnits + MetalYieldUnits + CrystalYieldUnits;
 	RemainingYieldUnits = TotalYieldUnits;
 	const float WorkPerDrop = NodeSize == EJTSMoonResourceNodeSize::MediumRock ? 2.5f
 		: NodeSize == EJTSMoonResourceNodeSize::LargeRock ? 4.0f : 5.0f;
@@ -374,8 +381,9 @@ bool AJTSMoonResourceActor::SpawnAllResourceDrops(APawn* Miner)
 	TArray<AJTSWorldPickupActor*> SpawnedPickups;
 	for (int32 DropIndex = 0; DropIndex < GetTotalYieldUnits(); ++DropIndex)
 	{
-		const EJTSItemId ItemId = DropIndex < GetTotalYieldUnits() - GetMetalYieldUnits()
-			? DropItemId : EJTSItemId::Ore;
+		const int32 SecondaryYield = GetMetalYieldUnits() + GetCrystalYieldUnits();
+		const EJTSItemId ItemId = DropIndex < GetTotalYieldUnits() - SecondaryYield
+			? DropItemId : GetCrystalYieldUnits() > 0 ? EJTSItemId::Crystal : EJTSItemId::Ore;
 		AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnGameplayDrop(
 			GetWorld(),
 			UJTSItemDefinitionLibrary::MakeInstance(ItemId),
@@ -487,6 +495,7 @@ void AJTSMoonResourceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AJTSMoonResourceActor, TotalYieldUnits);
 	DOREPLIFETIME(AJTSMoonResourceActor, RemainingYieldUnits);
 	DOREPLIFETIME(AJTSMoonResourceActor, MetalYieldUnits);
+	DOREPLIFETIME(AJTSMoonResourceActor, CrystalYieldUnits);
 	DOREPLIFETIME(AJTSMoonResourceActor, VisualVariantIndex);
 	DOREPLIFETIME(AJTSMoonResourceActor, NodeSize);
 	DOREPLIFETIME(AJTSMoonResourceActor, TotalMiningWork);
@@ -519,6 +528,8 @@ void AJTSMoonResourceActor::ConfigureResourceMesh()
 	case EJTSMoonResourceNodeSize::LargeRock: Meshes = &LargeRockMeshes; break;
 	case EJTSMoonResourceNodeSize::MediumMetalRock: Meshes = &MediumMetalRockMeshes; break;
 	case EJTSMoonResourceNodeSize::LargeMetalRock: Meshes = &LargeMetalRockMeshes; break;
+	case EJTSMoonResourceNodeSize::MediumCrystalRock: Meshes = &MediumCrystalRockMeshes; break;
+	case EJTSMoonResourceNodeSize::LargeCrystalRock: Meshes = &LargeCrystalRockMeshes; break;
 	default: break;
 	}
 	UStaticMesh* const ConfiguredMesh = Meshes && !Meshes->IsEmpty()

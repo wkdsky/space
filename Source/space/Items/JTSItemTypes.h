@@ -47,7 +47,9 @@ enum class EJTSItemId : uint8
 	RailSniper UMETA(DisplayName = "Rail Sniper"),
 	HeavyMachineGun UMETA(DisplayName = "Heavy Machine Gun"),
 	GrenadeLauncher UMETA(DisplayName = "Grenade Launcher"),
-	ArcGun UMETA(DisplayName = "Arc Gun")
+	ArcGun UMETA(DisplayName = "Arc Gun"),
+	/** Append-only identity for material recovered from crystal-bearing rocks. */
+	Crystal UMETA(DisplayName = "Crystal")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */

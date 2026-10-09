@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/World/JTSMoonSurfaceGameplayData.h"
+#include "Engine/World.h"
 
 #include "space/World/JTSMoonAntActor.h"
 #include "space/World/JTSMoonAntNestActor.h"
@@ -81,3 +82,35 @@ float UJTSMoonSurfaceGameplayData::GetMoonAntTurnSpeed() const { return FMath::M
 float UJTSMoonSurfaceGameplayData::GetMoonAntGroundTraceStartHeight() const { return FMath::Max(0.0f, MoonAntGroundTraceStartHeight); }
 float UJTSMoonSurfaceGameplayData::GetMoonAntGroundTraceDistance() const { return FMath::Max(1.0f, MoonAntGroundTraceDistance); }
 int32 UJTSMoonSurfaceGameplayData::GetMoonAntNestPunchHitsToDestroy() const { return FMath::Max(1, MoonAntNestPunchHitsToDestroy); }
+
+#if WITH_EDITOR
+#include "UObject/UObjectIterator.h"
+
+namespace
+{
+	void RefreshResourceSpawners(const UJTSMoonSurfaceGameplayData* Data)
+	{
+		for (TObjectIterator<AJTSMoonResourceSpawner> It; It; ++It)
+		{
+			if (It->ResourceGameplayData == Data && !It->IsTemplate()
+				&& It->GetWorld() && !It->GetWorld()->IsGameWorld())
+			{
+				It->Modify();
+				It->RefreshResourceConfiguration();
+			}
+		}
+	}
+}
+
+void UJTSMoonSurfaceGameplayData::PostEditChangeProperty(FPropertyChangedEvent& Event)
+{
+	Super::PostEditChangeProperty(Event);
+	RefreshResourceSpawners(this);
+}
+
+void UJTSMoonSurfaceGameplayData::PostEditUndo()
+{
+	Super::PostEditUndo();
+	RefreshResourceSpawners(this);
+}
+#endif

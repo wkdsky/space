@@ -403,9 +403,8 @@ bool AJTSMoonSurfaceController::InitializeConfiguredSurfaceGameplay()
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("JumpToSpace Moon Surface Ready: Planet=%s ResourceCount=%d SpawnRadius=%.1f MoonAntNests=%d"),
+		TEXT("JumpToSpace Moon Surface Ready: Planet=%s SpawnRadius=%.1f MoonAntNests=%d"),
 		*PlanetId.ToString(),
-		FMath::Max(0, MoonSettings->GetMoonResourceSpawnSettings().TotalResourceCount),
 		FMath::Max(0.0f, MoonSettings->GetMoonResourceSpawnSettings().SpawnRadius),
 		MoonSettings->GetMoonAntNestCount());
 
@@ -454,19 +453,25 @@ void AJTSMoonSurfaceController::InitializeMoonResources()
 		return;
 	}
 
-	AJTSMoonResourceSpawner* const ResourceSpawner = MoonResourceSpawner.Get();
-	if (!IsValid(ResourceSpawner))
+	TArray<AJTSMoonResourceSpawner*> Spawners;
+	for (TActorIterator<AJTSMoonResourceSpawner> It(GetWorld()); It; ++It)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Moon surface %s has no configured MoonResourceSpawner."), *PlanetId.ToString());
-		return;
+		AJTSMoonResourceSpawner* const Spawner = *It;
+		if (Spawner->IsActorBeingDestroyed() || Spawner->GetLevel() != GetLevel()
+			|| (IsValid(Spawner->CoveragePlanet) && Spawner->CoveragePlanet != GetOwningPlanet())) continue;
+		Spawners.Add(Spawner);
 	}
-
-	RegisterSurfaceRuntimeActor(ResourceSpawner);
-	ResourceSpawner->SetSurfaceGameplayController(this);
-	ResourceSpawner->ApplyMoonSpawnSettings(MoonSettings->GetMoonResourceSpawnSettings());
-	ResourceSpawner->SetOwningPlanet(GetOwningPlanet());
-	ResourceSpawner->SetLandmarkExclusions(GetSpacecraft(), CachedLevelMoonCorpseLandmarks, GeneratedMoonAntNests);
-	ResourceSpawner->GenerateResources();
+	if (IsValid(MoonResourceSpawner) && !Spawners.Contains(MoonResourceSpawner)) Spawners.Add(MoonResourceSpawner);
+	for (AJTSMoonResourceSpawner* Spawner : Spawners)
+	{
+		RegisterSurfaceRuntimeActor(Spawner);
+		Spawner->SetSurfaceGameplayController(this);
+		if (!IsValid(Spawner->ResourceGameplayData)) Spawner->ResourceGameplayData = MoonGameplayData;
+		Spawner->RefreshResourceConfiguration();
+		Spawner->SetOwningPlanet(GetOwningPlanet());
+		Spawner->SetLandmarkExclusions(GetSpacecraft(), CachedLevelMoonCorpseLandmarks, GeneratedMoonAntNests);
+	}
+	AJTSMoonResourceSpawner::GenerateResourceGroup(Spawners);
 }
 
 AJTSMoonCorpseActor* AJTSMoonSurfaceController::FindLevelCorpseLandmark()

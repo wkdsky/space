@@ -427,6 +427,7 @@ protected:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FJTSBoardingRegression;
+	friend class FJTSLandedHeadlightsRegression;
 	friend class FJTSHullCameraRegression;
 	friend class FJTSThirdPersonFlightRegression;
 	friend class FJTSSurfaceAttitudeRegression;

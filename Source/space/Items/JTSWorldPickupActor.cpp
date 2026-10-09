@@ -96,6 +96,10 @@ namespace
 			OutResourceType = EJTSResourceType::Ore;
 			return true;
 
+		case EJTSWorldPickupItemType::Crystal:
+			OutResourceType = EJTSResourceType::Crystal;
+			return true;
+
 		case EJTSWorldPickupItemType::MoonAntCorpse:
 			OutResourceType = EJTSResourceType::MoonAntCorpse;
 			return true;
@@ -809,6 +813,7 @@ FText AJTSWorldPickupActor::GetInteractionPrompt_Implementation(APawn* Interacti
 	{
 		return FText::FromString(TEXT("[E] Metal"));
 	}
+	if (ItemInstance.ItemId == EJTSItemId::Crystal) return FText::FromString(TEXT("[E] Crystal"));
 	return FText::FromString(TEXT("[E] PICK UP"));
 }
 
@@ -1435,6 +1440,7 @@ EJTSItemId AJTSWorldPickupActor::ItemTypeToItemId(EJTSWorldPickupItemType InItem
 	case EJTSWorldPickupItemType::Food: return EJTSItemId::Food;
 	case EJTSWorldPickupItemType::Rock: return EJTSItemId::Rock;
 	case EJTSWorldPickupItemType::Ore: return EJTSItemId::Ore;
+	case EJTSWorldPickupItemType::Crystal: return EJTSItemId::Crystal;
 	case EJTSWorldPickupItemType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
 	case EJTSWorldPickupItemType::Pickaxe: return EJTSItemId::Pickaxe;
 	case EJTSWorldPickupItemType::Backpack: return EJTSItemId::Backpack;
@@ -1457,6 +1463,7 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::ItemIdToItemType(EJTSItemId ItemId
 	case EJTSItemId::Food: return EJTSWorldPickupItemType::Food;
 	case EJTSItemId::Rock: return EJTSWorldPickupItemType::Rock;
 	case EJTSItemId::Ore: return EJTSWorldPickupItemType::Ore;
+	case EJTSItemId::Crystal: return EJTSWorldPickupItemType::Crystal;
 	case EJTSItemId::MoonAntCorpse: return EJTSWorldPickupItemType::MoonAntCorpse;
 	case EJTSItemId::Backpack: return EJTSWorldPickupItemType::Backpack;
 	case EJTSItemId::WaistLamp: return EJTSWorldPickupItemType::WaistLamp;

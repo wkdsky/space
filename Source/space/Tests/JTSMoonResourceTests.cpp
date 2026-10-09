@@ -13,6 +13,7 @@
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSMoonResourceSpawner.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMoonMixedResourceTest, "JTS.Moon.Resources.MixedMiningYield",
@@ -41,14 +42,16 @@ bool FJTSMoonMixedResourceTest::RunTest(const FString& Parameters)
 	Inventory->SelectQuickbarSlot(0);
 
 	const EJTSMoonResourceNodeSize Sizes[] = {EJTSMoonResourceNodeSize::MediumRock, EJTSMoonResourceNodeSize::LargeRock,
-		EJTSMoonResourceNodeSize::MediumMetalRock, EJTSMoonResourceNodeSize::LargeMetalRock};
+		EJTSMoonResourceNodeSize::MediumMetalRock, EJTSMoonResourceNodeSize::LargeMetalRock,
+		EJTSMoonResourceNodeSize::MediumCrystalRock, EJTSMoonResourceNodeSize::LargeCrystalRock};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Sizes); ++Index)
 	{
 		const int32 ExpectedRock = Index % 2 == 0 ? 2 : 6;
-		const int32 ExpectedMetal = Index < 2 ? 0 : ExpectedRock;
+		const int32 ExpectedMetal = Index >= 2 && Index < 4 ? ExpectedRock : 0;
+		const int32 ExpectedCrystal = Index >= 4 ? ExpectedRock : 0;
 		AJTSMoonResourceActor* Node = World->SpawnActor<AJTSMoonResourceActor>(FVector(300, 0, 150), FRotator::ZeroRotator);
-		Node->InitializeMiningNode(EJTSResourceType::Rock, ExpectedRock, Sizes[Index], ExpectedMetal, 1);
-		TestEqual(TEXT("Node counts both payload types"), Node->GetTotalYieldUnits(), ExpectedRock + ExpectedMetal);
+		Node->InitializeMiningNode(EJTSResourceType::Rock, ExpectedRock, Sizes[Index], ExpectedMetal + ExpectedCrystal, 1);
+		TestEqual(TEXT("Node counts both payload types"), Node->GetTotalYieldUnits(), ExpectedRock + ExpectedMetal + ExpectedCrystal);
 		const float WorkBefore = Node->GetRemainingMiningWork();
 		TestFalse(TEXT("Wrong held item cannot mutate mining state"), Node->ApplyMiningWork(Miner, EJTSItemId::Knife, 1000));
 		TestEqual(TEXT("Rejected work leaves the node unchanged"), Node->GetRemainingMiningWork(), WorkBefore);
@@ -57,17 +60,19 @@ bool FJTSMoonMixedResourceTest::RunTest(const FString& Parameters)
 			if (!TestTrue(TEXT("Verified mining tool work succeeds"), Node->ApplyMiningWork(Miner, EJTSItemId::PowerHammer, 1000))) break;
 		}
 		TestTrue(TEXT("Completing mining consumes the node"), Node->IsActorBeingDestroyed());
-		int32 Rock = 0, Metal = 0;
+		int32 Rock = 0, Metal = 0, Crystal = 0;
 		for (TActorIterator<AJTSWorldPickupActor> It(World); It; ++It)
 		{
 			if (It->IsActorBeingDestroyed()) continue;
 			const FJTSItemInstance Item = It->GetItemInstance();
 			if (Item.ItemId == EJTSItemId::Rock) Rock += Item.StackCount;
 			if (Item.ItemId == EJTSItemId::Ore) Metal += Item.StackCount;
+			if (Item.ItemId == EJTSItemId::Crystal) Crystal += Item.StackCount;
 			It->Destroy();
 		}
 		TestEqual(TEXT("Mining conserves stone yield"), Rock, ExpectedRock);
 		TestEqual(TEXT("Mixed mining also produces metal in the same operation"), Metal, ExpectedMetal);
+		TestEqual(TEXT("Crystal-bearing rocks produce distinct crystal drops"), Crystal, ExpectedCrystal);
 		TestFalse(TEXT("Consumed nodes cannot produce duplicate drops"), Node->ApplyMiningWork(Miner, EJTSItemId::PowerHammer, 1000));
 	}
 	World->EndPlay(EEndPlayReason::Quit);
@@ -93,7 +98,8 @@ bool FJTSMoonAuthoredResourceTest::RunTest(const FString& Parameters)
 	const FVector Up = FVector(1, 2, 3).GetSafeNormal();
 	const FRotator Rotation = FRotationMatrix::MakeFromZ(Up).Rotator();
 	const EJTSMoonResourceNodeSize Sizes[] = {EJTSMoonResourceNodeSize::MediumRock, EJTSMoonResourceNodeSize::LargeRock,
-		EJTSMoonResourceNodeSize::MediumMetalRock, EJTSMoonResourceNodeSize::LargeMetalRock};
+		EJTSMoonResourceNodeSize::MediumMetalRock, EJTSMoonResourceNodeSize::LargeMetalRock,
+		EJTSMoonResourceNodeSize::MediumCrystalRock, EJTSMoonResourceNodeSize::LargeCrystalRock};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Sizes); ++Index)
 	{
 		for (int32 Variant = 0; Variant < 2; ++Variant)
@@ -145,6 +151,56 @@ bool FJTSMoonAuthoredResourceTest::RunTest(const FString& Parameters)
 	World->EndPlay(EEndPlayReason::Quit);
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMoonResourceDistributionTest, "JTS.Moon.Resources.DistributionAndDensity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSMoonResourceDistributionTest::RunTest(const FString& Parameters)
+{
+	FJTSMoonResourceDistribution Ratios;
+	Ratios.SmallRock = 100;
+	Ratios.Normalize(TEXT("SmallRock"));
+	TestEqual(TEXT("An edited category can own 100 percent"), Ratios.SmallRock, 100.0f);
+	TestEqual(TEXT("Other categories reach zero at 100 percent"), Ratios.LargeRock, 0.0f);
+	Ratios.SmallRock = 0;
+	Ratios.Normalize(TEXT("SmallRock"));
+	TestEqual(TEXT("An edited category can reach zero"), Ratios.SmallRock, 0.0f);
+	TestTrue(TEXT("An all-zero remainder is redistributed"), FMath::IsNearlyEqual(Ratios.GetTotalPercentage(), 100.0f));
+	FJTSMoonResourceKinds Kinds;
+	Kinds.bMediumCrystalRock = false;
+	Kinds.bLargeCrystalRock = false;
+	Ratios.SetEnabledKinds(Kinds);
+	Ratios.Normalize();
+	TestFalse(TEXT("Disabled crystal field is hidden by its edit condition"), Ratios.bEnableMediumCrystalRock);
+	TestEqual(TEXT("Disabled kinds never contribute to sampling"), Ratios.GetPercentage(EJTSMoonResourceKind::MediumCrystalRock), 0.0f);
+	TestTrue(TEXT("Enabled percentages still sum to 100"), FMath::IsNearlyEqual(Ratios.GetTotalPercentage(), 100.0f));
+	FRandomStream Random(42);
+	for (int32 Index = 0; Index < 500; ++Index)
+	{
+		Ratios.MediumMetalRock = Random.FRandRange(-10, 110);
+		Ratios.Normalize(TEXT("MediumMetalRock"));
+		TestTrue(TEXT("Repeated edits preserve the normalized budget"), FMath::IsNearlyEqual(Ratios.GetTotalPercentage(), 100.0f, 0.0001f));
+	}
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	AJTSMoonResourceSpawner* Spawner = World->SpawnActor<AJTSMoonResourceSpawner>();
+	FJTSMoonResourceSpawnSettings Settings;
+	Settings.SpawnRadius = 1000;
+	Settings.TotalResourceCount = 9999;
+	Spawner->ResourceDensity = 2;
+	Spawner->ResourceRatios.SmallRock = 37;
+	Spawner->ResourceRatios.Normalize(TEXT("SmallRock"));
+	Spawner->ApplyMoonSpawnSettings(Settings);
+	TestEqual(TEXT("Density and area determine count, ignoring legacy PDA count"), Spawner->GetTargetResourceCount(), 6);
+	TestTrue(TEXT("PDA content does not overwrite authored ratios"), FMath::IsNearlyEqual(Spawner->ResourceRatios.SmallRock, 37.0f));
+	Spawner->bOverrideCoverageRadius = true;
+	Spawner->Radius = 2000;
+	Spawner->ApplyMoonSpawnSettings(Settings);
+	TestEqual(TEXT("Doubling area radius quadruples density-derived count"), Spawner->GetTargetResourceCount(), 25);
+	Spawner->ResourceDensity = 0;
+	TestEqual(TEXT("Zero density produces no resources"), Spawner->GetTargetResourceCount(), 0);
+	World->DestroyWorld(false);
 	return true;
 }
 

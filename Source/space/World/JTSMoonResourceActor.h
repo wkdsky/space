@@ -25,7 +25,9 @@ enum class EJTSMoonResourceNodeSize : uint8
 	LargeRock UMETA(DisplayName = "Large Rock"),
 	OreVein UMETA(DisplayName = "Ore Vein"),
 	MediumMetalRock UMETA(DisplayName = "Medium Rock + Metal"),
-	LargeMetalRock UMETA(DisplayName = "Large Rock + Metal")
+	LargeMetalRock UMETA(DisplayName = "Large Rock + Metal"),
+	MediumCrystalRock UMETA(DisplayName = "Medium Rock + Crystal"),
+	LargeCrystalRock UMETA(DisplayName = "Large Rock + Crystal")
 };
 
 UCLASS()
@@ -68,10 +70,13 @@ public:
 		const FVector& PreferredForward);
 
 	/** Initializes a Medium Rock, Large Rock, or Ore Vein mining node. */
-	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits, EJTSMoonResourceNodeSize NewNodeSize = EJTSMoonResourceNodeSize::LargeRock, int32 NewMetalYieldUnits = 0, int32 NewVisualVariantIndex = 0);
+	void InitializeMiningNode(EJTSResourceType NewResourceType, int32 NewTotalYieldUnits, EJTSMoonResourceNodeSize NewNodeSize = EJTSMoonResourceNodeSize::LargeRock, int32 NewSecondaryYieldUnits = 0, int32 NewVisualVariantIndex = 0);
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Mining")
 	int32 GetMetalYieldUnits() const;
+
+	UFUNCTION(BlueprintPure, Category = "Moon|Mining")
+	int32 GetCrystalYieldUnits() const;
 
 	/** Server-authoritative work application shared by melee and hitscan weapons. */
 	bool ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemId, float WorkAmount);
@@ -125,6 +130,12 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
 	TArray<TObjectPtr<UStaticMesh>> LargeMetalRockMeshes;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> MediumCrystalRockMeshes;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Moon|Presentation")
+	TArray<TObjectPtr<UStaticMesh>> LargeCrystalRockMeshes;
+
 	/** Surface material used by every resource node. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet|Rendering", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> RealPlanetSurfaceMaterial;
@@ -149,6 +160,9 @@ private:
 	/** Included in TotalYieldUnits; the remaining units use ResourceType. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true"))
 	int32 MetalYieldUnits = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_ResourceData, Category = "Moon|Mining", meta = (AllowPrivateAccess = "true"))
+	int32 CrystalYieldUnits = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_ResourceData)
 	int32 VisualVariantIndex = 0;
