@@ -1,0 +1,743 @@
+{
+  "intact": {
+    "source": "mars planet 3d model/mars+planet+3d+model.fbx",
+    "mesh_objects": 1,
+    "vertices": 2506,
+    "triangles": 5004,
+    "connected_islands": 2,
+    "materials": 1,
+    "images": 1,
+    "bounds_min": [
+      -0.498291015625,
+      -0.4998779296875,
+      -3.773973489273885e-08
+    ],
+    "bounds_max": [
+      0.498291015625,
+      0.49987801909446716,
+      0.9947510361671448
+    ],
+    "dimensions": [
+      0.99658203125,
+      0.9997559785842896,
+      0.9947510957717896
+    ],
+    "uv_layers": [
+      1
+    ],
+    "image_sizes": [
+      [
+        8192,
+        8192
+      ]
+    ],
+    "missing_images": [],
+    "objects": [
+      {
+        "name": "tripo_node_cc0f2eb5-0de2-4e78-8ef0-a252522c0ec2",
+        "vertices": 2506,
+        "triangles": 5004,
+        "islands": 2
+      }
+    ]
+  },
+  "debris": {
+    "source": "asteroid 3d model/asteroid+3d+model.fbx",
+    "mesh_objects": 107,
+    "vertices": 2754,
+    "triangles": 5080,
+    "connected_islands": 107,
+    "materials": 107,
+    "images": 107,
+    "bounds_min": [
+      -0.4997555613517761,
+      -0.4963395893573761,
+      -1.6902319543987687e-08
+    ],
+    "bounds_max": [
+      0.4997555613517761,
+      0.4963396489620209,
+      0.9897483587265015
+    ],
+    "dimensions": [
+      0.9995111227035522,
+      0.992679238319397,
+      0.9897483587265015
+    ],
+    "uv_layers": [
+      1
+    ],
+    "image_sizes": [
+      [
+        32,
+        32
+      ],
+      [
+        64,
+        64
+      ],
+      [
+        128,
+        128
+      ],
+      [
+        256,
+        256
+      ],
+      [
+        512,
+        512
+      ],
+      [
+        1024,
+        1024
+      ]
+    ],
+    "missing_images": [],
+    "objects": [
+      {
+        "name": "tripo_part_0",
+        "vertices": 138,
+        "triangles": 272,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_1",
+        "vertices": 221,
+        "triangles": 438,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_10",
+        "vertices": 57,
+        "triangles": 110,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_100",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_101",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_102",
+        "vertices": 8,
+        "triangles": 12,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_103",
+        "vertices": 7,
+        "triangles": 10,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_104",
+        "vertices": 6,
+        "triangles": 8,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_105",
+        "vertices": 6,
+        "triangles": 8,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_106",
+        "vertices": 5,
+        "triangles": 6,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_11",
+        "vertices": 59,
+        "triangles": 114,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_12",
+        "vertices": 51,
+        "triangles": 98,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_13",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_14",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_15",
+        "vertices": 19,
+        "triangles": 34,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_16",
+        "vertices": 30,
+        "triangles": 56,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_17",
+        "vertices": 17,
+        "triangles": 30,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_18",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_19",
+        "vertices": 19,
+        "triangles": 34,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_2",
+        "vertices": 118,
+        "triangles": 232,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_20",
+        "vertices": 17,
+        "triangles": 30,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_21",
+        "vertices": 25,
+        "triangles": 46,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_22",
+        "vertices": 24,
+        "triangles": 44,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_23",
+        "vertices": 23,
+        "triangles": 42,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_24",
+        "vertices": 23,
+        "triangles": 42,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_25",
+        "vertices": 22,
+        "triangles": 40,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_26",
+        "vertices": 22,
+        "triangles": 40,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_27",
+        "vertices": 21,
+        "triangles": 38,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_28",
+        "vertices": 21,
+        "triangles": 38,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_29",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_3",
+        "vertices": 109,
+        "triangles": 214,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_30",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_31",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_32",
+        "vertices": 18,
+        "triangles": 32,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_33",
+        "vertices": 19,
+        "triangles": 34,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_34",
+        "vertices": 16,
+        "triangles": 28,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_35",
+        "vertices": 16,
+        "triangles": 28,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_36",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_37",
+        "vertices": 14,
+        "triangles": 24,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_38",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_39",
+        "vertices": 121,
+        "triangles": 238,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_4",
+        "vertices": 108,
+        "triangles": 212,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_40",
+        "vertices": 69,
+        "triangles": 134,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_41",
+        "vertices": 40,
+        "triangles": 76,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_42",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_43",
+        "vertices": 20,
+        "triangles": 36,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_44",
+        "vertices": 19,
+        "triangles": 34,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_45",
+        "vertices": 19,
+        "triangles": 34,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_46",
+        "vertices": 17,
+        "triangles": 30,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_47",
+        "vertices": 17,
+        "triangles": 30,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_48",
+        "vertices": 16,
+        "triangles": 28,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_49",
+        "vertices": 16,
+        "triangles": 28,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_5",
+        "vertices": 67,
+        "triangles": 130,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_50",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_51",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_52",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_53",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_54",
+        "vertices": 15,
+        "triangles": 26,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_55",
+        "vertices": 14,
+        "triangles": 24,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_56",
+        "vertices": 14,
+        "triangles": 24,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_57",
+        "vertices": 14,
+        "triangles": 24,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_58",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_59",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_6",
+        "vertices": 107,
+        "triangles": 210,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_60",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_61",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_62",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_63",
+        "vertices": 13,
+        "triangles": 22,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_64",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_65",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_66",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_67",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_68",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_69",
+        "vertices": 12,
+        "triangles": 20,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_7",
+        "vertices": 42,
+        "triangles": 80,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_70",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_71",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_72",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_73",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_74",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_75",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_76",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_77",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_78",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_79",
+        "vertices": 11,
+        "triangles": 18,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_8",
+        "vertices": 88,
+        "triangles": 172,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_80",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_81",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_82",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_83",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_84",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_85",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_86",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_87",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_88",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_89",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_9",
+        "vertices": 92,
+        "triangles": 180,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_90",
+        "vertices": 10,
+        "triangles": 16,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_91",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_92",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_93",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_94",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_95",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_96",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_97",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_98",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      },
+      {
+        "name": "tripo_part_99",
+        "vertices": 9,
+        "triangles": 14,
+        "islands": 1
+      }
+    ]
+  },
+  "note": "Independent meshes. Normalized side-by-side envelope sizes are for inspection, not a geometric correspondence."
+}

@@ -69,6 +69,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Arrival")
 	bool StartLandingSequence(APlayerController* PlayerController, AJTSPlanetAnchor* Planet);
 
+	/** Moves the existing shared craft and living crew, retaining every inventory and ship payload. */
+	bool TransferExpedition(APlayerController* Requester, AJTSPlanetAnchor* Planet);
+
 	/** Surface GameMode flow binds here instead of polling for player/ship creation. */
 	FOnJTSInitialLandingSequenceCompleted& OnInitialLandingSequenceCompleted();
 
@@ -115,7 +118,8 @@ private:
 		const AJTSSpacecraftActor* Spacecraft,
 		AJTSPlanetAnchor* Planet,
 		int32 PreferredSlot,
-		FTransform& OutTransform) const;
+		FTransform& OutTransform,
+		const TArray<FTransform>* ReservedTransforms = nullptr) const;
 	bool IsRespawnTransformClear(const AJTSSpacecraftActor* Spacecraft, const FTransform& Transform) const;
 	int32 GetPlayerSpawnSlot(const APlayerController* PlayerController) const;
 	bool SpawnAndConfigureCharacter(APlayerController* PlayerController, AJTSPlanetAnchor* Planet, const FTransform& SpawnTransform, AJTSCharacter*& OutCharacter) const;

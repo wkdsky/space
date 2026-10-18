@@ -18,3 +18,12 @@ public:
 	UPROPERTY()
 	FJTSExpeditionSnapshot Snapshot;
 };
+
+/** Host-only developer entry preference, kept out of the four expedition save slots. */
+UCLASS()
+class UJTSSpaceDebugSaveGame : public USaveGame
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY() FName DefaultPlanetId;
+};

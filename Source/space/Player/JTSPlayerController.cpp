@@ -28,6 +28,7 @@
 #include "space/UI/JTSPrototypeHUDWidget.h"
 #include "space/UI/JTSShopWidget.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/World/JTSSpaceDebugTravelManager.h"
 #include "TimerManager.h"
 
 AJTSPlayerController::AJTSPlayerController()
@@ -830,7 +831,7 @@ void AJTSPlayerController::SetInventoryArrangementMode(bool bEnabled)
 {
 	if (!IsLocalController() || (bEnabled && (!IsNormalGameplayPhase() || IsGameMenuOpen()
 		|| IsSpaceShopOpen() || IsMoonShopOpen() || IsStellarItemDialogOpen() || IsInventoryQuantityDialogOpen()
-		|| !Cast<AJTSCharacter>(GetPawn())))) return;
+		|| (!Cast<AJTSCharacter>(GetPawn()) && !Cast<AJTSSpacecraftActor>(GetPawn()))))) return;
 	const auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD());
 	auto* Widget = Hud ? Hud->GetPrototypeWidget() : nullptr;
 	if (bEnabled && !Widget) return;
@@ -838,8 +839,10 @@ void AJTSPlayerController::SetInventoryArrangementMode(bool bEnabled)
 	if (bEnabled) ApplyModalUIInputMode(Widget);
 	else
 	{
-		if (Widget) Widget->UpdateInventoryDragPreview(FVector2D::ZeroVector, FString(), false);
-		RestoreGameplayInputAfterModal();
+		if (Widget) Widget->CancelInventoryDrag();
+		if (FSlateApplication::IsInitialized()) FSlateApplication::Get().ReleaseAllPointerCapture();
+		if (!IsGameMenuOpen() && !IsSpaceShopOpen() && !IsMoonShopOpen() && !IsStellarItemDialogOpen() && !IsInventoryQuantityDialogOpen())
+			RestoreGameplayInputAfterModal();
 	}
 }
 void AJTSPlayerController::DropStellarItemInSpaceShop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId)
@@ -1033,6 +1036,11 @@ void AJTSPlayerController::RestoreGameplayInputAfterModal()
 
 bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (Params.Key == EKeys::LeftAlt || Params.Key == EKeys::RightAlt)
+	{
+		SetAltCursorHeld(Params.Event != IE_Released);
+		return true;
+	}
 	if (Params.Event == IE_Pressed && Params.Key == EKeys::I && IsNormalGameplayPhase()
 		&& !IsGameMenuOpen() && !IsSpaceShopOpen() && !IsMoonShopOpen() && !IsStellarItemDialogOpen())
 	{
@@ -1075,6 +1083,28 @@ bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	}
 
 	return Super::InputKey(Params);
+}
+
+void AJTSPlayerController::SetAltCursorHeld(bool bHeld)
+{
+	if (bAltCursorHeld == bHeld) return;
+	bAltCursorHeld = bHeld;
+	SetInventoryArrangementMode(bHeld);
+}
+
+void AJTSPlayerController::PlayerTick(float DeltaTime)
+{
+	Super::PlayerTick(DeltaTime);
+	// Slate still knows physical modifier state when UI-only input owns keyboard focus.
+	// This also recovers after Alt-Tab or releasing Alt while a button/drag has focus.
+	if (IsLocalController() && bAltCursorHeld && FSlateApplication::IsInitialized()
+		&& (!FSlateApplication::Get().GetModifierKeys().IsAltDown() || !FSlateApplication::Get().IsActive()))
+		SetAltCursorHeld(false);
+}
+
+void AJTSPlayerController::ServerRequestDebugPlanet_Implementation(FName PlanetId, bool bSetDefault)
+{
+	if (auto* Debug = AJTSSpaceDebugTravelManager::Find(this)) Debug->Request(this, PlanetId, bSetDefault);
 }
 
 bool AJTSPlayerController::IsNormalGameplayPhase() const

@@ -1,0 +1,47 @@
+{
+  "revision": 9,
+  "result": "PASS",
+  "comparison": "R9 minus R8, outside the opaque planet silhouette",
+  "samples": [
+    {
+      "seconds": 4.0,
+      "mean_added_red": 0.14162060000532392,
+      "quadrant_lit_pixels": [
+        790,
+        275,
+        0,
+        0
+      ]
+    },
+    {
+      "seconds": 5.0,
+      "mean_added_red": 0.8047365105280437,
+      "quadrant_lit_pixels": [
+        6711,
+        5063,
+        300,
+        162
+      ]
+    },
+    {
+      "seconds": 6.0,
+      "mean_added_red": 2.3909506739190234,
+      "quadrant_lit_pixels": [
+        16260,
+        12843,
+        3602,
+        7032
+      ]
+    },
+    {
+      "seconds": 7.0,
+      "mean_added_red": 2.8684748755534653,
+      "quadrant_lit_pixels": [
+        15137,
+        11783,
+        5280,
+        7715
+      ]
+    }
+  ]
+}

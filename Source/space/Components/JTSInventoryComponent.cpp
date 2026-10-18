@@ -9,6 +9,7 @@
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Player/JTSPlayerState.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
 
 UJTSInventoryComponent::UJTSInventoryComponent()
 {
@@ -185,6 +186,41 @@ bool UJTSInventoryComponent::SelectQuickbarSlot(int32 SlotIndex)
 void UJTSInventoryComponent::ServerSelectQuickbarSlot_Implementation(int32 SlotIndex)
 {
 	SelectQuickbarSlot(SlotIndex);
+}
+
+void UJTSInventoryComponent::ServerEquipInventorySlot_Implementation(int32 SlotIndex, FGuid ExpectedInstanceId)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ExpectedInstanceId.IsValid()
+		|| SlotIndex < 0 || SlotIndex >= GetInventoryCapacity()
+		|| GetItemAtSlot(SlotIndex).InstanceId != ExpectedInstanceId || GetItemAtSlot(SlotIndex).IsEmpty()) return;
+	SelectQuickbarSlot(SlotIndex);
+	if (auto* Pawn = Cast<APawn>(GetOwner()))
+		if (auto* State = Pawn->GetPlayerState<AJTSPlayerState>())
+			State->GetStellarLoadout()->SelectWeapon(INDEX_NONE);
+	if (GetActiveItemId() == EJTSItemId::WaistLamp && !IsWaistLampEquipped()) RequestToggleWaistLamp();
+}
+
+void UJTSInventoryComponent::ServerMoveInventorySlot_Implementation(int32 FromSlot, FGuid ExpectedFromId,
+	int32 ToSlot, FGuid ExpectedToId)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || FromSlot == ToSlot || !ExpectedFromId.IsValid()
+		|| FromSlot < 0 || ToSlot < 0 || FromSlot >= GetInventoryCapacity() || ToSlot >= GetInventoryCapacity()
+		|| !ItemSlots.IsValidIndex(FromSlot) || !ItemSlots.IsValidIndex(ToSlot)
+		|| ItemSlots[FromSlot].IsEmpty() || ItemSlots[FromSlot].InstanceId != ExpectedFromId
+		|| ItemSlots[ToSlot].InstanceId != ExpectedToId) return;
+	ItemSlots.Swap(FromSlot, ToSlot);
+	if (SelectedQuickbarSlot == FromSlot) SelectedQuickbarSlot = ToSlot;
+	else if (SelectedQuickbarSlot == ToSlot) SelectedQuickbarSlot = FromSlot;
+	QuickbarPageIndex = SelectedQuickbarSlot / MaximumQuickbarSlots;
+	NotifyInventoryChanged();
+}
+
+void UJTSInventoryComponent::ServerDropInventorySlot_Implementation(int32 SlotIndex, FGuid ExpectedInstanceId)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ExpectedInstanceId.IsValid()
+		|| SlotIndex < 0 || SlotIndex >= GetInventoryCapacity()
+		|| GetItemAtSlot(SlotIndex).InstanceId != ExpectedInstanceId) return;
+	DropItemAtSlot(SlotIndex);
 }
 
 bool UJTSInventoryComponent::SelectQuickbarPage(int32 PageIndex)

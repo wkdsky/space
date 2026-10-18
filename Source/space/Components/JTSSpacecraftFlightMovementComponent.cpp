@@ -9,6 +9,7 @@
 #include "Math/RotationMatrix.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSCompressedSpaceComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
@@ -273,10 +274,18 @@ float UJTSSpacecraftFlightMovementComponent::GetCurrentSpeed() const
 	return Velocity.Size();
 }
 
+float UJTSSpacecraftFlightMovementComponent::GetFlightSpeedMultiplier() const
+{
+	const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+	const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	return Manager && Manager->IsCruisePresentationActive(Ship)
+		? FMath::Max(1.0f, EffectiveStats.CruiseSpeedMultiplier) : 1.0f;
+}
+
 float UJTSSpacecraftFlightMovementComponent::GetSpeedNormalized() const
 {
 	const float MaximumPlanarSpeed = EffectiveStats.MaxMoveSpeed * FMath::Max(1.0f, EffectiveStats.BoostMultiplier);
-	const float MaximumSpeed = FMath::Max(1.0f, FMath::Max(MaximumPlanarSpeed, EffectiveStats.LiftSpeed));
+	const float MaximumSpeed = FMath::Max(1.0f, FMath::Max(MaximumPlanarSpeed, EffectiveStats.LiftSpeed) * GetFlightSpeedMultiplier());
 	return FMath::Clamp(GetCurrentSpeed() / MaximumSpeed, 0.0f, 1.0f);
 }
 
@@ -443,7 +452,11 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 
 	const FVector TargetVelocity = BuildTargetVelocity(ReferenceUp);
 	const float Rate = bBraking ? EffectiveStats.BrakeStrength : GetAccelerationRate();
-	if (bBraking || bFlightAssistEnabled)
+	if (EffectiveStats.bInstantVelocityResponse)
+	{
+		Velocity = TargetVelocity;
+	}
+	else if (bBraking || bFlightAssistEnabled)
 	{
 		Velocity = FMath::VInterpConstantTo(Velocity, TargetVelocity, DeltaTime, FMath::Max(1.0f, Rate));
 	}
@@ -463,9 +476,21 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 	FHitResult Hit;
 	FQuat Rotation = UpdateRotation(DeltaTime);
 	FVector Delta = Velocity * DeltaTime;
+	bool bEnteredNearBubble = false;
+	const float StartSpeedMultiplier = GetFlightSpeedMultiplier();
 	if (auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
 	{
 		const FVector Start = Ship->GetActorLocation();
+		if (StartSpeedMultiplier > 1.0f)
+			if (const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+			{
+				FVector Entry;
+				if (Manager->CompressedSpace->ClipAtFirstBubbleEntry(Start, Start + Delta, Entry))
+				{
+					Delta = Entry - Start;
+					bEnteredNearBubble = true;
+				}
+			}
 		// The authored movement proxy may be narrower than the visible hull. Guard both.
 		if (!Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
 		{
@@ -477,7 +502,8 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 			if (!bCanRecover && TargetPlanet.IsValid())
 			{
 				// Forward intent into a slope must not cancel the shell's upward recovery.
-				const FVector Up = TargetPlanet->GetRadialUpVector(Start);
+				const auto Frame = Ship->GetSurfaceEnvelopeComponent()->GetFrame();
+				const FVector Up = Frame.bValid ? Frame.RadialUp : TargetPlanet->GetRadialUpVector(Start);
 				Recovery = Up * RecoveryStep;
 				bCanRecover = Ship->CanRecoverFlightPenetration(Recovery);
 			}
@@ -508,6 +534,7 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 		}
 	}
 	MoveWithCollisionSweep(Delta, Rotation, Hit);
+	if (bEnteredNearBubble) Velocity = TargetVelocity / StartSpeedMultiplier;
 	if (Hit.IsValidBlockingHit())
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
@@ -614,7 +641,7 @@ void UJTSSpacecraftFlightMovementComponent::UpdateReferenceFrame()
 
 void UJTSSpacecraftFlightMovementComponent::ApplyPlanetGravity(float DeltaTime)
 {
-	if (PlanetGravityScale <= 0.0f || DeltaTime <= 0.0f)
+	if (EffectiveStats.bInstantVelocityResponse || PlanetGravityScale <= 0.0f || DeltaTime <= 0.0f)
 	{
 		return;
 	}
@@ -679,7 +706,11 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
     if (!Frame.bValid)
     {
         // Without a departure surface there is no authorised horizontal path out of the crater.
-        if (bTakeoffClearance) Velocity = FVector::ZeroVector;
+        if (bTakeoffClearance)
+        {
+            if (IsValid(Planet) && Planet->IsFragmentedGameplaySurface()) bTakeoffClearance = false;
+            else Velocity = FVector::ZeroVector;
+        }
         return false;
     }
     const auto& Settings = Envelope->GetSettings();
@@ -688,8 +719,9 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
     const float Height = FVector::DotProduct(Current - Frame.Location, Up);
     if (bTakeoffClearance)
     {
-        double RequiredRadius;
-        if (!Envelope->GetTakeoffClearanceRadius(RequiredRadius))
+        double RequiredRadius = 0;
+        const bool bFragment = Planet->IsFragmentedGameplaySurface();
+        if (!bFragment && !Envelope->GetTakeoffClearanceRadius(RequiredRadius))
         {
             Velocity = FVector::ZeroVector;
             return false;
@@ -697,7 +729,8 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
         // Keep the highest departure target even if a later sample drops away. A brief Space
         // press completes the lift; forward/strafe/boost cannot escape below the crater rim.
         TakeoffClearanceRadius = FMath::Max(TakeoffClearanceRadius, RequiredRadius);
-        const double Remaining = TakeoffClearanceRadius - FVector::Distance(Current, Planet->GetPlanetCenter());
+        const double Remaining = bFragment ? Settings.HoverOffset - Height
+            : TakeoffClearanceRadius - FVector::Distance(Current, Planet->GetPlanetCenter());
         if (Remaining > 1.0)
         {
             const float LiftSpeed = FMath::Max(1.0f, EffectiveStats.LiftSpeed);
@@ -753,7 +786,7 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
         // Recover already displaced hulls gradually; ordinary flight clamps precisely at the shell.
         const float RecoveryCap = Height < 0
             ? FMath::Max(0.0f, SurfaceClearanceRecoverySpeed - float(FVector::DotProduct(Velocity, Up))) : BIG_NUMBER;
-        Velocity += Up * FMath::Min(RequiredLift, RecoveryCap);
+        Velocity += (Planet->IsFragmentedGameplaySurface() ? Next.RadialUp : Up) * FMath::Min(RequiredLift, RecoveryCap);
     }
     return false;
 }
@@ -937,7 +970,13 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 	const FTransform TargetHull = HullRelative * TargetRoot;
 	const FVector Start = TargetHull.GetLocation();
 	const FVector End = Start + Delta;
-	const FCollisionShape HullShape = FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent());
+	// A fragmented surface needs clearance on its sides and undersides too, where
+	// radial terrain following cannot describe the obstacle. Sweeping an expanded
+	// whole hull offsets every fragment's real collision without filling the gaps.
+	const AJTSPlanetAnchor* const Planet = TargetPlanet.Get();
+	const float SurfaceClearance = IsValid(Planet) && !bTakeoffClearance ? Planet->GetFlightCollisionClearance() : 0.0f;
+	const FCollisionShape HullShape = FCollisionShape::MakeBox(
+		FlightCollision->GetScaledBoxExtent() + FVector(SurfaceClearance));
 	const bool bTargetRotationBlocked = World->OverlapBlockingTestByChannel(
 		Start,
 		TargetHull.GetRotation(),
@@ -1022,7 +1061,7 @@ FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity(const FVector
 		* (bBoosting && ForwardThrottle > DeadZone ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
 	return (HullForward * (ForwardThrottle >= 0.0f ? MoveSpeed : EffectiveStats.ReverseSpeed) * ForwardThrottle
 		+ HullRight * MoveInput.X * EffectiveStats.StrafeSpeed
-		+ LiftDirection * VerticalInput * EffectiveStats.LiftSpeed) * SpeedLimit;
+		+ LiftDirection * VerticalInput * EffectiveStats.LiftSpeed) * SpeedLimit * GetFlightSpeedMultiplier();
 }
 
 float UJTSSpacecraftFlightMovementComponent::GetAccelerationRate() const

@@ -1,0 +1,90 @@
+{
+  "revision": 10,
+  "result": "PASS",
+  "errors": [],
+  "frames": 2400,
+  "expected_frames": 2400,
+  "fps": 60,
+  "resolution": [
+    1920,
+    1080
+  ],
+  "first_frame": 0,
+  "end_frame_exclusive": 2400,
+  "output_frame_step": 1,
+  "source": "Movie Render Queue / deferred render / fixed sequence time",
+  "starfield": "/Game/Space/Environment/M_SolarSystemStarfield",
+  "elapsed_seconds": 81.21900000000005,
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "r_frame_rate": "60/1",
+    "duration": "40.000000",
+    "nb_frames": "2400"
+  },
+  "frame_cadence": [
+    {
+      "seconds": [
+        4,
+        9
+      ],
+      "frames": 300,
+      "unique_frames": 300
+    },
+    {
+      "seconds": [
+        20,
+        21
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    },
+    {
+      "seconds": [
+        25,
+        26
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    },
+    {
+      "seconds": [
+        31,
+        32
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    }
+  ],
+  "animation_sampling_report": "validation_animation_sampling.json",
+  "decoded_video_cadence": [
+    {
+      "seconds": [
+        20,
+        21
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    },
+    {
+      "seconds": [
+        25,
+        26
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    },
+    {
+      "seconds": [
+        31,
+        32
+      ],
+      "frames": 60,
+      "unique_frames": 60
+    }
+  ],
+  "source_blackout_rgb_zero": true,
+  "encoded_blackout_rgb_zero": true,
+  "game_movie": "Content/Movies/MarsDestruction.mp4",
+  "audio": false
+}

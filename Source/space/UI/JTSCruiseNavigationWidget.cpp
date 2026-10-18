@@ -500,6 +500,7 @@ private:
 
 		const float InnerReach = DialRadius * 0.42f;
 		const float OuterReach = DialRadius * 0.78f;
+		TArray<FVector2D> LabelPositions;
 
 		for (const FJTSCruiseNavigationContact& Contact : Contacts)
 		{
@@ -548,7 +549,22 @@ private:
 			const FString RangeLabel = UJTSCruiseNavigationWidget::FormatAstronomicalRange(Contact.RangeCentimeters);
 			const double BelowWeight = 1.0 - FMath::SmoothStep(95.0, 135.0, Blip.Y);
 			const double LabelY = Blip.Y - 22.0 + BelowWeight * 38.0;
-			const FVector2D NamePosition(Blip.X - 16.0f, LabelY);
+			const bool bLabelRight = Blip.X >= DialCenter.X;
+			const double NameX = bLabelRight ? Geometry.GetLocalSize().X - 24.0 : 24.0;
+			double NameY = FMath::Clamp(LabelY, 90.0, Geometry.GetLocalSize().Y - 112.0);
+			// Compact moons can share almost the same bearing: retain distinct names and ranges.
+			for (int32 Attempt = 0; Attempt <= Contacts.Num(); ++Attempt)
+			{
+				const bool bOverlaps = LabelPositions.ContainsByPredicate([&](const FVector2D& Other)
+					{ return FMath::Abs(Other.X - NameX) < 1.0 && FMath::Abs(Other.Y - NameY) < 53.0; });
+				if (!bOverlaps) break;
+				NameY += 55.0;
+				if (NameY > Geometry.GetLocalSize().Y - 112.0) NameY = 90.0;
+			}
+			const FVector2D NamePosition(NameX, NameY);
+			LabelPositions.Add(NamePosition);
+			StrokeLine(OutDrawElements, LayerId, Geometry, Blip,
+				FVector2D(bLabelRight ? NameX - 100.0 : NameX + 100.0, NameY + 12.0), ProjectionColor, 0.8f);
 			DrawText(
 				OutDrawElements,
 				LayerId + 1,
@@ -557,7 +573,7 @@ private:
 				Contact.DisplayName,
 				NamePosition,
 				BlipColor,
-				ETextJustify::Right);
+				bLabelRight ? ETextJustify::Right : ETextJustify::Left);
 			DrawText(
 				OutDrawElements,
 				LayerId + 1,
@@ -566,7 +582,7 @@ private:
 				RangeLabel,
 					NamePosition + FVector2D(0.0f, 28.0f),
 				Ink * Tint,
-				ETextJustify::Right);
+				bLabelRight ? ETextJustify::Right : ETextJustify::Left);
 		}
 	}
 
@@ -581,9 +597,9 @@ private:
 		(void)DialCenter;
 		(void)DialRadius;
 		const FVector2D PanelSize = Geometry.GetLocalSize();
-		const FVector2D LeftEdge(10.0f, PanelSize.Y - 8.0f);
-		const FVector2D RightEdge(PanelSize.X - 10.0f, PanelSize.Y - 8.0f);
-		const FVector2D HorizonControl(PanelSize.X * 0.5f, PanelSize.Y - 150.0f);
+		const FVector2D LeftEdge(10.0f, PanelSize.Y - 72.0f);
+		const FVector2D RightEdge(PanelSize.X - 10.0f, PanelSize.Y - 72.0f);
+		const FVector2D HorizonControl(PanelSize.X * 0.5f, PanelSize.Y - 190.0f);
 		constexpr int32 ArcSteps = 32;
 		TArray<FVector2D> Arc;
 		Arc.Reserve(ArcSteps + 1);
@@ -617,6 +633,12 @@ private:
 			FVector2D(PanelSize.X * 0.5f, 248.0f),
 			FLinearColor(0.90f, 0.96f, 1.0f) * Tint,
 			ETextJustify::Center);
+		if (!Contacts.IsEmpty())
+		{
+			const FSlateFontInfo NameFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 30);
+			DrawText(OutDrawElements, LayerId + 2, Geometry, NameFont, Contacts[0].DisplayName,
+				FVector2D(PanelSize.X * 0.5f, PanelSize.Y - 66.0f), Ink * Tint, ETextJustify::Center);
+		}
 	}
 
 	void PaintLegend(
@@ -626,26 +648,11 @@ private:
 		const FSlateFontInfo& LabelFont,
 		const FLinearColor& Tint) const
 	{
-		struct FLegend
-		{
-			int32 Palette;
-			const TCHAR* Label;
-		};
-		const FLegend Entries[] = {
-			{0, TEXT("MOON")},
-			{1, TEXT("MAR II")},
-			{2, TEXT("OTHER")}
-		};
 		const FVector2D PanelSize = Geometry.GetLocalSize();
-		float X = 36.0f;
 		const float LegendY = PanelSize.Y - 42.0f;
-		for (const FLegend& Entry : Entries)
-		{
-			const FLinearColor Swatch = PaletteColor(Entry.Palette) * Tint;
-			FillQuad(OutDrawElements, LayerId, Geometry, FVector2D(X, LegendY + 4.0f), FVector2D(14.0f, 14.0f), Swatch);
-			DrawText(OutDrawElements, LayerId, Geometry, LabelFont, Entry.Label, FVector2D(X + 22.0f, LegendY), Ink * Tint, ETextJustify::Left);
-			X += 156.0f;
-		}
+		DrawText(OutDrawElements, LayerId, Geometry, LabelFont,
+			FString::Printf(TEXT("CONTACTS  %02d"), Contacts.Num()), FVector2D(PanelSize.X * 0.5f, LegendY),
+			Ink * Tint, ETextJustify::Center);
 	}
 
 	static FString FormatSurfaceRange(float Centimeters)
@@ -702,20 +709,19 @@ FString UJTSCruiseNavigationWidget::FormatAstronomicalRange(float Centimeters)
 	const double AstronomicalUnits = static_cast<double>(FMath::Max(0.0f, Centimeters)) / AstronomicalUnitCentimeters;
 	if (AstronomicalUnits < 0.01)
 	{
-		return TEXT("<0.01 AU");
+		const double Kilometers = FMath::Max(0.0f, Centimeters) / 100000.0;
+		return Kilometers < 10.0 ? FString::Printf(TEXT("%.1f km"), Kilometers)
+			: FString::Printf(TEXT("%.0f km"), Kilometers);
 	}
 	return FString::Printf(TEXT("%.2f AU"), AstronomicalUnits);
 }
 
 float UJTSCruiseNavigationWidget::CruiseRangeRadialFraction(float Centimeters)
 {
-	constexpr double AstronomicalUnitCentimeters = 1.495978707e13;
-	constexpr double HalfDialRangeAU = 0.35;
-	const double RangeAU = FMath::Max(0.0, static_cast<double>(Centimeters))
-		/ AstronomicalUnitCentimeters;
-	// A fixed, soft AU scale keeps each contact continuous when two bodies exchange
-	// nearest/farthest order. It also leaves useful space on the dial past one AU.
-	return static_cast<float>(RangeAU / (RangeAU + HalfDialRangeAU));
+	const double Kilometers = FMath::Max(0.0, static_cast<double>(Centimeters)) / 100000.0;
+	// Fixed logarithmic scope: local moons remain distinguishable alongside AU contacts.
+	return static_cast<float>(FMath::Clamp(FMath::Loge(1.0 + Kilometers / 100.0)
+		/ FMath::Loge(1.0 + 149597870.7 / 100.0), 0.0, 1.0));
 }
 
 FString UJTSCruiseNavigationWidget::FormatNavigationSpeed(float CentimetersPerSecond)

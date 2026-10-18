@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
 #include "GameFramework/Actor.h"
+#include "space/World/JTSCelestialNavigationTypes.h"
 
 #include "JTSPlanetAnchor.generated.h"
 
@@ -12,6 +13,7 @@ class AActor;
 class UPrimitiveComponent;
 class USceneComponent;
 class UWorld;
+class UJTSPlanetFragmentEnvelopeComponent;
 
 /** Result from one radial query against a planet's real gameplay mesh collision. */
 USTRUCT(BlueprintType)
@@ -89,6 +91,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	FName GetPlanetId() const;
 
+	FText GetNavigationDisplayName() const { return NavigationDisplayName.IsEmpty() ? FText::FromName(PlanetId) : NavigationDisplayName; }
+	int32 GetNavigationPaletteIndex() const { return NavigationPaletteIndex; }
+	float GetNavigationMarkerDistance() const { return NavigationMarkerDistance; }
+	float GetNavigationMarkerRangeKilometers() const { return NavigationMarkerRangeKilometers; }
+	const TArray<FJTSCelestialBackgroundNavigation>& GetBackgroundNavigation() const { return BackgroundNavigation; }
+
 	/** Centre of this gameplay planet. By default it is this actor's location. */
 	UFUNCTION(BlueprintPure, Category = "Planet")
 	FVector GetPlanetCenter() const;
@@ -113,6 +121,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
 	bool HasGameplaySurface() const;
+
+	/** Extra clearance around every real surface, including disconnected fragments. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
+	float GetFlightCollisionClearance() const { return FMath::IsFinite(FlightCollisionClearance) ? FMath::Max(0.0f, FlightCollisionClearance) : 0.0f; }
+
+	/** A debris field has one near-flight region, but no continuous radial terrain canopy. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
+	bool IsFragmentedGameplaySurface() const { return bFragmentedGameplaySurface; }
+	UFUNCTION(BlueprintPure, Category = "Planet|Surface")
+	UJTSPlanetFragmentEnvelopeComponent* GetFragmentEnvelope() const { return FragmentEnvelope; }
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Planet|Surface")
+	TObjectPtr<UJTSPlanetFragmentEnvelopeComponent> FragmentEnvelope;
 
 	/** Query the configured real mesh directly, including meshes that ignore Visibility. */
 	bool TraceGameplaySurfaceSegment(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutTraceHit) const;
@@ -291,6 +311,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Planet|Cruise")
 	FName GetParentPlanetId() const;
 
+	/** Optional paired presentation; the references and visual separation are authored in the level. */
+	AJTSPlanetAnchor* GetCelestialCompanion() const { return CelestialCompanion; }
+	/** Non-interactive bodies that share this anchor's local sky and cruise presentation. */
+	const TArray<TObjectPtr<AActor>>& GetCelestialBackgroundActors() const { return CelestialBackgroundActors; }
+	AActor* GetCelestialBackgroundCompanion() const { return CelestialBackgroundCompanion; }
+	float GetCompanionApparentSeparationCentimeters() const { return CompanionApparentSeparationCentimeters; }
+	float GetCompanionDistantSizeMultiplier() const { return FMath::IsFinite(CompanionDistantSizeMultiplier) ? FMath::Max(0.01f, CompanionDistantSizeMultiplier) : 1.0f; }
+
 	/**
 	 * Altitude at which the flight HUD leaves the near-surface tape and shows a planet bearing.
 	 * The value sits inside the existing takeoff-to-space-flight band.
@@ -336,6 +364,20 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet", meta = (AllowPrivateAccess = "true"))
 	FName PlanetId = TEXT("Moon");
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
+	FText NavigationDisplayName;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "2"))
+	int32 NavigationPaletteIndex = 2;
+	/** Fixed ship-to-centre range for every occupant's marker. Authored independently of the camera and visual scaling. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", Units = "cm"))
+	float NavigationMarkerDistance = 100000.0f;
+	/** Fixed simulated ship-to-centre trigger distance. Zero retains the legacy world-distance setting. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", Units = "km"))
+	float NavigationMarkerRangeKilometers = 0.0f;
+	/** Labels for existing backgrounds; membership still comes from CelestialBackgroundActors. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
+	TArray<FJTSCelestialBackgroundNavigation> BackgroundNavigation;
+
 	/** Optional centre override. If unset, GetActorLocation() is the planet centre. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<AActor> CenterActor;
@@ -351,6 +393,14 @@ private:
 	/** Preferred component when GameplaySurfaceActor has more than one collision primitive. If it cannot answer a surface trace, sibling collision components on the configured actor are tried automatically. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", UseComponentPicker, AllowAnyActor))
 	TObjectPtr<UPrimitiveComponent> GameplaySurfaceComponent;
+
+	/** Expands the whole spacecraft sweep in near flight. Zero preserves existing planet behavior. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", Units = "cm"))
+	float FlightCollisionClearance = 0.0f;
+
+	/** Treat the full authored bounds as the near-flight region. Individual real surfaces use whole-hull clearance sweeps. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true"))
+	bool bFragmentedGameplaySurface = false;
 
 	/** Retained for serialized Blueprint/API compatibility. Configured real planets use a direct GameplaySurfaceComponent trace instead of a world channel trace. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Surface", meta = (AllowPrivateAccess = "true"))
@@ -385,6 +435,26 @@ private:
 	/** Set on a moon so Mars↔Deimos stays a local transfer instead of another interplanetary cruise. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Cruise", meta = (AllowPrivateAccess = "true"))
 	FName ParentPlanetId = NAME_None;
+
+	/** Reciprocal companion for a compact local route with synchronized, reversible scale changes. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AJTSPlanetAnchor> CelestialCompanion;
+
+	/** Visual-only members of this local sky. They are never registered as gameplay planets. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Presentation", meta = (AllowPrivateAccess = "true"))
+	TArray<TObjectPtr<AActor>> CelestialBackgroundActors;
+
+	/** Optional visual member used as this body's local-route companion, without creating gameplay there. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Presentation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<AActor> CelestialBackgroundCompanion;
+
+	/** Separation used to calibrate the distant disk, in this level's full-size body units. Zero disables pairing. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0"))
+	float CompanionApparentSeparationCentimeters = 0.0f;
+
+	/** Apparent size of this body at its companion; does not change its full local size. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Presentation", meta = (AllowPrivateAccess = "true", ClampMin = "0.01"))
+	float CompanionDistantSizeMultiplier = 1.0f;
 
 	/** Optional future per-planet content level. It is not a flat gameplay-surface authority. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Content", meta = (AllowPrivateAccess = "true"))

@@ -12,6 +12,8 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/PlayerStart.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
@@ -375,6 +377,86 @@ FOnJTSInitialLandingSequenceCompleted& AJTSPlanetLandingManager::OnInitialLandin
 	return InitialLandingSequenceCompletedDelegate;
 }
 
+bool AJTSPlanetLandingManager::TransferExpedition(APlayerController* Requester, AJTSPlanetAnchor* Planet)
+{
+	AJTSSpacecraftActor* Ship = GetPlayerSpacecraft(Requester);
+	auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	if (!HasAuthority() || !IsValid(Planet) || !Planet->HasGameplaySurface() || !Ship || !Manager) return false;
+	FTransform PlayerArrival, ShipArrival;
+	if (!ResolveArrivalTransforms(Requester, Planet, PlayerArrival, ShipArrival)) return false;
+	Manager->PrepareForPlanetArrival();
+	FJTSPlanetSurfaceFrame Frame;
+	if (!Planet->GetSurfaceFrameAlongGravity(ShipArrival.GetLocation(), InitialGroundProbeDistance,
+		ShipArrival.GetUnitAxis(EAxis::X), Frame))
+	{
+		Manager->UpdateCelestialPresentation(Ship);
+		return false;
+	}
+	const FTransform OldTransform = Ship->GetActorTransform();
+	AJTSPlanetAnchor* OldPlanet = Ship->GetLandedPlanet();
+	const bool bWasLanded = Ship->IsLanded();
+	const FVector OldVelocity = Ship->GetFlightMovement()->Velocity;
+	const auto OldFootContacts = Ship->GetLandingSupportComponent()->GetFootContacts();
+	if (!Ship->SnapSpacecraftToSurfaceTransform(Planet, Frame.Transform))
+	{
+		Manager->UpdateCelestialPresentation(Ship);
+		return false;
+	}
+
+	TArray<APlayerController*> Controllers;
+	TArray<FTransform> Spawns;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC) continue;
+		const auto* State = PC->GetPlayerState<AJTSPlayerState>();
+		const bool bBoarded = Ship->GetOccupants().ContainsByPredicate([State](const auto& Seat) { return Seat.PlayerState == State; });
+		if (bBoarded || !Cast<AJTSCharacter>(PC->GetPawn())) continue;
+		FJTSPlayerRespawnTransformResult Result;
+		if (!BuildSafeSpacecraftExitTransform(Ship, Planet, GetPlayerSpawnSlot(PC), Result.Transform, &Spawns))
+		{
+			Ship->SetActorTransform(OldTransform, false, nullptr, ETeleportType::TeleportPhysics);
+			Ship->GetLandingSupportComponent()->SetContacts(OldFootContacts);
+			if (bWasLanded) Ship->SetGroundedPlanet(OldPlanet);
+			else
+			{
+				Ship->InitializeForPlanetArrival(Manager->GetCurrentPlanet() ? Manager->GetCurrentPlanet() : Planet);
+				Ship->GetFlightMovement()->Velocity = OldVelocity;
+			}
+			Manager->UpdateCelestialPresentation(Ship);
+			return false;
+		}
+		Controllers.Add(PC);
+		Spawns.Add(Result.Transform);
+	}
+	Manager->SetCurrentPlanet(Planet);
+	Manager->SetTravelState(EJTSSpaceTravelState::Surface);
+	Manager->RequestPlanetContentLoad(Planet, true);
+	Ship->InitializeForPlanetArrival(Planet);
+	Ship->SetGroundedPlanet(Planet);
+	for (const auto& Seat : Ship->GetOccupants())
+		if (Seat.Character) Seat.Character->SetGameplayPlanet(Planet);
+	// Boarded players travel attached to the same craft and retain their seats. Exterior crew
+	// move to independently clearance-tested slots; no character or inventory is recreated.
+	for (int32 Index = 0; Index < Controllers.Num(); ++Index)
+	{
+		AJTSCharacter* Character = CastChecked<AJTSCharacter>(Controllers[Index]->GetPawn());
+		Character->GetCharacterMovement()->StopMovementImmediately();
+		AJTSCharacter* Moved = nullptr;
+		SpawnAndConfigureCharacter(Controllers[Index], Planet, Spawns[Index], Moved);
+		Controllers[Index]->SetControlRotation(Spawns[Index].Rotator());
+		Controllers[Index]->ClientSetRotation(Spawns[Index].Rotator(), true);
+		Character->ForceNetUpdate();
+		RegisterPlayerSpacecraft(Controllers[Index], Ship);
+	}
+	for (auto It = ArrivalSpacecraftByPlanet.CreateIterator(); It; ++It)
+		if (It.Value() == Ship) It.RemoveCurrent();
+	ArrivalSpacecraftByPlanet.Add(Planet, Ship);
+	Ship->ForceNetUpdate();
+	Manager->UpdateCelestialPresentation(Ship);
+	return true;
+}
+
 bool AJTSPlanetLandingManager::RequestLanding(
 	AJTSSpacecraftActor* Spacecraft,
 	FJTSPlanetLandingValidationResult& OutResult,
@@ -652,7 +734,8 @@ bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
 	const AJTSSpacecraftActor* Spacecraft,
 	AJTSPlanetAnchor* Planet,
 	int32 PreferredSlot,
-	FTransform& OutTransform) const
+	FTransform& OutTransform,
+	const TArray<FTransform>* ReservedTransforms) const
 {
 	if (!IsValid(Spacecraft) || !IsValid(Planet))
 	{
@@ -697,7 +780,7 @@ bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
 	constexpr int32 DirectionCount = 12;
 	constexpr int32 RingCount = 6;
 	const int32 SafePreferredSlot = FMath::Max(0, PreferredSlot);
-	const auto FindCandidate = [this, Spacecraft, Planet, SpacecraftLocation, SurfaceUp, PreferredDirection, SearchRadius, BaseRadius, SafePreferredSlot](
+	const auto FindCandidate = [this, Spacecraft, Planet, SpacecraftLocation, SurfaceUp, PreferredDirection, SearchRadius, BaseRadius, SafePreferredSlot, ReservedTransforms](
 		FTransform& CandidateOutTransform)
 	{
 		float PreviousRadius = -1.0f;
@@ -721,6 +804,24 @@ bool AJTSPlanetLandingManager::BuildSafeSpacecraftExitTransform(
 				if (!BuildRespawnTransformAtAreaPoint(Spacecraft, Planet, CandidateAreaPoint, CandidateTransform, true))
 				{
 					continue;
+				}
+				// A batch transfer validates every slot before moving any pawn. Reserve the
+				// planned capsules as well as checking the current physics scene.
+				if (ReservedTransforms)
+				{
+					const float RadiusWithMargin = Spacecraft->GetPlayerRespawnCapsuleRadius() + 10.0f;
+					const float HalfSegment = FMath::Max(0.0f, Spacecraft->GetPlayerRespawnCapsuleHalfHeight() - Spacecraft->GetPlayerRespawnCapsuleRadius());
+					const FVector Axis = CandidateTransform.GetUnitAxis(EAxis::Z) * HalfSegment;
+					const FVector Center = CandidateTransform.GetLocation();
+					const bool bReserved = ReservedTransforms->ContainsByPredicate([&](const FTransform& Reserved)
+					{
+						const FVector OtherAxis = Reserved.GetUnitAxis(EAxis::Z) * HalfSegment;
+						FVector Closest, OtherClosest;
+						FMath::SegmentDistToSegmentSafe(Center - Axis, Center + Axis,
+							Reserved.GetLocation() - OtherAxis, Reserved.GetLocation() + OtherAxis, Closest, OtherClosest);
+						return FVector::DistSquared(Closest, OtherClosest) < FMath::Square(RadiusWithMargin * 2.0f);
+					});
+					if (bReserved) continue;
 				}
 
 				CandidateOutTransform = CandidateTransform;

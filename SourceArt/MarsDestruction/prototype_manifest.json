@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "style": "restrained plate drift; deceleration from release",
+  "fps": 30,
+  "frames": [
+    0,
+    840
+  ],
+  "duration_seconds": 28.0,
+  "movement_start_seconds": 2.0,
+  "surface_handoff_end_seconds": 12.0,
+  "intact_triangles": 5004,
+  "original_debris_triangles": 5080,
+  "shell_pieces": 0,
+  "final_debris_pieces": 107,
+  "bones": 109,
+  "export_materials": 2,
+  "final_envelope_diameter_vs_intact": 1.0,
+  "radial_travel_in_planet_radii": [
+    0.12,
+    0.19
+  ],
+  "drift_duration_seconds": [
+    21,
+    24
+  ],
+  "max_rotation_degrees": 2.5,
+  "motion_curve": "p(u) = 1 - (1-u)^2.4; monotonically decreasing outward speed",
+  "final_shape": "Original 107 supplied fragments. Shared centering and diameter normalization only.",
+  "surface_transition": "Seam-first masked handoff, encoded in UV1; source bone contraction drives UE material without a second clock.",
+  "render_step": 3,
+  "render_frames_directory": "Saved/MarsDestruction/frames_drift",
+  "preview_only": [],
+  "warning": "Authored gameplay motion, not a self-gravity solver. Multiplayer trigger and exploration collision remain to be integrated."
+}

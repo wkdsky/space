@@ -330,6 +330,15 @@ void AJTSSpacecraftActor::UpdateBoardingTriggerFromSpacecraftMeshBounds()
 void AJTSSpacecraftActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// Parked ships deactivate movement. Keep nearby celestial presentation current
+	// for players on the surface, using the same shared craft on server and clients.
+	if (FlightMovementComponent != nullptr && !FlightMovementComponent->IsActive())
+	{
+		if (AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+		{
+			Manager->UpdateCelestialPresentation(this);
+		}
+	}
 	if (HasAuthority())
 	{
 		if (DriverPlayerState != nullptr && FlightMovementComponent != nullptr && GetWorld() != nullptr

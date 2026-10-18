@@ -1,0 +1,159 @@
+{
+  "interpolation": "<AnimInterpolationType.LINEAR: 0>",
+  "stripping": true,
+  "compression": "/ACLPlugin/ACLAnimBoneCompressionSettings.ACLAnimBoneCompressionSettings",
+  "update_rate_optimizations": false,
+  "revision": 9,
+  "seconds": [
+    20,
+    21
+  ],
+  "sampling_fps": 60,
+  "measured_outer_bones": 12,
+  "bones": [
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.02344977690521852,
+        "maximum_step_local_cm": 0.025019020856102477
+      },
+      "COMPRESSED": {
+        "zero_steps": 56,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.4024353651562949
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.02712281493739137,
+        "maximum_step_local_cm": 0.028895874355242577
+      },
+      "COMPRESSED": {
+        "zero_steps": 56,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.4652060296057812
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.024943381271593686,
+        "maximum_step_local_cm": 0.026590414701180565
+      },
+      "COMPRESSED": {
+        "zero_steps": 54,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.4277579915041668
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.029695671701418368,
+        "maximum_step_local_cm": 0.03173471580811268
+      },
+      "COMPRESSED": {
+        "zero_steps": 47,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5105157797544445
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.030262397699988064,
+        "maximum_step_local_cm": 0.032300722306325476
+      },
+      "COMPRESSED": {
+        "zero_steps": 40,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5196920145620051
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.02918219440244676,
+        "maximum_step_local_cm": 0.03121530728350997
+      },
+      "COMPRESSED": {
+        "zero_steps": 48,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5022037886172006
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.03170079812631388,
+        "maximum_step_local_cm": 0.0339601997348936
+      },
+      "COMPRESSED": {
+        "zero_steps": 38,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5259358330241996
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.0315236851218975,
+        "maximum_step_local_cm": 0.03384077630258723
+      },
+      "COMPRESSED": {
+        "zero_steps": 37,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5236251861469664
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.02691449236333473,
+        "maximum_step_local_cm": 0.028887808467473186
+      },
+      "COMPRESSED": {
+        "zero_steps": 56,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.4650445828602922
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.029527682613453666,
+        "maximum_step_local_cm": 0.031778088773258245
+      },
+      "COMPRESSED": {
+        "zero_steps": 49,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.5116362675334947
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.027215312407094166,
+        "maximum_step_local_cm": 0.029350760880603757
+      },
+      "COMPRESSED": {
+        "zero_steps": 52,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.4728582877549176
+      }
+    },
+    {
+      "RAW": {
+        "zero_steps": 0,
+        "minimum_step_local_cm": 0.0212241724459585,
+        "maximum_step_local_cm": 0.022934118834847285
+      },
+      "COMPRESSED": {
+        "zero_steps": 50,
+        "minimum_step_local_cm": 0.0,
+        "maximum_step_local_cm": 0.36940132355749034
+      }
+    }
+  ]
+}

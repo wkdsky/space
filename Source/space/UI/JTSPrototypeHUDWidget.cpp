@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/UI/JTSSpaceDebugWidget.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -56,6 +57,8 @@
 #include "space/Systems/JTSVoiceSubsystem.h"
 #include "space/UI/JTSCircularProgressWidget.h"
 #include "space/UI/JTSCruiseNavigationWidget.h"
+#include "space/UI/JTSCelestialMarkerWidget.h"
+#include "space/UI/JTSCelestialNavigationLibrary.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
@@ -287,6 +290,23 @@ int32 UJTSPrototypeHUDWidget::GetStellarSlotAtScreenPosition(const FVector2D& Sc
 	return StellarRow ? StellarRow->GetSlotAtScreenPosition(ScreenPosition) : INDEX_NONE;
 }
 
+FReply UJTSPrototypeHUDWidget::NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	if ((InKeyEvent.GetKey() == EKeys::LeftAlt || InKeyEvent.GetKey() == EKeys::RightAlt) && !InKeyEvent.IsAltDown())
+	{
+		if (auto* PC = Cast<AJTSPlayerController>(GetOwningPlayer())) PC->SetAltCursorHeld(false);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return Super::NativeOnKeyUp(InGeometry, InKeyEvent);
+}
+
+void UJTSPrototypeHUDWidget::CancelInventoryDrag()
+{
+	UpdateInventoryDragPreview(FVector2D::ZeroVector, FString(), false);
+	DraggedCarriedSlot = INDEX_NONE; DraggedCarriedInstanceId.Invalidate();
+	DraggedCarriedLabel.Reset(); bCarriedDragPreviewVisible = false;
+}
+
 bool UJTSPrototypeHUDWidget::IsOverInventorySlot(const FVector2D& ScreenPosition) const
 {
 	return GetInventorySlotAtScreenPosition(ScreenPosition) != INDEX_NONE;
@@ -327,7 +347,7 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 	AJTSCharacter* const Character = Controller ? Cast<AJTSCharacter>(Controller->GetPawn()) : nullptr;
 	UJTSInventoryComponent* const Inventory = IsValid(Character) ? Character->GetInventoryComponent() : nullptr;
 	if (IsValid(Controller) && (Controller->IsSpaceShopOpen() || Controller->IsInventoryArrangementMode()) && IsValid(Inventory)
-		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		&& (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton))
 	{
 		for (int32 VisualIndex = 0; VisualIndex < InventorySlotBorders.Num(); ++VisualIndex)
 		{
@@ -335,6 +355,11 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 			if (!IsValid(Border) || !Border->IsVisible()
 				|| !Border->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition())) continue;
 			const int32 SlotIndex = Inventory->GetQuickbarPageStart() + VisualIndex;
+			if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+			{
+				Inventory->ServerEquipInventorySlot(SlotIndex, Inventory->GetItemAtSlot(SlotIndex).InstanceId);
+				return FReply::Handled();
+			}
 			Inventory->SelectQuickbarSlot(SlotIndex);
 			if (auto* State = Controller->GetPlayerState<AJTSPlayerState>()) State->GetStellarLoadout()->SelectWeapon(INDEX_NONE);
 			const FJTSItemInstance Item = Inventory->GetItemAtSlot(SlotIndex);
@@ -379,8 +404,19 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry
 			Controller->UpdateShipCarriedDragPreview(InMouseEvent.GetScreenSpacePosition(), FString(), false);
 			if (bCarriedDragPreviewVisible)
 			{
-				Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(),
-					DraggedCarriedSlot, DraggedCarriedInstanceId);
+				if (Controller->IsSpaceShopOpen())
+					Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(), DraggedCarriedSlot, DraggedCarriedInstanceId);
+				else if (auto* Character = Cast<AJTSCharacter>(Controller->GetPawn()))
+				{
+					auto* Inventory = Character->GetInventoryComponent();
+					const int32 Target = GetInventorySlotAtScreenPosition(InMouseEvent.GetScreenSpacePosition());
+					if (Target != INDEX_NONE)
+						Inventory->ServerMoveInventorySlot(DraggedCarriedSlot, DraggedCarriedInstanceId, Target, Inventory->GetItemAtSlot(Target).InstanceId);
+					else if ((!SpaceDebugWidget || !SpaceDebugWidget->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+						&& GetStellarSlotAtScreenPosition(InMouseEvent.GetScreenSpacePosition()) == INDEX_NONE)
+						Inventory->ServerDropInventorySlot(DraggedCarriedSlot, DraggedCarriedInstanceId);
+					else Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(), DraggedCarriedSlot, DraggedCarriedInstanceId);
+				}
 			}
 		}
 		DraggedCarriedSlot = INDEX_NONE;
@@ -660,6 +696,9 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			ETextJustify::Right);
 		AddCanvasChild(GameplayLayer, FlightTelemetryText, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 388.0f), FVector2D(300.0f, 120.0f), FVector2D(1.0f, 0.0f));
 
+		CelestialMarkerWidget = WidgetTree->ConstructWidget<UJTSCelestialMarkerWidget>(UJTSCelestialMarkerWidget::StaticClass(), TEXT("CelestialMarkers"));
+		AddCanvasChild(GameplayLayer, CelestialMarkerWidget, FAnchors(0, 0, 1, 1), FVector2D::ZeroVector, FVector2D::ZeroVector);
+		CelestialMarkerWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
 		CruiseNavigationWidget = WidgetTree->ConstructWidget<UJTSCruiseNavigationWidget>(UJTSCruiseNavigationWidget::StaticClass(), TEXT("CruiseNavigation"));
 		AddCanvasChild(GameplayLayer, CruiseNavigationWidget, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 14.0f), FVector2D(520.0f, 560.0f), FVector2D(1.0f, 0.0f));
 		CruiseNavigationWidget->SetRenderTransformPivot(FVector2D(1.0f, 0.0f));
@@ -924,6 +963,9 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		InventoryDragPreview->SetContent(InventoryDragPreviewText);
 		if (auto* GhostSlot = AddCanvasChild(GameplayLayer, InventoryDragPreview, FAnchors(0, 0), FVector2D::ZeroVector, FVector2D(140, 48))) GhostSlot->SetZOrder(100);
 		InventoryDragPreview->SetVisibility(ESlateVisibility::Collapsed);
+		SpaceDebugWidget = CreateWidget<UJTSSpaceDebugWidget>(GetOwningPlayer());
+		if (auto* DebugSlot = AddCanvasChild(GameplayLayer, SpaceDebugWidget, FAnchors(1, 1), FVector2D(-24, -190), FVector2D(272, 172), FVector2D(1, 1)))
+			DebugSlot->SetZOrder(50);
 		EquipmentHintText = MakeTextBlock(WidgetTree, TEXT("EquipmentHintText"), TEXT(""), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -210.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
 		InteractionPromptText = MakeTextBlock(WidgetTree, TEXT("InteractionPromptText"), TEXT(""), 17.0f, FLinearColor(0.90f, 0.96f, 1.0f, 1.0f), ETextJustify::Center);
@@ -1540,6 +1582,10 @@ void UJTSPrototypeHUDWidget::RefreshPhaseView(EJTSGameplayPhase NewGameplayPhase
 
 void UJTSPrototypeHUDWidget::SetFlightNavigationVisible(bool bVisible)
 {
+	if (CelestialMarkerWidget)
+	{
+		CelestialMarkerWidget->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
 	ApplyLayerVisibility(CruiseNavigationWidget, bVisible);
 	ApplyLayerVisibility(FlightSpeedText, bVisible);
 	ApplyLayerVisibility(FlightNavPanel, false);
@@ -1610,58 +1656,35 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 	const FVector ShipRight = Spacecraft->GetActorRightVector().GetSafeNormal();
 	const FVector ShipUp = Spacecraft->GetActorUpVector().GetSafeNormal();
 
-	auto DisplayNameForPlanet = [](const AJTSPlanetAnchor* Planet) -> FString
+	const TArray<FJTSCelestialNavigationBody> Bodies = UJTSCelestialNavigationLibrary::GatherBodies(SpaceWorldManager, Spacecraft);
+	if (CelestialMarkerWidget)
 	{
-		const FString PlanetId = IsValid(Planet) ? Planet->GetPlanetId().ToString() : FString();
-		if (PlanetId.Equals(TEXT("MarII"), ESearchCase::IgnoreCase))
-		{
-			return TEXT("MAR II");
-		}
-		return PlanetId.ToUpper();
-	};
-	auto PaletteForPlanet = [](const AJTSPlanetAnchor* Planet) -> int32
-	{
-		const FString PlanetId = IsValid(Planet) ? Planet->GetPlanetId().ToString() : FString();
-		if (PlanetId.Equals(TEXT("Moon"), ESearchCase::IgnoreCase))
-		{
-			return 0;
-		}
-		if (PlanetId.Equals(TEXT("MarII"), ESearchCase::IgnoreCase))
-		{
-			return 1;
-		}
-		return 2;
-	};
+		CelestialMarkerWidget->UpdateMarkers(GetOwningPlayer(), Bodies, !bNearSurface && !bGameMenuOpen);
+	}
 
 	TArray<FJTSCruiseNavigationContact> Contacts;
 	if (bNearSurface && IsValid(SurfacePlanet))
 	{
 		FJTSCruiseNavigationContact& Contact = Contacts.AddDefaulted_GetRef();
-		Contact.DisplayName = DisplayNameForPlanet(SurfacePlanet);
+		Contact.DisplayName = SurfacePlanet->GetNavigationDisplayName().ToString();
 		Contact.RangeCentimeters = SpaceWorldManager->GetNavigationSurfaceRangeCentimeters(Spacecraft, SurfacePlanet);
-		Contact.PaletteIndex = PaletteForPlanet(SurfacePlanet);
+		Contact.PaletteIndex = SurfacePlanet->GetNavigationPaletteIndex();
 	}
 	else
 	{
-		TArray<AJTSPlanetAnchor*> RegisteredPlanets;
-		SpaceWorldManager->GetRegisteredPlanets(RegisteredPlanets);
-		for (const AJTSPlanetAnchor* const Candidate : RegisteredPlanets)
+		for (const FJTSCelestialNavigationBody& Candidate : Bodies)
 		{
-			if (!IsValid(Candidate))
-			{
-				continue;
-			}
-
-			const FVector ToPlanet = (Candidate->GetPlanetCenter() - ShipLocation).GetSafeNormal();
+			if (!Candidate.bShowOnStarChart) continue;
+			const FVector ToPlanet = (Candidate.Center - ShipLocation).GetSafeNormal();
 			if (ToPlanet.IsNearlyZero() || ShipForward.IsNearlyZero())
 			{
 				continue;
 			}
 
 			FJTSCruiseNavigationContact& Contact = Contacts.AddDefaulted_GetRef();
-			Contact.DisplayName = DisplayNameForPlanet(Candidate);
-			Contact.RangeCentimeters = SpaceWorldManager->GetCruiseRangeCentimeters(Spacecraft, Candidate);
-			Contact.PaletteIndex = PaletteForPlanet(Candidate);
+			Contact.DisplayName = Candidate.DisplayName.ToString();
+			Contact.RangeCentimeters = Candidate.RangeCentimeters;
+			Contact.PaletteIndex = Candidate.PaletteIndex;
 			const float ForwardComponent = FVector::DotProduct(ToPlanet, ShipForward);
 			const float RightComponent = FVector::DotProduct(ToPlanet, ShipRight);
 			Contact.BearingDegrees = FMath::RadiansToDegrees(FMath::Atan2(RightComponent, ForwardComponent));
@@ -1678,7 +1701,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 	}
 
 	const FString LeftCaption = bNearSurface && IsValid(SurfacePlanet)
-		? DisplayNameForPlanet(SurfacePlanet)
+		? SurfacePlanet->GetNavigationDisplayName().ToString()
 		: FString(TEXT("SPACE"));
 	const FString RightCaption = bNearSurface
 		? FString(TEXT("NEAR SURFACE"))
@@ -1711,8 +1734,7 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 		return;
 	}
 
-	AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(
-		GetOwningPlayer() != nullptr ? GetOwningPlayer()->GetPawn() : nullptr);
+	AJTSSpacecraftActor* const Spacecraft = ResolveFlightSpacecraft();
 	const bool bLegacySpaceFlight = BoundGameState.IsValid() && BoundGameState->IsSpaceFlight();
 	if (!IsValid(Spacecraft))
 	{

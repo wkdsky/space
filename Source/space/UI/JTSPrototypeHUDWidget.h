@@ -46,12 +46,14 @@ public:
 	int32 GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const;
 	int32 GetInventorySlotAtScreenPosition(const FVector2D& ScreenPosition) const;
 	void UpdateInventoryDragPreview(const FVector2D& ScreenPosition, const FString& Label, bool bVisible);
+	void CancelInventoryDrag();
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -59,6 +61,7 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
+	UPROPERTY(Transient) TObjectPtr<class UJTSSpaceDebugWidget> SpaceDebugWidget;
 	void BuildWidgetTree();
 	void BindGameState();
 	void BindPlayerHealth();
@@ -186,8 +189,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> FlightSpeedText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Navigation", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSCruiseNavigationWidget> CruiseNavigationWidget;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Navigation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<class UJTSCelestialMarkerWidget> CelestialMarkerWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasPanel> FlightNavPanel;

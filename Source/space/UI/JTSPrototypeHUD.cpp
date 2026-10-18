@@ -30,7 +30,7 @@ void AJTSPrototypeHUD::BeginPlay()
 	PrototypeWidget = CreateWidget<UJTSPrototypeHUDWidget>(PlayerController, UJTSPrototypeHUDWidget::StaticClass());
 	if (PrototypeWidget != nullptr)
 	{
-		PrototypeWidget->AddToViewport(100);
+		PrototypeWidget->AddToPlayerScreen(100);
 	}
 }
 

@@ -4,6 +4,7 @@
 #include "Net/UnrealNetwork.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/Components/JTSPlanetFragmentEnvelopeComponent.h"
 
 UJTSSpacecraftSurfaceEnvelopeComponent::UJTSSpacecraftSurfaceEnvelopeComponent()
 {
@@ -119,6 +120,23 @@ bool UJTSSpacecraftSurfaceEnvelopeComponent::Evaluate(AJTSPlanetAnchor* Planet, 
 {
 	Out = {};
 	const auto* Ship = Cast<AJTSSpacecraftActor>(GetOwner());
+	if (Ship && IsValid(Planet) && Planet->IsFragmentedGameplaySurface() && Planet->GetFragmentEnvelope()->HasGeometry())
+	{
+		// A circumscribed hull sphere makes the wrap safe for any pitch/roll, including sharp corners.
+		const double Z = FMath::Max(Ship->GetExteriorHullSupportDistance(Ship->GetActorUpVector()),
+			Ship->GetExteriorHullSupportDistance(-Ship->GetActorUpVector()));
+		const double XY = Ship->GetSurfaceFlightFootprintRadius();
+		const double Hull = FMath::Sqrt(XY * XY + Z * Z);
+		const double Padding = Hull + Settings.FlatClearance + Settings.ShoulderRoundingDistance;
+		double Height;
+		if (!Planet->GetFragmentEnvelope()->QuerySurface(Position, Padding, Settings.ActivationAltitude,
+			Settings.SmoothMaximumWidth, Height, Out.Normal, Out.GroundLocation)) return false;
+		Out.bValid = true;
+		Out.RadialUp = Out.Normal;
+		Out.Location = Position - Out.Normal * Height;
+		Out.HullClearance = Hull;
+		return true;
+	}
 	if (!Ship || !IsValid(Planet) || SamplePlanet.Get() != Planet || Samples.IsEmpty()) return false;
 	const FVector Centre = Planet->GetPlanetCenter();
 	const FVector Up = (Position - Centre).GetSafeNormal();
@@ -176,6 +194,16 @@ void UJTSSpacecraftSurfaceEnvelopeComponent::Refresh(AJTSPlanetAnchor* Planet, c
     const FVector& Velocity, float GroundAltitude, float DeltaTime, bool bAllowFollowingExit, bool bTakeoffSampling)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority()) return;
+	if (IsValid(Planet) && Planet->IsFragmentedGameplaySurface())
+	{
+		FJTSSurfaceEnvelopeFrame NewFrame;
+		if (!Evaluate(Planet, Position, NewFrame)) { Reset(); return; }
+		Frame = NewFrame;
+		const float Height = FVector::DotProduct(Position - Frame.Location, Frame.RadialUp);
+		if (bFollowing && bAllowFollowingExit) bFollowing = Height < Settings.FollowingExitHeight;
+		else if (!bFollowing) bFollowing = Height <= Settings.FollowingEnterHeight;
+		return;
+	}
 	const float ActiveAltitude = Frame.bValid
 		? FMath::Max(Settings.ActivationAltitude, float(FVector::Distance(Frame.Location, Frame.GroundLocation)) + Settings.FollowingExitHeight + 300)
 		: Settings.ActivationAltitude;
@@ -183,7 +211,8 @@ void UJTSSpacecraftSurfaceEnvelopeComponent::Refresh(AJTSPlanetAnchor* Planet, c
 		GroundAltitude = FVector::Distance(Position, Planet->GetPlanetCenter()) - FVector::Distance(Frame.GroundLocation, Planet->GetPlanetCenter());
 	// A validated ground departure must finish even when a deep basin's rim is above the
 	// ordinary flight activation band. Losing the frame here would stall the clearance phase.
-	if (!IsValid(Planet) || (!bTakeoffSampling && GroundAltitude > ActiveAltitude))
+	if (!IsValid(Planet)
+		|| (!bTakeoffSampling && GroundAltitude > ActiveAltitude))
 	{
 		Reset(); return;
 	}

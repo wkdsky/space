@@ -235,6 +235,12 @@ public:
 	void CloseGameMenu();
 	bool IsGameMenuOpen() const;
 
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDebugPlanet(FName PlanetId, bool bSetDefault);
+
+	/** Called by the HUD's focused keyboard path as well as the gameplay viewport. */
+	void SetAltCursorHeld(bool bHeld);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void BeginPlayingState() override;
@@ -242,9 +248,11 @@ protected:
 	virtual void OnRep_Pawn() override;
 	virtual void ClientRestart_Implementation(APawn* NewPawn) override;
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+	virtual void PlayerTick(float DeltaTime) override;
 
 private:
 	bool bInventoryArrangementMode = false;
+	bool bAltCursorHeld = false;
 	bool bStellarItemDragging = false;
 	TWeakObjectPtr<class UJTSStellarAttachmentDialog> StellarItemDialog;
 	void BindGameState();

@@ -34,6 +34,7 @@ public:
 
 	/** Called by AJTSCharacter when health reaches zero. Only a landed associated spacecraft permits respawn. */
 	void HandlePlayerCharacterDeath(AJTSCharacter* Character);
+	bool DebugTravelExpedition(AJTSPlayerController* Requester, AJTSPlanetAnchor* Planet);
 
 protected:
 	virtual void BeginPlay() override;
@@ -50,6 +51,8 @@ private:
 		AJTSCharacter* Character,
 		AJTSSpacecraftActor* Spacecraft);
 	void ApplyConfiguredStartingItems(AJTSCharacter* Character);
+	void InitializeSurfacePlayer(APlayerController* PlayerController, AJTSPlanetAnchor* Planet,
+		AJTSCharacter* Character, AJTSSpacecraftActor* Spacecraft, bool bRestoreLoadout);
 	const FJTSSurfaceGameplayControllerDefinition* FindSurfaceGameplayDefinition(const AJTSPlanetAnchor* Planet) const;
 	AActor* FindOrSpawnSurfaceGameplayController(
 		const FJTSSurfaceGameplayControllerDefinition& Definition,

@@ -1,0 +1,18 @@
+{
+  "revision": 10,
+  "result": "PASS",
+  "errors": [],
+  "frames": 2400,
+  "expected_frames": 2400,
+  "fps": 60,
+  "resolution": [
+    1920,
+    1080
+  ],
+  "first_frame": 0,
+  "end_frame_exclusive": 2400,
+  "output_frame_step": 1,
+  "source": "Movie Render Queue / deferred render / fixed sequence time",
+  "starfield": "/Game/Space/Environment/M_SolarSystemStarfield",
+  "elapsed_seconds": 81.21900000000005
+}

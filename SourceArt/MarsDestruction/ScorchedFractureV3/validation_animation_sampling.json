@@ -1,0 +1,57 @@
+{
+  "revision": 10,
+  "result": "PASS",
+  "sampling_fps": 60,
+  "bones": 187,
+  "frame_stripping": false,
+  "compression": "/Game/Space/Environment/MarsDestructionPreview/ScorchedFractureV3/ABS_MarsCinematic.ABS_MarsCinematic",
+  "synchronized_release_seconds": 8.0,
+  "main_solids_stationary_until_release": true,
+  "windows": [
+    {
+      "seconds": [
+        20.0,
+        21.0
+      ],
+      "bone_steps": 11220,
+      "zero_steps": 0,
+      "minimum_step_local_cm": 0.006777276405872968,
+      "maximum_step_local_cm": 0.04124003641458062,
+      "maximum_raw_compressed_error_local_cm": 2.1734149841222772e-05,
+      "compressed_raw_step_ratio": [
+        0.9999999657719026,
+        0.9999999993987574
+      ]
+    },
+    {
+      "seconds": [
+        25.0,
+        26.0
+      ],
+      "bone_steps": 11220,
+      "zero_steps": 0,
+      "minimum_step_local_cm": 0.004720050146777312,
+      "maximum_step_local_cm": 0.027701460565328965,
+      "maximum_raw_compressed_error_local_cm": 2.2758595875053518e-05,
+      "compressed_raw_step_ratio": [
+        0.9999999657713085,
+        0.9999999993997143
+      ]
+    },
+    {
+      "seconds": [
+        31.0,
+        33.0
+      ],
+      "bone_steps": 22440,
+      "zero_steps": 0,
+      "minimum_step_local_cm": 0.003681423258497842,
+      "maximum_step_local_cm": 0.02142979361606464,
+      "maximum_raw_compressed_error_local_cm": 2.3841532956042926e-05,
+      "compressed_raw_step_ratio": [
+        0.9999999657706302,
+        0.999999999399935
+      ]
+    }
+  ]
+}

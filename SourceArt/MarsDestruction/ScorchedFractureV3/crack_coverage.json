@@ -1,0 +1,12 @@
+{
+  "boundary_edges": 8004,
+  "emitted_edges": 0,
+  "attached_light_cards": 0,
+  "method": "Fixed central point light, local scattering medium and actual moving opaque occluders.",
+  "light_origin": [
+    0,
+    0,
+    0
+  ],
+  "light_source_follows_plates": false
+}

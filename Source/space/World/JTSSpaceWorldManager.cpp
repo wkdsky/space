@@ -2,9 +2,11 @@
 
 #include "space/World/JTSSpaceWorldManager.h"
 
+#include "space/Components/JTSCompressedSpaceComponent.h"
 #include "Camera/CameraComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "Components/SceneComponent.h"
+#include "space/Components/JTSPlanetFragmentEnvelopeComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreamingDynamic.h"
@@ -66,6 +68,27 @@ namespace
 		return AltitudeFromNavigationKilometers(AJTSSpaceWorldManager::SurfaceContentTransitionKilometers);
 	}
 
+	float LocalPairInfluence(const FVector& View, const FVector& Start, const FVector& End,
+		double OwnShell, double OtherShell)
+	{
+		const FVector Closest = FMath::ClosestPointOnSegment(View, Start, End);
+		const float CorridorRadius = FMath::Max(float(OwnShell), float(OtherShell));
+		return 1.0f - FMath::SmoothStep(CorridorRadius, CorridorRadius * 2.0f,
+			float(FVector::Distance(View, Closest)));
+	}
+
+	// Shared by gameplay companions and visual-only companions. The destination's
+	// distance, rather than departure altitude alone, makes either direction reversible.
+	float LocalPairScale(const FVector& View, const FVector& Start, const FVector& End,
+		double OwnShell, double OtherShell, double OwnBeyond, double OtherBeyond,
+		float FarScale, float FallbackScale)
+	{
+		if (FVector::Distance(Start, End) - OwnShell - OtherShell <= 1.0) return FallbackScale;
+		const float Progress = float(OwnBeyond / FMath::Max(OwnBeyond + OtherBeyond, 1.0));
+		return FMath::Lerp(FallbackScale, FMath::Pow(FarScale, Progress),
+			LocalPairInfluence(View, Start, End, OwnShell, OtherShell));
+	}
+
 	// A small linear onset makes the antigravity drive measurable immediately, while the
 	// eased portion keeps the first kilometres of the compact map well below 0.01 AU.
 	constexpr float CruiseLinearOnsetShare = 0.002f;
@@ -99,6 +122,7 @@ AJTSSpaceWorldManager::AJTSSpaceWorldManager()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+	CompressedSpace = CreateDefaultSubobject<UJTSCompressedSpaceComponent>(TEXT("CompressedSpace"));
 }
 
 AJTSSpaceWorldManager* AJTSSpaceWorldManager::FindSpaceWorldManager(const UObject* WorldContextObject)
@@ -142,6 +166,7 @@ void AJTSSpaceWorldManager::BeginPlay()
 
 	GSpaceWorldManagers.Add(GetWorld(), this);
 	RegisterPersistentPlanetAnchors();
+	CompressedSpace->CaptureAuthoredBodies();
 	if (HasAuthority())
 	{
 		InitializeCurrentPlanet();
@@ -344,6 +369,8 @@ EJTSSpaceTravelState AJTSSpaceWorldManager::GetCurrentTravelState() const
 
 bool AJTSSpaceWorldManager::IsCruisePresentationActive(const AJTSSpacecraftActor* Spacecraft) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return !Spacecraft->IsLanded() && !CompressedSpace->ContainingPlanet(Spacecraft->GetActorLocation());
+
 	if (!IsValid(Spacecraft) || Spacecraft->IsLanded())
 	{
 		return false;
@@ -429,6 +456,11 @@ void AJTSSpaceWorldManager::SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet)
 		UE_LOG(LogTemp, Log, TEXT("Space World current planet changed to %s."),
 			IsValid(CurrentPlanet) ? *CurrentPlanet->GetPlanetId().ToString() : TEXT("None"));
 	}
+}
+
+void AJTSSpaceWorldManager::PrepareForPlanetArrival()
+{
+	if (HasAuthority()) RestoreDisplacedCruiseSurface();
 }
 
 void AJTSSpaceWorldManager::SetTravelState(EJTSSpaceTravelState NewTravelState)
@@ -620,7 +652,7 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 
 	if (CurrentTravelState == EJTSSpaceTravelState::Takeoff)
 	{
-		// Keep the departure planet as the low-flight reference until the shared 18 km
+		// Keep the departure planet as the low-flight reference until the shared 14 km
 		// navigation handoff. Above it, the ship has no planet flight target.
 		AJTSPlanetAnchor* const DeparturePlanet = IsValid(Spacecraft->GetFlightPlanet())
 			? Spacecraft->GetFlightPlanet()
@@ -649,7 +681,8 @@ void AJTSSpaceWorldManager::UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spa
 	{
 		// The near-flight shell is shared by all planets and is independent of the
 		// craft's forward vector or radial velocity. Gravity may have faded already.
-		AJTSPlanetAnchor* const NearbyPlanet = FindNearestGameplayPlanet(SpacecraftLocation, false);
+		AJTSPlanetAnchor* const NearbyPlanet = CompressedSpace->IsConfigured()
+			? CompressedSpace->ContainingPlanet(SpacecraftLocation) : FindNearestGameplayPlanet(SpacecraftLocation, false);
 		const bool bInsideNearFlightShell = IsValid(NearbyPlanet)
 			&& ResolvePresentationAltitude(NearbyPlanet, Spacecraft) < CruiseTransitionAltitude();
 		if (!bInsideNearFlightShell)
@@ -711,7 +744,11 @@ bool AJTSSpaceWorldManager::SharesLocalSky(
 	const AJTSPlanetAnchor* First,
 	const AJTSPlanetAnchor* Second) const
 {
-	return SharesLocalTransfer(First, Second);
+	if (CompressedSpace->IsConfigured()) return IsValid(First) && First == Second;
+
+	return IsValid(First) && IsValid(Second)
+		&& (First == Second || SharesLocalTransfer(First, Second)
+			|| (First->GetCelestialCompanion() == Second && Second->GetCelestialCompanion() == First));
 }
 
 float AJTSSpaceWorldManager::GetRouteKilometers(
@@ -732,6 +769,8 @@ float AJTSSpaceWorldManager::GetCruiseRangeCentimeters(
 	const AJTSSpacecraftActor* Spacecraft,
 	const AJTSPlanetAnchor* Planet) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return CompressedSpace->RangeCentimeters(Spacecraft->GetActorLocation(), Planet);
+
 	if (!IsValid(Spacecraft) || !IsValid(Planet))
 	{
 		return 0.0f;
@@ -775,8 +814,31 @@ float AJTSSpaceWorldManager::GetCruiseRangeCentimeters(
 		+ static_cast<double>(RouteShare) * static_cast<double>(RouteKilometers) * 100000.0));
 }
 
+float AJTSSpaceWorldManager::GetBackgroundCruiseRangeCentimeters(
+	const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* LocalAnchor, const AActor* Background) const
+{
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return CompressedSpace->RangeCentimeters(Spacecraft->GetActorLocation(), Background);
+
+	if (!IsValid(Spacecraft) || !IsValid(LocalAnchor) || !IsValid(Background)
+		|| !LocalAnchor->GetCelestialBackgroundActors().Contains(Background)) return 0.0f;
+	const float OwnerLocal = FMath::Max(0.0f, float(FVector::Distance(
+		Spacecraft->GetActorLocation(), LocalAnchor->GetPlanetCenter())) - ResolveAuthoredSurfaceRadius(LocalAnchor));
+	FVector Center;
+	float Radius;
+	GetBackgroundGeometry(Background, Center, Radius);
+	const float LocalRange = FMath::Max(0.0f, float(FVector::Distance(Spacecraft->GetActorLocation(), Center)) - Radius);
+	if (SharesLocalSky(ResolveReferencePlanet(Spacecraft), LocalAnchor)
+		&& ResolveBackgroundLocalInfluence(LocalAnchor, Spacecraft->GetActorLocation()) > 0.0f)
+	{
+		return LocalRange;
+	}
+	return LocalRange + FMath::Max(0.0f, GetCruiseRangeCentimeters(Spacecraft, LocalAnchor) - OwnerLocal);
+}
+
 float AJTSSpaceWorldManager::GetNavigationSpeedCentimetersPerSecond(const AJTSSpacecraftActor* Spacecraft) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return CompressedSpace->NavigationVelocity(Spacecraft->GetActorLocation(), Spacecraft->GetFlightVelocity()).Size();
+
 	if (!IsValid(Spacecraft)) return 0.0f;
 	const FVector Velocity = Spacecraft->GetFlightVelocity();
 	if (Velocity.IsNearlyZero()) return 0.0f;
@@ -826,6 +888,22 @@ float AJTSSpaceWorldManager::GetNavigationSurfaceRangeCentimeters(
 	const AJTSSpacecraftActor* Spacecraft,
 	const AJTSPlanetAnchor* Planet) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft) && IsValid(Planet))
+	{
+		if (Spacecraft->IsLanded()) return 0.0f;
+		const float ShellHeight = ResolvePresentationAltitude(Planet, Spacecraft);
+		float SurfaceHeight = ShellHeight;
+		if (Planet->IsFragmentedGameplaySurface() && Planet->GetFragmentEnvelope()->HasGeometry())
+			SurfaceHeight = Planet->GetFragmentEnvelope()->GetRegionAltitude(Spacecraft->GetActorLocation());
+		else Planet->GetAltitudeAboveSurface(Spacecraft->GetActorLocation(), SurfaceHeight);
+		// Real terrain close to the ground; converge continuously to the same spherical
+		// boundary and coordinate metric used by cruise before crossing the handoff.
+		const double Blend = FMath::SmoothStep(CompressedSpace->NearAltitudeCentimeters * 0.3,
+			CompressedSpace->NearAltitudeCentimeters * 0.9, double(ShellHeight));
+		return FMath::Lerp(FMath::Max(0.0f, SurfaceHeight), ShellHeight, Blend)
+			* CompressedSpace->LocalKilometersPerCentimeter() * 100000.0;
+	}
+
 	if (!IsValid(Spacecraft) || !IsValid(Planet))
 	{
 		return 0.0f;
@@ -857,6 +935,8 @@ float AJTSSpaceWorldManager::ResolveRouteKilometers(
 	const AJTSPlanetAnchor* Origin,
 	const AJTSPlanetAnchor* Destination) const
 {
+	if (CompressedSpace->IsConfigured()) return CompressedSpace->RouteKilometers(Origin, Destination);
+
 	if (!IsValid(Origin) || !IsValid(Destination) || Origin == Destination)
 	{
 		return 0.0f;
@@ -898,7 +978,11 @@ void AJTSSpaceWorldManager::SetCelestialBodyHidden(AJTSPlanetAnchor* Planet, boo
 	{
 		// Hide the mesh only. Landing and surface queries still need the authored collision.
 		SurfaceActor->SetActorHiddenInGame(bHideBody);
-		SurfaceActor->SetActorEnableCollision(true);
+		if (!CompressedSpace->IsConfigured()) SurfaceActor->SetActorEnableCollision(true);
+	}
+	for (AActor* const Background : Planet->GetCelestialBackgroundActors())
+	{
+		if (!CompressedSpace->IsConfigured() && IsValid(Background)) Background->SetActorHiddenInGame(bHideBody);
 	}
 }
 
@@ -918,6 +1002,8 @@ float AJTSSpaceWorldManager::ResolveLocalSeparationCentimeters(
 
 AJTSPlanetAnchor* AJTSSpaceWorldManager::ResolveReferencePlanet(const AJTSSpacecraftActor* Spacecraft) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return CompressedSpace->ContainingPlanet(Spacecraft->GetActorLocation());
+
 	if (!IsValid(Spacecraft))
 	{
 		return CurrentPlanet.Get();
@@ -1051,9 +1137,10 @@ float AJTSSpaceWorldManager::ResolveCelestialScaleRatio(
 
 	const float Altitude = ResolvePresentationAltitude(Planet, Spacecraft);
 	const float ReleaseAltitude = CruiseTransitionAltitude();
+	const bool bLocalSky = SharesLocalSky(ResolveReferencePlanet(Spacecraft), Planet);
 	if (Altitude <= ReleaseAltitude)
 	{
-		return 1.0f;
+		return bLocalSky ? ResolvePairedCelestialScaleRatio(Planet, Spacecraft->GetActorLocation(), 1.0f) : 1.0f;
 	}
 
 	// Apparent range is astronomical and jumps by orders of magnitude inside this compact map.
@@ -1062,7 +1149,99 @@ float AJTSSpaceWorldManager::ResolveCelestialScaleRatio(
 	const float ShrinkSpan = FMath::Max(ResolveCelestialShrinkSpanCentimeters(Planet), 1.0f);
 	const float Progress = FMath::Clamp(BeyondShell / ShrinkSpan, 0.0f, 1.0f);
 	const float FarScale = FMath::Clamp(MinimumCelestialScaleRatio, 0.0001f, 1.0f);
-	return FMath::Pow(FarScale, Progress);
+	const float Scale = FMath::Pow(FarScale, Progress);
+	return bLocalSky ? ResolvePairedCelestialScaleRatio(Planet, Spacecraft->GetActorLocation(), Scale) : Scale;
+}
+
+float AJTSSpaceWorldManager::ResolvePairedCelestialScaleRatio(
+	const AJTSPlanetAnchor* Planet, const FVector& ViewLocation, float FallbackScale) const
+{
+	const AJTSPlanetAnchor* const Companion = Planet->GetCelestialCompanion();
+	AActor* const BackgroundCompanion = Planet->GetCelestialBackgroundCompanion();
+	const float ApparentSeparation = Planet->GetCompanionApparentSeparationCentimeters();
+	const bool bGameplayPair = IsValid(Companion) && Companion != Planet
+		&& Companion->GetCelestialCompanion() == Planet
+		&& FMath::IsNearlyEqual(ApparentSeparation, Companion->GetCompanionApparentSeparationCentimeters(), 1.0f);
+	const bool bBackgroundPair = IsValid(BackgroundCompanion)
+		&& Planet->GetCelestialBackgroundActors().Contains(BackgroundCompanion);
+	if ((!bGameplayPair && !bBackgroundPair) || ApparentSeparation <= KINDA_SMALL_NUMBER)
+	{
+		return FallbackScale;
+	}
+	const FVector Start = Planet->GetPlanetCenter();
+	FVector End;
+	float OtherRadius;
+	if (bGameplayPair)
+	{
+		End = Companion->GetPlanetCenter();
+		OtherRadius = Companion->GetApproximateRadius();
+	}
+	else GetBackgroundGeometry(BackgroundCompanion, End, OtherRadius);
+	const double Separation = FVector::Distance(Start, End);
+	// Use exactly the same authored-radius shell as the existing flight handoff.
+	// ApproximateRadius is an apparent-size reference, not a replacement for terrain height.
+	const double OwnShell = ResolveAuthoredSurfaceRadius(Planet) + CruiseTransitionAltitude();
+	const double OtherShell = (bGameplayPair ? ResolveAuthoredSurfaceRadius(Companion) : OtherRadius)
+		+ CruiseTransitionAltitude();
+	const double Span = Separation - OwnShell - OtherShell;
+	if (Span <= 1.0 || ApparentSeparation <= Separation)
+	{
+		return FallbackScale;
+	}
+	// Radial distances preserve the original release height even on an oblique
+	// departure. Swapping the bodies still changes Progress to 1-Progress.
+	const auto Beyond = [&](const AJTSPlanetAnchor* Body, double Shell)
+	{
+		if (Body->IsFragmentedGameplaySurface() && Body->GetFragmentEnvelope()->HasGeometry())
+			return FMath::Max(0.0, Body->GetFragmentEnvelope()->GetRegionAltitude(ViewLocation) - CruiseTransitionAltitude());
+		return FMath::Max(0.0, FVector::Distance(ViewLocation, Body->GetPlanetCenter()) - Shell);
+	};
+	const double OwnBeyond = Beyond(Planet, OwnShell);
+	const double OtherBeyond = bGameplayPair ? Beyond(Companion, OtherShell)
+		: FMath::Max(0.0, FVector::Distance(ViewLocation, End) - OtherShell);
+	const float FarScale = FMath::Clamp(float((Separation - OtherRadius)
+		/ FMath::Max(double(ApparentSeparation - OtherRadius), 1.0))
+		* Planet->GetCompanionDistantSizeMultiplier(), 0.0001f, 1.0f);
+	// Sideways departure to another system smoothly returns to the existing
+	// interplanetary rule. A local pair must not keep a body large everywhere.
+	return LocalPairScale(ViewLocation, Start, End, OwnShell, OtherShell,
+		OwnBeyond, OtherBeyond, FarScale, FallbackScale);
+}
+
+void AJTSSpaceWorldManager::GetBackgroundGeometry(const AActor* Background, FVector& Center, float& Radius) const
+{
+	if (const FSavedCelestialSurface* Saved = SavedCelestialSurfaces.Find(Background); Saved && Saved->bCaptured)
+	{
+		Center = Saved->BoundsCenter;
+		Radius = Saved->BoundsRadius;
+		return;
+	}
+	FVector Extent;
+	Background->GetActorBounds(false, Center, Extent);
+	Radius = FMath::Max(float(Extent.GetAbsMax()), 1.0f);
+}
+
+float AJTSSpaceWorldManager::ResolveBackgroundLocalInfluence(
+	const AJTSPlanetAnchor* Planet, const FVector& ViewLocation) const
+{
+	// Every corridor in this visual group belongs to the same local sky, including
+	// routes between two backgrounds. Keep authored centres/radii independent of scale.
+	TArray<FSphere, TInlineAllocator<4>> Bodies;
+	Bodies.Emplace(Planet->GetPlanetCenter(), ResolveAuthoredSurfaceRadius(Planet) + CruiseTransitionAltitude());
+	for (const AActor* Background : Planet->GetCelestialBackgroundActors())
+	{
+		if (!IsValid(Background)) continue;
+		FVector Center;
+		float Radius;
+		GetBackgroundGeometry(Background, Center, Radius);
+		Bodies.Emplace(Center, Radius + CruiseTransitionAltitude());
+	}
+	float Influence = 0.0f;
+	for (int32 I = 0; I < Bodies.Num(); ++I)
+		for (int32 J = I + 1; J < Bodies.Num(); ++J)
+			Influence = FMath::Max(Influence, LocalPairInfluence(ViewLocation,
+				Bodies[I].Center, Bodies[J].Center, Bodies[I].W, Bodies[J].W));
+	return Influence;
 }
 
 float AJTSSpaceWorldManager::ResolveCelestialShrinkSpanCentimeters(const AJTSPlanetAnchor* Planet) const
@@ -1092,6 +1271,8 @@ float AJTSSpaceWorldManager::ResolveCelestialShrinkSpanCentimeters(const AJTSPla
 
 float AJTSSpaceWorldManager::ResolveAuthoredSurfaceRadius(const AJTSPlanetAnchor* Planet) const
 {
+	if (CompressedSpace->ContainsBody(Planet)) return CompressedSpace->AuthoredRadius(Planet);
+
 	if (!IsValid(Planet))
 	{
 		return 1.0f;
@@ -1118,6 +1299,8 @@ float AJTSSpaceWorldManager::ResolvePresentationAltitude(
 	const AJTSPlanetAnchor* Planet,
 	const AJTSSpacecraftActor* Spacecraft) const
 {
+	if (CompressedSpace->ContainsBody(Planet) && IsValid(Spacecraft)) return FMath::Max(0.0, FVector::Distance(Spacecraft->GetActorLocation(), Planet->GetPlanetCenter()) - CompressedSpace->AuthoredRadius(Planet));
+
 	if (!IsValid(Planet) || !IsValid(Spacecraft))
 	{
 		return 0.0f;
@@ -1125,9 +1308,17 @@ float AJTSSpaceWorldManager::ResolvePresentationAltitude(
 
 	const float LevelDistance = FVector::Distance(Spacecraft->GetActorLocation(), Planet->GetPlanetCenter());
 	const float AuthoredAltitude = FMath::Max(0.0f, LevelDistance - ResolveAuthoredSurfaceRadius(Planet));
+	// Empty gaps belong to the same debris-field planet region. A far-side
+	// surface hit through a gap must not repeatedly engage cruise.
+	if (Planet->IsFragmentedGameplaySurface())
+	{
+		if (Planet->GetFragmentEnvelope()->HasGeometry())
+			return float(Planet->GetFragmentEnvelope()->GetRegionAltitude(Spacecraft->GetActorLocation()));
+		return AuthoredAltitude;
+	}
 	// Retain real mesh height near gameplay. Higher up, smoothly converge on the
 	// authored-radius shell before scaling begins; a scaled mesh cannot answer a
-	// full-size surface trace, so this prevents an altitude jump at 18 km.
+	// full-size surface trace, so this prevents an altitude jump at 14 km.
 	if (!IsPlanetPresentedAtAuthoredScale(Planet))
 	{
 		return AuthoredAltitude;
@@ -1148,6 +1339,8 @@ float AJTSSpaceWorldManager::ResolveApparentRangeCentimeters(
 	const AJTSSpacecraftActor* Spacecraft,
 	const AJTSPlanetAnchor* Planet) const
 {
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return CompressedSpace->RangeCentimeters(Spacecraft->GetActorLocation(), Planet);
+
 	if (!IsValid(Spacecraft) || !IsValid(Planet))
 	{
 		return 0.0f;
@@ -1184,10 +1377,18 @@ bool AJTSSpaceWorldManager::IsPlanetNoticeableFrom(
 	const AJTSPlanetAnchor* Planet,
 	const AJTSSpacecraftActor* Viewer) const
 {
+	if (CompressedSpace->ContainsBody(Planet)) return true;
+
 	if (!IsValid(Planet))
 	{
 		return false;
 	}
+
+	// Compact map distances must not expose another system while inside a local sky.
+	const AJTSPlanetAnchor* const Reference = ResolveReferencePlanet(Viewer);
+	if (IsValid(Reference) && !SharesLocalSky(Reference, Planet)
+		&& (!IsValid(Viewer) || !IsCruisePresentationActive(Viewer)
+			|| ResolveBackgroundLocalInfluence(Reference, Viewer->GetActorLocation()) > KINDA_SMALL_NUMBER)) return false;
 
 	// The test is the disk the camera can see: the mesh after this frame's scale, at the
 	// level distance. Apparent range stays on the radar and must not hide a still-large body.
@@ -1203,7 +1404,19 @@ bool AJTSSpaceWorldManager::IsPlanetNoticeableFrom(
 	}
 
 	const float AngularDiameterDegrees = FMath::RadiansToDegrees(2.0f * FMath::Atan(Radius / Distance));
-	return AngularDiameterDegrees >= FMath::Max(0.001f, MinimumNoticeableAngularDiameterDegrees);
+	const float MinimumAngle = FMath::Max(0.001f, MinimumNoticeableAngularDiameterDegrees);
+	if (AngularDiameterDegrees >= MinimumAngle) return true;
+	// A background primary can be larger than the gameplay moon representing its local sky.
+	for (const AActor* const Background : Planet->GetCelestialBackgroundActors())
+	{
+		if (!IsValid(Background)) continue;
+		FVector Center, Extent;
+		Background->GetActorBounds(false, Center, Extent);
+		const float BackgroundDistance = FMath::Max(float(FVector::Distance(
+			IsValid(Viewer) ? Viewer->GetActorLocation() : FVector::ZeroVector, Center)), 1.0f);
+		if (FMath::RadiansToDegrees(2.0f * FMath::Atan(Extent.GetAbsMax() / BackgroundDistance)) >= MinimumAngle) return true;
+	}
+	return false;
 }
 
 void AJTSSpaceWorldManager::ApplyCelestialScale(
@@ -1225,16 +1438,67 @@ void AJTSSpaceWorldManager::ApplyCelestialScale(
 	if (!SavedSurface.bCaptured)
 	{
 		SavedSurface.Scale = SurfaceActor->GetActorScale3D();
+		SavedSurface.Location = SurfaceActor->GetActorLocation();
+		SavedSurface.bCollisionEnabled = SurfaceActor->GetActorEnableCollision();
 		SavedSurface.bCaptured = true;
 	}
 
 	const float ScaleRatio = ResolveCelestialScaleRatio(Planet, Spacecraft);
 	SurfaceActor->SetActorScale3D(SavedSurface.Scale * ScaleRatio);
+	// Paired generated meshes can have a bottom pivot. Their movable visual
+	// scales about the planet centre, preserving its direction in the sky.
+	if ((IsValid(Planet->GetCelestialCompanion()) || IsValid(Planet->GetCelestialBackgroundCompanion()))
+		&& Planet->GetCompanionApparentSeparationCentimeters() > 0.0f)
+	{
+		const FVector ScaledLocation = Planet->GetPlanetCenter()
+			+ (SavedSurface.Location - Planet->GetPlanetCenter()) * ScaleRatio;
+		if (!SurfaceActor->GetActorLocation().Equals(ScaledLocation, 0.01))
+		{
+			SurfaceActor->SetActorLocation(ScaledLocation);
+		}
+	}
 	SurfaceActor->SetActorEnableCollision(true);
+	// Capture all members before applying any scale so pair geometry never depends
+	// on update order or on last frame's shrunken bounds.
+	for (AActor* const Background : Planet->GetCelestialBackgroundActors())
+	{
+		if (!IsValid(Background) || Background == SurfaceActor) continue;
+		FSavedCelestialSurface& SavedBackground = SavedCelestialSurfaces.FindOrAdd(Background);
+		if (!SavedBackground.bCaptured)
+		{
+			SavedBackground.Scale = Background->GetActorScale3D();
+			SavedBackground.Location = Background->GetActorLocation();
+			FVector Extent;
+			Background->GetActorBounds(false, SavedBackground.BoundsCenter, Extent);
+			SavedBackground.BoundsRadius = FMath::Max(float(Extent.GetAbsMax()), 1.0f);
+			SavedBackground.bCollisionEnabled = Background->GetActorEnableCollision();
+			SavedBackground.bCaptured = true;
+		}
+	}
+	const bool bLocalSky = SharesLocalSky(ResolveReferencePlanet(Spacecraft), Planet);
+	const FVector ViewLocation = IsValid(Spacecraft) ? Spacecraft->GetActorLocation() : Planet->GetPlanetCenter();
+	const float LocalInfluence = bLocalSky ? ResolveBackgroundLocalInfluence(Planet, ViewLocation) : 0.0f;
+	for (AActor* const Background : Planet->GetCelestialBackgroundActors())
+	{
+		if (!IsValid(Background) || Background == SurfaceActor) continue;
+		const FSavedCelestialSurface& SavedBackground = SavedCelestialSurfaces.FindChecked(Background);
+		const float Beyond = FMath::Max(0.0f, float(FVector::Distance(ViewLocation, SavedBackground.BoundsCenter))
+			- SavedBackground.BoundsRadius - CruiseTransitionAltitude());
+		const float Progress = FMath::Clamp(Beyond / FMath::Max(ResolveCelestialShrinkSpanCentimeters(Planet), 1.0f), 0.0f, 1.0f);
+		const float DistantScale = FMath::Pow(FMath::Clamp(MinimumCelestialScaleRatio, 0.0001f, 1.0f), Progress);
+		// Background dimensions are already calibrated to their local orbital distances.
+		// Preserve them along local routes; outside, each body shrinks from its own centre.
+		const float BackgroundScale = FMath::Lerp(DistantScale, 1.0f, LocalInfluence);
+		Background->SetActorScale3D(SavedBackground.Scale * BackgroundScale);
+		Background->SetActorLocation(SavedBackground.BoundsCenter
+			+ (SavedBackground.Location - SavedBackground.BoundsCenter) * BackgroundScale);
+	}
 }
 
 bool AJTSSpaceWorldManager::IsPlanetPresentedAtAuthoredScale(const AJTSPlanetAnchor* Planet) const
 {
+	if (CompressedSpace->ContainsBody(Planet) && IsValid(Planet)) return Planet->GetVisualRadius() >= CompressedSpace->AuthoredRadius(Planet) * 0.999;
+
 	if (!IsValid(Planet))
 	{
 		return false;
@@ -1441,14 +1705,20 @@ void AJTSSpaceWorldManager::UpdateSurfaceContentPresentation(
 
 void AJTSSpaceWorldManager::RestoreDisplacedCruiseSurface()
 {
+	CompressedSpace->RestorePresentation();
+
 	for (TPair<TWeakObjectPtr<AActor>, FSavedCelestialSurface>& Entry : SavedCelestialSurfaces)
 	{
 		AActor* const SurfaceActor = Entry.Key.Get();
 		if (Entry.Value.bCaptured && IsValid(SurfaceActor))
 		{
 			SurfaceActor->SetActorScale3D(Entry.Value.Scale);
+			if (!SurfaceActor->GetActorLocation().Equals(Entry.Value.Location, 0.01))
+			{
+				SurfaceActor->SetActorLocation(Entry.Value.Location);
+			}
 			SurfaceActor->SetActorHiddenInGame(false);
-			SurfaceActor->SetActorEnableCollision(true);
+			SurfaceActor->SetActorEnableCollision(Entry.Value.bCollisionEnabled);
 		}
 	}
 
@@ -1491,6 +1761,7 @@ void AJTSSpaceWorldManager::UpdateCelestialPresentation(const AJTSSpacecraftActo
 	}
 
 	const FVector ViewLocation = Spacecraft->GetActorLocation();
+	if (CompressedSpace->IsConfigured()) CompressedSpace->ApplyPresentation(ViewLocation);
 	float FieldOfView = 90.0f;
 	if (const UCameraComponent* const FlightCamera = Spacecraft->GetFlightCamera(); IsValid(FlightCamera))
 	{
@@ -1505,7 +1776,7 @@ void AJTSSpaceWorldManager::UpdateCelestialPresentation(const AJTSSpacecraftActo
 			continue;
 		}
 
-		ApplyCelestialScale(Planet, Spacecraft);
+		if (!CompressedSpace->IsConfigured()) ApplyCelestialScale(Planet, Spacecraft);
 		UpdateSurfaceContentPresentation(Planet, Spacecraft);
 		static_cast<void>(FieldOfView);
 		const bool bNoticeable = IsPlanetNoticeableFrom(Planet, Spacecraft);

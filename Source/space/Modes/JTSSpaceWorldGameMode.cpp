@@ -20,6 +20,7 @@
 #include "space/World/JTSPlanetLandingManager.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/World/JTSSpaceDebugTravelManager.h"
 
 AJTSSpaceWorldGameMode::AJTSSpaceWorldGameMode()
 {
@@ -45,6 +46,9 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 	}
 	StartedLandingSequences.Empty();
 	InitializedSurfacePlanets.Empty();
+	const auto* EntryExpedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>();
+	const FString EntryMap = EntryExpedition ? EntryExpedition->GetSnapshot().CurrentMapPackage : FString();
+	const FString EntryPlanetId = EntryExpedition ? EntryExpedition->GetSnapshot().CurrentPlanetId : FString();
 
 	AJTSSpaceWorldManager* const WorldManager = FindOrCreateSpaceWorldManager();
 	if (!IsValid(WorldManager))
@@ -58,15 +62,19 @@ void AJTSSpaceWorldGameMode::BeginPlay()
 	if (UJTSExpeditionSubsystem* const Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 	{
 		Expedition->SetCurrentMap(GetWorld()->GetPackage()->GetName());
-		if (!Expedition->GetSnapshot().CurrentPlanetId.IsEmpty())
+		if (!EntryPlanetId.IsEmpty())
 		{
-			if (AJTSPlanetAnchor* const SavedPlanet = WorldManager->FindPlanetById(FName(*Expedition->GetSnapshot().CurrentPlanetId)))
+			if (AJTSPlanetAnchor* const SavedPlanet = WorldManager->FindPlanetById(FName(*EntryPlanetId)))
 			{
 				WorldManager->SetCurrentPlanet(SavedPlanet);
 			}
 		}
 	}
 	WorldManager->SetTravelState(EJTSSpaceTravelState::Surface);
+	if (EntryMap.IsEmpty())
+		if (auto* Debug = AJTSSpaceDebugTravelManager::Find(this))
+			if (auto* Preferred = WorldManager->FindPlanetById(Debug->GetPreferredPlanetId()))
+				WorldManager->SetCurrentPlanet(Preferred);
 
 	if (UWorld* const World = GetWorld())
 	{
@@ -243,6 +251,30 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	AJTSCharacter* Character,
 	AJTSSpacecraftActor* Spacecraft)
 {
+	InitializeSurfacePlayer(PlayerController, Planet, Character, Spacecraft, true);
+}
+
+bool AJTSSpaceWorldGameMode::DebugTravelExpedition(AJTSPlayerController* Requester, AJTSPlanetAnchor* Planet)
+{
+	if (!HasAuthority() || !IsHostController(Requester) || !Planet || !FindSurfaceGameplayDefinition(Planet)) return false;
+	auto* Landing = PlanetLandingManager.Get();
+	if (!Landing || !Landing->TransferExpedition(Requester, Planet)) return false;
+	auto* Ship = Landing->GetPlayerSpacecraft(Requester);
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (auto* Character = PC ? Cast<AJTSCharacter>(PC->GetPawn()) : nullptr)
+			InitializeSurfacePlayer(PC, Planet, Character, Ship, false);
+	}
+	// A driver possesses the craft; its boarded character still supplies the surface context.
+	for (const auto& Seat : Ship->GetOccupants())
+		if (Seat.Character) InitializeSurfacePlayer(Requester, Planet, Seat.Character, Ship, false);
+	return true;
+}
+
+void AJTSSpaceWorldGameMode::InitializeSurfacePlayer(APlayerController* PlayerController,
+	AJTSPlanetAnchor* Planet, AJTSCharacter* Character, AJTSSpacecraftActor* Spacecraft, bool bRestoreLoadout)
+{
 	AJTSSpaceWorldManager* const WorldManager = SpaceWorldManager.Get();
 	if (!IsValid(WorldManager) || !IsValid(Planet) || !IsValid(Character) || !IsValid(Spacecraft))
 	{
@@ -283,11 +315,11 @@ void AJTSSpaceWorldGameMode::HandleInitialLandingSequenceCompleted(
 	{
 		Context.Players.Add(Character);
 	}
-	if (UJTSExpeditionSubsystem* const Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
+	if (UJTSExpeditionSubsystem* const Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>(); bRestoreLoadout && Expedition)
 	{
 		Expedition->RestorePlayerState(Character->GetPlayerState<AJTSPlayerState>(), Character);
 	}
-	ApplyConfiguredStartingItems(Character);
+	if (bRestoreLoadout) ApplyConfiguredStartingItems(Character);
 	Context.Spacecraft = Spacecraft;
 	Context.GameplayData = Definition->GameplayData.IsNull() ? nullptr : Definition->GameplayData.LoadSynchronous();
 	if (!Definition->GameplayData.IsNull() && !IsValid(Context.GameplayData))

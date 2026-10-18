@@ -82,6 +82,10 @@ public:
 	bool ConsumeResumeRequest();
 	void ResetClientTransientState();
 
+	/** Host developer preference, separate from expedition snapshots and normal saves. */
+	FName GetDebugDefaultPlanetId() const { return DebugDefaultPlanetId; }
+	bool SetDebugDefaultPlanetId(FName PlanetId);
+
 	UFUNCTION(BlueprintPure, Category = "Expedition")
 	bool HasActiveExpedition() const { return !Snapshot.ExpeditionId.IsEmpty(); }
 
@@ -97,6 +101,9 @@ public:
 	FString SaveSlotName = TEXT("JumpToSpaceExpedition");
 
 private:
+	UPROPERTY(Transient)
+	FName DebugDefaultPlanetId;
+
 	void FlushDeferredSave();
 	void NormalizeSnapshotMetadata(int32 PreferredSaveSlot = INDEX_NONE);
 	void UpdatePlaytime();

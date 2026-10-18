@@ -38,8 +38,8 @@ struct FJTSCruiseNavigationContact
  * Local-space cruise dial for free flight.
  *
  * The ship stays fixed at the bottom of the disc, pointing up. Registered planets slide with the
- * hull's heading. A body outside the forward cone, or above or below the nose, pins to the rim
- * with a direction chevron. Inside the shared 18 km handoff the same frame switches to that
+ * hull's heading. Visual-only backgrounds can also supply contacts. Inside the shared
+ * near-surface handoff the same frame switches to that
  * body's surface distance.
  */
 UCLASS()

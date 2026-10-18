@@ -1,0 +1,370 @@
+{
+  "version": 3,
+  "revision": 10,
+  "geometry_revision": 10,
+  "fps": 30,
+  "video_fps": 60,
+  "frames": [
+    0,
+    1200
+  ],
+  "duration_seconds": 40.0,
+  "animation_seconds": 33.5,
+  "release_seconds": 5.0,
+  "main_drift_seconds": 8.0,
+  "rift_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      24,
+      0.0
+    ],
+    [
+      36,
+      0.04
+    ],
+    [
+      60,
+      0.2
+    ],
+    [
+      105,
+      0.65
+    ],
+    [
+      150,
+      1.0
+    ],
+    [
+      1200,
+      1.0
+    ]
+  ],
+  "rift_morph": "TectonicRift",
+  "opening_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      30,
+      0.0
+    ],
+    [
+      45,
+      0.06
+    ],
+    [
+      75,
+      0.25
+    ],
+    [
+      120,
+      0.65
+    ],
+    [
+      180,
+      1.0
+    ],
+    [
+      1200,
+      1.0
+    ]
+  ],
+  "opening_morph": "RiftOpening",
+  "falling_fault_shards": 126,
+  "plates": 187,
+  "bones": 188,
+  "materials": 2,
+  "triangles": 90764,
+  "original_outer_triangles": 5004,
+  "source_surface_area": 12.855352018679696,
+  "partition_surface_area": 12.855352010231472,
+  "source_volume": 4.093142505419134,
+  "partition_volume": 4.087553743638259,
+  "final_original_fragments": 107,
+  "recovered_inner_fragments": 13,
+  "interior_fragments": 19,
+  "recovered_inner_volume": 0.15248345513400594,
+  "debris_solid_volume_before_rescale": 0.9071617886312658,
+  "debris_compacted_volume_equivalent_radius": 0.6005263199060843,
+  "debris_to_intact_scale": 1.6524336824003707,
+  "radial_travel": [
+    0.18,
+    0.8040852687554434
+  ],
+  "drift_seconds": [
+    25.5,
+    25.5
+  ],
+  "drift_continues_until_seconds": 33.5,
+  "internal_pressure_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      24,
+      0.0
+    ],
+    [
+      36,
+      0.35
+    ],
+    [
+      60,
+      0.65
+    ],
+    [
+      105,
+      0.9
+    ],
+    [
+      150,
+      1.15
+    ],
+    [
+      210,
+      1.7
+    ],
+    [
+      240,
+      2.3
+    ],
+    [
+      270,
+      1.6
+    ],
+    [
+      330,
+      0.7
+    ],
+    [
+      420,
+      0.15
+    ],
+    [
+      510,
+      0.02
+    ],
+    [
+      570,
+      0.0
+    ],
+    [
+      1200,
+      0.0
+    ]
+  ],
+  "central_light_intensity_scale": 220.0,
+  "leakage_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      105,
+      0.0
+    ],
+    [
+      120,
+      0.22
+    ],
+    [
+      150,
+      0.48
+    ],
+    [
+      180,
+      0.78
+    ],
+    [
+      210,
+      1.0
+    ],
+    [
+      240,
+      1.25
+    ],
+    [
+      255,
+      0.7
+    ],
+    [
+      270,
+      0.4
+    ],
+    [
+      300,
+      0.18
+    ],
+    [
+      330,
+      0.1
+    ],
+    [
+      420,
+      0.03
+    ],
+    [
+      510,
+      0.005
+    ],
+    [
+      570,
+      0.0
+    ],
+    [
+      1200,
+      0.0
+    ]
+  ],
+  "ray_strength_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      1200,
+      0.0
+    ]
+  ],
+  "ray_reach_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      1200,
+      0.0
+    ]
+  ],
+  "edge_glow_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      1200,
+      0.0
+    ]
+  ],
+  "erosion_keys": [
+    [
+      0,
+      0.0
+    ],
+    [
+      240,
+      0.0
+    ],
+    [
+      330,
+      0.15
+    ],
+    [
+      450,
+      0.65
+    ],
+    [
+      600,
+      1.0
+    ],
+    [
+      1005,
+      1.0
+    ]
+  ],
+  "crack_coverage": {
+    "boundary_edges": 8004,
+    "emitted_edges": 0,
+    "attached_light_cards": 0,
+    "method": "Fixed central point light, local scattering medium and actual moving opaque occluders.",
+    "light_origin": [
+      0,
+      0,
+      0
+    ],
+    "light_source_follows_plates": false
+  },
+  "local_rim_morph": "ScorchedRim",
+  "energy_volume_bounds_half_extent": 1.12,
+  "energy_core_scale_keys": [
+    [
+      0,
+      1.0
+    ],
+    [
+      1200,
+      1.0
+    ]
+  ],
+  "energy_has_visible_surface": false,
+  "energy_extinction_mode": "fixed soft volume, radiance decay only",
+  "thermal_flow_texture": "T_MarsThermalFlow.png",
+  "burn_progress_keys": [
+    [
+      0,
+      -0.2
+    ],
+    [
+      150,
+      -0.12
+    ],
+    [
+      210,
+      0.04
+    ],
+    [
+      300,
+      0.22
+    ],
+    [
+      420,
+      0.43
+    ],
+    [
+      600,
+      0.7
+    ],
+    [
+      780,
+      1.04
+    ],
+    [
+      870,
+      1.12
+    ],
+    [
+      1200,
+      1.12
+    ]
+  ],
+  "thermal_flow": "Transient branching hot fingers with layered yellow/orange/red emission, patch-gated secondary branches, sparse cooling reservoirs. No permanent fine emissive web.",
+  "energy_core_hide_seconds": 19.0,
+  "central_light_pocket_depth": 0.025,
+  "central_cavity": false,
+  "fracture_ray_pairs": 0,
+  "fade_out": [
+    32,
+    33
+  ],
+  "full_black": [
+    33,
+    34
+  ],
+  "swap_seconds": 33.5,
+  "fade_in": [
+    34,
+    35.5
+  ],
+  "render_step": 1,
+  "render_frames_directory": "Saved/MarsDestruction/frames_scorched_v3",
+  "cinematic_frames_directory": "Saved/MarsDestruction/offline_r10",
+  "geometry": "Closed partition of the FIRST mesh. Original crust slivers fall inward while TectonicRift deepens gorges and RiftOpening bends and separates irregular lips; all solids release outward together at 8 seconds. Localized rim erosion, source exterior UV and central solid fragments retained.",
+  "second_mesh": "Original second mesh uniformly rescaled by solid-volume compaction, not by matching exploded bounds. Only visible AFTER the blackout.",
+  "heat": "Opaque solid rock; transient root-to-tip flame fingers, bright hot cores, orange rolling fronts and sparse dark-red cooling reservoirs. Fixed soft volume emission fades without shrinking.",
+  "physical_scope": "Authored restrained motion, not a self-gravity simulation."
+}

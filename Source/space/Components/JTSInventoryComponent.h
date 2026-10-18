@@ -85,6 +85,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSelectQuickbarSlot(int32 SlotIndex);
 
+	/** Exact-instance UI actions reject drags/clicks that became stale after replication. */
+	UFUNCTION(Server, Reliable)
+	void ServerEquipInventorySlot(int32 SlotIndex, FGuid ExpectedInstanceId);
+	UFUNCTION(Server, Reliable)
+	void ServerMoveInventorySlot(int32 FromSlot, FGuid ExpectedFromId, int32 ToSlot, FGuid ExpectedToId);
+	UFUNCTION(Server, Reliable)
+	void ServerDropInventorySlot(int32 SlotIndex, FGuid ExpectedInstanceId);
+
 	UFUNCTION(BlueprintCallable, Category = "Inventory|Quickbar")
 	bool SelectQuickbarPage(int32 PageIndex);
 

@@ -20,6 +20,18 @@
 void UJTSExpeditionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	if (const auto* Preferences = Cast<UJTSSpaceDebugSaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("JumpToSpaceDebugPreferences"), 0)))
+		DebugDefaultPlanetId = Preferences->DefaultPlanetId;
+}
+
+bool UJTSExpeditionSubsystem::SetDebugDefaultPlanetId(FName PlanetId)
+{
+	if (PlanetId.IsNone() || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return false;
+	auto* Preferences = Cast<UJTSSpaceDebugSaveGame>(UGameplayStatics::CreateSaveGameObject(UJTSSpaceDebugSaveGame::StaticClass()));
+	Preferences->DefaultPlanetId = PlanetId;
+	if (!UGameplayStatics::SaveGameToSlot(Preferences, TEXT("JumpToSpaceDebugPreferences"), 0)) return false;
+	DebugDefaultPlanetId = PlanetId;
+	return true;
 }
 
 void UJTSExpeditionSubsystem::Deinitialize()

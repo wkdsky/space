@@ -79,6 +79,22 @@ Editor 调整人口与活动带在 PDA，坡度 / 探测在 `BP_MoonAnt → Surf
 
 在权威主机控制台使用 `jts.EnemyBody.Debug 1` 查看身体范围和统计，`0` 关闭。行为参数在敌人 Blueprint，求解参数由 `JTSPlanetEnemySubsystem.BodySeparationSettings` 配置。
 
+## 月球附近的破碎地球
+
+`L_SpaceWorld` 的 `EarthFragments_NearMoon` 保持当前大小、位置和朝向：整体模型包络直径约 2.20 km，地月中心距约 4.10 km，地球视觉缩放为 220126.216724。月球本体仍为原始 scale 82，远处月球的 `Companion Distant Size Multiplier` 保持 2。两端继续同步指数缩放，来回使用同一条曲线。
+
+月球自由航行阈值恢复为导航 **14 km**，指数换算为 `8000 * (exp(14 / 12) - 1)`，即约 17690 cm 的关卡物理高度。HUD、近地/自由航行状态、自由航行罩子和开始缩放使用同一阈值；地表交互内容在 13 km 提前隐藏。近地的真实地形查询、月球外套和着陆参数保持现有配置。
+
+地球整体近地范围使用以爆炸中心为原点、随模型原始朝向旋转的椭圆。局部三轴半径约为 `(107667.65, 106752.26, 129973.25)` cm，根据全部模型顶点拟合并保证包含全部碎块。内部空隙也属于地球近地状态，罩子隐藏。离开椭圆后，按到椭圆外沿的**最短距离**进行相同指数换算，14 km 切换自由航行；不再以旋转包围盒的最大半径划一个过大的球。该配置独立于运行时视觉缩放，离开后不会因模型缩小而改变判断基准。
+
+`DA_EarthFragmentsEnvelope` 保存 67 个碎块各自的凸包和整体椭圆。`JTSPlanetFragmentEnvelopeComponent` 只负责几何查询，无 Tick；现有 `JTSSpacecraftSurfaceEnvelopeComponent` 继续管理贴面帧和服务器复制，移动组件沿该帧飞行。每个凸包外扩整艘飞船的包围球、1 m 平面安全余量和 6 m 圆角距离，平面、侧面、背面、棱边和角点构成连续圆滑的外套；相邻外套采用保守平滑并集。可容纳飞船的碎块间隙保留，不把全部碎块桥接成一个球面地形。接触法线只用于外套跟随和碰撞脱离，重力仍指向 PlanetAnchor 中心。
+
+原始模型保留双面真实三角形碰撞（Complex As Simple）作为最终检查。地球 `Flight Collision Clearance` 改为 0，安全间距由连续外套提供，避免膨胀盒碰撞在贴面时只把飞船拦停。已有穿透恢复继续验证整个可见船体和物理船体，再以小步向外脱离；碎块处使用当地外套法线。地球起飞以当前碎块的局部外套高度解除抬升，不把它当作整颗球的最高地形。
+
+Editor 已配置并保存数据资产及关卡。打开 `L_SpaceWorld` 后 Play 即可验证。重建几何时，先在 Editor 执行 `Tools/Art/export_fragment_envelope.py`，再用 Blender 执行 `--background --python Tools/Art/build_fragment_envelope.py -- Saved/EarthFragments/envelope_source.json Saved/EarthFragments/envelope_hulls.json`，最后在 Editor 执行 `Tools/Art/configure_fragment_envelope.py`。`configure_earth_fragments.py` 会复用已放置地球的中心，并应用已有外套资产；调整模型大小后须重新导出几何。
+
+相关修改：`JTSPlanetFragmentEnvelopeComponent.h/.cpp`、`JTSSpacecraftSurfaceEnvelopeComponent.cpp`、`JTSSpacecraftFlightMovementComponent.cpp`、`JTSPlanetAnchor.h/.cpp`、`JTSSpaceWorldManager.h/.cpp`、`JTSSpacecraftRegressionTests.cpp`、上述三个几何工具及 `configure_earth_fragments.py`、`L_SpaceWorld.umap` 和 `DA_EarthFragmentsEnvelope.uasset`。验证包括 14 km 状态/显示切换、双向缩放、椭圆各轴距离、连续圆角、原生飞行跨棱角及实际 67 碎块的整船前进/倒退/横移碰撞。
+
 ## 美术来源与可用角色
 
 `BP_JTSPlayer_SkeletonAstronaut` 是可选玩家 Blueprint，沿用 `Casual_2_Skeleton` 和 `ABP_JTSPlayer_Casual_2`。在实际使用的 Earth / SpaceWorld GameMode Blueprint 中选择 Default Pawn Class 才会启用，不因存在该资产自动替换当前玩家。

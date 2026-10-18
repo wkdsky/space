@@ -6,6 +6,7 @@
 #include "Engine/Level.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -24,6 +25,7 @@
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSSpaceWorldManager.h"
 #include "space/World/JTSSurfacePlacementBounds.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -209,11 +211,16 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		return nullptr;
 	}
 
-	AJTSMoonSurfaceController* const SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(
+	AJTSMoonSurfaceController* SurfaceController = AJTSMoonSurfaceController::FindMoonSurfaceController(
 		SourceActor != nullptr ? static_cast<const UObject*>(SourceActor) : static_cast<const UObject*>(SafetyPawn));
-	AJTSPlanetAnchor* const Planet = IsValid(SurfaceController) && SurfaceController->IsUsingRealPlanetSurfaceGameplay()
-		? SurfaceController->GetOwningPlanet()
-		: nullptr;
+	const AJTSCharacter* DropCharacter = Cast<AJTSCharacter>(SafetyPawn);
+	AJTSPlanetAnchor* Planet = DropCharacter ? DropCharacter->GetGameplayPlanet() : nullptr;
+	if (!Planet)
+		if (const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(World)) Planet = Manager->GetCurrentPlanet();
+	if (!Planet && IsValid(SurfaceController) && SurfaceController->IsUsingRealPlanetSurfaceGameplay())
+		Planet = SurfaceController->GetOwningPlanet();
+	// A previously visited Moon controller must not claim a drop made on another body.
+	if (SurfaceController && Planet && SurfaceController->GetOwningPlanet() != Planet) SurfaceController = nullptr;
 	FVector GravityAcceleration = GetPickupGravityAcceleration(World, SafetyPawn);
 	if (IsValid(Planet))
 	{
@@ -299,7 +306,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		}
 
 		bool bOverlapsShip = false;
-		auto DoesOverlapShip = [Planet, &CandidateLocation, &bOverlapsShip](const AJTSSpacecraftActor* Spacecraft)
+		auto DoesOverlapShip = [World, Planet, &CandidateLocation, &bOverlapsShip](const AJTSSpacecraftActor* Spacecraft)
 		{
 			if (!IsValid(Spacecraft))
 			{
@@ -311,10 +318,16 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 			{
 				if (IsValid(Planet))
 				{
-					const float SurfaceClearance = ShipBounds.GetExtent().Size() + 70.0f;
-					bOverlapsShip = Planet->ApproximateSurfaceArcDistance(
-						CandidateLocation,
-						Spacecraft->GetActorLocation()) <= SurfaceClearance;
+					// Resource exclusion bounds deliberately leave a large empty region around
+					// the ship. A hand-dropped item only needs clearance from its physical hull.
+					TArray<FOverlapResult> Overlaps;
+					World->OverlapMultiByChannel(Overlaps,
+						CandidateLocation + Planet->GetRadialUpVector(CandidateLocation) * PickupDropSpawnHeight,
+						FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(35.0f));
+					bOverlapsShip = Overlaps.ContainsByPredicate([Spacecraft](const FOverlapResult& Hit)
+					{
+						return Hit.bBlockingHit && Hit.GetActor() == Spacecraft;
+					});
 					return;
 				}
 
@@ -353,6 +366,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnGameplayDrop(
 		{
 			if (IsValid(ExistingPickup)
 				&& IsInCurrentMoonSurface(SurfaceController, ExistingPickup)
+				&& (!Planet || ExistingPickup->GetSurfacePlanet() == Planet)
 				&& (IsValid(Planet)
 					? Planet->ApproximateSurfaceArcDistance(CandidateLocation, ExistingPickup->GetActorLocation()) < 60.0f
 					: FVector::DistSquared2D(CandidateLocation, ExistingPickup->GetActorLocation()) < FMath::Square(60.0f)))

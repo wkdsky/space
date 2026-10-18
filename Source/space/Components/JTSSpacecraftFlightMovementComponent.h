@@ -54,6 +54,14 @@ struct SPACE_API FJTSSpacecraftFlightStats
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0"))
 	float ReverseSpeed = 1800.0f;
+
+	/** Step change outside the world's near-flight bubbles. Authored per ship Blueprint. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "1.0"))
+	float CruiseSpeedMultiplier = 1.0f;
+
+	/** Anti-gravity drive commands velocity directly, including immediate idle/stop. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
+	bool bInstantVelocityResponse = false;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSSpacecraftBoostStateChanged, bool, bIsBoosting);
@@ -123,6 +131,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	float GetCurrentSpeed() const;
+
+	UFUNCTION(BlueprintPure, Category = "Flight")
+	float GetFlightSpeedMultiplier() const;
 
 	UFUNCTION(BlueprintPure, Category = "Flight")
 	float GetSpeedNormalized() const;

@@ -5,6 +5,7 @@
 #include "CollisionQueryParams.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "space/Components/JTSPlanetFragmentEnvelopeComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "Math/RotationMatrix.h"
@@ -27,6 +28,7 @@ AJTSPlanetAnchor::AJTSPlanetAnchor()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+	FragmentEnvelope = CreateDefaultSubobject<UJTSPlanetFragmentEnvelopeComponent>(TEXT("FragmentEnvelope"));
 }
 
 void AJTSPlanetAnchor::BeginPlay()
@@ -77,7 +79,9 @@ float AJTSPlanetAnchor::GetVisualRadius() const
 		FVector Extent = FVector::ZeroVector;
 		SurfaceActor->GetActorBounds(false, Origin, Extent);
 		const float BoundsRadius = Extent.GetAbsMax();
-		if (BoundsRadius > 1.0f)
+		// A valid distant celestial mesh can be much smaller than one world centimetre.
+		// Falling back to the gameplay radius here creates a huge phantom navigation disk.
+		if (FMath::IsFinite(BoundsRadius) && BoundsRadius > UE_SMALL_NUMBER)
 		{
 			return BoundsRadius;
 		}

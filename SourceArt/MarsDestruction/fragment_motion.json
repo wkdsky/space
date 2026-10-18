@@ -1,0 +1,858 @@
+[
+  {
+    "name": "Debris_000",
+    "size_proxy": 0.678065836429596,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.517925182133191
+  },
+  {
+    "name": "Debris_001",
+    "size_proxy": 0.9379890859127045,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.4998590866222502
+  },
+  {
+    "name": "Debris_002",
+    "size_proxy": 0.6761117875576019,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.5407524937271226
+  },
+  {
+    "name": "Debris_003",
+    "size_proxy": 0.04005852807313204,
+    "radial_travel": 0.18840396974693235,
+    "drift_seconds": 21.06840129656004,
+    "initial_speed": 0.021461976209199412,
+    "rotation_degrees": -1.0050379009437287
+  },
+  {
+    "name": "Debris_004",
+    "size_proxy": 0.0341964066028595,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 1.882856775575368
+  },
+  {
+    "name": "Debris_005",
+    "size_proxy": 0.044943854212760925,
+    "radial_travel": 0.18536312474278266,
+    "drift_seconds": 21.198723225309315,
+    "initial_speed": 0.020985768560417024,
+    "rotation_degrees": 0.6365748910169877
+  },
+  {
+    "name": "Debris_006",
+    "size_proxy": 0.03810456395149231,
+    "radial_travel": 0.18972544277494977,
+    "drift_seconds": 21.011766738216437,
+    "initial_speed": 0.021670765163773684,
+    "rotation_degrees": -0.23754159794684443
+  },
+  {
+    "name": "Debris_007",
+    "size_proxy": 0.0723009705543518,
+    "radial_travel": 0.1727998276226577,
+    "drift_seconds": 21.73715024474324,
+    "initial_speed": 0.019078838836966282,
+    "rotation_degrees": -1.87289055190251
+  },
+  {
+    "name": "Debris_008",
+    "size_proxy": 0.030288219451904297,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": -1.9786737392354123
+  },
+  {
+    "name": "Debris_009",
+    "size_proxy": 0.03517436981201172,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 0.9491367007849383
+  },
+  {
+    "name": "Debris_010",
+    "size_proxy": 0.5197853446006775,
+    "radial_travel": 0.12067348798730261,
+    "drift_seconds": 23.9711362291156,
+    "initial_speed": 0.012081879156723289,
+    "rotation_degrees": -0.7636081955573883
+  },
+  {
+    "name": "Debris_011",
+    "size_proxy": 0.33317069709300995,
+    "radial_travel": 0.13242651205844228,
+    "drift_seconds": 23.46743519749533,
+    "initial_speed": 0.013543177013829897,
+    "rotation_degrees": 0.2183243811452454
+  },
+  {
+    "name": "Debris_012",
+    "size_proxy": 0.16707387566566467,
+    "radial_travel": 0.15066588047010512,
+    "drift_seconds": 22.685747979852636,
+    "initial_speed": 0.015939439750868697,
+    "rotation_degrees": -1.0198414413466153
+  },
+  {
+    "name": "Debris_013",
+    "size_proxy": 0.24718350172042847,
+    "radial_travel": 0.1403151529160712,
+    "drift_seconds": 23.129350589311237,
+    "initial_speed": 0.014559698323488426,
+    "rotation_degrees": 1.2273186863002712
+  },
+  {
+    "name": "Debris_014",
+    "size_proxy": 0.23253555223345757,
+    "radial_travel": 0.1419294291347546,
+    "drift_seconds": 23.060167322796232,
+    "initial_speed": 0.014771385877442401,
+    "rotation_degrees": 0.522879113700732
+  },
+  {
+    "name": "Debris_015",
+    "size_proxy": 0.34098705649375916,
+    "radial_travel": 0.13181371678710835,
+    "drift_seconds": 23.49369785198107,
+    "initial_speed": 0.013465437509335468,
+    "rotation_degrees": -0.359057072021422
+  },
+  {
+    "name": "Debris_016",
+    "size_proxy": 0.15925754606723785,
+    "radial_travel": 0.15193201543332996,
+    "drift_seconds": 22.631485052857286,
+    "initial_speed": 0.016111927086903892,
+    "rotation_degrees": -0.9934536631951768
+  },
+  {
+    "name": "Debris_017",
+    "size_proxy": 0.15632641315460205,
+    "radial_travel": 0.15242290752755677,
+    "drift_seconds": 22.610446820247567,
+    "initial_speed": 0.01617902472137571,
+    "rotation_degrees": -1.0812272575309452
+  },
+  {
+    "name": "Debris_018",
+    "size_proxy": 0.2510993182659149,
+    "radial_travel": 0.13989980855224338,
+    "drift_seconds": 23.147151062046714,
+    "initial_speed": 0.01450543695962278,
+    "rotation_degrees": -0.5003452793007679
+  },
+  {
+    "name": "Debris_019",
+    "size_proxy": 1.097216159105301,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": -0.4279184498363172
+  },
+  {
+    "name": "Debris_020",
+    "size_proxy": 0.15437234938144684,
+    "radial_travel": 0.15275530513833205,
+    "drift_seconds": 22.596201208357197,
+    "initial_speed": 0.01622452946632487,
+    "rotation_degrees": 1.384301571467621
+  },
+  {
+    "name": "Debris_021",
+    "size_proxy": 0.3957012761384249,
+    "radial_travel": 0.12788120684702703,
+    "drift_seconds": 23.66223399227027,
+    "initial_speed": 0.012970664415419296,
+    "rotation_degrees": -0.9039490378107572
+  },
+  {
+    "name": "Debris_022",
+    "size_proxy": 0.2872498035430908,
+    "radial_travel": 0.13634548357230564,
+    "drift_seconds": 23.299479275472617,
+    "initial_speed": 0.01404448385754303,
+    "rotation_degrees": 0.2534205091072101
+  },
+  {
+    "name": "Debris_023",
+    "size_proxy": 0.28334155678749084,
+    "radial_travel": 0.13670749021007095,
+    "drift_seconds": 23.283964705282674,
+    "initial_speed": 0.014091155894499843,
+    "rotation_degrees": 0.49120740342770597
+  },
+  {
+    "name": "Debris_024",
+    "size_proxy": 0.29408910870552063,
+    "radial_travel": 0.13572367660540152,
+    "drift_seconds": 23.32612814548279,
+    "initial_speed": 0.013964461732413317,
+    "rotation_degrees": -0.2458251360371575
+  },
+  {
+    "name": "Debris_025",
+    "size_proxy": 0.3927701339125633,
+    "radial_travel": 0.12807768121463162,
+    "drift_seconds": 23.653813662230075,
+    "initial_speed": 0.012995216725070605,
+    "rotation_degrees": -0.7205044494241374
+  },
+  {
+    "name": "Debris_026",
+    "size_proxy": 0.2393748238682747,
+    "radial_travel": 0.14116342045100672,
+    "drift_seconds": 23.092996266385427,
+    "initial_speed": 0.014670777458859594,
+    "rotation_degrees": 0.954123425835287
+  },
+  {
+    "name": "Debris_027",
+    "size_proxy": 0.15534940361976624,
+    "radial_travel": 0.15258857989404684,
+    "drift_seconds": 22.60334657596942,
+    "initial_speed": 0.016201697855442725,
+    "rotation_degrees": 0.8589971677588549
+  },
+  {
+    "name": "Debris_028",
+    "size_proxy": 0.3409869819879532,
+    "radial_travel": 0.13181372256108778,
+    "drift_seconds": 23.49369760452481,
+    "initial_speed": 0.013465438241006477,
+    "rotation_degrees": -0.22815595259269655
+  },
+  {
+    "name": "Debris_029",
+    "size_proxy": 0.02833417057991028,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 2.1562154990755444
+  },
+  {
+    "name": "Debris_030",
+    "size_proxy": 0.6653643227182329,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.6132921505866862
+  },
+  {
+    "name": "Debris_031",
+    "size_proxy": 0.24231359362602234,
+    "radial_travel": 0.14084097392343412,
+    "drift_seconds": 23.106815403281395,
+    "initial_speed": 0.01462851247637699,
+    "rotation_degrees": 0.6353144751794504
+  },
+  {
+    "name": "Debris_032",
+    "size_proxy": 0.12603816390037537,
+    "radial_travel": 0.15811393859945733,
+    "drift_seconds": 22.366545488594685,
+    "initial_speed": 0.016966118117444712,
+    "rotation_degrees": -0.5351550048814017
+  },
+  {
+    "name": "Debris_033",
+    "size_proxy": 0.19443100690841675,
+    "radial_travel": 0.1466586857239076,
+    "drift_seconds": 22.85748489754682,
+    "initial_speed": 0.015398931567276442,
+    "rotation_degrees": -0.5523837926404637
+  },
+  {
+    "name": "Debris_034",
+    "size_proxy": 0.16414274647831917,
+    "radial_travel": 0.15113360175212462,
+    "drift_seconds": 22.665702782051802,
+    "initial_speed": 0.016003061881333994,
+    "rotation_degrees": 0.49400719656435477
+  },
+  {
+    "name": "Debris_035",
+    "size_proxy": 0.11724483966827393,
+    "radial_travel": 0.1600250390119029,
+    "drift_seconds": 22.284641185204162,
+    "initial_speed": 0.017234295604614123,
+    "rotation_degrees": -0.14016571679094963
+  },
+  {
+    "name": "Debris_036",
+    "size_proxy": 0.1446019411087036,
+    "radial_travel": 0.15448307741426007,
+    "drift_seconds": 22.52215382510314,
+    "initial_speed": 0.01646198621470104,
+    "rotation_degrees": 0.941428947150367
+  },
+  {
+    "name": "Debris_037",
+    "size_proxy": 0.09379583597183228,
+    "radial_travel": 0.1659217255866144,
+    "drift_seconds": 22.031926046287953,
+    "initial_speed": 0.018074322715646882,
+    "rotation_degrees": -1.748358794330942
+  },
+  {
+    "name": "Debris_038",
+    "size_proxy": 0.1387396976351738,
+    "radial_travel": 0.15557670230900134,
+    "drift_seconds": 22.475284186757087,
+    "initial_speed": 0.016613097411315895,
+    "rotation_degrees": 0.4222630830169705
+  },
+  {
+    "name": "Debris_039",
+    "size_proxy": 0.04396679997444153,
+    "radial_travel": 0.1859439363777928,
+    "drift_seconds": 21.173831298094594,
+    "initial_speed": 0.021076272925007272,
+    "rotation_degrees": 0.21508480080772202
+  },
+  {
+    "name": "Debris_040",
+    "size_proxy": 0.5617981255054474,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.07588820139319577
+  },
+  {
+    "name": "Debris_041",
+    "size_proxy": 1.0425017476081848,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": -0.041161047553636365
+  },
+  {
+    "name": "Debris_042",
+    "size_proxy": 0.49732866883277893,
+    "radial_travel": 0.1218405646161305,
+    "drift_seconds": 23.921118659308693,
+    "initial_speed": 0.012224234127316682,
+    "rotation_degrees": -0.10994343529320712
+  },
+  {
+    "name": "Debris_043",
+    "size_proxy": 0.43869107961654663,
+    "radial_travel": 0.12515579067701338,
+    "drift_seconds": 23.77903754241371,
+    "initial_speed": 0.01263187784993683,
+    "rotation_degrees": -0.049572305256477656
+  },
+  {
+    "name": "Debris_044",
+    "size_proxy": 0.1748901978135109,
+    "radial_travel": 0.14945764779777215,
+    "drift_seconds": 22.73752938009548,
+    "initial_speed": 0.015775608190248633,
+    "rotation_degrees": -0.3540563084430542
+  },
+  {
+    "name": "Debris_045",
+    "size_proxy": 0.25109925866127014,
+    "radial_travel": 0.13989981482498764,
+    "drift_seconds": 23.147150793214813,
+    "initial_speed": 0.014505437778475632,
+    "rotation_degrees": -0.5460281986831916
+  },
+  {
+    "name": "Debris_046",
+    "size_proxy": 0.23741308227181435,
+    "radial_travel": 0.14138087674297323,
+    "drift_seconds": 23.083676711015432,
+    "initial_speed": 0.014699309318485494,
+    "rotation_degrees": -0.05744304273981257
+  },
+  {
+    "name": "Debris_047",
+    "size_proxy": 0.20127028226852417,
+    "radial_travel": 0.14574512202640127,
+    "drift_seconds": 22.896637627439944,
+    "initial_speed": 0.015276841017222868,
+    "rotation_degrees": -0.6486927913465682
+  },
+  {
+    "name": "Debris_048",
+    "size_proxy": 0.13385449349880219,
+    "radial_travel": 0.1565239544094101,
+    "drift_seconds": 22.434687668168138,
+    "initial_speed": 0.01674449388995028,
+    "rotation_degrees": 0.24616044243801022
+  },
+  {
+    "name": "Debris_049",
+    "size_proxy": 0.11919891834259033,
+    "radial_travel": 0.15958824463670368,
+    "drift_seconds": 22.30336094414127,
+    "initial_speed": 0.01717282826060795,
+    "rotation_degrees": -1.3333892760967099
+  },
+  {
+    "name": "Debris_050",
+    "size_proxy": 0.11919888854026794,
+    "radial_travel": 0.15958825124365048,
+    "drift_seconds": 22.303360660986407,
+    "initial_speed": 0.017172829189581948,
+    "rotation_degrees": 1.2999908216570144
+  },
+  {
+    "name": "Debris_051",
+    "size_proxy": 0.13580858707427979,
+    "radial_travel": 0.15614096706365438,
+    "drift_seconds": 22.45110141155767,
+    "initial_speed": 0.01669131122270277,
+    "rotation_degrees": 1.0681601754281305
+  },
+  {
+    "name": "Debris_052",
+    "size_proxy": 0.7103081531822681,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.44679428117562026
+  },
+  {
+    "name": "Debris_053",
+    "size_proxy": 0.15730345249176025,
+    "radial_travel": 0.15225826235566842,
+    "drift_seconds": 22.617503041899926,
+    "initial_speed": 0.016156506267586117,
+    "rotation_degrees": 0.006137302622309707
+  },
+  {
+    "name": "Debris_054",
+    "size_proxy": 0.031265318393707275,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": -1.2150382879428
+  },
+  {
+    "name": "Debris_055",
+    "size_proxy": 0.043966829776763916,
+    "radial_travel": 0.18594391846562847,
+    "drift_seconds": 21.17383206575878,
+    "initial_speed": 0.021076270130581866,
+    "rotation_degrees": 2.285465889339421
+  },
+  {
+    "name": "Debris_056",
+    "size_proxy": 0.11626395583152771,
+    "radial_travel": 0.1602470476365869,
+    "drift_seconds": 22.27512652986056,
+    "initial_speed": 0.017265577091660905,
+    "rotation_degrees": 1.5945885985175088
+  },
+  {
+    "name": "Debris_057",
+    "size_proxy": 0.10845145583152771,
+    "radial_travel": 0.16208521561566866,
+    "drift_seconds": 22.19634790218563,
+    "initial_speed": 0.017525609131369774,
+    "rotation_degrees": -0.9721352682550182
+  },
+  {
+    "name": "Debris_058",
+    "size_proxy": 0.11724483966827393,
+    "radial_travel": 0.1600250390119029,
+    "drift_seconds": 22.284641185204162,
+    "initial_speed": 0.017234295604614123,
+    "rotation_degrees": 1.3195291315152469
+  },
+  {
+    "name": "Debris_059",
+    "size_proxy": 0.1387397050857544,
+    "radial_travel": 0.15557670088990352,
+    "drift_seconds": 22.475284247575562,
+    "initial_speed": 0.016613097214823697,
+    "rotation_degrees": -0.3175528802747345
+  },
+  {
+    "name": "Debris_060",
+    "size_proxy": 0.11333665251731873,
+    "radial_travel": 0.1609209099688988,
+    "drift_seconds": 22.246246715618625,
+    "initial_speed": 0.0173606895968751,
+    "rotation_degrees": 1.679857081998704
+  },
+  {
+    "name": "Debris_061",
+    "size_proxy": 0.023448973894119263,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 2.1132842809042796
+  },
+  {
+    "name": "Debris_062",
+    "size_proxy": 0.037127554416656494,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 0.8563923745327567
+  },
+  {
+    "name": "Debris_063",
+    "size_proxy": 0.6282215304672718,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": -0.6138727552429839
+  },
+  {
+    "name": "Debris_064",
+    "size_proxy": 0.0312662273645401,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": -2.132063547063324
+  },
+  {
+    "name": "Debris_065",
+    "size_proxy": 0.11040553450584412,
+    "radial_travel": 0.16161331980602606,
+    "drift_seconds": 22.216572008313168,
+    "initial_speed": 0.017458677575880096,
+    "rotation_degrees": -0.653647212405418
+  },
+  {
+    "name": "Debris_066",
+    "size_proxy": 0.1367855966091156,
+    "radial_travel": 0.1559515421778465,
+    "drift_seconds": 22.459219620949433,
+    "initial_speed": 0.016665035898117696,
+    "rotation_degrees": 1.1106168581044409
+  },
+  {
+    "name": "Debris_067",
+    "size_proxy": 0.06546169519424438,
+    "radial_travel": 0.17542579113204923,
+    "drift_seconds": 21.624608951483605,
+    "initial_speed": 0.019469572821479066,
+    "rotation_degrees": 0.025284802004522423
+  },
+  {
+    "name": "Debris_068",
+    "size_proxy": 0.03224226552993059,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 2.1265925009403066
+  },
+  {
+    "name": "Debris_069",
+    "size_proxy": 0.05569129437208176,
+    "radial_travel": 0.1796972415070598,
+    "drift_seconds": 21.44154679255458,
+    "initial_speed": 0.020113911733583515,
+    "rotation_degrees": -0.09645670301059492
+  },
+  {
+    "name": "Debris_070",
+    "size_proxy": 0.08402545005083084,
+    "radial_travel": 0.1688285482632847,
+    "drift_seconds": 21.90734793157351,
+    "initial_speed": 0.01849555304902579,
+    "rotation_degrees": -0.08372815860398715
+  },
+  {
+    "name": "Debris_071",
+    "size_proxy": 0.09965810179710388,
+    "radial_travel": 0.1643196836562912,
+    "drift_seconds": 22.10058498615895,
+    "initial_speed": 0.017844199193011466,
+    "rotation_degrees": 0.7751490917220097
+  },
+  {
+    "name": "Debris_072",
+    "size_proxy": 0.11724863201379776,
+    "radial_travel": 0.1600241842796336,
+    "drift_seconds": 22.28467781658713,
+    "initial_speed": 0.017234175222639078,
+    "rotation_degrees": -0.49453331651660903
+  },
+  {
+    "name": "Debris_073",
+    "size_proxy": 0.068392813205719,
+    "radial_travel": 0.1742682866287613,
+    "drift_seconds": 21.6742162873388,
+    "initial_speed": 0.01929684018855843,
+    "rotation_degrees": 0.1443370323898506
+  },
+  {
+    "name": "Debris_074",
+    "size_proxy": 0.3224231228232384,
+    "radial_travel": 0.13329300987313966,
+    "drift_seconds": 23.430299576865444,
+    "initial_speed": 0.013653398781610138,
+    "rotation_degrees": 1.1177203320805518
+  },
+  {
+    "name": "Debris_075",
+    "size_proxy": 0.05569128692150116,
+    "radial_travel": 0.1796972450423559,
+    "drift_seconds": 21.44154664104189,
+    "initial_speed": 0.020113912271428277,
+    "rotation_degrees": 1.9366293597434994
+  },
+  {
+    "name": "Debris_076",
+    "size_proxy": 0.0390816330909729,
+    "radial_travel": 0.1890563877931697,
+    "drift_seconds": 21.04044052314987,
+    "initial_speed": 0.021564915915347982,
+    "rotation_degrees": 0.6457122578077079
+  },
+  {
+    "name": "Debris_077",
+    "size_proxy": 0.033219367265701294,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": -2.386290644902784
+  },
+  {
+    "name": "Debris_078",
+    "size_proxy": 0.046897925436496735,
+    "radial_travel": 0.18423847159684725,
+    "drift_seconds": 21.246922645849406,
+    "initial_speed": 0.020811123530814563,
+    "rotation_degrees": 0.25907608543102517
+  },
+  {
+    "name": "Debris_079",
+    "size_proxy": 0.05471426248550415,
+    "radial_travel": 0.18016495737039684,
+    "drift_seconds": 21.421501826982993,
+    "initial_speed": 0.02018513459893354,
+    "rotation_degrees": 1.0433090183274372
+  },
+  {
+    "name": "Debris_080",
+    "size_proxy": 0.09965810179710388,
+    "radial_travel": 0.1643196836562912,
+    "drift_seconds": 22.10058498615895,
+    "initial_speed": 0.017844199193011466,
+    "rotation_degrees": 0.7230248194678341
+  },
+  {
+    "name": "Debris_081",
+    "size_proxy": 0.03810456395149231,
+    "radial_travel": 0.18972544277494977,
+    "drift_seconds": 21.011766738216437,
+    "initial_speed": 0.021670765163773684,
+    "rotation_degrees": 2.2345580997959984
+  },
+  {
+    "name": "Debris_082",
+    "size_proxy": 0.09281882643699646,
+    "radial_travel": 0.1661984260994749,
+    "drift_seconds": 22.020067452879648,
+    "initial_speed": 0.01811421438614064,
+    "rotation_degrees": -1.5099526057037407
+  },
+  {
+    "name": "Debris_083",
+    "size_proxy": 0.10942850634455681,
+    "radial_travel": 0.1618482116600316,
+    "drift_seconds": 22.206505214570075,
+    "initial_speed": 0.01749197832935983,
+    "rotation_degrees": -1.1442658150093326
+  },
+  {
+    "name": "Debris_084",
+    "size_proxy": 0.14753305912017822,
+    "radial_travel": 0.15395278276689403,
+    "drift_seconds": 22.544880738561684,
+    "initial_speed": 0.01638893915320477,
+    "rotation_degrees": 0.06652386647997281
+  },
+  {
+    "name": "Debris_085",
+    "size_proxy": 0.5539817214012146,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": 0.5069415501904022
+  },
+  {
+    "name": "Debris_086",
+    "size_proxy": 0.10258921980857849,
+    "radial_travel": 0.16355367462177225,
+    "drift_seconds": 22.13341394478119,
+    "initial_speed": 0.017734671211207673,
+    "rotation_degrees": -0.8102842755499758
+  },
+  {
+    "name": "Debris_087",
+    "size_proxy": 0.06741577386856079,
+    "radial_travel": 0.17464851565625542,
+    "drift_seconds": 21.657920757589054,
+    "initial_speed": 0.01935349391414401,
+    "rotation_degrees": 1.0660326939203073
+  },
+  {
+    "name": "Debris_088",
+    "size_proxy": 0.09868103265762329,
+    "radial_travel": 0.16458004311105962,
+    "drift_seconds": 22.08942672381173,
+    "initial_speed": 0.017881500882988222,
+    "rotation_degrees": 0.5603500934242964
+  },
+  {
+    "name": "Debris_089",
+    "size_proxy": 0.07718617841601372,
+    "radial_travel": 0.17107205407133808,
+    "drift_seconds": 21.81119768265694,
+    "initial_speed": 0.018823951611684136,
+    "rotation_degrees": -1.317356082389027
+  },
+  {
+    "name": "Debris_090",
+    "size_proxy": 0.07620914280414581,
+    "radial_travel": 0.17140868739958096,
+    "drift_seconds": 21.79677054001796,
+    "initial_speed": 0.01887347710541414,
+    "rotation_degrees": 0.559595430887122
+  },
+  {
+    "name": "Debris_091",
+    "size_proxy": 0.07914024591445923,
+    "radial_travel": 0.1704113868726908,
+    "drift_seconds": 21.839511991170394,
+    "initial_speed": 0.018726944478421013,
+    "rotation_degrees": -1.6151057177388868
+  },
+  {
+    "name": "Debris_092",
+    "size_proxy": 0.04787495732307434,
+    "radial_travel": 0.1836936014794071,
+    "drift_seconds": 21.270274222311123,
+    "initial_speed": 0.02072679641751581,
+    "rotation_degrees": -1.7484722652057658
+  },
+  {
+    "name": "Debris_093",
+    "size_proxy": 0.04885201156139374,
+    "radial_travel": 0.1831597274149972,
+    "drift_seconds": 21.293154539357264,
+    "initial_speed": 0.020644350511028704,
+    "rotation_degrees": -1.7665910848313529
+  },
+  {
+    "name": "Debris_094",
+    "size_proxy": 0.0781632661819458,
+    "radial_travel": 0.1707396375847721,
+    "drift_seconds": 21.825444103509767,
+    "initial_speed": 0.018775110749639078,
+    "rotation_degrees": 1.5051398475614128
+  },
+  {
+    "name": "Debris_095",
+    "size_proxy": 0.09281881153583527,
+    "radial_travel": 0.16619843034183018,
+    "drift_seconds": 22.02006727106442,
+    "initial_speed": 0.018114214998086665,
+    "rotation_degrees": 0.0038124584642589125
+  },
+  {
+    "name": "Debris_096",
+    "size_proxy": 0.6849052086472511,
+    "radial_travel": 0.12,
+    "drift_seconds": 24,
+    "initial_speed": 0.011999999999999999,
+    "rotation_degrees": -0.6447627971634134
+  },
+  {
+    "name": "Debris_097",
+    "size_proxy": 0.050806090235710144,
+    "radial_travel": 0.18212330199005547,
+    "drift_seconds": 21.337572771854767,
+    "initial_speed": 0.02048480065889606,
+    "rotation_degrees": -0.5290192417186615
+  },
+  {
+    "name": "Debris_098",
+    "size_proxy": 0.08304847776889801,
+    "radial_travel": 0.16913760019834656,
+    "drift_seconds": 21.89410284864229,
+    "initial_speed": 0.01854061996887004,
+    "rotation_degrees": -1.7329228739136773
+  },
+  {
+    "name": "Debris_099",
+    "size_proxy": 0.03615051507949829,
+    "radial_travel": 0.19,
+    "drift_seconds": 21,
+    "initial_speed": 0.021714285714285714,
+    "rotation_degrees": 2.138913359110906
+  },
+  {
+    "name": "Debris_100",
+    "size_proxy": 0.0381045937538147,
+    "radial_travel": 0.18972542210707108,
+    "drift_seconds": 21.011767623982667,
+    "initial_speed": 0.02167076188950652,
+    "rotation_degrees": 0.008949818771293808
+  },
+  {
+    "name": "Debris_101",
+    "size_proxy": 0.05178311467170715,
+    "radial_travel": 0.181619952248397,
+    "drift_seconds": 21.35914490364013,
+    "initial_speed": 0.020407553175121104,
+    "rotation_degrees": 0.34009122708475364
+  },
+  {
+    "name": "Debris_102",
+    "size_proxy": 0.0390816330909729,
+    "radial_travel": 0.1890563877931697,
+    "drift_seconds": 21.04044052314987,
+    "initial_speed": 0.021564915915347982,
+    "rotation_degrees": 2.3001983101816146
+  },
+  {
+    "name": "Debris_103",
+    "size_proxy": 0.08597955107688904,
+    "radial_travel": 0.16822103271094796,
+    "drift_seconds": 21.933384312387947,
+    "initial_speed": 0.01840712189036184,
+    "rotation_degrees": 1.8891950152824926
+  },
+  {
+    "name": "Debris_104",
+    "size_proxy": 0.068392813205719,
+    "radial_travel": 0.1742682866287613,
+    "drift_seconds": 21.6742162873388,
+    "initial_speed": 0.01929684018855843,
+    "rotation_degrees": -0.22486504340052077
+  },
+  {
+    "name": "Debris_105",
+    "size_proxy": 0.0703468918800354,
+    "radial_travel": 0.1735238581904701,
+    "drift_seconds": 21.70612036326557,
+    "initial_speed": 0.01918616743514982,
+    "rotation_degrees": 1.2607868982386303
+  },
+  {
+    "name": "Debris_106",
+    "size_proxy": 0.042012691497802734,
+    "radial_travel": 0.18714531956014466,
+    "drift_seconds": 21.12234344742237,
+    "initial_speed": 0.021264154143803504,
+    "rotation_degrees": -1.1456125909986705
+  }
+]

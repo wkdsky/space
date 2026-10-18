@@ -1,0 +1,18 @@
+{
+  "revision": 10,
+  "result": "PASS",
+  "error": null,
+  "relative_path": "./Movies/MarsDestruction.mp4",
+  "player": "WmfMedia",
+  "width": 1920,
+  "height": 1080,
+  "fps": 60.0,
+  "duration_seconds": 39.999,
+  "played_seconds": 1.0166666,
+  "assets": [
+    "/Game/Space/Environment/MarsDestructionPreview/ScorchedFractureV3/FMS_MarsDestruction.FMS_MarsDestruction",
+    "/Game/Space/Environment/MarsDestructionPreview/ScorchedFractureV3/MP_MarsDestruction.MP_MarsDestruction",
+    "/Game/Space/Environment/MarsDestructionPreview/ScorchedFractureV3/MT_MarsDestruction.MT_MarsDestruction",
+    "/Game/Space/Environment/MarsDestructionPreview/ScorchedFractureV3/M_MarsDestruction_UI.M_MarsDestruction_UI"
+  ]
+}

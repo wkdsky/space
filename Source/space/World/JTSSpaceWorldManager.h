@@ -15,6 +15,7 @@ class ULevel;
 class ULevelStreamingDynamic;
 class UObject;
 class USceneComponent;
+class UJTSCompressedSpaceComponent;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnJTSSpaceWorldLandingRequested, AJTSPlanetAnchor*);
 
@@ -41,6 +42,8 @@ class SPACE_API AJTSSpaceWorldManager : public AActor
 
 public:
 	AJTSSpaceWorldManager();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Space World|Navigation")
+	TObjectPtr<UJTSCompressedSpaceComponent> CompressedSpace;
 
 	/** Finds the single persistent-world manager using a small cache after its first lookup. */
 	static AJTSSpaceWorldManager* FindSpaceWorldManager(const UObject* WorldContextObject);
@@ -93,6 +96,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Space World|State")
 	void SetCurrentPlanet(AJTSPlanetAnchor* NewCurrentPlanet);
+	/** Restore authored geometry before an instantaneous arrival surface query. */
+	void PrepareForPlanetArrival();
 
 	UFUNCTION(BlueprintCallable, Category = "Space World|State")
 	void SetTravelState(EJTSSpaceTravelState NewTravelState);
@@ -134,9 +139,10 @@ public:
 	void UpdateSpacecraftFlightState(AJTSSpacecraftActor* Spacecraft);
 
 	/**
-	 * Keeps authored positions. Past the near-surface band each body scales down continuously
+	 * Keeps authored centres. Past the near-surface band each body scales down continuously
 	 * across the open gap to the next body. A body is hidden only once its scaled disk covers
 	 * less than MinimumNoticeableAngularDiameterDegrees on screen.
+	 * Reciprocal local companions share a reversible corridor and calibrated distant disks.
 	 */
 	void UpdateCelestialPresentation(const AJTSSpacecraftActor* Spacecraft);
 
@@ -154,6 +160,8 @@ public:
 
 	/** Heliocentric cruise distance for the navigation dial, in centimetres. Follows radial travel from each body's release shell. */
 	float GetCruiseRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
+	/** Same route contribution as its owner, plus this background's own local separation. */
+	float GetBackgroundCruiseRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* LocalAnchor, const AActor* Background) const;
 
 	/** Speed in the same navigation scale as the surface dial or compressed cruise route. */
 	float GetNavigationSpeedCentimetersPerSecond(const AJTSSpacecraftActor* Spacecraft) const;
@@ -169,8 +177,8 @@ public:
 	bool IsPlanetPresentedAtAuthoredScale(const AJTSPlanetAnchor* Planet) const;
 
 	/** Shared navigation-dial heights for every planet, regardless of flight direction. */
-	static constexpr float SurfaceContentTransitionKilometers = 17.0f;
-	static constexpr float CruiseTransitionKilometers = 18.0f;
+	static constexpr float SurfaceContentTransitionKilometers = 13.0f;
+	static constexpr float CruiseTransitionKilometers = 14.0f;
 
 	void GetRegisteredPlanets(TArray<AJTSPlanetAnchor*>& OutPlanets) const;
 
@@ -198,6 +206,9 @@ private:
 	AJTSPlanetAnchor* FindNearestRoutedPlanet(const AJTSSpacecraftActor* Spacecraft) const;
 	float ResolveApparentRangeCentimeters(const AJTSSpacecraftActor* Spacecraft, const AJTSPlanetAnchor* Planet) const;
 	float ResolveCelestialScaleRatio(const AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft) const;
+	float ResolvePairedCelestialScaleRatio(const AJTSPlanetAnchor* Planet, const FVector& ViewLocation, float FallbackScale) const;
+	void GetBackgroundGeometry(const AActor* Background, FVector& Center, float& Radius) const;
+	float ResolveBackgroundLocalInfluence(const AJTSPlanetAnchor* Planet, const FVector& ViewLocation) const;
 	float ResolveCelestialShrinkSpanCentimeters(const AJTSPlanetAnchor* Planet) const;
 	float ResolvePresentationAltitude(const AJTSPlanetAnchor* Planet, const AJTSSpacecraftActor* Spacecraft) const;
 	float ResolveAuthoredSurfaceRadius(const AJTSPlanetAnchor* Planet) const;
@@ -256,6 +267,10 @@ private:
 	struct FSavedCelestialSurface
 	{
 		FVector Scale = FVector::OneVector;
+		FVector Location = FVector::ZeroVector;
+		FVector BoundsCenter = FVector::ZeroVector;
+		float BoundsRadius = 1.0f;
+		bool bCollisionEnabled = false;
 		bool bCaptured = false;
 	};
 
