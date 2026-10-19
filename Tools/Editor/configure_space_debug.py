@@ -92,6 +92,10 @@ def inspect_sky():
 
 
 def run(operation):
+    if operation.startswith('mars_access_'): return runpy.run_path(str(ROOT / 'Tools/Editor/configure_mars_access.py'))['run'](operation[len('mars_access_'):])
+    if operation.startswith('celestial_coherence_'): return runpy.run_path(str(ROOT / 'Tools/Editor/validate_celestial_coherence.py'))['run'](operation[len('celestial_coherence_'):])
+    if operation.startswith('multi_body_'): return runpy.run_path(str(ROOT / 'Tools/Editor/validate_multi_body_flight.py'))['run'](operation[len('multi_body_'):])
+    if operation.startswith('earth_moon_'): return runpy.run_path(str(ROOT / 'Tools/Editor/validate_earth_moon_sky.py'))['run'](operation[len('earth_moon_'):])
     if operation.startswith('antigravity_'): return runpy.run_path(str(ROOT / 'Tools/Editor/configure_antigravity_flight.py'))['run'](operation[len('antigravity_'):])
     if operation.startswith('independent_'): return runpy.run_path(str(ROOT / 'Tools/Editor/configure_independent_space.py'))['run'](operation[len('independent_'):])
     if operation == 'navigation_quit_editor':

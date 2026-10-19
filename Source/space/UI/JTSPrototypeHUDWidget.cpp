@@ -40,6 +40,8 @@
 #include "space/UI/JTSGameUILayout.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftInterferenceComponent.h"
+#include "space/Components/JTSCompressedSpaceComponent.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/Core/JTSGameInstance.h"
@@ -1645,10 +1647,13 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 		return;
 	}
 
-	const AJTSPlanetAnchor* const SurfacePlanet = SpaceWorldManager->GetNavigationReferencePlanet(Spacecraft);
+	const AActor* const NearBody = SpaceWorldManager->CompressedSpace->IsConfigured()
+		? SpaceWorldManager->CompressedSpace->ContainingNearFlightBody(Spacecraft->GetActorLocation()) : nullptr;
+	const AJTSPlanetAnchor* const SurfacePlanet = SpaceWorldManager->CompressedSpace->IsConfigured()
+		? Cast<AJTSPlanetAnchor>(NearBody) : SpaceWorldManager->GetNavigationReferencePlanet(Spacecraft);
 
 	// The same release shell that starts the planet shrink switches the dial to the star chart.
-	const bool bNearSurface = IsValid(SurfacePlanet)
+	const bool bNearSurface = (IsValid(NearBody) || IsValid(SurfacePlanet))
 		&& !SpaceWorldManager->IsCruisePresentationActive(Spacecraft);
 
 	const FVector ShipLocation = Spacecraft->GetActorLocation();
@@ -1657,18 +1662,27 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 	const FVector ShipUp = Spacecraft->GetActorUpVector().GetSafeNormal();
 
 	const TArray<FJTSCelestialNavigationBody> Bodies = UJTSCelestialNavigationLibrary::GatherBodies(SpaceWorldManager, Spacecraft);
+	const auto* NearContact = Bodies.FindByPredicate([NearBody](const FJTSCelestialNavigationBody& Body)
+	{
+		return NearBody && (Body.Planet == NearBody || Body.VisualActor == NearBody);
+	});
 	if (CelestialMarkerWidget)
 	{
 		CelestialMarkerWidget->UpdateMarkers(GetOwningPlayer(), Bodies, !bNearSurface && !bGameMenuOpen);
 	}
 
 	TArray<FJTSCruiseNavigationContact> Contacts;
-	if (bNearSurface && IsValid(SurfacePlanet))
+	const bool bShowNearContact = NearContact ? NearContact->bShowOnStarChart
+		: IsValid(SurfacePlanet) && SurfacePlanet->ShouldShowOnStarChart();
+	if (bNearSurface && (IsValid(SurfacePlanet) || NearContact))
 	{
+		// The local altimeter still measures terrain without identifying an uncharted body.
 		FJTSCruiseNavigationContact& Contact = Contacts.AddDefaulted_GetRef();
-		Contact.DisplayName = SurfacePlanet->GetNavigationDisplayName().ToString();
-		Contact.RangeCentimeters = SpaceWorldManager->GetNavigationSurfaceRangeCentimeters(Spacecraft, SurfacePlanet);
-		Contact.PaletteIndex = SurfacePlanet->GetNavigationPaletteIndex();
+		Contact.DisplayName = bShowNearContact
+			? (NearContact ? NearContact->DisplayName.ToString() : SurfacePlanet->GetNavigationDisplayName().ToString()) : FString();
+		Contact.RangeCentimeters = IsValid(SurfacePlanet)
+			? SpaceWorldManager->GetNavigationSurfaceRangeCentimeters(Spacecraft, SurfacePlanet) : NearContact->RangeCentimeters;
+		Contact.PaletteIndex = NearContact ? NearContact->PaletteIndex : SurfacePlanet->GetNavigationPaletteIndex();
 	}
 	else
 	{
@@ -1700,9 +1714,9 @@ void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 		});
 	}
 
-	const FString LeftCaption = bNearSurface && IsValid(SurfacePlanet)
-		? SurfacePlanet->GetNavigationDisplayName().ToString()
-		: FString(TEXT("SPACE"));
+	const FString LeftCaption = bNearSurface && bShowNearContact
+		? (NearContact ? NearContact->DisplayName.ToString() : SurfacePlanet->GetNavigationDisplayName().ToString())
+		: FString(bNearSurface ? TEXT("LOCAL") : TEXT("SPACE"));
 	const FString RightCaption = bNearSurface
 		? FString(TEXT("NEAR SURFACE"))
 		: FString::Printf(TEXT("FUEL  %d"), Spacecraft->GetFuelCount());
@@ -1753,6 +1767,25 @@ void UJTSPrototypeHUDWidget::RefreshFlightHud()
 	ApplyLayerVisibility(FlightTelemetryText, true);
 	RefreshFlightNavigation();
 	ApplyLayerVisibility(GameplayHelpText, false);
+	if (const auto* Interference = Spacecraft->GetInterferenceComponent(); Interference->IsControllingFlight())
+	{
+		// Navigation normally suppresses legacy telemetry; the takeover warning must remain visible.
+		ApplyLayerVisibility(FlightTelemetryText, true);
+		ApplyLayerVisibility(FlightControlsPanel, false);
+		const TCHAR* Detail = TEXT("FLIGHT CONTROL OVERRIDDEN");
+		switch (Interference->GetPhase())
+		{
+		case EJTSFlightInterferencePhase::Braking: Detail = TEXT("UNKNOWN FIELD DETECTED\nFLIGHT CONTROL OVERRIDDEN"); break;
+		case EJTSFlightInterferencePhase::Turning: Detail = TEXT("EXTERNAL ATTITUDE COMMAND\nMANUAL INPUT OFFLINE"); break;
+		case EJTSFlightInterferencePhase::Retreating: Detail = TEXT("TRAJECTORY FORCED OUTBOUND\nMAIN DRIVE IDLE"); break;
+		case EJTSFlightInterferencePhase::Recovering: Detail = TEXT("SIGNAL FADING\nRESTORING MANUAL CONTROL"); break;
+		default: break;
+		}
+		FlightTelemetryText->SetText(FText::FromString(FString::Printf(TEXT("SIGNAL LOST\n%s"), Detail)));
+		FlightTelemetryText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.38f, 0.22f)));
+		return;
+	}
+	FlightTelemetryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.70f, 0.92f, 1.0f)));
 	// FlightPlanet is explicitly cleared once a craft leaves a planet. In that state the HUD must
 	// describe free flight instead of quietly reusing the previous world's CurrentPlanet as a Moon
 	// altitude reference.

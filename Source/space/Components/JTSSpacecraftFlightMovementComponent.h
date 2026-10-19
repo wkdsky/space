@@ -59,6 +59,14 @@ struct SPACE_API FJTSSpacecraftFlightStats
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "1.0"))
 	float CruiseSpeedMultiplier = 1.0f;
 
+	/** HUD/navigation speed just outside a near bubble, relative to the same near-flight command. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "1.0"))
+	float CruiseApproachNearSpeedMultiplier = 3.0f;
+
+	/** Normalized exponential falloff from the marker gate to the near boundary; zero disables it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight", meta = (ClampMin = "0.0", ClampMax = "12.0"))
+	float CruiseApproachExponent = 4.0f;
+
 	/** Anti-gravity drive commands velocity directly, including immediate idle/stop. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight")
 	bool bInstantVelocityResponse = false;
@@ -96,6 +104,8 @@ public:
 	void SetBoosting(bool bNewBoosting);
 	void SetBraking(bool bNewBraking);
 	void ClearInput();
+	/** External narrative movement still uses the complete hull's normal collision sweep. */
+	void MoveInterferenceStep(const FVector& Delta, const FQuat& Rotation, float DeltaTime);
 
 	/**
 	 * Follows a terrain/gear-fitted pose with concurrent swept correction, alignment and descent.
@@ -287,6 +297,7 @@ protected:
 private:
 	void TickAssistedLanding(float DeltaTime);
 	void TickFlight(float DeltaTime);
+	void TickFlightStep(float DeltaTime);
 	void RefreshSurfaceProximity(float DeltaTime);
 	void UpdateReferenceFrame();
 	void ApplyPlanetGravity(float DeltaTime);
@@ -301,6 +312,7 @@ private:
 	bool MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit);
 
 	FVector BuildTargetVelocity(const FVector& ReferenceUp) const;
+	float ResolveFlightSpeedMultiplier(const FVector& Command) const;
 	float GetAccelerationRate() const;
 	void SetBoostState(bool bNewBoosting);
 

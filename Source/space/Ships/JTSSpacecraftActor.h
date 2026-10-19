@@ -37,6 +37,7 @@ class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 class UJTSSpacecraftFlightMovementComponent;
+class UJTSSpacecraftInterferenceComponent;
 class UJTSSpacecraftPresentationComponent;
 class UJTSSpacecraftLandingSupportComponent;
 class UJTSSpacecraftSurfaceEnvelopeComponent;
@@ -137,6 +138,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Flight")
 	UJTSSpacecraftFlightMovementComponent* GetFlightMovementComponent() const;
+	UFUNCTION(BlueprintPure, Category = "Ship|Interference")
+	UJTSSpacecraftInterferenceComponent* GetInterferenceComponent() const { return InterferenceComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Ground Probe")
 	UJTSSpacecraftGroundProbeComponent* GetGroundProbeComponent() const;
@@ -534,6 +537,8 @@ private:
 	/** Dedicated arcade flight movement. It owns all velocity, damping, boost, and collision movement. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Flight", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSSpacecraftFlightMovementComponent> FlightMovementComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Interference", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSSpacecraftInterferenceComponent> InterferenceComponent;
 
 	/** Surface-query component used by LandingAssist and Landed checks; it never moves the spacecraft. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Ground Probe", meta = (AllowPrivateAccess = "true"))

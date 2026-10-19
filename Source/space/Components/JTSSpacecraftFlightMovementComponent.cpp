@@ -9,6 +9,7 @@
 #include "Math/RotationMatrix.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Components/JTSSpacecraftInterferenceComponent.h"
 #include "space/Components/JTSCompressedSpaceComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -89,7 +90,12 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 		return;
 	}
 
-	if (bAssistedLanding)
+	auto* Interference = GetOwner()->FindComponentByClass<UJTSSpacecraftInterferenceComponent>();
+	if (Interference && Interference->UpdateFlight(DeltaTime, this))
+	{
+		// Submit the real trajectory to travel state, celestial presentation and HUD below.
+	}
+	else if (bAssistedLanding)
 	{
 		TickAssistedLanding(DeltaTime);
 	}
@@ -276,10 +282,29 @@ float UJTSSpacecraftFlightMovementComponent::GetCurrentSpeed() const
 
 float UJTSSpacecraftFlightMovementComponent::GetFlightSpeedMultiplier() const
 {
+	return ResolveFlightSpeedMultiplier(BuildTargetVelocity(GetReferenceUp()));
+}
+
+float UJTSSpacecraftFlightMovementComponent::ResolveFlightSpeedMultiplier(const FVector& Command) const
+{
 	const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
 	const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	return Manager && Manager->IsCruisePresentationActive(Ship)
-		? FMath::Max(1.0f, EffectiveStats.CruiseSpeedMultiplier) : 1.0f;
+	if (!Manager || !Ship) return 1.0f;
+	if (Manager->CompressedSpace->IsConfigured())
+	{
+		// Evaluate the perceptual field at ordinary thrust; Shift then keeps its
+		// authored propulsion ratio instead of disappearing into an angular-rate cap.
+		FVector ReferenceCommand = Command;
+		if (bBoosting && MoveInput.Y > FMath::Clamp(MovementDeadZone, 0.0f, 1.0f))
+			ReferenceCommand -= Ship->GetActorForwardVector() * EffectiveStats.MaxMoveSpeed
+				* (FMath::Max(1.0f, EffectiveStats.BoostMultiplier) - 1.0f)
+				* FMath::Clamp(MoveInput.Y, 0.0f, 1.0f) * SpeedLimit;
+		return Manager->CompressedSpace->CruiseApproachMultiplier(Ship->GetActorLocation(),
+			ReferenceCommand.IsNearlyZero() ? Ship->GetActorForwardVector() : ReferenceCommand,
+			EffectiveStats.CruiseSpeedMultiplier, EffectiveStats.CruiseApproachNearSpeedMultiplier,
+			EffectiveStats.CruiseApproachExponent);
+	}
+	return Manager->IsCruisePresentationActive(Ship) ? FMath::Max(1.0f, EffectiveStats.CruiseSpeedMultiplier) : 1.0f;
 }
 
 float UJTSSpacecraftFlightMovementComponent::GetSpeedNormalized() const
@@ -428,6 +453,30 @@ void UJTSSpacecraftFlightMovementComponent::TickAssistedLanding(float DeltaTime)
 
 void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 {
+	const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner());
+	const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	if (!EffectiveStats.bInstantVelocityResponse || EffectiveStats.CruiseApproachExponent <= 0
+		|| !Manager || !Manager->CompressedSpace->IsConfigured() || !Manager->IsCruisePresentationActive(Ship))
+	{
+		TickFlightStep(DeltaTime);
+		return;
+	}
+	double Remaining = DeltaTime;
+	for (int32 Step = 0; Step < 128 && Remaining > UE_SMALL_NUMBER; ++Step)
+	{
+		const FVector Command = BuildTargetVelocity(GetReferenceUp());
+		const FVector DriveVelocity = Command * ResolveFlightSpeedMultiplier(Command);
+		const double Seconds = Manager->CompressedSpace->CruiseSimulationStep(Ship->GetActorLocation(), DriveVelocity, Remaining);
+		TickFlightStep(Seconds);
+		Remaining -= Seconds;
+		// Preserve the crossing-frame rule: never spend leftover cruise time inside near space.
+		if (!Manager->IsCruisePresentationActive(Ship)
+			|| Ship->GetInterferenceComponent()->IsControllingFlight()) break;
+	}
+}
+
+void UJTSSpacecraftFlightMovementComponent::TickFlightStep(float DeltaTime)
+{
 	const auto* ShipOwner = Cast<AJTSSpacecraftActor>(GetPawnOwner());
 	const auto* Shell = ShipOwner ? ShipOwner->GetSurfaceEnvelopeComponent() : nullptr;
 	const FVector ReferenceUp = Shell && Shell->IsFollowing() ? Shell->GetFrame().RadialUp : GetReferenceUp();
@@ -450,7 +499,9 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 		TurnAroundDeckUp = FVector::ZeroVector;
 	}
 
-	const FVector TargetVelocity = BuildTargetVelocity(ReferenceUp);
+	const FVector NearTargetVelocity = BuildTargetVelocity(ReferenceUp);
+	const float StartSpeedMultiplier = ResolveFlightSpeedMultiplier(NearTargetVelocity);
+	const FVector TargetVelocity = NearTargetVelocity * StartSpeedMultiplier;
 	const float Rate = bBraking ? EffectiveStats.BrakeStrength : GetAccelerationRate();
 	if (EffectiveStats.bInstantVelocityResponse)
 	{
@@ -464,7 +515,7 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 	{
 		const float MaximumSpeed = FMath::Max3(EffectiveStats.MaxMoveSpeed
 			* (bBoosting ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f),
-			EffectiveStats.LiftSpeed, EffectiveStats.StrafeSpeed) * SpeedLimit;
+			EffectiveStats.LiftSpeed, EffectiveStats.StrafeSpeed) * SpeedLimit * StartSpeedMultiplier;
 		const float ExistingSpeed = Velocity.Size();
 		Velocity += TargetVelocity.GetSafeNormal() * FMath::Max(0.0f, Rate) * DeltaTime
 			* FMath::Clamp(TargetVelocity.Size() / FMath::Max(1.0f, MaximumSpeed), 0.0f, 1.0f);
@@ -477,13 +528,21 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 	FQuat Rotation = UpdateRotation(DeltaTime);
 	FVector Delta = Velocity * DeltaTime;
 	bool bEnteredNearBubble = false;
-	const float StartSpeedMultiplier = GetFlightSpeedMultiplier();
+	bool bRefreshCruiseVelocity = false;
 	if (auto* Ship = Cast<AJTSSpacecraftActor>(GetPawnOwner()))
 	{
 		const FVector Start = Ship->GetActorLocation();
-		if (StartSpeedMultiplier > 1.0f)
-			if (const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this))
+		FVector InterceptEntry;
+		if (Ship->GetInterferenceComponent()->InterceptSegment(Start, Start + Delta, InterceptEntry))
+		{
+			// Stop precisely on the external field. Never spend this frame's remaining time inside it.
+			MoveWithCollisionSweep(InterceptEntry - Start, Ship->GetActorQuat(), Hit);
+			return;
+		}
+		if (const auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+			Manager && Manager->IsCruisePresentationActive(Ship))
 			{
+				bRefreshCruiseVelocity = true;
 				FVector Entry;
 				if (Manager->CompressedSpace->ClipAtFirstBubbleEntry(Start, Start + Delta, Entry))
 				{
@@ -521,6 +580,7 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 				Rotation = Ship->GetActorQuat();
 			if (!Ship->CanTraverseLandingSegment(Start, Start + Delta, Rotation))
 			{
+				bRefreshCruiseVelocity = false;
 				float Safe = 0, Blocked = 1;
 				for (int32 I = 0; I < 10; ++I)
 				{
@@ -529,15 +589,40 @@ void UJTSSpacecraftFlightMovementComponent::TickFlight(float DeltaTime)
 					else Blocked = Alpha;
 				}
 				Delta *= Safe;
+				if (bTakeoffClearance && Safe < 0.01f)
+				{
+					// Contact may block the requested tangent thrust, but must not pin the
+					// automatic departure lift against a crater wall. Test that lift separately.
+					const auto Frame = Ship->GetSurfaceEnvelopeComponent()->GetFrame();
+					const double LiftDistance = FMath::Max(0.0, FVector::DotProduct(Velocity, Frame.RadialUp)) * DeltaTime;
+					// The current radial can point into a vertical rim after travelling around
+					// a small sphere. Prefer the canopy normal, then the departure vertical.
+					for (const FVector Direction : {Frame.Normal, InertialReferenceUp, Frame.RadialUp})
+					{
+						const FVector LiftDelta = Direction.GetSafeNormal() * LiftDistance;
+						if (Ship->CanTraverseLandingSegment(Start, Start + LiftDelta, Rotation))
+						{
+							Delta = LiftDelta;
+							break;
+						}
+					}
+				}
 				Velocity = Delta / FMath::Max(DeltaTime, SMALL_NUMBER);
 			}
 		}
 	}
 	MoveWithCollisionSweep(Delta, Rotation, Hit);
-	if (bEnteredNearBubble) Velocity = TargetVelocity / StartSpeedMultiplier;
+	if (bEnteredNearBubble) Velocity = NearTargetVelocity * ResolveFlightSpeedMultiplier(NearTargetVelocity);
 	if (Hit.IsValidBlockingHit())
 	{
 		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
+	}
+	else if (!bEnteredNearBubble && bRefreshCruiseVelocity && EffectiveStats.bInstantVelocityResponse)
+	{
+		// The coordinate metric can change substantially during one frame. Resolve the
+		// actual drive velocity at the new position as well, so the NAV derivative does
+		// not momentarily undershoot the envelope and then rebound on the next frame.
+		Velocity = NearTargetVelocity * ResolveFlightSpeedMultiplier(NearTargetVelocity);
 	}
 }
 
@@ -699,7 +784,7 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
     if (!Ship) return false;
     auto* Envelope = Ship->GetSurfaceEnvelopeComponent();
     auto* Planet = TargetPlanet.Get();
-    Envelope->Refresh(Planet, Ship->GetActorLocation(), bTakeoffClearance ? FVector::ZeroVector : Velocity,
+    Envelope->Refresh(Planet, Ship->GetActorLocation(), Velocity,
         bHasSurfaceProximity ? CachedSurfaceAltitude : BIG_NUMBER, DeltaTime,
         (VerticalInput > MovementDeadZone || bEnvelopeEscape) && !bTakeoffClearance, bTakeoffClearance);
     const auto Frame = Envelope->GetFrame();
@@ -726,8 +811,8 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
             Velocity = FVector::ZeroVector;
             return false;
         }
-        // Keep the highest departure target even if a later sample drops away. A brief Space
-        // press completes the lift; forward/strafe/boost cannot escape below the crater rim.
+        // Complete the departure lift after a short Space press, while leaving all tangent
+        // thrust under pilot control. The envelope and whole-hull sweep guard the path.
         TakeoffClearanceRadius = FMath::Max(TakeoffClearanceRadius, RequiredRadius);
         const double Remaining = bFragment ? Settings.HoverOffset - Height
             : TakeoffClearanceRadius - FVector::Distance(Current, Planet->GetPlanetCenter());
@@ -735,20 +820,23 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
         {
             const float LiftSpeed = FMath::Max(1.0f, EffectiveStats.LiftSpeed);
             const float RadialSpeed = FMath::Max(0.0f, float(FVector::DotProduct(Velocity, Up)));
-            const float Speed = FMath::FInterpConstantTo(RadialSpeed, LiftSpeed, DeltaTime,
-                FMath::Max(1.0f, EffectiveStats.Acceleration));
-            Velocity = Up * FMath::Min(double(Speed), Remaining / FMath::Max(DeltaTime, SMALL_NUMBER));
-            return false;
+            const float Speed = EffectiveStats.bInstantVelocityResponse ? LiftSpeed
+                : FMath::FInterpConstantTo(RadialSpeed, LiftSpeed, DeltaTime,
+                    FMath::Max(1.0f, EffectiveStats.Acceleration));
+            Velocity = FVector::VectorPlaneProject(Velocity, Up)
+                + Up * FMath::Min(double(Speed), Remaining / FMath::Max(DeltaTime, SMALL_NUMBER));
         }
-        bTakeoffClearance = false;
-        bEnvelopeEscape = false;
-        // A teleport/correction well above departure clearance has already left surface flight.
-        // Release the takeoff attitude latch immediately, including when no Space key is held.
-        if (Remaining < -Settings.FollowingExitHeight)
-            Envelope->Refresh(Planet, Current, Velocity, bHasSurfaceProximity ? CachedSurfaceAltitude : BIG_NUMBER,
-                0, true);
+        else
+        {
+            bTakeoffClearance = false;
+            bEnvelopeEscape = false;
+            // A correction well above departure clearance has already left surface flight.
+            if (Remaining < -Settings.FollowingExitHeight)
+                Envelope->Refresh(Planet, Current, Velocity, bHasSurfaceProximity ? CachedSurfaceAltitude : BIG_NUMBER,
+                    0, true);
+        }
     }
-    if (bEnvelopeEscape && Height >= Settings.HoverOffset) bEnvelopeEscape = false;
+    if (bEnvelopeEscape && !bTakeoffClearance && Height >= Settings.HoverOffset) bEnvelopeEscape = false;
     const bool bFollowing = Envelope->IsFollowing();
     // Follow a single tangent field. Pilot pitch/camera error never fights terrain pitch.
     if (bFollowing)
@@ -758,7 +846,7 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
         const float TangentSpeed = Tangent.Size();
         Tangent = FVector::VectorPlaneProject(Tangent, Frame.Normal).GetSafeNormal() * TangentSpeed;
         Velocity = Tangent;
-        if (FMath::Abs(VerticalInput) > MovementDeadZone)
+        if (FMath::Abs(VerticalInput) > MovementDeadZone || bTakeoffClearance)
             Velocity += Up * (RadialSpeed - FVector::DotProduct(Tangent, Up));
         else
         {
@@ -780,7 +868,7 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
         if (Ship->TryLandingAtEnvelopeBoundary()) return true;
     }
     const float FloorHeight = VerticalInput < -MovementDeadZone ? 0.0f : Settings.HoverOffset;
-    if (NextHeight < FloorHeight && (!bEnvelopeEscape || VerticalInput <= 0))
+    if (NextHeight < FloorHeight && (!bEnvelopeEscape || VerticalInput <= 0 || bTakeoffClearance))
     {
         const float RequiredLift = (FloorHeight - NextHeight) / FMath::Max(DeltaTime, SMALL_NUMBER);
         // Recover already displaced hulls gradually; ordinary flight clamps precisely at the shell.
@@ -945,6 +1033,16 @@ void UJTSSpacecraftFlightMovementComponent::SetAssistedLandingPhase(EJTSSpacecra
 	OnAssistedLandingPhaseChanged.Broadcast(AssistedLandingPhase);
 }
 
+void UJTSSpacecraftFlightMovementComponent::MoveInterferenceStep(const FVector& Delta, const FQuat& Rotation, float DeltaTime)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !UpdatedComponent) return;
+	const FVector Start = UpdatedComponent->GetComponentLocation();
+	FHitResult Hit;
+	MoveWithCollisionSweep(Delta, Rotation, Hit);
+	Velocity = (UpdatedComponent->GetComponentLocation() - Start) / FMath::Max(DeltaTime, UE_SMALL_NUMBER);
+	UpdateComponentVelocity();
+}
+
 bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector& Delta, const FQuat& NewRotation, FHitResult& OutHit)
 {
 	OutHit = FHitResult();
@@ -1061,7 +1159,7 @@ FVector UJTSSpacecraftFlightMovementComponent::BuildTargetVelocity(const FVector
 		* (bBoosting && ForwardThrottle > DeadZone ? FMath::Max(1.0f, EffectiveStats.BoostMultiplier) : 1.0f);
 	return (HullForward * (ForwardThrottle >= 0.0f ? MoveSpeed : EffectiveStats.ReverseSpeed) * ForwardThrottle
 		+ HullRight * MoveInput.X * EffectiveStats.StrafeSpeed
-		+ LiftDirection * VerticalInput * EffectiveStats.LiftSpeed) * SpeedLimit * GetFlightSpeedMultiplier();
+		+ LiftDirection * VerticalInput * EffectiveStats.LiftSpeed) * SpeedLimit;
 }
 
 float UJTSSpacecraftFlightMovementComponent::GetAccelerationRate() const

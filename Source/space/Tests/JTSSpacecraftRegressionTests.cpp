@@ -31,6 +31,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftInterferenceComponent.h"
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
@@ -1613,6 +1614,48 @@ bool FJTSCraterTakeoffRegression::RunTest(const FString& Parameters)
 	if (!TestTrue(TEXT("The crater floor fits the whole ship"), Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
 		|| !TestTrue(TEXT("Crater takeoff starts"), Ship->BeginSurfaceTakeoff())) return false;
 	const FVector Start = Ship->GetActorLocation();
+	// An input lock here used to last until the entire surrounding crater rim was cleared.
+	// Check all four directions from the same low departure pose in both drive modes.
+	const FJTSSpacecraftFlightStats OriginalStats = Movement->GetEffectiveStats();
+	for (const bool bInstant : {false, true})
+	{
+		for (const FVector2D Input : {FVector2D(0, 1), FVector2D(0, -1), FVector2D(-1, 0), FVector2D(1, 0)})
+		{
+			Ship->SetActorLocationAndRotation(Start, Rotation);
+			Ship->SetGroundedPlanet(Fixture.Planet);
+			Fixture.Manager->SetTravelState(EJTSSpaceTravelState::Surface);
+			Fixture.Manager->SetSurfaceGameplayReady(true);
+			if (!TestTrue(TEXT("Repeated low-altitude departure starts"), Ship->BeginSurfaceTakeoff())) return false;
+			auto Stats = OriginalStats;
+			Stats.bInstantVelocityResponse = bInstant;
+			Movement->SetEffectiveStats(Stats);
+			const FVector Direction = (Ship->GetActorForwardVector() * Input.Y + Ship->GetActorRightVector() * Input.X).GetSafeNormal();
+			Movement->SetMoveInput(Input);
+			Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+			TestTrue(TEXT("W/S/A/D moves in the requested direction on the first takeoff frame"),
+				FVector::DotProduct(Ship->GetActorLocation() - Start, Direction) > 0.05);
+			TestTrue(TEXT("Directional control starts below the crater rim"),
+				FVector::DotProduct(Ship->GetActorLocation(), Up) < 12500);
+			TestTrue(TEXT("Immediate takeoff control keeps the whole hull clear"),
+				Ship->CanOccupyLandingTransform(Ship->GetActorTransform()));
+			if (bInstant)
+			{
+				TestTrue(TEXT("Automatic lift respects instant anti-gravity response"),
+					FVector::DotProduct(Movement->Velocity, Up) >= Stats.LiftSpeed * 0.95);
+				Movement->SetMoveInput(FVector2D::ZeroVector);
+				Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
+				TestTrue(TEXT("Releasing W/S/A/D stops tangent thrust during automatic lift"),
+					FVector::VectorPlaneProject(Movement->Velocity,
+						Fixture.Planet->GetRadialUpVector(Ship->GetActorLocation())).Size() < 10);
+			}
+		}
+	}
+	Ship->SetActorLocationAndRotation(Start, Rotation);
+	Ship->SetGroundedPlanet(Fixture.Planet);
+	Fixture.Manager->SetTravelState(EJTSSpaceTravelState::Surface);
+	Fixture.Manager->SetSurfaceGameplayReady(true);
+	Ship->BeginSurfaceTakeoff();
+	Movement->SetEffectiveStats(OriginalStats);
 	Movement->SetVerticalInput(1);
 	Movement->SetMoveInput(FVector2D(1, 1)); Movement->SetBoosting(true);
 	Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
@@ -1622,23 +1665,26 @@ bool FJTSCraterTakeoffRegression::RunTest(const FString& Parameters)
 	float DepartureHeight = 0;
 	for (int32 I = 0; I < 480; ++I)
 	{
+		const FTransform Before = Ship->GetActorTransform();
 		Movement->TickComponent(1.0f / 60, LEVELTICK_All, nullptr);
 		const FVector Offset = Ship->GetActorLocation() - Start;
 		if (!bDeparted && FVector::VectorPlaneProject(Offset, Up).Size() > 1)
 		{
 			bDeparted = true;
 			DepartureHeight = FVector::DotProduct(Ship->GetActorLocation(), Up);
-			TestTrue(TEXT("Horizontal thrust begins only after the whole hull clears the rim"),
-				DepartureHeight > 12500 + Ship->GetLandingCollisionClearance(Up));
+			TestTrue(TEXT("Horizontal thrust starts while the departure lift is still below the rim"),
+				DepartureHeight < 12500);
 		}
 		if (!Ship->CanOccupyLandingTransform(Ship->GetActorTransform()))
 		{
-			AddError(TEXT("The takeoff/crossing penetrated the crater collision")); return false;
+			AddError(FString::Printf(TEXT("The takeoff/crossing penetrated the crater collision at step %d; before=%s after=%s velocity=%s"),
+				I, *Before.ToString(), *Ship->GetActorTransform().ToString(), *Movement->Velocity.ToCompactString())); return false;
 		}
 		if (bDeparted && FVector::VectorPlaneProject(Offset, Up).Size() > 3500) break;
 	}
-	AddInfo(FString::Printf(TEXT("Crater departure height %.1f; travel %.1f"), DepartureHeight,
-		FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size()));
+	AddInfo(FString::Printf(TEXT("Crater departure height %.1f; travel %.1f; final=%s velocity=%s"), DepartureHeight,
+		FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size(),
+		*Ship->GetActorLocation().ToCompactString(), *Movement->Velocity.ToCompactString()));
 	TestTrue(TEXT("A short Space press followed by forward/strafe/boost crosses the crater rim"),
 		bDeparted && FVector::VectorPlaneProject(Ship->GetActorLocation() - Start, Up).Size() > 3500);
 	return true;
@@ -3283,6 +3329,19 @@ bool FJTSCelestialNavigationRegression::RunTest(const FString& Parameters)
 	TArray<AJTSPlanetAnchor*> Registered;
 	Fixture.Manager->GetRegisteredPlanets(Registered);
 	TestEqual(TEXT("Navigation does not register a background planet"), Registered.Num(), 1);
+	FindFProperty<FBoolProperty>(Fixture.Planet->GetClass(), TEXT("bShowOnStarChart"))
+		->SetPropertyValue_InContainer(Fixture.Planet, false);
+	FindFProperty<FBoolProperty>(Fixture.Planet->GetClass(), TEXT("bShowScreenMarker"))
+		->SetPropertyValue_InContainer(Fixture.Planet, false);
+	const auto Uncharted = UJTSCelestialNavigationLibrary::GatherBodies(Fixture.Manager, Fixture.Ship);
+	const auto* UnchartedPlanet = Uncharted.FindByPredicate([&](const auto& Body) { return Body.Planet == Fixture.Planet; });
+	TestNotNull(TEXT("An uncharted gameplay body remains available for physical occlusion"), UnchartedPlanet);
+	if (!UnchartedPlanet) return false;
+	TestFalse(TEXT("A level can exclude a landable planet from the star chart"), UnchartedPlanet->bShowOnStarChart);
+	TestFalse(TEXT("A landable planet can suppress its screen marker"), UnchartedPlanet->bShowScreenMarker);
+	TestFalse(TEXT("Close range cannot reveal an uncharted planet marker"), UJTSCelestialNavigationLibrary::IsWithinMarkerDistance(*UnchartedPlanet));
+	Fixture.Manager->GetRegisteredPlanets(Registered);
+	TestTrue(TEXT("Navigation discovery does not unregister the physical planet"), Registered.Contains(Fixture.Planet));
 
 	FJTSCelestialNavigationBody Disk;
 	Disk.VisualActor = Background;
@@ -3439,9 +3498,119 @@ bool FJTSIndependentCompressedSpaceRegression::RunTest(const FString& Parameters
         const auto Bodies=UJTSCelestialNavigationLibrary::GatherBodies(F.Manager,F.Ship);
         const auto* Body=Bodies.FindByPredicate([&](const auto& B){return B.Planet==Destination;});
         TestTrue(TEXT("Fixed simulated-distance gate applies from every approach direction"),Body && UJTSCelestialNavigationLibrary::IsWithinMarkerDistance(*Body));
-        if(Body) TestTrue(TEXT("Different world directions retain the calibrated apparent disk"),FMath::IsNearlyEqual(
-            double(Body->VisualRadius)/FVector::Distance(F.Ship->GetActorLocation(),Body->Center)*16.0/9.0,0.05/0.9,0.002));
+        if(Body) TestTrue(TEXT("Close marker entries keep a bounded continuous presentation"),
+            Body->VisualRadius>0 && Body->VisualRadius<=C->AuthoredRadius(Destination)+.001);
+        const FVector Far=Destination->GetPlanetCenter()+Direction*10000000;
+        const double FarRange=FVector::Distance(C->NavigationPosition(Far),C->NavigationPosition(Destination->GetPlanetCenter()));
+        TestTrue(TEXT("Distant astronomical calibration is exact in every world direction"),FMath::IsNearlyEqual(
+            C->AuthoredRadius(Destination)*C->VisualScale(Far,Destination)/10000000,
+            C->DisplayRadiusKilometers(Destination)/FarRange,1e-9));
     }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSCoherentCelestialSystemRegression,
+    "JTS.Spacecraft.CoherentCelestialSystem", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSCoherentCelestialSystemRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    auto* C = F.Manager->CompressedSpace.Get();
+    const FVector Center(5000000,5000000,5000000);
+    auto* Primary = F.World->SpawnActor<AStaticMeshActor>();
+    Primary->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+    Primary->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere")));
+    Primary->SetActorLocation(Center);
+    Primary->SetActorScale3D(FVector(3400));
+    Primary->SetActorEnableCollision(false);
+    auto* First = F.AddFlightPlanet(TEXT("FirstSatellite"),Center+FVector(340000,225000,231600));
+    auto* Second = F.AddFlightPlanet(TEXT("SecondSatellite"),Center+FVector(425000,1050000,304440));
+    for (auto* P : {F.Planet,First,Second})
+        P->GetGameplaySurfaceActor()->FindComponentByClass<UStaticMeshComponent>()->SetMobility(EComponentMobility::Movable);
+    auto Add = [&](AActor* Actor, FVector Navigation, double Radius, FName Group)
+    {
+        FJTSCompressedCelestialBody Body;
+        Body.Actor=Actor; Body.NavigationPositionKilometers=Navigation;
+        Body.RadiusKilometers=Radius; Body.PresentationGroup=Group;
+        C->Bodies.Add(Body);
+    };
+    const FVector Nav(10000000,10000000,10000000);
+    Add(F.Planet,FVector::ZeroVector,6000,NAME_None);
+    Add(Primary,Nav,3390,TEXT("LocalSystem"));
+    Add(First,Nav+FVector(6800,4500,4632),11,TEXT("LocalSystem"));
+    Add(Second,Nav+FVector(8500,21000,6088.8),6,TEXT("LocalSystem"));
+    C->CaptureAuthoredBodies();
+    const FVector GroupCenter=C->AuthoredCenter(Primary);
+    const FVector FirstCenter=First->GetPlanetCenter(), SecondCenter=Second->GetPlanetCenter();
+    const FVector Start=FirstCenter+FVector(0,0,C->BubbleRadius(First)+5000);
+    const FVector End=SecondCenter+FVector(0,0,C->BubbleRadius(Second)+5000);
+    bool NaturalPerspective=true, LocalGeometry=true, Visible=true;
+    for (int32 I=0; I<=300; ++I)
+    {
+        const FVector P=FMath::Lerp(Start,End,I/300.0);
+        F.Ship->SetActorLocation(P,false,nullptr,ETeleportType::TeleportPhysics);
+        F.Manager->SetCurrentPlanet(I<150 ? First : Second);
+        F.Manager->UpdateCelestialPresentation(F.Ship);
+        for (AActor* Actor : {static_cast<AActor*>(Primary),static_cast<AActor*>(First),static_cast<AActor*>(Second)})
+        {
+            const double Radius=C->AuthoredRadius(Actor);
+            const double Distance=FVector::Distance(P,C->AuthoredCenter(Actor));
+            const double Expected=2*FMath::Asin(Radius/Distance);
+            NaturalPerspective &= FMath::IsNearlyEqual(C->ApparentDiameterRadians(P,Actor),Expected,1.e-10);
+            LocalGeometry &= C->VisualScale(P,Actor)==1 && C->PresentationCenter(P,Actor).Equals(C->AuthoredCenter(Actor),1.e-7);
+            Visible &= !Actor->IsHidden();
+        }
+    }
+    TestTrue(TEXT("All three visible disks change only through geometric distance during local transfers"),NaturalPerspective);
+    TestTrue(TEXT("A new near/reference planet never deflates its visible neighbours"),LocalGeometry);
+    TestTrue(TEXT("Neighbouring primary and satellites remain rendered"),Visible);
+    TestTrue(TEXT("First satellite retains its independent landing shell"),C->ContainingPlanet(FirstCenter)==First);
+    TestTrue(TEXT("Second satellite retains its independent landing shell"),C->ContainingPlanet(SecondCenter)==Second);
+    TestFalse(TEXT("The corridor does not become a shared landing bubble"),C->ContainingPlanet((FirstCenter+SecondCenter)*.5)!=nullptr);
+
+    bool Congruent=true, Continuous=true, NoOpticalJump=true;
+    for (const FVector Direction : {FVector(1,0,0),FVector(-1,-2,-3).GetSafeNormal(),FVector(2,3,4).GetSafeNormal()})
+    {
+        double LastScale=1;
+        for (int32 I=0; I<=600; ++I)
+        {
+            const FVector P=GroupCenter+Direction*(200000+I*25000.0);
+            const double Scale=C->VisualScale(P,Primary);
+            C->ApplyPresentation(P);
+            for (auto* Satellite : {First,Second})
+            {
+                const FVector Authored=C->AuthoredCenter(Satellite)-GroupCenter;
+                const FVector Rendered=C->PresentationCenter(P,Satellite)-GroupCenter;
+                Congruent &= FMath::IsNearlyEqual(C->VisualScale(P,Satellite),Scale,1.e-12)
+                    && Rendered.Equals(Authored*Scale,1.e-7);
+                const FVector Actual=Satellite->GetGameplaySurfaceActor()->GetActorLocation();
+                if (Congruent && !Actual.Equals(C->PresentationCenter(P,Satellite),.001))
+                    AddError(FString::Printf(TEXT("Rendered satellite diverged at sample %d, scale %.12g: actual %s, expected %s"),
+                        I,Scale,*Actual.ToString(),*C->PresentationCenter(P,Satellite).ToString()));
+                Congruent &= Actual.Equals(C->PresentationCenter(P,Satellite),.001);
+            }
+            Continuous &= Scale>0 && Scale<=1 && FMath::Abs(Scale-LastScale)<.02;
+            LastScale=Scale;
+            for (AActor* Actor : {static_cast<AActor*>(Primary),static_cast<AActor*>(First),static_cast<AActor*>(Second)})
+                NoOpticalJump &= FMath::Abs(C->ApparentDiameterRadians(P+Direction,Actor)-C->ApparentDiameterRadians(P,Actor))<.00002;
+        }
+    }
+    TestTrue(TEXT("Far presentation scales orbital offsets and all body radii as one congruent model"),Congruent);
+    TestTrue(TEXT("Leaving the entire system blends continuously from full geometry to far space"),Continuous && NoOpticalJump);
+    const FVector Far=GroupCenter+FVector(2,3,4).GetSafeNormal()*4000000;
+    F.Ship->SetActorLocation(Far,false,nullptr,ETeleportType::TeleportPhysics);
+    F.Manager->UpdateCelestialPresentation(F.Ship);
+    const auto Bodies=UJTSCelestialNavigationLibrary::GatherBodies(F.Manager,F.Ship);
+    const auto* Contact=Bodies.FindByPredicate([&](const auto& Body){return Body.Planet==First;});
+    TestTrue(TEXT("Radar/marker geometry follows the rendered satellite"),Contact && Contact->Center.Equals(C->PresentationCenter(Far,First),.001));
+    TestTrue(TEXT("Marker trigger distances retain the physical authored reference"),Contact && FMath::IsNearlyEqual(
+        double(Contact->ShipDistanceCentimeters),FVector::Distance(Far,FirstCenter),1.0));
+    TestTrue(TEXT("Gravity anchors remain fixed while far visuals move"),First->GetPlanetCenter().Equals(FirstCenter) && Second->GetPlanetCenter().Equals(SecondCenter));
+    TestFalse(TEXT("A scaled distant surface cannot collide"),First->GetGameplaySurfaceActor()->GetActorEnableCollision());
+    C->RestorePresentation();
+    TestTrue(TEXT("Stopping presentation restores the real collision surface position"),First->GetGameplaySurfaceActor()->GetActorLocation().Equals(FirstCenter,.001));
+    TestTrue(TEXT("Stopping presentation restores authored gameplay collision"),First->GetGameplaySurfaceActor()->GetActorEnableCollision());
+    TestFalse(TEXT("A background primary never acquires collision"),Primary->GetActorEnableCollision());
     return true;
 }
 
@@ -3466,7 +3635,20 @@ bool FJTSAntiGravityCruiseRegression::RunTest(const FString& Parameters)
     auto Stats=M->GetEffectiveStats();
     Stats.MaxMoveSpeed=1000; Stats.LiftSpeed=800;
     Stats.CruiseSpeedMultiplier=100; Stats.bInstantVelocityResponse=true;
+    // Isolate the drive's unattenuated step response; the approach envelope has its own regression.
+    Stats.CruiseApproachExponent=0;
     M->SetEffectiveStats(Stats);
+    F.Ship->ActivateFlightCameraThirdPerson();
+    auto CheckCameraPivot = [this, &F](const TCHAR* Phase)
+    {
+        auto* Boom=F.Ship->GetFlightCameraBoom();
+        Boom->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+        const auto* Camera=F.Ship->GetFlightCamera();
+        const FVector Pivot=Camera->GetComponentLocation()+Camera->GetForwardVector()*Boom->TargetArmLength
+            -Camera->GetComponentQuat().RotateVector(Boom->SocketOffset);
+        TestTrue(*FString::Printf(TEXT("Camera pivot stays on the hull during %s"),Phase),
+            Pivot.Equals(Boom->GetComponentLocation()+Boom->TargetOffset,0.01));
+    };
     F.Ship->InitializeForPlanetArrival(F.Planet);
     F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight);
     F.Ship->SetActorRotation(FQuat::Identity);
@@ -3475,20 +3657,25 @@ bool FJTSAntiGravityCruiseRegression::RunTest(const FString& Parameters)
     M->SetMoveInput(FVector2D(0,1));
     M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
     TestTrue(TEXT("Near drive reaches commanded velocity in one frame"),FMath::IsNearlyEqual(M->Velocity.Size(),1000.0,0.1));
+    CheckCameraPivot(TEXT("near flight"));
     F.Ship->SetActorLocation(FVector(R+5,0,0));
     M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
     TestTrue(TEXT("Cruise is a hundredfold step, with no acceleration ramp"),FMath::IsNearlyEqual(M->Velocity.Size(),100000.0,0.1));
+    CheckCameraPivot(TEXT("instant cruise engagement"));
     M->SetBoosting(true);
     M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
     TestTrue(TEXT("Boost applies on top of cruise"),FMath::IsNearlyEqual(M->Velocity.Size(),100000.0*Stats.BoostMultiplier,0.1));
+    CheckCameraPivot(TEXT("boost"));
     M->SetMoveInput(FVector2D::ZeroVector);
     const FVector Stop=F.Ship->GetActorLocation();
     M->TickComponent(.1f,LEVELTICK_All,nullptr);
     TestTrue(TEXT("Releasing thrust stops in one authoritative frame"),M->Velocity.IsNearlyZero() && F.Ship->GetActorLocation().Equals(Stop,.01));
+    CheckCameraPivot(TEXT("immediate stop"));
     M->SetBoosting(false);
     M->SetMoveInput(FVector2D(0,-1));
     M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
     TestTrue(TEXT("Reverse also uses cruise scale"),M->Velocity.X < -Stats.ReverseSpeed*99);
+    CheckCameraPivot(TEXT("reverse"));
     M->SetMoveInput(FVector2D(0,1));
     F.Ship->SetFlightTargetPlanet(nullptr);
     F.Ship->SetActorLocation(Destination->GetPlanetCenter()-FVector(C->BubbleRadius(Destination)+50,0,0));
@@ -3500,10 +3687,374 @@ bool FJTSAntiGravityCruiseRegression::RunTest(const FString& Parameters)
     TestTrue(TEXT("Arrival cannot tunnel beyond the near-shell boundary"),FMath::IsNearlyEqual(
         FVector::Distance(F.Ship->GetActorLocation(),Destination->GetPlanetCenter()),C->BubbleRadius(Destination)-2,0.1));
     TestTrue(TEXT("Entry drops to near velocity in the same frame"),FMath::IsNearlyEqual(M->Velocity.Size(),1000.0,0.1));
+    CheckCameraPivot(TEXT("long-frame near bubble entry"));
     FVector Entry;
     TestTrue(TEXT("Segment query detects a bubble even when both endpoints are outside"),C->ClipAtFirstBubbleEntry(FVector(-1000000,0,0),FVector(1000000,0,0),Entry));
     TestEqual(TEXT("Crossing several planets chooses the first entry"),C->ContainingPlanet(Entry),F.Planet);
     TestFalse(TEXT("A tangent-free pass does not invent a near bubble"),C->ClipAtFirstBubbleEntry(FVector(-1000000,100000,0),FVector(1000000,100000,0),Entry));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPlanetAdaptiveFlightRegression,
+    "JTS.Spacecraft.PlanetAdaptiveFlight", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSPlanetAdaptiveFlightRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    auto* Large = F.AddFlightPlanet(TEXT("Large"), FVector(1000000,0,0));
+    auto* C = F.Manager->CompressedSpace.Get();
+    for (auto* Planet : {F.Planet, Large})
+    {
+        auto* Visual = Planet->GetGameplaySurfaceActor();
+        Visual->FindComponentByClass<UStaticMeshComponent>()->SetMobility(EComponentMobility::Movable);
+        if (Planet == Large) Visual->SetActorScale3D(FVector(1800));
+        FindFProperty<FFloatProperty>(Planet->GetClass(), TEXT("NearFlightReferenceRadius"))->SetPropertyValue_InContainer(Planet,10000);
+        FindFProperty<FFloatProperty>(Planet->GetClass(), TEXT("NavigationMarkerRangeKilometers"))->SetPropertyValue_InContainer(Planet,50000);
+        FJTSCompressedCelestialBody Body; Body.Actor=Planet;
+        Body.NavigationPositionKilometers=Planet==Large ? FVector(384400,0,0) : FVector::ZeroVector;
+        C->Bodies.Add(Body);
+    }
+    C->CaptureAuthoredBodies();
+    TestEqual(TEXT("Small reference body keeps its existing handling"),F.Planet->GetNearFlightSpeedMultiplier(C->AuthoredRadius(F.Planet)),1.0);
+    TestTrue(TEXT("Ninefold size produces threefold rather than ninefold speed"),FMath::IsNearlyEqual(Large->GetNearFlightSpeedMultiplier(C->AuthoredRadius(Large)),3.0));
+    TestEqual(TEXT("Very large bodies respect the authored cap"),Large->GetNearFlightSpeedMultiplier(1.e12),3.0);
+
+    auto* M=F.Ship->GetFlightMovementComponent(); auto Stats=M->GetEffectiveStats();
+    Stats.MaxMoveSpeed=1000; Stats.LiftSpeed=800; Stats.CruiseSpeedMultiplier=100;
+    Stats.bInstantVelocityResponse=true; M->SetEffectiveStats(Stats);
+    F.Ship->InitializeForPlanetArrival(Large); F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+    F.Ship->SetActorRotation(FQuat::Identity);
+    const FVector Near=Large->GetPlanetCenter()+FVector::UpVector*(C->BubbleRadius(Large)-1000);
+    F.Ship->SetActorLocation(Near); M->SetMoveInput(FVector2D(0,1));
+    M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Server displacement uses adapted normal speed"),FMath::IsNearlyEqual(FVector::Distance(F.Ship->GetActorLocation(),Near),50.0,0.1));
+    M->SetBoosting(true); M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Shift retains the ship boost on top of planet adaptation"),FMath::IsNearlyEqual(M->Velocity.Size(),3000.0*Stats.BoostMultiplier,0.1));
+    M->SetBoosting(false); M->SetMoveInput(FVector2D(1,0)); M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Strafe uses the same local scale"),FMath::IsNearlyEqual(M->Velocity.Size(),3.0*Stats.StrafeSpeed,0.1));
+    M->SetMoveInput(FVector2D(0,-1)); M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Reverse uses the same local scale"),FMath::IsNearlyEqual(M->Velocity.Size(),3.0*Stats.ReverseSpeed,0.1));
+    M->SetMoveInput(FVector2D::ZeroVector); M->SetVerticalInput(1); M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Vertical thrust uses the same local scale"),FMath::IsNearlyEqual(M->Velocity.Size(),2400.0,0.1));
+    M->SetVerticalInput(0); const FVector Stop=F.Ship->GetActorLocation(); M->TickComponent(.1f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Adaptation does not weaken immediate release-to-stop"),M->Velocity.IsNearlyZero() && F.Ship->GetActorLocation().Equals(Stop,0.01));
+
+    const FVector Outside=Large->GetPlanetCenter()+FVector::UpVector*(C->BubbleRadius(Large)+1);
+    const FVector Command=-FVector::UpVector*1000;
+    const double Multiplier=C->CruiseApproachMultiplier(Outside,Command,100,3,4);
+    TestTrue(TEXT("Approach joins adapted physical near speed without a NAV crawl or boundary jump"),
+        FMath::IsNearlyEqual(Multiplier,3.0,0.001));
+    const FVector CompressedTail=Outside+FVector::UpVector*(C->AuthoredRadius(Large)*.02);
+    TestTrue(TEXT("A steep coordinate band cannot lower actual speed below adapted handling"),
+        C->CruiseApproachMultiplier(CompressedTail,Command,100,3,4)>=3.0);
+    F.Ship->SetActorLocation(Outside); F.Ship->SetActorRotation(FRotationMatrix::MakeFromX(-FVector::UpVector).ToQuat());
+    M->SetMoveInput(FVector2D(0,1)); M->TickComponent(.2f,LEVELTICK_All,nullptr);
+    TestEqual(TEXT("Long arrival frame captures the destination"),C->ContainingPlanet(F.Ship->GetActorLocation()),Large);
+    TestTrue(TEXT("Crossing frame already uses destination near speed"),FMath::IsNearlyEqual(M->Velocity.Size(),3000.0,0.1));
+    const FVector Far=Large->GetPlanetCenter()+FVector::UpVector*1000000;
+    C->ApplyPresentation(Far);
+    TestTrue(TEXT("Distant visual shrink cannot change authored handling scale"),FMath::IsNearlyEqual(Large->GetNearFlightSpeedMultiplier(C->AuthoredRadius(Large)),3.0));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSFragmentNavigationBoundsRegression,
+    "JTS.Spacecraft.FragmentNavigationBounds", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSFragmentNavigationBoundsRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    FindFProperty<FBoolProperty>(F.Planet->GetClass(),TEXT("bFragmentedGameplaySurface"))->SetPropertyValue_InContainer(F.Planet,true);
+    auto* Envelope=F.Planet->GetFragmentEnvelope();
+    Envelope->Data=NewObject<UJTSFragmentEnvelopeData>(Envelope);
+    auto& Hull=Envelope->Data->Fragments.AddDefaulted_GetRef();
+    for (double X : {-400.0,400.0}) for (double Y : {-100.0,100.0}) for (double Z : {-100.0,100.0}) Hull.Vertices.Add(FVector(X,Y,Z));
+    FJTSCelestialNavigationBody Body; Body.Planet=F.Planet; Body.Center=FVector(0,0,10000); Body.VisualRadius=1000; Body.bVisible=true;
+    const FMatrix Projection=FReversedZPerspectiveMatrix(PI/4.0,1920.0,1080.0,10.0);
+    const FIntRect Rect(0,0,1920,1080); FBox2D Bounds, Scaled, Rotated;
+    TestTrue(TEXT("Fragment hull projects without an enclosing sphere"),UJTSCelestialNavigationLibrary::ProjectBody(Body,FVector::ZeroVector,Projection,Rect,Bounds));
+    TestTrue(TEXT("Frame follows the elongated debris silhouette"),FMath::IsNearlyEqual(Bounds.GetSize().X/Bounds.GetSize().Y,4.0,0.001));
+    TestTrue(TEXT("Actor bounds padding cannot inflate the fragment frame"),Bounds.GetSize().Y<30);
+    Body.FragmentPresentationScale=.25;
+    TestTrue(TEXT("Compressed fragments still project"),UJTSCelestialNavigationLibrary::ProjectBody(Body,FVector::ZeroVector,Projection,Rect,Scaled));
+    TestTrue(TEXT("Frame shrinks with the rendered fragments"),FMath::IsNearlyEqual(Scaled.GetSize().Y/Bounds.GetSize().Y,.25,.003));
+    Envelope->GeometryRotation=FRotator(0,90,0); Body.FragmentPresentationScale=1;
+    TestTrue(TEXT("Rotated fragment hull projects"),UJTSCelestialNavigationLibrary::ProjectBody(Body,FVector::ZeroVector,Projection,Rect,Rotated));
+    TestTrue(TEXT("Authored geometry rotation rotates the marker extent"),FMath::IsNearlyEqual(Rotated.GetSize().Y/Rotated.GetSize().X,4.0,.001));
+    Body.Center.Z=-10000;
+    TestFalse(TEXT("Fragments behind the viewer never leave a phantom frame"),UJTSCelestialNavigationLibrary::ProjectBody(Body,FVector::ZeroVector,Projection,Rect,Bounds));
+    auto* C=F.Manager->CompressedSpace.Get(); FJTSCompressedCelestialBody Captured; Captured.Actor=F.Planet;
+    C->Bodies.Add(Captured); C->CaptureAuthoredBodies();
+    TestTrue(TEXT("Debris near region encloses actual vertices without inheriting the padded Actor AABB"),
+        FMath::IsNearlyEqual(C->AuthoredRadius(F.Planet),FVector(400,100,100).Size(),.001));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSCruiseApproachRegression,
+    "JTS.Spacecraft.CruiseApproachSlowdown", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSCruiseApproachRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    auto* Destination=F.AddFlightPlanet(TEXT("Destination"),FVector(1000000,0,0));
+    auto* C=F.Manager->CompressedSpace.Get();
+    for(auto* P : {F.Planet,Destination})
+    {
+        P->GetGameplaySurfaceActor()->FindComponentByClass<UStaticMeshComponent>()->SetMobility(EComponentMobility::Movable);
+        FJTSCompressedCelestialBody B; B.Actor=P;
+        B.NavigationPositionKilometers=P==F.Planet ? FVector::ZeroVector : FVector(384400,0,0);
+        B.FlightTransitionDistanceRadii=2;
+        B.FlightAngularChangeDegreesPerSecond=0; B.FlightRelativeAngularChangePerSecond=0;
+        C->Bodies.Add(B);
+    }
+    C->CaptureAuthoredBodies();
+    const FVector Center=Destination->GetPlanetCenter(), Radial=-FVector::ForwardVector, Command=FVector::ForwardVector*1000;
+    const double Inner=C->BubbleRadius(Destination);
+    const double Width=C->FlightTransitionWidth(Destination);
+    double Previous=1;
+    for(int32 I=0;I<=200;++I)
+    {
+        const FVector P=Center+Radial*(Inner+Width*I/200.0);
+        const double Speed=C->CruiseApproachMultiplier(P,Command,100,3,1);
+        TestTrue(TEXT("Physical speed increases continuously on departure, bounded by near and cruise"),Speed>=Previous-1e-8 && Speed>=1-1e-8 && Speed<=100+1e-8);
+        TestEqual(TEXT("Reversing flight uses the same joint positional field"),C->CruiseApproachMultiplier(P,-Command,100,3,1),Speed);
+        TestEqual(TEXT("Tangential thrust does not switch the reference body"),C->CruiseApproachMultiplier(P,FVector::UpVector*1000,100,3,1),Speed);
+        Previous=Speed;
+    }
+    TestTrue(TEXT("Near-shell boundary is continuous from both sides"),FMath::Abs(
+        C->CruiseApproachMultiplier(Center+Radial*(Inner+1),Command,100,3,1)
+        -C->CruiseApproachMultiplier(Center+Radial*(Inner-1),Command,100,3,1))<.001);
+    const FVector Mid=Center+Radial*(Inner+Width*.5);
+    const double Before=C->CruiseApproachMultiplier(Mid,Command,100,3,1);
+    FindFProperty<FFloatProperty>(Destination->GetClass(),TEXT("NavigationMarkerRangeKilometers"))->SetPropertyValue_InContainer(Destination,1.e9f);
+    TestEqual(TEXT("HUD marker tuning cannot stretch the flight slowdown"),C->CruiseApproachMultiplier(Mid,Command,100,3,1),Before);
+    TestEqual(TEXT("A disabled envelope retains unattenuated outer cruise"),C->CruiseApproachMultiplier(Mid,Command,100,3,0),100.0);
+    TestTrue(TEXT("Outer field boundary meets cruise without a jump"),FMath::Abs(C->CruiseApproachMultiplier(Center+Radial*(Inner+Width-1),Command,100,3,1)-100)<.001);
+
+    auto* M=F.Ship->GetFlightMovementComponent(); auto Stats=M->GetEffectiveStats();
+    Stats.MaxMoveSpeed=1000; Stats.CruiseSpeedMultiplier=100; Stats.CruiseApproachExponent=1; Stats.bInstantVelocityResponse=true;
+    M->SetEffectiveStats(Stats); F.Ship->InitializeForPlanetArrival(F.Planet);
+    F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight); F.Ship->SetActorRotation(FQuat::Identity);
+    F.Ship->SetActorLocation(Mid); M->SetMoveInput(FVector2D(0,1));
+    // Keep this displacement assertion within one integration step; longer frames
+    // intentionally re-evaluate the changing field along the travelled segment.
+    M->TickComponent(.0001f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("The field changes actual authoritative displacement"),FMath::IsNearlyEqual(FVector::Distance(F.Ship->GetActorLocation(),Mid),Before*.1,0.02));
+    M->SetMoveInput(FVector2D::ZeroVector); M->TickComponent(.1f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Blending retains immediate release-to-stop"),M->Velocity.IsNearlyZero());
+    F.Ship->SetActorLocation(Center+Radial*(Inner+2)); M->SetMoveInput(FVector2D(0,1));
+    M->TickComponent(.7f,LEVELTICK_All,nullptr);
+    TestEqual(TEXT("A long frame still acquires the correct near shell"),C->ContainingPlanet(F.Ship->GetActorLocation()),Destination);
+    TestTrue(TEXT("Crossing frame uses continuous local handling"),FMath::IsNearlyEqual(M->Velocity.Size(),1000.,.1));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMultiBodyFlightRegression,
+    "JTS.Spacecraft.MultiBodyFlightBlend", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSMultiBodyFlightRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    auto* C=F.Manager->CompressedSpace.Get();
+    TArray<FJTSCompressedCelestialBody> Bodies;
+    const FVector Locations[]={FVector(-100000,0,0),FVector(100000,0,0),FVector(0,100000,0)};
+    for(int32 I=0;I<3;++I)
+    {
+        auto* Visual=F.World->SpawnActor<AStaticMeshActor>();
+        Visual->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+        Visual->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere")));
+        Visual->SetActorScale3D(FVector(200)); Visual->SetActorLocation(Locations[I]); Visual->SetActorEnableCollision(false);
+        FJTSCompressedCelestialBody B; B.Actor=Visual; B.NavigationPositionKilometers=Locations[I]; B.RadiusKilometers=100;
+        B.bEnableNearFlight=true; B.NearFlightSpeedMultiplier=I==0?1:I==1?4:12; B.FlightTransitionDistanceRadii=20;
+        B.NearFlightReferenceRadius=0;
+        B.FlightAngularChangeDegreesPerSecond=0; B.FlightRelativeAngularChangePerSecond=0;
+        Bodies.Add(B);
+    }
+    const FVector P(0,1000,5000), Command=FVector::ForwardVector*1000;
+    auto Query=[&](const TArray<FJTSCompressedCelestialBody>& Set)
+    {
+        C->Bodies=Set; C->CaptureAuthoredBodies();
+        return C->CruiseApproachMultiplier(P,Command,100,3,1);
+    };
+    const double A=Query({Bodies[0]}), B=Query({Bodies[1]}), D=Query({Bodies[2]});
+    const double Pair=Query({Bodies[0],Bodies[1]});
+    TestTrue(TEXT("Both planets contribute instead of selecting the slower or faster body"),Pair>FMath::Min(A,B)+.01 && Pair<FMath::Max(A,B)-.01);
+    const double Triple=Query(Bodies);
+    TestTrue(TEXT("A third overlapping body changes the result"),Triple>Pair+.01 && Triple<D);
+    TestTrue(TEXT("Registration order cannot select a different reference"),FMath::IsNearlyEqual(Query({Bodies[2],Bodies[1],Bodies[0]}),Triple,1e-9));
+    auto Identical=Bodies[0]; Identical.Actor=Bodies[1].Actor; Identical.NavigationPositionKilometers=Bodies[1].NavigationPositionKilometers;
+    TestTrue(TEXT("Equal overlapping influences do not multiply braking into a crawl"),FMath::IsNearlyEqual(Query({Bodies[0],Identical}),A,.02));
+
+    C->Bodies={Bodies[0]}; C->CaptureAuthoredBodies();
+    const FVector Near=Locations[0]+FVector::UpVector*(C->BubbleRadius(Bodies[0].Actor)-100);
+    TestEqual(TEXT("Visual-only body has a real near-flight region"),C->ContainingNearFlightBody(Near),Bodies[0].Actor.Get());
+    TestNull(TEXT("Near flight does not turn scenery into a gameplay planet"),C->ContainingPlanet(Near));
+    F.Ship->InitializeForPlanetArrival(F.Planet); F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+    F.Ship->SetFlightTargetPlanet(nullptr); F.Ship->SetActorLocation(Near);
+    TestFalse(TEXT("Manager recognizes non-collidable near flight"),F.Manager->IsCruisePresentationActive(F.Ship));
+    C->ApplyPresentation(Near); TestFalse(TEXT("Full-size near presentation keeps scenery non-collidable"),Bodies[0].Actor->GetActorEnableCollision());
+    FVector Entry;
+    TestTrue(TEXT("Fast frames detect visual-only near-shell entry"),C->ClipAtFirstBubbleEntry(Locations[0]+FVector(0,0,200000),Locations[0],Entry));
+    TestEqual(TEXT("Visual-only crossing captures the correct region"),C->ContainingNearFlightBody(Entry),Bodies[0].Actor.Get());
+    auto* M=F.Ship->GetFlightMovementComponent(); auto Stats=M->GetEffectiveStats();
+    Stats.MaxMoveSpeed=1000; Stats.CruiseSpeedMultiplier=100; Stats.CruiseApproachExponent=1; Stats.bInstantVelocityResponse=true; M->SetEffectiveStats(Stats);
+    F.Ship->SetActorLocation(Locations[0]+FVector(0,0,10)); F.Ship->SetActorRotation(FQuat::Identity);
+    M->SetMoveInput(FVector2D(0,1)); M->TickComponent(.1f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Native flight can pass through the visual-only body without collision or a landing state"),M->Velocity.Size()>999 && !F.Ship->IsLanded() && !F.Ship->GetFlightPlanet());
+    C->RestorePresentation(); TestFalse(TEXT("Restoring presentation never enables background collision"),Bodies[0].Actor->GetActorEnableCollision());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSAdaptiveFlightEnvelopeRegression,
+    "JTS.Spacecraft.AdaptiveFlightEnvelope", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSAdaptiveFlightEnvelopeRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    auto* C=F.Manager->CompressedSpace.Get();
+    auto* Visual=F.World->SpawnActor<AStaticMeshActor>();
+    Visual->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+    Visual->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere")));
+    Visual->SetActorScale3D(FVector(200)); Visual->SetActorLocation(FVector(3000000,0,0)); Visual->SetActorEnableCollision(false);
+    FJTSCompressedCelestialBody B; B.Actor=Visual; B.NavigationPositionKilometers=FVector::ZeroVector; B.RadiusKilometers=1000;
+    B.NearFlightReferenceRadius=10000; B.FlightApproachExponent=.1;
+    C->Bodies={B}; C->CaptureAuthoredBodies();
+    const double InitialWidth=C->FlightTransitionWidth(Visual);
+    TestTrue(TEXT("An unmarked body participates by default with a broad radius-proportional field"),
+        FMath::IsNearlyEqual(InitialWidth,C->AuthoredRadius(Visual)*80));
+    C->Bodies[0].FlightTransitionMinimumWidth=InitialWidth;
+    Visual->SetActorScale3D(FVector(400)); C->CaptureAuthoredBodies(false);
+    TestTrue(TEXT("Doubling full planet radius doubles its slowdown width"),FMath::IsNearlyEqual(C->FlightTransitionWidth(Visual),InitialWidth*2));
+    const FVector Center=Visual->GetActorLocation(), Command=-FVector::UpVector*4200;
+    TestTrue(TEXT("An unmarked larger body also adapts local handling"),FMath::IsNearlyEqual(
+        C->CruiseApproachMultiplier(Center+FVector::UpVector*C->BubbleRadius(Visual),Command,100,3,1),FMath::Sqrt(2.0),.001));
+    Visual->SetActorScale3D(FVector(100)); C->CaptureAuthoredBodies(false);
+    TestEqual(TEXT("Shrinking a mesh cannot remove the retained transition region"),C->FlightTransitionWidth(Visual),InitialWidth);
+    TestEqual(TEXT("Near handling remains usable for a smaller body"),C->CruiseApproachMultiplier(Center,Command,100,3,1),1.0);
+    Visual->SetActorScale3D(FVector(200)); C->CaptureAuthoredBodies(false);
+    const double Inner=C->BubbleRadius(Visual);
+    const FVector Half=Center+FVector::UpVector*(Inner+InitialWidth*.5);
+    const double Gentle=C->CruiseApproachMultiplier(Half,Command,100,3,1);
+    C->Bodies[0].FlightApproachExponent=1; C->CaptureAuthoredBodies(false);
+    TestTrue(TEXT("Gentler attenuation retains more travel speed without shortening the region"),
+        Gentle>C->CruiseApproachMultiplier(Half,Command,100,3,1)+1 && C->FlightTransitionWidth(Visual)==InitialWidth);
+    C->Bodies[0].FlightApproachExponent=.1;
+    C->Bodies[0].FlightAngularChangeDegreesPerSecond=0; C->Bodies[0].FlightRelativeAngularChangePerSecond=0;
+    C->CaptureAuthoredBodies(false);
+    TArray<double> Unadapted;
+    for(int32 I=0;I<256;++I)
+    {
+        const double T=FMath::Pow((I+1)/256.0,3.0)*.99;
+        Unadapted.Add(C->CruiseApproachMultiplier(Center+FVector::UpVector*(Inner+InitialWidth*T),Command,100,3,1));
+    }
+    C->Bodies[0].FlightAngularChangeDegreesPerSecond=8; C->Bodies[0].FlightRelativeAngularChangePerSecond=.65;
+    C->CaptureAuthoredBodies(false);
+    double BestRatio=1; FVector Probe=Half;
+    for(int32 I=0;I<256;++I)
+    {
+        const double T=FMath::Pow((I+1)/256.0,3.0)*.99;
+        const FVector P=Center+FVector::UpVector*(Inner+InitialWidth*T);
+        const double Adapted=C->CruiseApproachMultiplier(P,Command,100,3,1);
+        TestTrue(TEXT("Geometric adaptation preserves local control and only softens excess cruise speed"),Adapted>=1 && Adapted<=Unadapted[I]+1e-8);
+        TestEqual(TEXT("Growth and shrinkage receive equal adaptation"),C->CruiseApproachMultiplier(P,-Command,100,3,1),Adapted);
+        if(Adapted/Unadapted[I]<BestRatio) { BestRatio=Adapted/Unadapted[I]; Probe=P; }
+    }
+    TestTrue(TEXT("Actual compressed visual growth affects propulsion, not only integration or HUD"),BestRatio<.95);
+    auto* M=F.Ship->GetFlightMovementComponent(); auto Stats=M->GetEffectiveStats();
+    Stats.MaxMoveSpeed=4200; Stats.CruiseSpeedMultiplier=100; Stats.CruiseApproachExponent=.1f; Stats.bInstantVelocityResponse=true;
+    M->SetEffectiveStats(Stats); F.Ship->InitializeForPlanetArrival(F.Planet);
+    F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight); F.Ship->SetFlightTargetPlanet(nullptr);
+    F.Ship->SetActorRotation(FRotationMatrix::MakeFromX(-FVector::UpVector).ToQuat());
+    F.Ship->SetActorLocation(Probe); M->SetMoveInput(FVector2D(0,1)); M->TickComponent(.00001f,LEVELTICK_All,nullptr);
+    const double Ordinary=M->Velocity.Size();
+    F.Ship->SetActorLocation(Probe); M->SetBoosting(true); M->TickComponent(.00001f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Shift retains its authored ratio through geometric adaptation"),FMath::IsNearlyEqual(M->Velocity.Size()/Ordinary,double(Stats.BoostMultiplier),.001));
+    M->SetMoveInput(FVector2D(1,0)); M->SetBoosting(false); F.Ship->SetActorLocation(Probe); M->TickComponent(.00001f,LEVELTICK_All,nullptr);
+    const double Strafe=M->Velocity.Size();
+    M->SetBoosting(true); F.Ship->SetActorLocation(Probe); M->TickComponent(.00001f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Shift does not alter unboosted strafe handling"),FMath::IsNearlyEqual(M->Velocity.Size(),Strafe,.01));
+    TestFalse(TEXT("Adaptive unmarked flight never enables collision"),Visual->GetActorEnableCollision());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSFlightInterferenceRegression,
+    "JTS.Spacecraft.ExternalFlightInterference", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSFlightInterferenceRegression::RunTest(const FString& Parameters)
+{
+    FShipTestWorld F;
+    F.Planet->GetGameplaySurfaceActor()->FindComponentByClass<UStaticMeshComponent>()->SetMobility(EComponentMobility::Movable);
+    auto* Field = F.World->SpawnActor<AStaticMeshActor>(FVector(500000,0,0),FRotator::ZeroRotator);
+    Field->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+    Field->GetStaticMeshComponent()->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere")));
+    Field->SetActorScale3D(FVector(20));
+    Field->SetActorEnableCollision(false);
+    auto* C = F.Manager->CompressedSpace.Get();
+    FJTSCompressedCelestialBody Source; Source.Actor = F.Planet;
+    FJTSCompressedCelestialBody Destination; Destination.Actor = Field;
+    Destination.NavigationPositionKilometers = FVector(400000,0,0);
+    Destination.Interference.bEnabled = true;
+    C->Bodies = {Source,Destination};
+    C->CaptureAuthoredBodies();
+    auto* M = F.Ship->GetFlightMovementComponent();
+    auto* I = F.Ship->GetInterferenceComponent();
+    auto Stats = M->GetEffectiveStats();
+    Stats.MaxMoveSpeed = 1000; Stats.CruiseSpeedMultiplier = 100;
+    Stats.CruiseApproachExponent = 0; Stats.bInstantVelocityResponse = true;
+    M->SetEffectiveStats(Stats);
+    F.Ship->InitializeForPlanetArrival(F.Planet);
+    F.Ship->SetFlightTargetPlanet(nullptr);
+    F.Manager->SetTravelState(EJTSSpaceTravelState::SpaceFlight);
+    const FVector Center = Field->GetActorLocation();
+    const double Near = C->BubbleRadius(Field);
+    const FVector Start = Center + FVector(0,0,Near + 18500);
+    F.Ship->SetActorLocation(Start);
+    F.Ship->SetActorRotation(FRotationMatrix::MakeFromXZ(-FVector::UpVector,FVector::ForwardVector).ToQuat());
+    M->SetMoveInput(FVector2D(0,1));
+    M->TickComponent(.7f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("A long crossing frame is intercepted before near-state switching"),I->IsControllingFlight());
+    TestTrue(TEXT("The entry is exactly on the authored trigger shell"),FMath::IsNearlyEqual(
+        FVector::Distance(F.Ship->GetActorLocation(),Center),Near + 18000,0.1));
+    TestNull(TEXT("The excluded body is never acquired as a landing planet"),C->ContainingPlanet(F.Ship->GetActorLocation()));
+    bool SawTurn = false, SawRetreat = false, SawRecovery = false;
+    FVector TurnOrigin;
+    double MinimumMargin = UE_DOUBLE_BIG_NUMBER;
+    for (int32 Frame = 0; Frame < 600 && I->IsControllingFlight(); ++Frame)
+    {
+        if (I->GetPhase() == EJTSFlightInterferencePhase::Turning)
+        {
+            if (!SawTurn) TurnOrigin = F.Ship->GetActorLocation();
+            SawTurn = true;
+            TestTrue(TEXT("Turn remains in place without orbiting the planet"),F.Ship->GetActorLocation().Equals(TurnOrigin,.01));
+        }
+        SawRetreat |= I->GetPhase() == EJTSFlightInterferencePhase::Retreating;
+        SawRecovery |= I->GetPhase() == EJTSFlightInterferencePhase::Recovering;
+        // A held or forged pilot command cannot overwrite scripted attitude or velocity.
+        M->SetMoveInput(FVector2D(1,1)); M->SetVerticalInput(-1); M->SetRollInput(1); M->SetBoosting(true);
+        M->TickComponent(1.f/60,LEVELTICK_All,nullptr);
+        MinimumMargin = FMath::Min(MinimumMargin,FVector::Distance(F.Ship->GetActorLocation(),Center)-Near);
+    }
+    TestTrue(TEXT("Braking, stationary turn, retreat and recovery all execute"),SawTurn && SawRetreat && SawRecovery);
+    TestTrue(TEXT("Braking cannot drift through the reserved safety margin"),MinimumMargin >= 2999.9);
+    TestFalse(TEXT("Manual control returns within the authored sequence duration"),I->IsControllingFlight());
+    TestTrue(TEXT("The nose faces radially outward regardless of world Z"),FVector::DotProduct(
+        F.Ship->GetActorForwardVector(),(F.Ship->GetActorLocation()-Center).GetSafeNormal()) > .999);
+    TestTrue(TEXT("The glide ends beyond the trigger, with no residual pilot or narrative velocity"),
+        FVector::Distance(F.Ship->GetActorLocation(),Center)>Near+18000 && M->Velocity.IsNearlyZero());
+    const FVector Released = F.Ship->GetActorLocation();
+    M->TickComponent(.1f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Pre-takeover inputs cannot resume themselves"),F.Ship->GetActorLocation().Equals(Released,.01));
+    M->SetMoveInput(FVector2D(0,1)); M->TickComponent(.1f,LEVELTICK_All,nullptr);
+    TestTrue(TEXT("Fresh pilot input moves normally after release"),FVector::Distance(F.Ship->GetActorLocation(),Center)>FVector::Distance(Released,Center));
+    FVector Entry;
+    TestFalse(TEXT("An outward departure never triggers the field"),I->InterceptSegment(Released,Released+FVector(0,0,10000),Entry));
+    TestFalse(TEXT("A tangent flyby outside the shell stays under pilot control"),I->InterceptSegment(
+        Center+FVector(-100000,Near+20000,0),Center+FVector(100000,Near+20000,0),Entry));
+    TestTrue(TEXT("Another attempt cannot bypass the exclusion during cooldown"),I->InterceptSegment(Released,Center,Entry));
+    F.Ship->SetActorLocation(Entry);
+    M->TickComponent(10,LEVELTICK_All,nullptr);
+    TestFalse(TEXT("A long simulation frame completes without a stuck control lock"),I->IsControllingFlight());
+    TestTrue(TEXT("Long-frame recovery remains outside near space"),FVector::Distance(F.Ship->GetActorLocation(),Center)>Near);
+    TestTrue(TEXT("The sequence is independent of physical collision on the background"),!Field->GetActorEnableCollision());
     return true;
 }
 

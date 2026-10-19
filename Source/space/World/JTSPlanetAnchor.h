@@ -92,9 +92,16 @@ public:
 	FName GetPlanetId() const;
 
 	FText GetNavigationDisplayName() const { return NavigationDisplayName.IsEmpty() ? FText::FromName(PlanetId) : NavigationDisplayName; }
+	bool ShouldShowOnStarChart() const { return bShowOnStarChart; }
+	bool ShouldShowScreenMarker() const { return bShowScreenMarker; }
 	int32 GetNavigationPaletteIndex() const { return NavigationPaletteIndex; }
 	float GetNavigationMarkerDistance() const { return NavigationMarkerDistance; }
 	float GetNavigationMarkerRangeKilometers() const { return NavigationMarkerRangeKilometers; }
+	double GetCruiseApproachExponent(double Fallback) const { return CruiseApproachExponentOverride > 0.0f ? CruiseApproachExponentOverride : Fallback; }
+	float GetCruiseApproachExpansionDegreesPerSecond() const { return CruiseApproachExpansionDegreesPerSecond; }
+	/** Uses full authored size, never the changing distant presentation scale. */
+	UFUNCTION(BlueprintPure, Category = "Planet|Flight")
+	double GetNearFlightSpeedMultiplier(double AuthoredRadius) const;
 	const TArray<FJTSCelestialBackgroundNavigation>& GetBackgroundNavigation() const { return BackgroundNavigation; }
 
 	/** Centre of this gameplay planet. By default it is this actor's location. */
@@ -366,6 +373,11 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
 	FText NavigationDisplayName;
+	/** Navigation discovery is independent of gameplay registration, collision and gravity. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
+	bool bShowOnStarChart = true;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
+	bool bShowScreenMarker = true;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "2"))
 	int32 NavigationPaletteIndex = 2;
 	/** Fixed ship-to-centre range for every occupant's marker. Authored independently of the camera and visual scaling. */
@@ -374,6 +386,22 @@ private:
 	/** Fixed simulated ship-to-centre trigger distance. Zero retains the legacy world-distance setting. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", Units = "km"))
 	float NavigationMarkerRangeKilometers = 0.0f;
+	/** Per-body approach curve for compressed space. Zero uses the spacecraft's fallback.
+	 * Smaller positive strengths give gentler attenuation inside the same wide region. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "12"))
+	float CruiseApproachExponentOverride = 0.0f;
+	/** Legacy marker-envelope setting, retained for serialized assets. Geometric change
+	 * adaptation is configured for every body on CompressedSpace, including visual-only bodies. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true", ClampMin = "0", Units = "deg/s"))
+	float CruiseApproachExpansionDegreesPerSecond = 0.0f;
+	/** Zero disables size adaptation. Set a shared reference radius in level/Blueprint tuning. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Flight", meta = (AllowPrivateAccess = "true", ClampMin = "0", Units = "cm"))
+	float NearFlightReferenceRadius = 0.0f;
+	/** Sublinear growth preserves precise control on large planets and debris fields. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Flight", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "1"))
+	float NearFlightSizeExponent = 0.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Flight", meta = (AllowPrivateAccess = "true", ClampMin = "1"))
+	float NearFlightMaxSpeedMultiplier = 3.0f;
 	/** Labels for existing backgrounds; membership still comes from CelestialBackgroundActors. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Planet|Navigation", meta = (AllowPrivateAccess = "true"))
 	TArray<FJTSCelestialBackgroundNavigation> BackgroundNavigation;

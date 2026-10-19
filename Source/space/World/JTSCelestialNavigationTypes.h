@@ -31,6 +31,8 @@ struct SPACE_API FJTSCelestialNavigationBody
 	UPROPERTY(BlueprintReadOnly) TObjectPtr<AJTSPlanetAnchor> Planet;
 	UPROPERTY(BlueprintReadOnly) FVector Center = FVector::ZeroVector;
 	UPROPERTY(BlueprintReadOnly) float VisualRadius = 0.0f;
+	/** Full-size fragment geometry follows the same presentation ratio as its visible mesh. */
+	UPROPERTY(BlueprintReadOnly) double FragmentPresentationScale = 1.0;
 	UPROPERTY(BlueprintReadOnly) float RangeCentimeters = 0.0f;
 	/** Shared ship-to-centre trigger range: simulated cm when configured, otherwise legacy world cm. Never camera distance. */
 	UPROPERTY(BlueprintReadOnly) float ShipDistanceCentimeters = 0.0f;

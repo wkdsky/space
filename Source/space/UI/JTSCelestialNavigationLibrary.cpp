@@ -6,6 +6,7 @@
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "space/Components/JTSCompressedSpaceComponent.h"
+#include "space/Components/JTSPlanetFragmentEnvelopeComponent.h"
 
 TArray<FJTSCelestialNavigationBody> UJTSCelestialNavigationLibrary::GatherBodies(
 	const AJTSSpaceWorldManager* Manager, const AJTSSpacecraftActor* Ship)
@@ -22,6 +23,8 @@ TArray<FJTSCelestialNavigationBody> UJTSCelestialNavigationLibrary::GatherBodies
 		Body.Planet = Planet;
 		Body.VisualActor = Planet->GetGameplaySurfaceActor();
 		Body.DisplayName = Planet->GetNavigationDisplayName();
+		Body.bShowOnStarChart = Planet->ShouldShowOnStarChart();
+		Body.bShowScreenMarker = Planet->ShouldShowScreenMarker();
 		Body.PaletteIndex = Planet->GetNavigationPaletteIndex();
 		Body.Center = Planet->GetPlanetCenter();
 		Body.ShipDistanceCentimeters = FVector::Distance(Ship->GetActorLocation(), Body.Center);
@@ -34,7 +37,11 @@ TArray<FJTSCelestialNavigationBody> UJTSCelestialNavigationLibrary::GatherBodies
 			Body.MarkerDistanceCentimeters = Planet->GetNavigationMarkerRangeKilometers() * 100000.0f;
 		}
 		Body.VisualRadius = Planet->GetVisualRadius();
+		Body.FragmentPresentationScale = Manager->CompressedSpace->IsConfigured()
+			? Manager->CompressedSpace->VisualScale(Ship->GetActorLocation(), Planet) : 1.0;
 		Body.RangeCentimeters = Manager->GetCruiseRangeCentimeters(Ship, Planet);
+		if (Manager->CompressedSpace->ContainsBody(Planet))
+			Body.Center = Manager->CompressedSpace->PresentationCenter(Ship->GetActorLocation(), Planet);
 		Body.bVisible = !Planet->IsHidden() && IsValid(Body.VisualActor) && !Body.VisualActor->IsHidden();
 		Seen.Add(Body.VisualActor);
 		for (const FJTSCelestialBackgroundNavigation& Entry : Planet->GetBackgroundNavigation())
@@ -80,7 +87,25 @@ bool UJTSCelestialNavigationLibrary::ProjectBody(const FJTSCelestialNavigationBo
 	const FVector Offset = Body.Center - ViewOrigin;
 	const double Distance = Offset.Size();
 	const double Radius = Body.VisualRadius;
-	if (!Body.bVisible || !FMath::IsFinite(Radius) || Radius <= 0.0 || Distance <= Radius || ViewRect.IsEmpty()) return false;
+	if (!Body.bVisible || !FMath::IsFinite(Radius) || Radius <= 0.0 || ViewRect.IsEmpty()) return false;
+	if (const auto* Envelope = IsValid(Body.Planet) && Body.Planet->IsFragmentedGameplaySurface()
+		? Body.Planet->GetFragmentEnvelope() : nullptr; Envelope && Envelope->HasGeometry())
+	{
+		// Project the existing authored convex wraps, not an enclosing sphere or a
+		// rotated Actor AABB. Linear perspective extrema lie on hull vertices.
+		const FQuat Rotation = Envelope->GeometryRotation.Quaternion();
+		for (const FJTSFragmentHull& Hull : Envelope->Data->Fragments)
+			for (const FVector& Vertex : Hull.Vertices)
+			{
+				const FVector World = Body.Center + Rotation.RotateVector(Vertex) * Body.FragmentPresentationScale;
+				FVector2D Point;
+				if (!FSceneView::ProjectWorldToScreen(World, ViewRect, ViewProjection, Point)) return false;
+				OutBounds += Point - FVector2D(ViewRect.Min);
+			}
+		return OutBounds.bIsValid && OutBounds.Max.X >= 0.0 && OutBounds.Min.X <= ViewRect.Width()
+			&& OutBounds.Max.Y >= 0.0 && OutBounds.Min.Y <= ViewRect.Height();
+	}
+	if (Distance <= Radius) return false;
 	FVector2D Projected;
 	if (!FSceneView::ProjectWorldToScreen(Body.Center, ViewRect, ViewProjection, Projected)) return false;
 	const FVector Normal = Offset / Distance;

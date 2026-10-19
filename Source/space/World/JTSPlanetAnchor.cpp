@@ -71,6 +71,15 @@ float AJTSPlanetAnchor::GetPlanetRadius() const
 	return GetApproximateRadius();
 }
 
+double AJTSPlanetAnchor::GetNearFlightSpeedMultiplier(double AuthoredRadius) const
+{
+	if (!FMath::IsFinite(NearFlightReferenceRadius) || NearFlightReferenceRadius <= 0.0f
+		|| !FMath::IsFinite(AuthoredRadius) || AuthoredRadius <= 0.0) return 1.0;
+	const double Exponent = FMath::IsFinite(NearFlightSizeExponent) ? FMath::Clamp(double(NearFlightSizeExponent), 0.0, 1.0) : 0.0;
+	const double Maximum = FMath::IsFinite(NearFlightMaxSpeedMultiplier) ? FMath::Max(1.0, double(NearFlightMaxSpeedMultiplier)) : 1.0;
+	return FMath::Clamp(FMath::Pow(FMath::Max(1.0, AuthoredRadius / NearFlightReferenceRadius), Exponent), 1.0, Maximum);
+}
+
 float AJTSPlanetAnchor::GetVisualRadius() const
 {
 	if (const AActor* const SurfaceActor = GetGameplaySurfaceActor(); IsValid(SurfaceActor))

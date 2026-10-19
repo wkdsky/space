@@ -369,7 +369,7 @@ EJTSSpaceTravelState AJTSSpaceWorldManager::GetCurrentTravelState() const
 
 bool AJTSSpaceWorldManager::IsCruisePresentationActive(const AJTSSpacecraftActor* Spacecraft) const
 {
-	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return !Spacecraft->IsLanded() && !CompressedSpace->ContainingPlanet(Spacecraft->GetActorLocation());
+	if (CompressedSpace->IsConfigured() && IsValid(Spacecraft)) return !Spacecraft->IsLanded() && !CompressedSpace->ContainingNearFlightBody(Spacecraft->GetActorLocation());
 
 	if (!IsValid(Spacecraft) || Spacecraft->IsLanded())
 	{

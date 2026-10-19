@@ -182,7 +182,16 @@ def configure(actors):
         entry.actor = bodies[key]
         entry.navigation_position_kilometers = unreal.Vector(*nav[key])
         entry.radius_kilometers = radii[key]
-        entry.visual_radius_multiplier = 4.0 if key == 'MarI' else 1.0
+        # Calibrated against the actual mesh silhouette, rather than its enclosing AABB.
+        # Keep gameplay meshes unchanged; Earth debris is only slightly wider than an intact Earth.
+        entry.visual_radius_multiplier = {'MarI':4.0, 'Moon':1.43, 'EarthFragments':1.25}.get(key, 1.0)
+        entry.set_editor_property('bEnableNearFlight', True)
+        entry.near_flight_speed_multiplier = 1.0
+        entry.near_flight_reference_radius = 21000.0
+        entry.flight_transition_distance_radii = 80.0
+        entry.flight_approach_exponent = .1
+        entry.flight_angular_change_degrees_per_second = 8.0
+        entry.flight_relative_angular_change_per_second = .65
         entries.append(entry)
     component = manager.get_editor_property('compressed_space')
     component.set_editor_property('bodies', entries)
@@ -194,6 +203,10 @@ def configure(actors):
         a.set_editor_property('celestial_background_companion', None)
         a.set_editor_property('companion_apparent_separation_centimeters', 0)
     # Calibrate a fixed ship-distance gate at roughly 5% of a 16:9, 90-degree view.
+    component.capture_authored_bodies(False)
+    for entry in entries:
+        entry.flight_transition_minimum_width=component.authored_radius(entry.actor)*entry.flight_transition_distance_radii
+    component.set_editor_property('bodies',entries)
     component.capture_authored_bodies(False)
     # Refuse to save an ambiguous coordinate field or overlapping local transition regions.
     for axis in range(3):
@@ -214,6 +227,9 @@ def configure(actors):
             assert (center-other_center).length()>2*(component.bubble_radius(a)+component.bubble_radius(b)), (key,other_key)
     gates={}
     for key,a in anchors.items():
+        a.set_editor_property('near_flight_reference_radius',14000 if key=='Moon' else 21000)
+        a.set_editor_property('cruise_approach_exponent_override',.1)
+        a.set_editor_property('cruise_approach_expansion_degrees_per_second',0.0)
         # One-time reference-camera calibration only. Runtime compares simulated
         # ship distance with this constant, independent of camera/FOV/direction.
         range_km=component.display_radius_kilometers(a)*16/9/0.05

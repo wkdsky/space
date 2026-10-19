@@ -31,6 +31,7 @@
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftInterferenceComponent.h"
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
@@ -153,6 +154,7 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 
 	FlightMovementComponent = CreateDefaultSubobject<UJTSSpacecraftFlightMovementComponent>(TEXT("FlightMovementComponent"));
 	FlightMovementComponent->SetUpdatedComponent(SceneRoot);
+	InterferenceComponent = CreateDefaultSubobject<UJTSSpacecraftInterferenceComponent>(TEXT("InterferenceComponent"));
 
 	GroundProbeComponent = CreateDefaultSubobject<UJTSSpacecraftGroundProbeComponent>(TEXT("GroundProbeComponent"));
 	LandingSupportComponent = CreateDefaultSubobject<UJTSSpacecraftLandingSupportComponent>(TEXT("LandingSupportComponent"));
@@ -168,7 +170,8 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	// The ship is often parked directly on uneven terrain. A spring-arm collision retraction can
 	// collapse an otherwise valid exterior view to the cockpit, so driving always keeps its full arm.
 	FlightCameraBoom->bDoCollisionTest = false;
-	FlightCameraBoom->bEnableCameraLag = true;
+	// Translation must stay attached to the hull even during instantaneous cruise jumps.
+	FlightCameraBoom->bEnableCameraLag = false;
 	FlightCameraBoom->CameraLagSpeed = 14.0f;
 	FlightCameraBoom->bEnableCameraRotationLag = true;
 	FlightCameraBoom->CameraRotationLagSpeed = FlightCameraRotationLagSpeed;
@@ -1303,8 +1306,10 @@ void AJTSSpacecraftActor::UpdateFlightCamera(float DeltaSeconds)
 		FlightCamera->AddOrUpdateBlendable(CruiseMediumDistortionInstance,
 			FMath::Abs(CurrentMediumWarpStrength) > KINDA_SMALL_NUMBER ? 1.0f : 0.0f);
 	}
-	const float FringeAlpha = FMath::Clamp(FMath::Abs(CurrentMediumWarpStrength)
-		/ FMath::Max(0.0001f, CruiseMediumWarpStrength), 0.0f, 1.0f);
+	const float InterferenceFringe = InterferenceComponent->IsControllingFlight()
+		? (InterferenceComponent->GetPhase() == EJTSFlightInterferencePhase::Recovering ? 0.15f : 0.45f) : 0.0f;
+	const float FringeAlpha = FMath::Max(InterferenceFringe, FMath::Clamp(FMath::Abs(CurrentMediumWarpStrength)
+		/ FMath::Max(0.0001f, CruiseMediumWarpStrength), 0.0f, 1.0f));
 	FlightCamera->PostProcessSettings.bOverride_SceneFringeIntensity = FringeAlpha > KINDA_SMALL_NUMBER
 		|| bBaseFlightCameraFringeOverride;
 	FlightCamera->PostProcessSettings.SceneFringeIntensity = BaseFlightCameraFringeIntensity
@@ -1873,7 +1878,8 @@ void AJTSSpacecraftActor::ActivateFlightCameraThirdPerson()
 		FlightCameraBoom->bUsePawnControlRotation = false;
 		FlightCameraBoom->SetUsingAbsoluteRotation(true);
 		FlightCameraBoom->bDoCollisionTest = false;
-		FlightCameraBoom->bEnableCameraLag = true;
+		// Existing Blueprint component defaults may still contain the old positional lag.
+		FlightCameraBoom->bEnableCameraLag = false;
 		FlightCameraBoom->CameraLagSpeed = 14.0f;
 		FlightCameraBoom->bEnableCameraRotationLag = true;
 		FlightCameraBoom->CameraRotationLagSpeed = FlightCameraRotationLagSpeed;
@@ -1979,6 +1985,8 @@ UJTSSpacecraftFlightMovementComponent* AJTSSpacecraftActor::GetFlightMovement() 
 
 float AJTSSpacecraftActor::GetPresentationMainThrottle() const
 {
+	// An external field moves the ship without firing the pilot's main drive.
+	if (InterferenceComponent->IsControllingFlight()) return 0.0f;
 	if (IsLanded())
 	{
 		return 0.0f;
@@ -1997,6 +2005,7 @@ float AJTSSpacecraftActor::GetPresentationMainThrottle() const
 
 float AJTSSpacecraftActor::GetPresentationLiftThrottle() const
 {
+	if (InterferenceComponent->IsControllingFlight()) return 0.0f;
 	if (IsLanded())
 	{
 		return 0.0f;
@@ -2055,6 +2064,7 @@ bool AJTSSpacecraftActor::RequestLanding()
 
 bool AJTSSpacecraftActor::RequestLandingInternal(bool bAllowControlledDescentCapture)
 {
+	if (InterferenceComponent->IsControllingFlight()) return false;
 	if (!HasAuthority())
 	{
 		return false;
@@ -2483,7 +2493,9 @@ bool AJTSSpacecraftActor::CanTraverseLandingSegment(const FVector& Start, const 
 		if (GetWorld()->SweepSingleByChannel(Hit, MeshFrom.TransformPosition(Bounds.GetCenter()), MeshTo.TransformPosition(Bounds.GetCenter()),
 			MeshFrom.GetRotation(), ECC_Visibility, FCollisionShape::MakeBox(Bounds.GetExtent() * MeshFrom.GetScale3D().GetAbs()), Params)) return false;
 	}
-	return true;
+	// Sweep contact tolerances can accept an endpoint that the resting overlap test rejects.
+	// The same full-hull pose check must authorize the committed endpoint too.
+	return CanOccupyLandingTransform(FTransform(Rotation, End, GetActorScale3D()));
 }
 
 bool AJTSSpacecraftActor::CanRecoverFlightPenetration(const FVector& Delta) const
@@ -3154,6 +3166,14 @@ void AJTSSpacecraftActor::SubmitFlightInput(bool bHeartbeat)
 void AJTSSpacecraftActor::ApplyFlightInputOnServer(const FJTSSpacecraftInputState& InputState)
 {
 	if (!HasAuthority() || FlightMovementComponent == nullptr) return;
+	if (InterferenceComponent->IsControllingFlight())
+	{
+		FlightMovementComponent->ClearInput();
+		bAutomaticLandingDescentHeld = false;
+		ReplicatedPresentationForward = ReplicatedPresentationLift = 0.0f;
+		bReplicatedPresentationBoost = false;
+		return;
+	}
 	auto SafeAxis = [](float Value)
 	{
 		return FMath::IsFinite(Value) ? FMath::Clamp(Value, -1.0f, 1.0f) : 0.0f;

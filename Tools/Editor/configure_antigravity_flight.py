@@ -12,6 +12,20 @@ def xyz(v): return [v.x,v.y,v.z]
 def run(operation):
     world=unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()
     actors=unreal.GameplayStatics.get_all_actors_of_class(world,unreal.Actor) if world else unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    if operation.startswith('balance_'):
+        return runpy.run_path(str(Path(__file__).with_name('validate_planet_flight_balance.py')))['run'](operation[len('balance_'):],world,actors)
+    if operation.startswith('approach_'):
+        return runpy.run_path(str(Path(__file__).with_name('validate_cruise_approach.py')))['run'](operation[len('approach_'):],world,actors)
+    if operation=='camera_configure':
+        assert not world, 'Stop PIE before saving camera defaults'
+        bp=unreal.load_asset('/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1')
+        cls=unreal.EditorAssetLibrary.load_blueprint_class(bp.get_path_name())
+        unreal.get_default_object(cls).get_flight_camera_boom().set_editor_property('enable_camera_lag',False)
+        unreal.BlueprintEditorLibrary.compile_blueprint(bp)
+        assert unreal.EditorAssetLibrary.save_loaded_asset(bp,only_if_is_dirty=False)
+        return 'Saved production Blueprint camera: hull-attached translation, existing orbit rotation/zoom'
+    if operation.startswith('camera_'):
+        return camera_validation(operation[len('camera_'):],world,actors)
     if operation=='configure':
         assert not world, 'Stop PIE before saving authoring data'
         return configure(actors)
@@ -134,3 +148,64 @@ def configure(actors):
         'sun_incidence_at_default_site':sun_cos,'purpose':'Local warm Mars-reflected light, artist-amplified for night-side terrain readability; no ambient/global exposure change'}}
     (OUT/'antigravity_configuration.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     return json.dumps(report,ensure_ascii=False)
+
+
+def camera_validation(operation,world,actors):
+    """PIE-only production camera/input checks; never replaces view targets or disables ship Tick."""
+    assert world
+    ship=next(a for a in actors if isinstance(a,unreal.JTSSpacecraftActor))
+    pc=unreal.GameplayStatics.get_player_controller(world,0)
+    if operation.startswith('takeoff_'):
+        # Begin takeoff and issue directional intent in one editor call, before any
+        # game frame can mask an initial input lock. Boarding uses the existing QA path.
+        runpy.run_path(str(Path(__file__).with_name('configure_celestial_navigation.py')))['view_setup']('board')
+        camera_validation('input_'+operation[len('takeoff_'):],world,actors)
+        return camera_validation('inspect',world,actors)
+    if operation.startswith('input_'):
+        mode=operation[len('input_'):]
+        previous=getattr(unreal,'_camera_follow_input_callback',None)
+        if previous:
+            unreal.unregister_slate_post_tick_callback(previous)
+            unreal._camera_follow_input_callback=None
+        state=unreal.JTSSpacecraftInputState()
+        assert state.import_text('(MoveForward=%f,MoveRight=%f,Lift=%f,bFlightAssistEnabled=True,bBoosting=%s,SpeedLimit=1.0)'%(
+            1 if mode=='forward' else -1 if mode=='reverse' else 0,
+            1 if mode=='right' else -1 if mode=='left' else 0,1 if mode=='lift' else -1 if mode=='descend' else 0,
+            'True' if mode in ['forward','reverse','right','left'] else 'False'))
+        assert pc.get_controlled_pawn()==ship
+        ship.call_method('ServerSetFlightInput',(state,))
+        if mode!='stop':
+            def submit(delta):
+                if unreal.SystemLibrary.is_valid(ship): ship.call_method('ServerSetFlightInput',(state,))
+            unreal._camera_follow_input_callback=unreal.register_slate_post_tick_callback(submit)
+        return 'PIE owner-RPC flight intent with native ship/camera Tick: '+mode
+    assert operation=='inspect'
+    boom=ship.get_flight_camera_boom()
+    camera=ship.get_flight_camera()
+    rotation=camera.get_world_rotation()
+    pivot=camera.get_world_location()+camera.get_forward_vector()*boom.target_arm_length-unreal.MathLibrary.quat_rotate_vector(rotation.quaternion(),boom.socket_offset)
+    expected=boom.get_world_location()+boom.target_offset
+    manager=next(a for a in actors if isinstance(a,unreal.JTSSpaceWorldManager))
+    planet=manager.get_current_planet()
+    envelope=ship.get_surface_envelope_component()
+    frame=envelope.get_frame()
+    result={'seconds':unreal.GameplayStatics.get_time_seconds(world),'ship_location':xyz(ship.get_actor_location()),
+            'forward':xyz(ship.get_actor_forward_vector()),'right':xyz(ship.get_actor_right_vector()),
+            'up':xyz(ship.get_actor_up_vector()),'landed':ship.is_landed(),
+            'planet':str(planet.get_planet_id()) if planet else None,
+            'radial_up':xyz(planet.get_radial_up_vector(ship.get_actor_location())) if planet else None,
+            'envelope_valid':frame.valid,'following':envelope.is_following(),
+            'ship_tick_enabled':ship.is_actor_tick_enabled(),'cruise':manager.is_cruise_presentation_active(ship),
+            'velocity_cm_s':xyz(ship.get_flight_velocity()),'position_lag':boom.get_editor_property('enable_camera_lag'),
+            'pivot_error_cm':(pivot-expected).length(),'camera_distance_cm':(camera.get_world_location()-ship.get_actor_location()).length(),
+            'arm_length_cm':boom.target_arm_length,'players':[],
+            'camera_actor_count':len([a for a in actors if isinstance(a,unreal.CameraActor)])}
+    for controller in actors:
+        if not isinstance(controller,unreal.JTSPlayerController):continue
+        pcm=controller.player_camera_manager
+        target=controller.get_view_target()
+        result['players'].append({'controller':controller.get_name(),'pawn':controller.get_controlled_pawn().get_name(),
+            'view_target':target.get_name(),'view_target_type':target.get_class().get_name(),
+            'move_ignored':controller.is_move_input_ignored(),
+            'camera_distance_cm':(pcm.get_camera_location()-ship.get_actor_location()).length()})
+    return json.dumps(result)
