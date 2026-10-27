@@ -1,0 +1,103 @@
+{
+  "worlds": [
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Main.WBP_FE_Main_C",
+          "page": "Appearance",
+          "lobby": false,
+          "owner": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry:PersistentLevel.PlayerController_0' (0x000001CCBF2AD200) Class 'PlayerController'>",
+          "owner_role": "<NetRole.ROLE_AUTHORITY: 3>",
+          "owner_state": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry:PersistentLevel.PlayerState_0' (0x000001CCE959A800) Class 'PlayerState'>",
+          "local_controller": true,
+          "page_after": "Appearance",
+          "labels": {},
+          "controls": {}
+        }
+      ],
+      "time": 39.333462834358215,
+      "paused": false,
+      "presentation": [
+        {
+          "name": "FE_TwinforkDisplay",
+          "location": "<Struct 'Vector' (0x000001CCA4CF7760) {x: -120.000000, y: 1000.000000, z: 44.920000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF69F0) {x: -119.999996, y: 1000.000003, z: 62.260000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF7940) {x: 254.040233, y: 270.154905, z: 60.860000}>",
+          "hidden": false
+        },
+        {
+          "name": "FE_CrewPad_0",
+          "location": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -240.000000, y: -80.000000, z: 0.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF7760) {x: -240.000000, y: -80.000000, z: 3.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF4FB0) {x: 42.000000, y: 42.000000, z: 2.000000}>",
+          "hidden": true
+        },
+        {
+          "name": "FE_CrewPad_1",
+          "location": "<Struct 'Vector' (0x000001CCA4CF4FB0) {x: -50.000000, y: -80.000000, z: 0.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -50.000000, y: -80.000000, z: 3.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF69F0) {x: 42.000000, y: 42.000000, z: 2.000000}>",
+          "hidden": false
+        },
+        {
+          "name": "FE_CrewPad_2",
+          "location": "<Struct 'Vector' (0x000001CCA4CF69F0) {x: 80.000000, y: -80.000000, z: 0.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF4FB0) {x: 80.000000, y: -80.000000, z: 3.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF7760) {x: 42.000000, y: 42.000000, z: 2.000000}>",
+          "hidden": true
+        },
+        {
+          "name": "FE_CrewPad_3",
+          "location": "<Struct 'Vector' (0x000001CCA4CF7760) {x: 240.000000, y: -80.000000, z: 0.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF69F0) {x: 240.000000, y: -80.000000, z: 3.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF7940) {x: 42.000000, y: 42.000000, z: 2.000000}>",
+          "hidden": true
+        },
+        {
+          "name": "FE_MainPresentation",
+          "location": "<Struct 'Vector' (0x000001CCA4CF7940) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF7760) {x: 75.000000, y: -650.000000, z: 140.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF74E0) {x: 1010.000000, y: 1010.000000, z: 1010.000000}>",
+          "hidden": false,
+          "anim": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry:PersistentLevel.JTSEntryPresentationStage_0.PreviewMesh.AnimSingleNodeInstance_3' (0x000001CCC78D9B00) Class 'AnimSingleNodeInstance'>",
+          "playing": true,
+          "mesh_transform": "<Struct 'Transform' (0x000001CCAADD7ED0) {rotation: {x: -0.000000, y: 0.000000, z: -0.984808, w: 0.173648}, translation: {x: -50.000000, y: -80.000000, z: 5.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+          "bones": {
+            "Body": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -50.456688, y: -82.792906, z: 89.808610}>",
+            "Head": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -50.396593, y: -84.140545, z: 161.995308}>",
+            "Wrist_L": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -68.187916, y: -106.228458, z: 109.008106}>",
+            "Wrist_R": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -24.771625, y: -83.018169, z: 106.750383}>",
+            "Foot_L": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -60.018246, y: -95.043204, z: 7.275174}>",
+            "Foot_R": "<Struct 'Vector' (0x000001CCA4CF7940) {x: -35.460558, y: -77.378680, z: 7.275170}>"
+          },
+          "bone_transforms": {
+            "Root": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.122788, y: 0.696364, z: -0.696364, w: 0.122788}, translation: {x: -47.527582, y: -86.792912, z: 5.000000}, scale3d: {x: 100.000000, y: 99.999992, z: 99.999992}}>",
+            "Body": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.122788, y: 0.696364, z: -0.696364, w: 0.122788}, translation: {x: -50.456688, y: -82.792906, z: 89.808610}, scale3d: {x: 100.000000, y: 99.999986, z: 99.999992}}>",
+            "Head": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.135978, y: 0.692091, z: -0.694575, w: 0.141727}, translation: {x: -50.396593, y: -84.140545, z: 161.995308}, scale3d: {x: 100.000000, y: 99.999980, z: 99.999986}}>",
+            "Wrist_L": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: 0.459400, y: -0.426023, z: -0.263397, w: 0.733538}, translation: {x: -68.187916, y: -106.228458, z: 109.008106}, scale3d: {x: 99.999994, y: 100.000004, z: 99.999998}}>",
+            "Wrist_R": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.373938, y: -0.532477, z: -0.572339, w: -0.499065}, translation: {x: -24.771625, y: -83.018169, z: 106.750383}, scale3d: {x: 100.000000, y: 99.999939, z: 99.999998}}>",
+            "Foot_L": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.130526, y: 0.991441, z: -0.002654, w: 0.000324}, translation: {x: -60.018246, y: -95.043204, z: 7.275174}, scale3d: {x: 100.000000, y: 99.999986, z: 99.999986}}>",
+            "Foot_R": "<Struct 'Transform' (0x000001CCAADD7E40) {rotation: {x: -0.216439, y: 0.976292, z: -0.002605, w: 0.000605}, translation: {x: -35.460558, y: -77.378680, z: 7.275170}, scale3d: {x: 100.000000, y: 99.999986, z: 99.999986}}>"
+          }
+        },
+        {
+          "name": "FE_ThreatHeatedAtmosphere",
+          "location": "<Struct 'Vector' (0x000001CCA4CF74E0) {x: -100000.000000, y: 400000.000000, z: 62000.000000}>",
+          "center": "<Struct 'Vector' (0x000001CCA4CF69F0) {x: -100000.000000, y: 400000.000000, z: 62000.000000}>",
+          "extent": "<Struct 'Vector' (0x000001CCA4CF5690) {x: 43656.415837, y: 10914.103959, z: 17500.001335}>",
+          "hidden": false
+        }
+      ],
+      "phase": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry:PersistentLevel.GameStateBase_0' (0x000001CD3952FA00) Class 'GameStateBase'>",
+      "player_count": 1,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-FAEF",
+          "id": 269
+        }
+      ]
+    }
+  ],
+  "success": true
+}

@@ -134,6 +134,7 @@ int32 UJTSExpeditionSubsystem::FindFirstAvailableSaveSlot() const
 
 void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 {
+	Snapshot.CurrentMapPackage = UWorld::RemovePIEPrefix(Snapshot.CurrentMapPackage);
 	if (PreferredSaveSlot >= 1 && PreferredSaveSlot <= MaximumSaveSlots)
 	{
 		Snapshot.SaveSlot = PreferredSaveSlot;
@@ -160,7 +161,12 @@ void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 		Snapshot.LastPlayedUtcTicks = Snapshot.SavedUtcTicks;
 	}
 	Snapshot.PlaytimeSeconds = FMath::Max(0.0, Snapshot.PlaytimeSeconds);
-	Snapshot.SaveVersion = FMath::Max(5, Snapshot.SaveVersion);
+	if (Snapshot.SaveVersion<6)
+	{
+		const uint8 Palette[4]={2,1,3,4};
+		for (auto& Player:Snapshot.Players) Player.Appearance.Upper=Palette[FMath::Clamp(int32(Player.AvatarColor),0,3)];
+	}
+	Snapshot.SaveVersion = FMath::Max(6, Snapshot.SaveVersion);
 }
 
 void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
@@ -173,7 +179,7 @@ void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
 	Snapshot.SaveSlot = SelectedSlot;
 	Snapshot.DisplayName = FString::Printf(TEXT("Expedition %02d"), SelectedSlot);
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 5;
+	Snapshot.SaveVersion = 6;
 	ActiveSaveSlot = SelectedSlot;
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -194,7 +200,7 @@ bool UJTSExpeditionSubsystem::BeginNewExpeditionInSlot(int32 InSaveSlot, const F
 	Snapshot.SaveSlot = InSaveSlot;
 	Snapshot.DisplayName = InDisplayName.TrimStartAndEnd();
 	Snapshot.CurrentCheckpoint = TEXT("Pre-Launch");
-	Snapshot.SaveVersion = 5;
+	Snapshot.SaveVersion = 6;
 	NormalizeSnapshotMetadata(InSaveSlot);
 	ActivePlaySegmentStartedUtc = FDateTime::UtcNow();
 	JoinCode.Reset();
@@ -296,13 +302,15 @@ bool UJTSExpeditionSubsystem::ValidateJoinCredentials(const FString& InJoinCode,
 
 void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, const AJTSSpacecraftActor* Spacecraft)
 {
+	// Staging must never replace the saved gameplay map, inventory or resume destination.
+	if (GameState && GameState->IsWaitingToStart()) return;
 	if (GameState != nullptr)
 	{
 		Snapshot.GameplayPhase = GameState->GetGameplayPhase();
 		Snapshot.CurrentPlanetId = GameState->GetCurrentPlanetId();
 		if (const UWorld* const World = GameState->GetWorld())
 		{
-			Snapshot.CurrentMapPackage = World->GetPackage()->GetName();
+			Snapshot.CurrentMapPackage = UWorld::RemovePIEPrefix(World->GetPackage()->GetName());
 		}
 	}
 	if (Spacecraft != nullptr)
@@ -325,6 +333,7 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			PlayerSnapshot.PlayerId = PlayerState->GetOnlineIdentityString();
 			PlayerSnapshot.DisplayName = PlayerState->GetPlayerName();
 			PlayerSnapshot.AvatarColor = PlayerState->GetAvatarColor();
+			PlayerSnapshot.Appearance = PlayerState->GetAppearance();
 			PlayerSnapshot.ProgressionLevel = PlayerState->GetProgressionLevel();
 			PlayerSnapshot.ExperienceInCurrentLevel = PlayerState->GetExperienceInCurrentLevel();
 			PlayerSnapshot.UnspentAbilityPoints = PlayerState->GetUnspentAbilityPoints();
@@ -378,6 +387,7 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 	}
 
 	PlayerState->SetAvatarColor(SavedPlayer->AvatarColor);
+	PlayerState->SetAppearance(SavedPlayer->Appearance);
 	PlayerState->RestoreShipLockerSlots(SavedPlayer->ShipLockerSlots);
 	PlayerState->RestoreDiscoveredStellarCoreIds(SavedPlayer->DiscoveredStellarCoreIds);
 	PlayerState->RestoreStellarFirmwareUnits(SavedPlayer->StellarFirmwareUnits);
@@ -435,7 +445,7 @@ void UJTSExpeditionSubsystem::SetSpacecraftSnapshot(TSubclassOf<AJTSSpacecraftAc
 
 void UJTSExpeditionSubsystem::SetCurrentMap(const FString& MapPackageName)
 {
-	Snapshot.CurrentMapPackage = MapPackageName;
+	Snapshot.CurrentMapPackage = UWorld::RemovePIEPrefix(MapPackageName);
 }
 
 void UJTSExpeditionSubsystem::SetCurrentPlanetId(const FString& PlanetId)

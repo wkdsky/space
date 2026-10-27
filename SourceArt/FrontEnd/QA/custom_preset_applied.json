@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "quality": {
+    "view_distance": 1,
+    "shadow": 1,
+    "global_illumination": 1,
+    "reflection": 1,
+    "anti_aliasing": 1,
+    "texture": 1,
+    "visual_effect": 1,
+    "post_processing": 1,
+    "foliage": 1,
+    "shading": 1,
+    "landscape": 1
+  },
+  "resolution_scale": 71.0,
+  "resolution": {
+    "x": 1280,
+    "y": 720
+  },
+  "mode": "<WindowMode.WINDOWED_FULLSCREEN: 1>",
+  "vsync": false,
+  "fps": 0.0,
+  "overall": 1
+}

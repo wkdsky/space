@@ -26,6 +26,7 @@ public:
 	virtual bool RequestStartExpedition(AJTSPlayerController* RequestingController) override;
 
 private:
+	FTimerHandle LaunchTimer;
 	void EnsureLobbyStage();
 	void ArrangeLobbyPlayers();
 	FString ResolveLaunchDestination();

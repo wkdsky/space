@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "space/UI/FrontEnd/JTSAvatarTypes.h"
 #include "GameFramework/PlayerState.h"
 #include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSShipLockerTypes.h"
@@ -170,6 +171,7 @@ struct SPACE_API FJTSPlayerSnapshot
 
 	UPROPERTY()
 	EJTSAvatarColor AvatarColor = EJTSAvatarColor::Blue;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame) FJTSAvatarAppearance Appearance;
 
 	UPROPERTY()
 	float Health = 100.0f;

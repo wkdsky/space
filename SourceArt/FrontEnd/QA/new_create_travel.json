@@ -1,0 +1,31 @@
+{
+  "worlds": [
+    {
+      "world": "/Game/Space/Maps/UEDPIE_0_L_EarthLaunchPrototype.L_EarthLaunchPrototype",
+      "widgets": [],
+      "time": 138.20472119376063,
+      "paused": false,
+      "phase": "<JTSGameplayPhase.EARTH_CAPTURE_FAILURE: 3>",
+      "launch_deadline": 0.0,
+      "accepting_players": false,
+      "player_count": 1,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-C065",
+          "id": 260,
+          "ready": false,
+          "host": true,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x000002D5A31C8180) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "None",
+          "location": "<Struct 'Vector' (0x000002D6396E8D30) {x: -335.000000, y: 0.000000, z: 98.275001}>",
+          "movement_mode": "<MovementMode.MOVE_WALKING: 1>",
+          "velocity": "<Struct 'Vector' (0x000002D6396EAC20) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x000002D599878200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x000002D6396EAC20) {x: -332.295595, y: 0.462738, z: 158.579075}>",
+          "anim_instance": "<Object '/Game/Space/Maps/UEDPIE_0_L_EarthLaunchPrototype.L_EarthLaunchPrototype:PersistentLevel.BP_JTSPlayer_Casual_2_C_0.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000002D677280000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        }
+      ]
+    }
+  ],
+  "success": true
+}

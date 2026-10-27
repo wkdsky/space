@@ -1,0 +1,71 @@
+{
+  "sources": [
+    {
+      "file": "External/hangar_diffuse.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_diff_2k.jpg",
+      "sha256": "8662d6f8f1c40277a507fa259cd79392346e598de68add790b4102170092e34d",
+      "bytes": 2559056
+    },
+    {
+      "file": "External/hangar_normal_dx.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_nor_dx_2k.jpg",
+      "sha256": "ac7109f718c2b00d040a3a6528d5678cd02694a872065359d2ea910b932fa749",
+      "bytes": 3097643
+    },
+    {
+      "file": "External/hangar_arm.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_arm_2k.jpg",
+      "sha256": "a4912ae65c15d2f3a873e66b161bd5b5235cb3429eede8d3f4a4724513188bd1",
+      "bytes": 2994585
+    },
+    {
+      "file": "External/09_SourceHanSansSC_2.005R.zip",
+      "url": "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/09_SourceHanSansSC.zip",
+      "sha256": "ef7364f7ac2564be1ae9c1d74276de2653fe38b73449070398c4fc0b7e032ff1",
+      "bytes": 95177106
+    },
+    {
+      "file": "External/OFL_SourceHanSans.txt",
+      "url": "https://raw.githubusercontent.com/adobe-fonts/source-han-sans/2.005R/LICENSE.txt",
+      "sha256": "fcac737e761ec63dbfbdce11030a1780161920d80315edba9c8beff1c2bac5a2",
+      "bytes": 4463
+    },
+    {
+      "file": "External/PolyHaven_license.html",
+      "url": "https://polyhaven.com/license",
+      "sha256": "46158a6b319ae8ef55acd18bd96d986c9261fb0cc8086124e97bcbefe779a623",
+      "bytes": 72685
+    },
+    {
+      "file": "External/Casual_2_reference.fbx",
+      "url": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+      "sha256": "a6178223f72422ad16406ffd91644f51cd19dde3a0bc48bd5ba5f54c484583c2",
+      "usage": "Skeleton compatibility reference only; avatar geometry is original."
+    },
+    {
+      "file": "External/LICENSE_Quaternius.txt",
+      "url": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+      "sha256": "de990ef6fc68cffd7fd1ae342c4d0c823b541b8848d8f76bca5d3339f4de6f6e",
+      "usage": "Skeleton compatibility reference only; avatar geometry is original."
+    }
+  ],
+  "licenses": {
+    "floor": "CC0-1.0",
+    "rig_reference": "CC0-1.0",
+    "font": "OFL-1.1"
+  },
+  "ship_source": "SourceArt/TwinforkR1; Tools/Art/generate_twinfork_meshes.py (project original)",
+  "reference_images": "User-provided visual direction only; no screenshot pixels, logo or models extracted.",
+  "visual_references": [
+    {
+      "title": "Star Wars: The Force Awakens ? official gallery",
+      "url": "https://www.starwars.com/films/star-wars-the-force-awakens-gallery",
+      "usage": "White-hot energy core and red atmospheric scattering reference only. No images, geometry, textures or logos included in game assets."
+    },
+    {
+      "title": "Starkiller Base ? official databank",
+      "url": "https://www.starwars.com/databank/starkiller-base",
+      "usage": "Science-fiction threat presentation reference only; all beam geometry and heat texture authored originally in Blender."
+    }
+  ]
+}

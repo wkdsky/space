@@ -1,0 +1,223 @@
+{
+  "actors": [
+    {
+      "name": "FE_TwinforkDisplay",
+      "location": "<Struct 'Vector' (0x000001DEE9AB11E0) {x: -350.000000, y: 650.000000, z: 170.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB11E0) {pitch: 0.000000, yaw: 25.000000, roll: -0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB2FE0) {x: -349.999991, y: 650.000004, z: 202.130000}>",
+        "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: 433.997244, y: 492.809058, z: 112.770000}>"
+      ]
+    },
+    {
+      "name": "FE_Sunset",
+      "location": "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: 0.000000, y: 0.000000, z: 1600.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB3EE0) {pitch: -12.000000, yaw: -110.000000, roll: -0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB11E0) {x: -100.363855, y: -265.486747, z: 1537.626493}>",
+        "<Struct 'Vector' (0x000001DEE9AB1870) {x: 302.524376, y: 393.486747, z: 258.003027}>"
+      ]
+    },
+    {
+      "name": "FE_Atmosphere",
+      "location": "<Struct 'Vector' (0x000001DEE9AB1870) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB1870) {pitch: 0.000000, yaw: 0.000000, roll: 0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: 56.000000, y: 0.000000, z: 0.000000}>",
+        "<Struct 'Vector' (0x000001DEE9AB2FE0) {x: 184.000000, y: 128.000000, z: 128.000000}>"
+      ]
+    },
+    {
+      "name": "FE_PostProcess",
+      "location": "<Struct 'Vector' (0x000001DEE9AB2FE0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB2FE0) {pitch: 0.000000, yaw: 0.000000, roll: 0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB1870) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+        "<Struct 'Vector' (0x000001DEE9AB11E0) {x: 100.000000, y: 100.000000, z: 100.000000}>"
+      ]
+    },
+    {
+      "name": "FE_Camera_Home",
+      "location": "<Struct 'Vector' (0x000001DEE9AB11E0) {x: 150.000000, y: -600.000000, z: 215.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB11E0) {pitch: -7.800911, yaw: 99.462322, roll: 0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB2FE0) {x: 150.000000, y: -600.000000, z: 215.000000}>",
+        "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: 1010.000000, y: 1010.000000, z: 1010.000000}>"
+      ]
+    },
+    {
+      "name": "FE_AvatarPreview",
+      "location": "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: -50.000000, y: -80.000000, z: 0.000000}>",
+      "rotation": "<Struct 'Rotator' (0x000001DEE9AB3EE0) {pitch: 0.000000, yaw: -160.000000, roll: 0.000000}>",
+      "bounds": [
+        "<Struct 'Vector' (0x000001DEE9AB1870) {x: -48.871330, y: -83.100985, z: 95.400006}>",
+        "<Struct 'Vector' (0x000001DEE9AB3DA0) {x: 84.098058, y: 48.992120, z: 95.300006}>"
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x000001DF9E263200) Class 'SkeletalMesh'>",
+      "scale": "<Struct 'Vector' (0x000001DEE9AB3EE0) {x: 1.000000, y: 1.000000, z: 1.000000}>",
+      "visible": true,
+      "animation": "<Struct 'SingleAnimationPlayData' (0x000001DECF724730) {anim_to_play: \"/Script/Engine.AnimSequence'/Game/Space/FrontEnd/Animations/A_FE_Idle.A_FE_Idle'\", saved_looping: True, saved_playing: True, saved_position: 0.000000, saved_play_rate: 1.000000}>"
+    }
+  ],
+  "asset_checks": [
+    {
+      "suit": "Explorer",
+      "lods": 3,
+      "skeleton": "/Game/Space/FrontEnd/Characters/SK_FE_Engineer_Skeleton.SK_FE_Engineer_Skeleton"
+    },
+    {
+      "suit": "Scout",
+      "lods": 3,
+      "skeleton": "/Game/Space/FrontEnd/Characters/SK_FE_Engineer_Skeleton.SK_FE_Engineer_Skeleton"
+    },
+    {
+      "suit": "Engineer",
+      "lods": 3,
+      "skeleton": "/Game/Space/FrontEnd/Characters/SK_FE_Engineer_Skeleton.SK_FE_Engineer_Skeleton"
+    },
+    {
+      "suit": "Survey",
+      "lods": 3,
+      "skeleton": "/Game/Space/FrontEnd/Characters/SK_FE_Engineer_Skeleton.SK_FE_Engineer_Skeleton"
+    },
+    {
+      "suit": "Tactical",
+      "lods": 3,
+      "skeleton": "/Game/Space/FrontEnd/Characters/SK_FE_Engineer_Skeleton.SK_FE_Engineer_Skeleton"
+    }
+  ],
+  "animation_api": [
+    "add_animation_notify_track",
+    "add_virtual_bone",
+    "does_bone_name_exist",
+    "evaluate_bone_timecode_and_slate_attributes_at_time",
+    "evaluate_root_bone_timecode_attributes_at_time",
+    "evaluate_root_bone_timecode_subframe_attribute_at_time",
+    "extract_root_track_transform",
+    "finalize_bone_animation",
+    "find_bone_path_to_root",
+    "get_additive_base_pose_type",
+    "get_animation_notify_events_for_track",
+    "get_animation_notify_track_names",
+    "get_animation_sync_markers_for_track",
+    "get_animation_track_names",
+    "get_bone_compression_settings",
+    "get_bone_pose_for_frame",
+    "get_bone_pose_for_time",
+    "get_bone_poses_for_frame",
+    "get_bone_poses_for_time",
+    "get_raw_track_data",
+    "get_raw_track_position_data",
+    "get_raw_track_rotation_data",
+    "get_raw_track_scale_data",
+    "is_valid_anim_notify_track_name",
+    "is_valid_raw_animation_track_name",
+    "remove_all_animation_notify_tracks",
+    "remove_all_bone_animation",
+    "remove_all_virtual_bones",
+    "remove_animation_notify_events_by_track",
+    "remove_animation_notify_track",
+    "remove_animation_sync_markers_by_track",
+    "remove_bone_animation",
+    "remove_bone_selective_animation",
+    "remove_virtual_bone",
+    "remove_virtual_bones",
+    "set_additive_base_pose_type",
+    "set_bone_compression_settings"
+  ],
+  "bone_locations": {
+    "Root": "<Struct 'Vector' (0x000001DEE9AB39E0) {x: -47.527582, y: -86.792912, z: -0.000000}>",
+    "Body": "<Struct 'Vector' (0x000001DEE9AB39E0) {x: -49.129981, y: -82.522867, z: 86.540137}>",
+    "Head": "<Struct 'Vector' (0x000001DEE9AB39E0) {x: -48.496114, y: -84.031380, z: 158.726205}>",
+    "UpperArm_L": "<Struct 'Vector' (0x000001DEE9AB39E0) {x: -62.289278, y: -90.836163, z: 143.210775}>",
+    "Foot_L": "<Struct 'Vector' (0x000001DEE9AB39E0) {x: -59.208103, y: -89.959538, z: 2.275175}>"
+  },
+  "anim_track_names": [
+    "root",
+    "body",
+    "hips",
+    "abdomen",
+    "torso",
+    "chest",
+    "neck",
+    "head",
+    "head_end",
+    "shoulder_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "wrist_l",
+    "index1_l",
+    "index2_l",
+    "index3_l",
+    "index4_l",
+    "index4_l_end",
+    "middle1_l",
+    "middle2_l",
+    "middle3_l",
+    "middle4_l",
+    "middle4_l_end",
+    "ring1_l",
+    "ring2_l",
+    "ring3_l",
+    "ring4_l",
+    "ring4_l_end",
+    "pinky1_l",
+    "pinky2_l",
+    "pinky3_l",
+    "pinky4_l",
+    "pinky4_l_end",
+    "thumb1_l",
+    "thumb2_l",
+    "thumb3_l",
+    "thumb3_l_end",
+    "shoulder_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "wrist_r",
+    "index1_r",
+    "index2_r",
+    "index3_r",
+    "index4_r",
+    "index4_r_end",
+    "middle1_r",
+    "middle2_r",
+    "middle3_r",
+    "middle4_r",
+    "middle4_r_end",
+    "ring1_r",
+    "ring2_r",
+    "ring3_r",
+    "ring4_r",
+    "ring4_r_end",
+    "pinky1_r",
+    "pinky2_r",
+    "pinky3_r",
+    "pinky4_r",
+    "pinky4_r_end",
+    "thumb1_r",
+    "thumb2_r",
+    "thumb3_r",
+    "thumb3_r_end",
+    "upperleg_l",
+    "lowerleg_l",
+    "lowerleg_l_end",
+    "upperleg_r",
+    "lowerleg_r",
+    "lowerleg_r_end",
+    "foot_l",
+    "foot_l_end",
+    "pt_l",
+    "pt_l_end",
+    "foot_r",
+    "foot_r_end",
+    "pt_r",
+    "pt_r_end"
+  ],
+  "anim_pose_api": "X.get_bone_pose_for_time(animation_sequence_base, bone_name, time, extract_root_motion) -> Transform\r\nGet Bone Pose for Time\r\n\r\nArgs:\r\n    animation_sequence_base (AnimSequenceBase): \r\n    bone_name (Name): \r\n    time (float): \r\n    extract_root_motion (bool): \r\n\r\nReturns:\r\n    Transform: \r\n\r\n    pose (Transform):",
+  "bone_local_poses": {
+    "Root": "<Struct 'Transform' (0x000001DEE99A38A0) {rotation: {x: -0.707107, y: 0.000000, z: -0.000000, w: 0.707107}, translation: {x: 0.000000, y: 7.228866, z: -0.000000}, scale3d: {x: 100.000000, y: 99.999992, z: 99.999992}}>",
+    "Body": "<Struct 'Transform' (0x000001DEE99A38A0) {rotation: {x: 0.000000, y: -0.000000, z: 0.000000, w: -1.000000}, translation: {x: 0.000453, y: -0.865401, z: -0.045606}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+    "Head": "<Struct 'Transform' (0x000001DEE99A38A0) {rotation: {x: 0.000000, y: 0.000275, z: 0.000000, w: -1.000000}, translation: {x: 0.000000, y: -0.076729, z: -0.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>"
+  },
+  "success": true
+}

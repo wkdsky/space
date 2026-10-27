@@ -1,0 +1,158 @@
+{
+  "generated_utc": "2026-10-27T04:20:48.538814+00:00",
+  "result": "passed",
+  "checks": [
+    {
+      "check": "Planted feet while native compressed idle shifts weight",
+      "passed": true,
+      "evidence": [
+        "QA/polished_pose_0.json",
+        "QA/polished_pose_3.json",
+        "QA/polished_pose_6.json",
+        "QA/polished_pose_9.json",
+        "QA/polished_pose_12.json"
+      ],
+      "foot_deviation_cm": 0.0,
+      "body_span_cm": 1.600000679657672
+    },
+    {
+      "check": "Native loop endpoints match",
+      "passed": true,
+      "evidence": [
+        "QA/polished_pose_0.json",
+        "QA/polished_pose_12.json"
+      ]
+    },
+    {
+      "check": "Shared skeleton unit basis retained",
+      "passed": true,
+      "evidence": [
+        "QA/polished_pose_0.json"
+      ]
+    },
+    {
+      "check": "Five suits retain playable idle and visible standing proportions",
+      "passed": true,
+      "evidence": [
+        "QA/polished_suit_0.json",
+        "QA/polished_suit_1.json",
+        "QA/polished_suit_2.json",
+        "QA/polished_suit_3.json",
+        "QA/polished_suit_4.json"
+      ]
+    },
+    {
+      "check": "Ship grounded with no wall or door overlap",
+      "passed": true,
+      "evidence": [
+        "QA/polished_scene_bounds_entry.json"
+      ],
+      "minimum_wall_gap_cm": 292.345,
+      "floor_clearance_cm": 0.9999999999999986
+    },
+    {
+      "check": "Hero root and visible pad aligned",
+      "passed": true,
+      "evidence": [
+        "QA/polished_entry_restart.json"
+      ]
+    },
+    {
+      "check": "Distant laser front remains suspended above buildings",
+      "passed": true,
+      "evidence": [
+        "QA/polished_scene_bounds_entry.json"
+      ],
+      "beam_origin_height_cm": 56000.0
+    },
+    {
+      "check": "Four appearances and native lobby idle survive editor restart (16 observed pawns)",
+      "passed": true,
+      "evidence": [
+        "QA/polished_four_restart.json"
+      ]
+    },
+    {
+      "check": "Four-player travel restores gameplay pawns and animation",
+      "passed": true,
+      "evidence": [
+        "QA/polished_four_ready.json",
+        "QA/polished_four_travel.json"
+      ]
+    },
+    {
+      "check": "Shipping version check enabled; entry idle with no dirty packages",
+      "passed": true,
+      "evidence": [
+        "QA/polished_shipping_defaults.json"
+      ]
+    },
+    {
+      "check": "Original five saves restored byte-for-byte; QA profile removed",
+      "passed": true,
+      "evidence": [
+        "QA/polished_save_restoration.json"
+      ]
+    },
+    {
+      "check": "Normal Development Editor build succeeded",
+      "passed": true,
+      "evidence": [
+        "QA/Build-PresentationFix-spaceEditor-Win64-Development.log"
+      ],
+      "up_to_date": true
+    }
+  ],
+  "source_assets": 223,
+  "cpp_changed_this_revision": false,
+  "build_seconds": 1.4,
+  "source_manifest": "asset_manifest.json",
+  "sources": "sources.json",
+  "editor_steps": "PRESENTATION_FIX.md",
+  "screenshots": [
+    "QA/MainMenu.png",
+    "QA/Astronaut.png",
+    "QA/FourPlayerLobby.png",
+    "QA/PolishedPose3.png",
+    "QA/PolishedPose9.png"
+  ],
+  "visual_review": "Native home, five full-body outfits, face close-up, pose phases and four-player lobby inspected. Blue daytime sky, white-hot beam and red-orange heat cloud; no ground impact.",
+  "scope": "Presentation assets, editor authoring scripts and Blueprint/level configuration. No gameplay animation or skeleton changes.",
+  "multiplayer_environment": "One-process PIE listen server plus three clients using OnlineSubsystem NULL.",
+  "not_verified": [
+    "Packaged build",
+    "Cross-machine networking and platform services"
+  ],
+  "save_preservation": {
+    "success": true,
+    "baseline": "Saved/FrontEndQA/PresentationFixBefore/SaveGames/manifest.json",
+    "files": [
+      {
+        "file": "JumpToSpaceDebugPreferences.sav",
+        "sha256": "37fcd535b24830bcc493f6bcfd1cd8493660d7844b219393e328827d36d8fb6b",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_01.sav",
+        "sha256": "cc5e892a825dc24e5b2de5001802119624abedb66d69a0d49e3560d3ce3486dc",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_02.sav",
+        "sha256": "e9176f454b4ae192c61c33f9ee3781e1d1fd90c60bb133f15e168434a16c5bc9",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_03.sav",
+        "sha256": "52183ac7581eba012c146eb822deac1b62398762444e011bab920ae94b383a8a",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_04.sav",
+        "sha256": "f14fa68c743c09a7b3b48e853b52d280f04e17e493fd6d5b93fd1fc33f2028a1",
+        "restored": true
+      }
+    ],
+    "qa_profile_removed": true
+  }
+}

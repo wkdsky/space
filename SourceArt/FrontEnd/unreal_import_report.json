@@ -1,0 +1,20 @@
+{
+  "imported": [],
+  "errors": [],
+  "materials": [
+    "/Game/Space/FrontEnd/Materials/M_FE_Suit",
+    "/Game/Space/FrontEnd/Materials/M_FE_Visor",
+    "/Game/Space/FrontEnd/Materials/M_FE_Rubber",
+    "/Game/Space/FrontEnd/Materials/M_FE_PaintedMetal",
+    "/Game/Space/FrontEnd/Materials/M_FE_Concrete",
+    "/Game/Space/FrontEnd/Materials/M_FE_Glass",
+    "/Game/Space/FrontEnd/Materials/M_FE_Light",
+    "/Game/Space/FrontEnd/Materials/M_FE_UI",
+    "/Game/Space/FrontEnd/Materials/M_FE_Decal",
+    "/Game/Space/FrontEnd/Materials/M_FE_Particle",
+    "/Game/Space/FrontEnd/Materials/M_FE_Moon",
+    "/Game/Space/FrontEnd/Materials/M_FE_Stars",
+    "/Game/Space/FrontEnd/Materials/M_FE_Sky"
+  ],
+  "success": true
+}

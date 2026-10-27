@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "widgets": 515,
+  "blueprints": [
+    "/Game/Space/FrontEnd/Widgets/WBP_FE_Main",
+    "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby"
+  ],
+  "catalog": "/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog"
+}

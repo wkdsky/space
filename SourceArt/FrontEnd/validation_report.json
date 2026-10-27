@@ -1,0 +1,210 @@
+{
+  "generated_utc": "2026-10-27T04:20:27.912055+00:00",
+  "result": "passed_with_service_validation_pending",
+  "engine": "Unreal Engine 5.8.2",
+  "build": {
+    "target": "spaceEditor Win64 Development",
+    "result": "Succeeded",
+    "seconds": 45.69,
+    "command": "Build.bat spaceEditor Win64 Development D:/projects/space/space.uproject -WaitMutex -NoHotReloadFromIDE",
+    "evidence": "QA/Build-spaceEditor-Win64-Development.log"
+  },
+  "entry_map": "/Game/Space/FrontEnd/Maps/L_Entry",
+  "lobby_map": "/Game/Space/FrontEnd/Maps/L_PreLaunchLobby",
+  "art_direction": "Blue Earth daytime; routine maintenance continues; suspended alien laser front before ground impact.",
+  "source_assets": 223,
+  "source_manifest": "asset_manifest.json",
+  "checks": [
+    {
+      "check": "Source asset gate and current SHA256 checksums",
+      "passed": true,
+      "evidence": [
+        "asset_manifest.json",
+        "asset_gate.json"
+      ]
+    },
+    {
+      "check": "Four independent appearances on all four peers (16 observed pawns)",
+      "passed": true,
+      "evidence": [
+        "QA/final_four_appearance.json"
+      ]
+    },
+    {
+      "check": "All four ready; only host launch enabled",
+      "passed": true,
+      "evidence": [
+        "QA/final_four_ready.json"
+      ]
+    },
+    {
+      "check": "Native non-host launch request rejected by server",
+      "passed": true,
+      "evidence": [
+        "QA/final_client_launch_rejected.json"
+      ]
+    },
+    {
+      "check": "Shared countdown closes joining and locks ready/launch",
+      "passed": true,
+      "evidence": [
+        "QA/final_countdown.json"
+      ]
+    },
+    {
+      "check": "Four-player seamless travel reaches Earth collection",
+      "passed": true,
+      "evidence": [
+        "QA/final_four_travel.json"
+      ]
+    },
+    {
+      "check": "Single-player new expedition creates lobby and reaches Earth",
+      "passed": true,
+      "evidence": [
+        "QA/new_create_lobby.json",
+        "QA/new_create_travel.json"
+      ]
+    },
+    {
+      "check": "Original saved expedition resumes in SpaceWorld",
+      "passed": true,
+      "evidence": [
+        "QA/final_resume_lobby.json",
+        "QA/final_resume_travel.json"
+      ]
+    },
+    {
+      "check": "Reduced motion pauses loop and robot; disabling it resumes",
+      "passed": true,
+      "evidence": [
+        "QA/final_motion_paused_a.json",
+        "QA/final_motion_paused_b.json",
+        "QA/final_motion_resumed.json"
+      ]
+    },
+    {
+      "check": "Video confirmation expires and restores settings",
+      "passed": true,
+      "evidence": [
+        "QA/video_pending.json",
+        "QA/video_timeout.json"
+      ]
+    },
+    {
+      "check": "Custom quality label and resolution-only changes preserve mixed quality",
+      "passed": true,
+      "evidence": [
+        "QA/custom_video_baseline.json",
+        "QA/custom_video_label.json",
+        "QA/custom_resolution_applied.json"
+      ]
+    },
+    {
+      "check": "Timeout and explicit preset cancellation restore every custom video field",
+      "passed": true,
+      "evidence": [
+        "QA/custom_video_baseline.json",
+        "QA/custom_resolution_timeout.json",
+        "QA/custom_preset_applied.json",
+        "QA/custom_preset_reverted.json"
+      ]
+    },
+    {
+      "check": "Avatar catalog persisted after normal editor restart",
+      "passed": true,
+      "evidence": [
+        "QA/restart_persistence.json"
+      ]
+    },
+    {
+      "check": "Shipping version check restored; editor idle on entry with no dirty packages",
+      "passed": true,
+      "evidence": [
+        "QA/final_shipping_defaults.json"
+      ]
+    },
+    {
+      "check": "All five original save files restored byte-for-byte; QA profile removed",
+      "passed": true,
+      "evidence": [
+        "QA/save_restoration.json"
+      ]
+    },
+    {
+      "check": "Normal Development Editor build succeeded",
+      "passed": true,
+      "evidence": [
+        "QA/Build-spaceEditor-Win64-Development.log"
+      ]
+    }
+  ],
+  "screenshots": [
+    "QA/MainMenu.png",
+    "QA/Astronaut.png",
+    "QA/Settings.png",
+    "QA/ExpeditionSlots.png",
+    "QA/FourPlayerLobby.png"
+  ],
+  "test_environment": {
+    "multiplayer": "One-process PIE listen server plus three clients, OnlineSubsystem NULL.",
+    "rpc_driver": "Native button invocation on a following game tick; avoids Python editor-script local callspace.",
+    "pie_travel": "net.AllowPIESeamlessTravel=1 in PIE worlds; shipping uses normal seamless travel.",
+    "build_version_check": "Temporarily disabled only for auto-connected PIE QA; restored and saved as true.",
+    "new_game_capture": "Earth gameplay had advanced to its existing timeout phase by the new-game capture; map arrival is the tested criterion.",
+    "appearance_and_travel": "Distinct appearance synchronization and final seamless travel were checked in separate PIE runs."
+  },
+  "not_verified": [
+    "EOS/Steam real-account authentication and discovery",
+    "Cross-machine networking",
+    "Voice transmit/receive with real provider devices",
+    "Packaged build and platform authentication"
+  ],
+  "implementation_limits": [
+    "Input page documents bindings; runtime key remapping is not included.",
+    "Presentation loop is 60 seconds; the distant laser stays suspended rather than impacting Earth."
+  ],
+  "save_preservation": {
+    "success": true,
+    "baseline": "Saved/FrontEndQA/PresentationFixBefore/SaveGames/manifest.json",
+    "files": [
+      {
+        "file": "JumpToSpaceDebugPreferences.sav",
+        "sha256": "37fcd535b24830bcc493f6bcfd1cd8493660d7844b219393e328827d36d8fb6b",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_01.sav",
+        "sha256": "cc5e892a825dc24e5b2de5001802119624abedb66d69a0d49e3560d3ce3486dc",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_02.sav",
+        "sha256": "e9176f454b4ae192c61c33f9ee3781e1d1fd90c60bb133f15e168434a16c5bc9",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_03.sav",
+        "sha256": "52183ac7581eba012c146eb822deac1b62398762444e011bab920ae94b383a8a",
+        "restored": true
+      },
+      {
+        "file": "JumpToSpaceExpedition_04.sav",
+        "sha256": "f14fa68c743c09a7b3b48e853b52d280f04e17e493fd6d5b93fd1fc33f2028a1",
+        "restored": true
+      }
+    ],
+    "qa_profile_removed": true
+  },
+  "editor_steps": [
+    "Open space.uproject; L_Entry is the configured startup map.",
+    "Play with one local player to use the complete create/resume flow.",
+    "Edit WBP_FE_Main/WBP_FE_Lobby, DA_FE_AvatarCatalog and map Stage instances for presentation changes."
+  ],
+  "implementation_details": "IMPLEMENTATION.md",
+  "presentation_revision": {
+    "report": "presentation_fix_validation.json",
+    "checks_passed": 12,
+    "build_seconds": 1.4
+  }
+}

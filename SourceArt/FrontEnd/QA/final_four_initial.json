@@ -1,0 +1,485 @@
+{
+  "worlds": [
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby.WBP_FE_Lobby_C",
+          "page": "Lobby",
+          "lobby": true,
+          "owner": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerController_0' (0x0000017152044800) Class 'JTSPlayerController'>",
+          "owner_role": "<NetRole.ROLE_AUTHORITY: 3>",
+          "owner_state": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerState_0' (0x000001712E796600) Class 'JTSPlayerState'>",
+          "local_controller": true,
+          "page_after": "Lobby",
+          "labels": {},
+          "controls": {}
+        }
+      ],
+      "time": 19.816781982779503,
+      "paused": false,
+      "scene": [
+        {
+          "name": "FE_MaintenanceRobot",
+          "position": "<Struct 'Vector' (0x00000170E6388DD0) {x: -578.809083, y: 478.351038, z: 0.000000}>",
+          "playing": null
+        },
+        {
+          "name": "FE_HangarLoop",
+          "position": "<Struct 'Vector' (0x00000170E6388DD0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "playing": true
+        }
+      ],
+      "bindings": [
+        {
+          "name": "FE_Steam_1",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1193' (0x000001717CE04B00) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_2",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1194' (0x000001717CE04600) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_0",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1192' (0x000001717CE05000) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_MaintenanceRobot",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1166' (0x000001717C7BAA00) Class 'StaticMeshActor'>"
+          ]
+        }
+      ],
+      "phase": "<JTSGameplayPhase.WAITING_TO_START: 5>",
+      "launch_deadline": 0.0,
+      "accepting_players": true,
+      "player_count": 4,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-FA1D",
+          "id": 256,
+          "ready": false,
+          "host": true,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CAFF0) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6388FB0) {x: 240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6388470) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6388470) {x: 241.312686, y: -82.253496, z: 158.325529}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_0.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001715CF9E000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-4997",
+          "id": 257,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CADA8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389140) {x: 80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E63895A0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E63895A0) {x: 81.320055, y: -82.273764, z: 158.322269}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_1.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x0000017181942000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-6871",
+          "id": 258,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C8E90) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6388F10) {x: -80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389230) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389230) {x: -78.679945, y: -82.273764, z: 158.322269}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_2.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001715AC82000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-1F91",
+          "id": 259,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CCBC0) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6388E70) {x: -240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389000) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389000) {x: -238.679945, y: -82.273764, z: 158.322269}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_3.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001714D730000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        }
+      ]
+    },
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby.WBP_FE_Lobby_C",
+          "page": "Lobby",
+          "lobby": true,
+          "owner": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerController_0' (0x0000017199B5CC00) Class 'JTSPlayerController'>",
+          "owner_role": "<NetRole.ROLE_AUTONOMOUS_PROXY: 2>",
+          "owner_state": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerState_2' (0x00000171986E2A00) Class 'JTSPlayerState'>",
+          "local_controller": true,
+          "page_after": "Lobby",
+          "labels": {},
+          "controls": {}
+        }
+      ],
+      "time": 19.000595569610596,
+      "paused": false,
+      "scene": [
+        {
+          "name": "FE_MaintenanceRobot",
+          "position": "<Struct 'Vector' (0x00000170E6388BA0) {x: -569.170533, y: 465.005354, z: 0.000000}>",
+          "playing": null
+        },
+        {
+          "name": "FE_HangarLoop",
+          "position": "<Struct 'Vector' (0x00000170E6388BA0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "playing": true
+        }
+      ],
+      "bindings": [
+        {
+          "name": "FE_Steam_1",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1193' (0x0000017199A13C00) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_2",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1194' (0x0000017199A12300) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_0",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1192' (0x0000017199A13700) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_MaintenanceRobot",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1166' (0x000001715AE00000) Class 'StaticMeshActor'>"
+          ]
+        }
+      ],
+      "phase": "<JTSGameplayPhase.WAITING_TO_START: 5>",
+      "launch_deadline": 0.0,
+      "accepting_players": true,
+      "player_count": 4,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-6871",
+          "id": 258,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C4EE8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E63895F0) {x: -80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389190) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389190) {x: -78.708181, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_1.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x0000017151538000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-1F91",
+          "id": 259,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C4230) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389690) {x: -240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E63896E0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E63896E0) {x: -238.708181, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_3.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001712E5F0000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-4997",
+          "id": 257,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CB0B8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389730) {x: 80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389780) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389780) {x: 81.304023, y: -82.229594, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_2.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001712E694000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-FA1D",
+          "id": 256,
+          "ready": false,
+          "host": true,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C8C20) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E63897D0) {x: 240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389820) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389820) {x: 241.291819, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_1_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_0.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001715025C000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        }
+      ]
+    },
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby.WBP_FE_Lobby_C",
+          "page": "Lobby",
+          "lobby": true,
+          "owner": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerController_0' (0x0000017199B57800) Class 'JTSPlayerController'>",
+          "owner_role": "<NetRole.ROLE_AUTONOMOUS_PROXY: 2>",
+          "owner_state": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerState_1' (0x00000171B1F37800) Class 'JTSPlayerState'>",
+          "local_controller": true,
+          "page_after": "Lobby",
+          "labels": {},
+          "controls": {}
+        }
+      ],
+      "time": 19.000595569610596,
+      "paused": false,
+      "scene": [
+        {
+          "name": "FE_MaintenanceRobot",
+          "position": "<Struct 'Vector' (0x00000170E6389870) {x: -569.170533, y: 465.005354, z: 0.000000}>",
+          "playing": null
+        },
+        {
+          "name": "FE_HangarLoop",
+          "position": "<Struct 'Vector' (0x00000170E6389870) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "playing": true
+        }
+      ],
+      "bindings": [
+        {
+          "name": "FE_Steam_1",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1193' (0x0000017196D74B00) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_2",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1194' (0x0000017196D74600) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_0",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1192' (0x0000017196D75000) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_MaintenanceRobot",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1166' (0x0000017199B41400) Class 'StaticMeshActor'>"
+          ]
+        }
+      ],
+      "phase": "<JTSGameplayPhase.WAITING_TO_START: 5>",
+      "launch_deadline": 0.0,
+      "accepting_players": true,
+      "player_count": 4,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-FA1D",
+          "id": 256,
+          "ready": false,
+          "host": true,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CD6E8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389910) {x: 240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389960) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389960) {x: 241.291819, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_0.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001712E5FE000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-6871",
+          "id": 258,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C49F0) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E63899B0) {x: -80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389A00) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389A00) {x: -78.695977, y: -82.229594, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_2.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001717D4BC000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-1F91",
+          "id": 259,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CE888) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389A50) {x: -240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389AA0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389AA0) {x: -238.708181, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_3.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001717E89C000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-4997",
+          "id": 257,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C5CC8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389AF0) {x: 80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389B40) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389B40) {x: 81.291819, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_2_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_1.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001715CA1E000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        }
+      ]
+    },
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby.WBP_FE_Lobby_C",
+          "page": "Lobby",
+          "lobby": true,
+          "owner": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerController_0' (0x0000017199B5B400) Class 'JTSPlayerController'>",
+          "owner_role": "<NetRole.ROLE_AUTONOMOUS_PROXY: 2>",
+          "owner_state": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.JTSPlayerState_1' (0x000001719ABA4E00) Class 'JTSPlayerState'>",
+          "local_controller": true,
+          "page_after": "Lobby",
+          "labels": {},
+          "controls": {}
+        }
+      ],
+      "time": 19.000595569610596,
+      "paused": false,
+      "scene": [
+        {
+          "name": "FE_MaintenanceRobot",
+          "position": "<Struct 'Vector' (0x00000170E6389B90) {x: -569.170533, y: 465.005354, z: 0.000000}>",
+          "playing": null
+        },
+        {
+          "name": "FE_HangarLoop",
+          "position": "<Struct 'Vector' (0x00000170E6389B90) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "playing": true
+        }
+      ],
+      "bindings": [
+        {
+          "name": "FE_Steam_1",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1193' (0x000001714D1C2D00) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_2",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1194' (0x000001714D1C3200) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_Steam_0",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1192' (0x000001714D1C2800) Class 'StaticMeshActor'>"
+          ]
+        },
+        {
+          "name": "FE_MaintenanceRobot",
+          "objects": [
+            "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.StaticMeshActor_1166' (0x000001719842B400) Class 'StaticMeshActor'>"
+          ]
+        }
+      ],
+      "phase": "<JTSGameplayPhase.WAITING_TO_START: 5>",
+      "launch_deadline": 0.0,
+      "accepting_players": true,
+      "player_count": 4,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-6871",
+          "id": 258,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CB0A0) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389C30) {x: -80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389C80) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389C80) {x: -78.708181, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_2.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001719AC68000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-1F91",
+          "id": 259,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CB0A8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389CD0) {x: -240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389D20) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389D20) {x: -238.695977, y: -82.229594, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_3.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x0000017197576000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-FA1D",
+          "id": 256,
+          "ready": false,
+          "host": true,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513CAF58) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389D70) {x: 240.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389DC0) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389DC0) {x: 241.291819, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_0.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x0000017195FCC000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        },
+        {
+          "name": "DESKTOP-1G74PU2-4997",
+          "id": 257,
+          "ready": false,
+          "host": false,
+          "appearance": "<Struct 'JTSAvatarAppearance' (0x00000171513C64C8) {suit: 0, eyes: 0, mouth: 1, helmet: 0, upper: 1, lower: 0}>",
+          "catalog": "<Object '/Game/Space/FrontEnd/Data/DA_FE_AvatarCatalog.DA_FE_AvatarCatalog' (0x000001714C8E3560) Class 'JTSAvatarCatalog'>",
+          "location": "<Struct 'Vector' (0x00000170E6389E10) {x: 80.000000, y: -80.000000, z: 98.000000}>",
+          "movement_mode": "<MovementMode.MOVE_NONE: 0>",
+          "velocity": "<Struct 'Vector' (0x00000170E6389E60) {x: 0.000000, y: 0.000000, z: 0.000000}>",
+          "mesh": "<Object '/Game/Space/FrontEnd/Characters/SK_FE_Explorer.SK_FE_Explorer' (0x0000017116963200) Class 'SkeletalMesh'>",
+          "head": "<Struct 'Vector' (0x00000170E6389E60) {x: 81.291819, y: -82.236687, z: 158.329327}>",
+          "anim_instance": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_3_L_PreLaunchLobby.L_PreLaunchLobby:PersistentLevel.BP_JTSPlayer_Casual_2_C_1.CharacterMesh0.ABP_JTSPlayer_Casual_2_C_0' (0x000001719ABBA000) Class 'ABP_JTSPlayer_Casual_2_C'>"
+        }
+      ]
+    }
+  ],
+  "defaults": {
+    "/Game/Space/FrontEnd/Widgets/WBP_FE_Main": false,
+    "/Game/Space/FrontEnd/Widgets/WBP_FE_Lobby": true
+  },
+  "success": true
+}

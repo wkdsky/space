@@ -51,10 +51,10 @@ bool AJTSFrontEndHUD::EnsureRootWidget()
 
 	if (RootWidget == nullptr)
 	{
-		const TSubclassOf<UJTSFrontEndRootWidget> WidgetClass = FrontEndRootWidgetClass.IsNull()
+		const TSubclassOf<UUserWidget> WidgetClass = FrontEndRootWidgetClass.IsNull()
 			? UJTSFrontEndRootWidget::StaticClass()
 			: FrontEndRootWidgetClass.LoadSynchronous();
-		RootWidget = CreateWidget<UJTSFrontEndRootWidget>(Controller, WidgetClass != nullptr ? WidgetClass : TSubclassOf<UJTSFrontEndRootWidget>(UJTSFrontEndRootWidget::StaticClass()));
+		RootWidget = CreateWidget<UUserWidget>(Controller, WidgetClass != nullptr ? WidgetClass : TSubclassOf<UUserWidget>(UJTSFrontEndRootWidget::StaticClass()));
 		if (RootWidget == nullptr)
 		{
 			UE_LOG(LogTemp, Error, TEXT("Jump to Space Front End could not create its root widget for local controller %s."), *GetNameSafe(Controller));

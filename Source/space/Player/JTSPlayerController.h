@@ -40,6 +40,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
 	void RequestAvatarColor(EJTSAvatarColor NewColor);
+	UFUNCTION(Server, Reliable) void ServerSetAppearance(FJTSAvatarAppearance Appearance);
 
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
 	void RequestCloseJoining();
@@ -275,7 +276,7 @@ private:
 	TWeakObjectPtr<AJTSGameState> BoundGameState;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UJTSPreLaunchLobbyWidget> LobbyWidget;
+	TObjectPtr<UUserWidget> LobbyWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSShopWidget> SpaceShopWidget;
@@ -285,7 +286,7 @@ private:
 
 	/** Blueprint-owned lobby composition. Native widget remains a recoverable fallback. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
-	TSoftClassPtr<UJTSPreLaunchLobbyWidget> PreLaunchLobbyWidgetClass;
+	TSoftClassPtr<UUserWidget> PreLaunchLobbyWidgetClass;
 
 	/** Blueprint wrapper for the native large shop composition. Falls back safely if the asset is unavailable. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))

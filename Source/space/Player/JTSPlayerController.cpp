@@ -20,6 +20,7 @@
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
+#include "space/Systems/JTSLocalProfileSubsystem.h"
 #include "space/Core/JTSMapPaths.h"
 #include "space/UI/JTSPreLaunchLobbyWidget.h"
 #include "space/UI/JTSInventoryQuantityDialogWidget.h"
@@ -41,6 +42,7 @@ AJTSPlayerController::AJTSPlayerController()
 
 bool AJTSPlayerController::IsLookYAxisInverted() const
 {
+	if (GetGameInstance()) if (const auto* Local=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()) return Local->Profile->bInvertY;
 	return bInvertLookYAxis;
 }
 
@@ -156,7 +158,7 @@ void AJTSPlayerController::ServerSetReady_Implementation(bool bReady)
 	if (AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
 	{
 		const AJTSGameState* const GameState = GetWorld() != nullptr ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-		if (GameState != nullptr && GameState->IsWaitingToStart())
+		if (GameState != nullptr && GameState->IsWaitingToStart() && GameState->GetLaunchDeadline()==0)
 		{
 			State->SetReady(bReady);
 		}
@@ -175,6 +177,17 @@ void AJTSPlayerController::ServerSetAvatarColor_Implementation(EJTSAvatarColor N
 		{
 			State->SetAvatarColor(NewColor);
 		}
+	}
+}
+
+void AJTSPlayerController::ServerSetAppearance_Implementation(FJTSAvatarAppearance Appearance)
+{
+	const AJTSGameState* State=GetWorld() ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	if (!Appearance.IsValid() || !State || !State->IsWaitingToStart() || State->GetLaunchDeadline()>0) return;
+	if (auto* AvatarState=GetPlayerState<AJTSPlayerState>())
+	{
+		AvatarState->SetReady(false);
+		AvatarState->SetAppearance(Appearance);
 	}
 }
 
@@ -640,7 +653,7 @@ void AJTSPlayerController::ApplySpaceWorldInputMode()
 
 void AJTSPlayerController::ApplyModalUIInputMode(UUserWidget* FocusWidget)
 {
-	if (!IsLocalController())
+	if (!IsLocalController() || !GetWorld() || GetWorld()->bIsTearingDown || IsActorBeingDestroyed())
 	{
 		return;
 	}
@@ -1023,6 +1036,7 @@ bool AJTSPlayerController::IsGameMenuOpen() const
 
 void AJTSPlayerController::RestoreGameplayInputAfterModal()
 {
+	if (!GetWorld() || GetWorld()->bIsTearingDown || IsActorBeingDestroyed()) return;
 	if (const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 		IsValid(Manager) && Manager->IsSurfaceGameplayReady())
 	{
@@ -1137,7 +1151,7 @@ void AJTSPlayerController::BindGameState()
 		BoundGameState = NewGameState;
 		if (NewGameState != nullptr)
 		{
-			NewGameState->OnGameplayPhaseChanged.AddDynamic(this, &AJTSPlayerController::HandleGameplayPhaseChanged);
+			NewGameState->OnGameplayPhaseChanged.AddUniqueDynamic(this, &AJTSPlayerController::HandleGameplayPhaseChanged);
 		}
 	}
 
@@ -1340,10 +1354,10 @@ void AJTSPlayerController::ShowLobby()
 	if (!IsLocalController() || !IsPreLaunchLobbyWorld()) return;
 	if (LobbyWidget == nullptr)
 	{
-		const TSubclassOf<UJTSPreLaunchLobbyWidget> WidgetClass = PreLaunchLobbyWidgetClass.IsNull()
+		const TSubclassOf<UUserWidget> WidgetClass = PreLaunchLobbyWidgetClass.IsNull()
 			? UJTSPreLaunchLobbyWidget::StaticClass()
 			: PreLaunchLobbyWidgetClass.LoadSynchronous();
-		LobbyWidget = CreateWidget<UJTSPreLaunchLobbyWidget>(this, WidgetClass != nullptr ? WidgetClass : TSubclassOf<UJTSPreLaunchLobbyWidget>(UJTSPreLaunchLobbyWidget::StaticClass()));
+		LobbyWidget = CreateWidget<UUserWidget>(this, WidgetClass != nullptr ? WidgetClass : TSubclassOf<UUserWidget>(UJTSPreLaunchLobbyWidget::StaticClass()));
 		if (LobbyWidget != nullptr)
 		{
 			LobbyWidget->AddToViewport(90);

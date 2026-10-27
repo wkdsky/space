@@ -1,0 +1,33 @@
+[
+  {
+    "id": "SM_FE_ThreatCore",
+    "file": "Models/SM_FE_ThreatCore.fbx",
+    "source": "original_blender",
+    "triangles": 3196,
+    "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry"
+  },
+  {
+    "id": "SM_FE_ThreatHalo",
+    "file": "Models/SM_FE_ThreatHalo.fbx",
+    "source": "original_blender",
+    "triangles": 3196,
+    "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry"
+  },
+  {
+    "id": "SM_FE_ThreatFrontRings",
+    "file": "Models/SM_FE_ThreatFrontRings.fbx",
+    "source": "original_blender",
+    "triangles": 5080,
+    "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry"
+  },
+  {
+    "id": "T_FE_ThreatHeatCloud",
+    "file": "Textures/T_FE_ThreatHeatCloud.png",
+    "source": "original_blender_procedural",
+    "size": [
+      1024,
+      1024
+    ],
+    "recipe": "Seeded multiscale value noise, radial atmospheric scattering, white-orange center and red outer corona; no sampled artwork"
+  }
+]

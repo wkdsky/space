@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "map": "/Game/Space/FrontEnd/Maps/L_FrontEndArtLab",
+  "actors": 167,
+  "cameras": [
+    "FE_Camera_Home",
+    "FE_Camera_Head",
+    "FE_Camera_Full",
+    "FE_Camera_Crew"
+  ],
+  "display_ship": "FE_TwinforkDisplay"
+}

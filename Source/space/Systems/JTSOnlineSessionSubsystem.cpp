@@ -222,6 +222,19 @@ bool UJTSOnlineSessionSubsystem::EnsureAuthenticated()
 	return false;
 }
 
+void UJTSOnlineSessionSubsystem::HostExpedition(int32 Slot, const FString& Name, bool bResume, const FString& Code, const FString& Password, int32 MaximumPlayers, EJTSLobbyVisibility Visibility)
+{
+	if (OperationState!=EJTSSessionOperationState::Idle && OperationState!=EJTSSessionOperationState::Failed) return;
+	auto* Expedition=GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>();
+	if (!Expedition || Slot<1 || Slot>4 || Expedition->HasSaveInSlot(Slot)!=bResume)
+	{
+		FinishOperation(false,TEXT("The selected save slot changed. Refresh saves and try again."));
+		return;
+	}
+	PendingSaveSlot=Slot; PendingExpeditionName=Name.Left(40).TrimStartAndEnd(); bPendingResume=bResume;
+	CreateExpedition(Code,Password,MaximumPlayers,Visibility);
+}
+
 void UJTSOnlineSessionSubsystem::CreateExpedition(const FString& RequestedJoinCode, const FString& Password, int32 MaximumPlayers, EJTSLobbyVisibility LobbyVisibility)
 {
 	if (IsShuttingDown())
@@ -244,7 +257,7 @@ void UJTSOnlineSessionSubsystem::CreateExpedition(const FString& RequestedJoinCo
 	{
 		// New Expedition Setup has already prepared the selected slot and its metadata. Do not
 		// overwrite that authoritative choice with a generic snapshot here.
-		if (!bCreateFromSavedSnapshot && !Expedition->HasActiveExpedition())
+		if (PendingSaveSlot==INDEX_NONE && !bCreateFromSavedSnapshot && !Expedition->HasActiveExpedition())
 		{
 			Expedition->StartNewExpedition(FGuid::NewGuid().ToString(EGuidFormats::Digits));
 		}
@@ -636,6 +649,21 @@ void UJTSOnlineSessionSubsystem::HandleCreateSessionComplete(FName SessionName, 
 		FinishOperation(false, TEXT("OnlineSubsystem could not create the expedition session."));
 		return;
 	}
+	if (PendingSaveSlot!=INDEX_NONE)
+	{
+		auto* Expedition=GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>();
+		const bool bPrepared=Expedition && (bPendingResume ? Expedition->LoadExpeditionSlot(PendingSaveSlot)
+			: (!Expedition->HasSaveInSlot(PendingSaveSlot) && Expedition->BeginNewExpeditionInSlot(PendingSaveSlot,PendingExpeditionName)));
+		if (!bPrepared || (!bPendingResume && !Expedition->SaveNow()))
+		{
+			SessionInterface->DestroySession(SessionName);
+			PendingSaveSlot=INDEX_NONE;
+			FinishOperation(false,TEXT("Could not prepare the host save. Session was closed."));
+			return;
+		}
+		if (bPendingResume) Expedition->MarkResumeRequested();
+		PendingSaveSlot=INDEX_NONE;
+	}
 	CurrentJoinCode = PendingJoinCode;
 	CurrentMaximumPlayers = PendingMaximumPlayers;
 	bCurrentSessionPasswordProtected = !PendingPassword.IsEmpty();
@@ -851,6 +879,7 @@ void UJTSOnlineSessionSubsystem::FinishOperation(bool bSucceeded, const FString&
 	{
 		LastError = Message;
 		bCreateFromSavedSnapshot = false;
+		PendingSaveSlot = INDEX_NONE;
 	}
 	if (!IsShuttingDown())
 	{

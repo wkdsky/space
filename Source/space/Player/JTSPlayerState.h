@@ -7,6 +7,7 @@
 #include "space/Core/JTSExpeditionTypes.h"
 #include "space/Player/JTSPlayerProgressionTypes.h"
 #include "space/Items/JTSShipLockerTypes.h"
+#include "space/UI/FrontEnd/JTSAvatarTypes.h"
 
 #include "JTSPlayerState.generated.h"
 
@@ -87,6 +88,8 @@ public:
 	void SetReady(bool bNewReady);
 	void SetExpeditionHost(bool bNewHost);
 	void SetAvatarColor(EJTSAvatarColor NewAvatarColor);
+	void SetAppearance(const FJTSAvatarAppearance& NewAppearance);
+	UFUNCTION(BlueprintPure, Category="Appearance") FJTSAvatarAppearance GetAppearance() const { return Appearance; }
 	void SetExpeditionStatus(EJTSPlayerExpeditionStatus NewStatus);
 	void SetBoarded(bool bNewBoarded);
 
@@ -167,6 +170,7 @@ public:
 	virtual void OverrideWith(APlayerState* PlayerState) override;
 
 private:
+	UPROPERTY(ReplicatedUsing=OnRep_NetworkState) FJTSAvatarAppearance Appearance;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stellar", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<class UJTSStellarLoadoutComponent> StellarLoadout;
 	UFUNCTION()

@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "asset_count": 223,
+  "checks": [
+    "All source files exist and SHA256 recorded",
+    "Five weighted suits with three Unreal LODs each",
+    "Independent alpha eye/mouth atlas visually inspected",
+    "Rifle and crouch pose renders inspected",
+    "Unreal centimetre animation scale checked",
+    "All 48kHz sounds below clipping; marked loops have matching endpoints",
+    "1920x1080 Unreal fallback capture inspected",
+    "No screenshot artwork extracted"
+  ],
+  "visual_notes": "Clear blue Earth daytime; routine base activity and a suspended alien laser front before ground impact. Ship is an adapted copy of the project original."
+}

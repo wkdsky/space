@@ -1,0 +1,26 @@
+[
+  {
+    "id": "JTSUISans-Regular",
+    "source": "adobe_ofl_derivative",
+    "file": "Fonts/JTSUISans-Regular.otf",
+    "glyphs": 65535,
+    "adaptations": [
+      "Renamed modified family and PostScript names; reserved Source name removed",
+      "Tabular 0-9 metrics at 580/1000 em",
+      "ASCII punctuation +24/1000 em spacing",
+      "Chinese coverage retained without subsetting"
+    ]
+  },
+  {
+    "id": "JTSUISans-Bold",
+    "source": "adobe_ofl_derivative",
+    "file": "Fonts/JTSUISans-Bold.otf",
+    "glyphs": 65535,
+    "adaptations": [
+      "Renamed modified family and PostScript names; reserved Source name removed",
+      "Tabular 0-9 metrics at 580/1000 em",
+      "ASCII punctuation +24/1000 em spacing",
+      "Chinese coverage retained without subsetting"
+    ]
+  }
+]

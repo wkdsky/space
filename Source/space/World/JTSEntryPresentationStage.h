@@ -1,43 +1,29 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #pragma once
-
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-
+#include "space/UI/FrontEnd/JTSAvatarTypes.h"
 #include "JTSEntryPresentationStage.generated.h"
 
-class UCameraComponent;
-class UPointLightComponent;
-class USceneComponent;
-class UStaticMeshComponent;
+USTRUCT(BlueprintType)
+struct FJTSMenuCameraView
+{
+ GENERATED_BODY()
+ UPROPERTY(EditAnywhere) FTransform Transform;
+ UPROPERTY(EditAnywhere) float FOV = 50.f;
+};
 
-/**
- * Non-gameplay launch-window tableau for L_Entry.
- *
- * The front end owns no expedition actors, resources, timers, or player pawn. This actor is only
- * a reusable visual composition point: Blueprint may replace meshes/materials without changing
- * menu, save, or session behavior.
- */
+/** Generic presentation anchor. All scenery and camera composition are editor-owned. */
 UCLASS()
 class SPACE_API AJTSEntryPresentationStage : public AActor
 {
-	GENERATED_BODY()
-
+ GENERATED_BODY()
 public:
-	AJTSEntryPresentationStage();
-
-	UCameraComponent* GetPresentationCamera() const { return PresentationCamera; }
-
-private:
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<USceneComponent> SceneRoot;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> LaunchDeck;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> Planet;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> OrbitBand;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> SpacecraftHull;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> SpacecraftNose;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UStaticMeshComponent> Beacon;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UPointLightComponent> KeyLight;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UPointLightComponent> AccentLight;
-	UPROPERTY(VisibleAnywhere, Category = "Entry Presentation") TObjectPtr<UCameraComponent> PresentationCamera;
+ AJTSEntryPresentationStage();
+ virtual void BeginPlay() override;
+ UFUNCTION(BlueprintCallable) void ShowView(FName View);
+ UFUNCTION(BlueprintCallable) void PreviewAppearance(const FJTSAvatarAppearance& Appearance);
+ UPROPERTY(VisibleAnywhere) TObjectPtr<class UCameraComponent> PresentationCamera;
+ UPROPERTY(VisibleAnywhere) TObjectPtr<class USkeletalMeshComponent> PreviewMesh;
+ UPROPERTY(VisibleAnywhere) TObjectPtr<class UJTSAvatarAppearanceComponent> AppearanceComponent;
+ UPROPERTY(EditAnywhere) TMap<FName,FJTSMenuCameraView> Views;
 };

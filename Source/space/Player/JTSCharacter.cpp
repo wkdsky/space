@@ -54,12 +54,15 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/Components/JTSAvatarAppearanceComponent.h"
+#include "space/Systems/JTSLocalProfileSubsystem.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 AJTSCharacter::AJTSCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	AvatarAppearance = CreateDefaultSubobject<UJTSAvatarAppearanceComponent>(TEXT("AvatarAppearance"));
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
@@ -731,6 +734,10 @@ void AJTSCharacter::HandleSpacecraftInvalidated(AJTSSpacecraftActor* Spacecraft)
 void AJTSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	if (AvatarAppearance && AvatarCatalog)
+	{
+		AvatarAppearance->Catalog = AvatarCatalog;
+	}
 	// Server hit checks use the posed wrists and held-item muzzle even on a dedicated server.
 	if (HasAuthority() && IsValid(GetMesh()))
 	{
@@ -858,6 +865,9 @@ void AJTSCharacter::PossessedBy(AController* NewController)
 {
 	UnregisterInputMappingContext();
 	Super::PossessedBy(NewController);
+	// Authority can begin play before possession. Bind here as well so the listen
+	// host observes remote crew appearance changes just as replicated clients do.
+	BindPlayerState();
 	if (StellarWeaponComponent) StellarWeaponComponent->RefreshEquipmentBinding();
 
 	ApplyCameraView();
@@ -1303,11 +1313,13 @@ void AJTSCharacter::GetMovementInputDirections(FVector& OutForward, FVector& Out
 
 void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 {
+	const auto* Profile=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile.Get();
+	const float UserSensitivity=Profile->Sensitivity;
 	if (IsRealPlanetGameplayActive())
 	{
 		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
 		PlanetCameraTangentForward = GetStablePlanetTangent(LocalUp, PlanetCameraTangentForward);
-		const float YawDeltaRadians = FMath::DegreesToRadians(Value.Get<float>() * MouseSensitivityX);
+		const float YawDeltaRadians = FMath::DegreesToRadians(Value.Get<float>() * MouseSensitivityX * UserSensitivity);
 		PlanetCameraTangentForward = FQuat(LocalUp, YawDeltaRadians).RotateVector(PlanetCameraTangentForward).GetSafeNormal();
 		UpdatePlanetCameraFrame(LocalUp, 0.0f);
 		// Camera orbit never invokes the view-facing body path while a wall owns the capsule.
@@ -1320,12 +1332,13 @@ void AJTSCharacter::LookYaw(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
-		AddControllerYawInput(Value.Get<float>() * MouseSensitivityX);
+		AddControllerYawInput(Value.Get<float>() * MouseSensitivityX * UserSensitivity);
 	}
 }
 
 void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 {
+	const float UserSensitivity=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile->Sensitivity;
 	if (IsRealPlanetGameplayActive())
 	{
 		const float RequestedPitchMin = bFirstPersonView ? FirstPersonViewPitchMin : ThirdPersonViewPitchMin;
@@ -1335,7 +1348,7 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 		// Positive local camera pitch means look up. The default mouse mapping is therefore direct;
 		// inversion remains a player-controller preference rather than a hidden engine-side sign flip.
 		PlanetCameraPitch = FMath::Clamp(
-			PlanetCameraPitch + Value.Get<float>() * MouseSensitivityY * PitchDirection,
+			PlanetCameraPitch + Value.Get<float>() * MouseSensitivityY * PitchDirection * UserSensitivity,
 			FMath::Min(RequestedPitchMin, RequestedPitchMax),
 			FMath::Max(RequestedPitchMin, RequestedPitchMax));
 		const FVector LocalUp = bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp();
@@ -1347,7 +1360,7 @@ void AJTSCharacter::LookPitch(const FInputActionValue& Value)
 	{
 		const AJTSPlayerController* const PlayerController = Cast<AJTSPlayerController>(GetController());
 		const float PitchDirection = PlayerController != nullptr && PlayerController->IsLookYAxisInverted() ? -1.0f : 1.0f;
-		AddControllerPitchInput(Value.Get<float>() * MouseSensitivityY * PitchDirection);
+		AddControllerPitchInput(Value.Get<float>() * MouseSensitivityY * PitchDirection * UserSensitivity);
 	}
 }
 
@@ -2769,6 +2782,7 @@ void AJTSCharacter::HandlePlayerStateNetworkChanged()
 void AJTSCharacter::ApplyAvatarColor()
 {
 	const AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	if (State) if (auto* Appearance = FindComponentByClass<UJTSAvatarAppearanceComponent>()) Appearance->Apply(State->GetAppearance());
 	if (State != nullptr && DebugVisual != nullptr)
 	{
 		const FLinearColor AvatarColor = State->GetAvatarLinearColor();

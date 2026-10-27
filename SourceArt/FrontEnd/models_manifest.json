@@ -1,0 +1,548 @@
+[
+  {
+    "id": "SK_FE_Explorer",
+    "source": "original_blender",
+    "file": "Characters/SK_FE_Explorer.fbx",
+    "triangles": 18892,
+    "unweighted_vertices": 0,
+    "rig": "W3 compatible bones; original mesh and weights",
+    "material_slots": [
+      "FE_Helmet",
+      "FE_Upper",
+      "FE_Lower",
+      "FE_Seal",
+      "FE_Metal",
+      "FE_Visor",
+      "FE_Glow",
+      "FE_Eye",
+      "FE_Mouth",
+      "FE_Concrete",
+      "FE_Marking",
+      "FE_Glass"
+    ]
+  },
+  {
+    "id": "SK_FE_Scout",
+    "source": "original_blender",
+    "file": "Characters/SK_FE_Scout.fbx",
+    "triangles": 18956,
+    "unweighted_vertices": 0,
+    "rig": "W3 compatible bones; original mesh and weights",
+    "material_slots": [
+      "FE_Helmet",
+      "FE_Upper",
+      "FE_Lower",
+      "FE_Seal",
+      "FE_Metal",
+      "FE_Visor",
+      "FE_Glow",
+      "FE_Eye",
+      "FE_Mouth",
+      "FE_Concrete",
+      "FE_Marking",
+      "FE_Glass"
+    ]
+  },
+  {
+    "id": "SK_FE_Engineer",
+    "source": "original_blender",
+    "file": "Characters/SK_FE_Engineer.fbx",
+    "triangles": 19276,
+    "unweighted_vertices": 0,
+    "rig": "W3 compatible bones; original mesh and weights",
+    "material_slots": [
+      "FE_Helmet",
+      "FE_Upper",
+      "FE_Lower",
+      "FE_Seal",
+      "FE_Metal",
+      "FE_Visor",
+      "FE_Glow",
+      "FE_Eye",
+      "FE_Mouth",
+      "FE_Concrete",
+      "FE_Marking",
+      "FE_Glass"
+    ]
+  },
+  {
+    "id": "SK_FE_Survey",
+    "source": "original_blender",
+    "file": "Characters/SK_FE_Survey.fbx",
+    "triangles": 19312,
+    "unweighted_vertices": 0,
+    "rig": "W3 compatible bones; original mesh and weights",
+    "material_slots": [
+      "FE_Helmet",
+      "FE_Upper",
+      "FE_Lower",
+      "FE_Seal",
+      "FE_Metal",
+      "FE_Visor",
+      "FE_Glow",
+      "FE_Eye",
+      "FE_Mouth",
+      "FE_Concrete",
+      "FE_Marking",
+      "FE_Glass"
+    ]
+  },
+  {
+    "id": "SK_FE_Tactical",
+    "source": "original_blender",
+    "file": "Characters/SK_FE_Tactical.fbx",
+    "triangles": 19324,
+    "unweighted_vertices": 0,
+    "rig": "W3 compatible bones; original mesh and weights",
+    "material_slots": [
+      "FE_Helmet",
+      "FE_Upper",
+      "FE_Lower",
+      "FE_Seal",
+      "FE_Metal",
+      "FE_Visor",
+      "FE_Glow",
+      "FE_Eye",
+      "FE_Mouth",
+      "FE_Concrete",
+      "FE_Marking",
+      "FE_Glass"
+    ]
+  },
+  {
+    "id": "SM_FE_Floor",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Floor.fbx",
+    "triangles": 132,
+    "dimensions_m": [
+      4.0,
+      4.0,
+      0.20399999618530273
+    ]
+  },
+  {
+    "id": "SM_FE_GrateFloor",
+    "source": "original_blender",
+    "file": "Models/SM_FE_GrateFloor.fbx",
+    "triangles": 2076,
+    "dimensions_m": [
+      4.0,
+      4.0,
+      0.27000001072883606
+    ]
+  },
+  {
+    "id": "SM_FE_Wall",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Wall.fbx",
+    "triangles": 540,
+    "dimensions_m": [
+      4.0,
+      0.33000001311302185,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_ServiceWall",
+    "source": "original_blender",
+    "file": "Models/SM_FE_ServiceWall.fbx",
+    "triangles": 1092,
+    "dimensions_m": [
+      4.0,
+      0.6000000238418579,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_Column",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Column.fbx",
+    "triangles": 540,
+    "dimensions_m": [
+      0.5400000214576721,
+      0.5600000023841858,
+      5.0
+    ]
+  },
+  {
+    "id": "SM_FE_Beam",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Beam.fbx",
+    "triangles": 540,
+    "dimensions_m": [
+      0.5400000214576721,
+      0.5600000023841858,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_Brace",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Brace.fbx",
+    "triangles": 540,
+    "dimensions_m": [
+      2.8035213947296143,
+      0.5600000023841858,
+      4.139213562011719
+    ]
+  },
+  {
+    "id": "SM_FE_DoorFrame",
+    "source": "original_blender",
+    "file": "Models/SM_FE_DoorFrame.fbx",
+    "triangles": 324,
+    "dimensions_m": [
+      3.5999999046325684,
+      0.5,
+      3.4499998092651367
+    ]
+  },
+  {
+    "id": "SM_FE_Door",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Door.fbx",
+    "triangles": 432,
+    "dimensions_m": [
+      3.0,
+      0.2549999952316284,
+      3.0
+    ]
+  },
+  {
+    "id": "SM_FE_PlatformEdge",
+    "source": "original_blender",
+    "file": "Models/SM_FE_PlatformEdge.fbx",
+    "triangles": 288,
+    "dimensions_m": [
+      4.0,
+      0.2670000195503235,
+      0.30000001192092896
+    ]
+  },
+  {
+    "id": "SM_FE_Stairs",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Stairs.fbx",
+    "triangles": 648,
+    "dimensions_m": [
+      1.600000023841858,
+      1.6999999284744263,
+      0.9000000357627869
+    ]
+  },
+  {
+    "id": "SM_FE_Rail",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Rail.fbx",
+    "triangles": 300,
+    "dimensions_m": [
+      4.0,
+      0.08000016957521439,
+      1.1400001049041748
+    ]
+  },
+  {
+    "id": "SM_FE_TowerBase",
+    "source": "original_blender",
+    "file": "Models/SM_FE_TowerBase.fbx",
+    "triangles": 888,
+    "dimensions_m": [
+      2.4000000953674316,
+      2.4000000953674316,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_TowerMiddle",
+    "source": "original_blender",
+    "file": "Models/SM_FE_TowerMiddle.fbx",
+    "triangles": 888,
+    "dimensions_m": [
+      2.4000000953674316,
+      2.4000000953674316,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_TowerTop",
+    "source": "original_blender",
+    "file": "Models/SM_FE_TowerTop.fbx",
+    "triangles": 948,
+    "dimensions_m": [
+      2.4000000953674316,
+      2.4000000953674316,
+      2.3000001907348633
+    ]
+  },
+  {
+    "id": "SM_FE_TowerArm",
+    "source": "original_blender",
+    "file": "Models/SM_FE_TowerArm.fbx",
+    "triangles": 996,
+    "dimensions_m": [
+      7.199999809265137,
+      2.4000000953674316,
+      4.0
+    ]
+  },
+  {
+    "id": "SM_FE_DistantBuilding",
+    "source": "original_blender",
+    "file": "Models/SM_FE_DistantBuilding.fbx",
+    "triangles": 1188,
+    "dimensions_m": [
+      12.5,
+      8.5,
+      6.199999809265137
+    ]
+  },
+  {
+    "id": "SM_FE_Antenna",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Antenna.fbx",
+    "triangles": 348,
+    "dimensions_m": [
+      2.5999999046325684,
+      0.5,
+      5.034999847412109
+    ]
+  },
+  {
+    "id": "SM_FE_CrateSmall",
+    "source": "original_blender",
+    "file": "Models/SM_FE_CrateSmall.fbx",
+    "triangles": 444,
+    "dimensions_m": [
+      0.699999988079071,
+      0.5600000023841858,
+      0.5740000009536743
+    ]
+  },
+  {
+    "id": "SM_FE_CrateLarge",
+    "source": "original_blender",
+    "file": "Models/SM_FE_CrateLarge.fbx",
+    "triangles": 444,
+    "dimensions_m": [
+      1.2000000476837158,
+      0.9474999904632568,
+      0.984000027179718
+    ]
+  },
+  {
+    "id": "SM_FE_RepairTerminal",
+    "source": "original_blender",
+    "file": "Models/SM_FE_RepairTerminal.fbx",
+    "triangles": 804,
+    "dimensions_m": [
+      0.800000011920929,
+      0.6000000238418579,
+      1.3499999046325684
+    ]
+  },
+  {
+    "id": "SM_FE_PowerUnit",
+    "source": "original_blender",
+    "file": "Models/SM_FE_PowerUnit.fbx",
+    "triangles": 804,
+    "dimensions_m": [
+      0.800000011920929,
+      0.6000000238418579,
+      1.3499999046325684
+    ]
+  },
+  {
+    "id": "SM_FE_CableStraight",
+    "source": "original_blender",
+    "file": "Models/SM_FE_CableStraight.fbx",
+    "triangles": 536,
+    "dimensions_m": [
+      0.10999999940395355,
+      3.059999942779541,
+      0.07000000029802322
+    ]
+  },
+  {
+    "id": "SM_FE_CableCoil",
+    "source": "original_blender",
+    "file": "Models/SM_FE_CableCoil.fbx",
+    "triangles": 3080,
+    "dimensions_m": [
+      1.2740074396133423,
+      1.3209738731384277,
+      0.11474999785423279
+    ]
+  },
+  {
+    "id": "SM_FE_RepairCart",
+    "source": "original_blender",
+    "file": "Models/SM_FE_RepairCart.fbx",
+    "triangles": 804,
+    "dimensions_m": [
+      0.8999999761581421,
+      0.6899999976158142,
+      0.7950000166893005
+    ]
+  },
+  {
+    "id": "SM_FE_Toolbox",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Toolbox.fbx",
+    "triangles": 444,
+    "dimensions_m": [
+      0.4000000059604645,
+      0.32749998569488525,
+      0.328000009059906
+    ]
+  },
+  {
+    "id": "SM_FE_Barrier",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Barrier.fbx",
+    "triangles": 492,
+    "dimensions_m": [
+      2.0,
+      0.699999988079071,
+      1.0
+    ]
+  },
+  {
+    "id": "SM_FE_LightPole",
+    "source": "original_blender",
+    "file": "Models/SM_FE_LightPole.fbx",
+    "triangles": 276,
+    "dimensions_m": [
+      0.6499999761581421,
+      0.48000001907348633,
+      5.059999942779541
+    ]
+  },
+  {
+    "id": "SM_FE_Vent",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Vent.fbx",
+    "triangles": 1296,
+    "dimensions_m": [
+      1.0,
+      0.6499999761581421,
+      0.6000000238418579
+    ]
+  },
+  {
+    "id": "SM_FE_DockMarker",
+    "source": "original_blender",
+    "file": "Models/SM_FE_DockMarker.fbx",
+    "triangles": 1484,
+    "dimensions_m": [
+      0.8399999737739563,
+      0.8399999737739563,
+      0.04000000283122063
+    ]
+  },
+  {
+    "id": "SM_FE_MaintenanceRobot",
+    "source": "original_blender",
+    "file": "Models/SM_FE_MaintenanceRobot.fbx",
+    "triangles": 2336,
+    "dimensions_m": [
+      0.7599999904632568,
+      0.5399999618530273,
+      0.8949999809265137
+    ]
+  },
+  {
+    "id": "SM_FE_RiflePose",
+    "source": "original_blender",
+    "file": "Models/SM_FE_RiflePose.fbx",
+    "triangles": 600,
+    "dimensions_m": [
+      0.11999999731779099,
+      1.0850000381469727,
+      0.35999998450279236
+    ]
+  },
+  {
+    "id": "SM_FE_MiningToolPose",
+    "source": "original_blender",
+    "file": "Models/SM_FE_MiningToolPose.fbx",
+    "triangles": 276,
+    "dimensions_m": [
+      0.5,
+      0.07999999821186066,
+      0.9399999380111694
+    ]
+  },
+  {
+    "id": "SM_FE_Hill1",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Hill1.fbx",
+    "triangles": 336,
+    "dimensions_m": [
+      59.999977111816406,
+      29.999996185302734,
+      16.0
+    ]
+  },
+  {
+    "id": "SM_FE_Hill2",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Hill2.fbx",
+    "triangles": 336,
+    "dimensions_m": [
+      79.99996948242188,
+      35.99999237060547,
+      20.0
+    ]
+  },
+  {
+    "id": "SM_FE_Hill3",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Hill3.fbx",
+    "triangles": 336,
+    "dimensions_m": [
+      99.99996948242188,
+      41.99999237060547,
+      24.0
+    ]
+  },
+  {
+    "id": "SM_FE_Moon",
+    "source": "original_blender",
+    "file": "Models/SM_FE_Moon.fbx",
+    "triangles": 2976,
+    "dimensions_m": [
+      2.0000014305114746,
+      2.0000009536743164,
+      2.0
+    ]
+  },
+  {
+    "id": "SM_FE_TwinforkDisplay",
+    "source": "project_twinfork_adapted",
+    "file": "Models/SM_FE_TwinforkDisplay.fbx",
+    "triangles": 26896,
+    "dimensions_m": [
+      9.139999389648438,
+      13.000000953674316,
+      3.5799999237060547
+    ],
+    "adaptations": [
+      "Separate display mesh",
+      "Welded vertices and recalculated normals",
+      "0.015m manufactured bevel",
+      "New industrial ivory/orange/graphite material palette",
+      "Removed gameplay-only internals and weapons"
+    ]
+  },
+  {
+    "id": "SM_FE_FXCard",
+    "source": "original_blender",
+    "file": "Models/SM_FE_FXCard.fbx",
+    "triangles": 2,
+    "dimensions_m": [
+      1,
+      1,
+      0
+    ]
+  }
+]

@@ -13,6 +13,7 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/World/JTSPreLaunchLobbyStage.h"
+#include "TimerManager.h"
 
 AJTSPreLaunchLobbyGameMode::AJTSPreLaunchLobbyGameMode()
 {
@@ -53,6 +54,7 @@ void AJTSPreLaunchLobbyGameMode::HandleStartingNewPlayer_Implementation(APlayerC
 
 bool AJTSPreLaunchLobbyGameMode::RequestStartExpedition(AJTSPlayerController* RequestingController)
 {
+	if (GetWorld()->GetTimerManager().IsTimerActive(LaunchTimer)) return false;
 	if (!Super::RequestStartExpedition(RequestingController))
 	{
 		return false;
@@ -66,7 +68,8 @@ bool AJTSPreLaunchLobbyGameMode::RequestStartExpedition(AJTSPlayerController* Re
 
 	const FString Destination = ResolveLaunchDestination();
 	UE_LOG(LogTemp, Log, TEXT("Jump to Space pre-launch lobby locked; travelling expedition to %s."), *Destination);
-	World->ServerTravel(Destination, true);
+	if (auto* State=GetGameState<AJTSGameState>()) State->SetLaunchDeadline(State->GetSynchronizedServerTimeSeconds()+3.0);
+	World->GetTimerManager().SetTimer(LaunchTimer,FTimerDelegate::CreateWeakLambda(this,[this,Destination]() { if (GetWorld()) GetWorld()->ServerTravel(Destination,true); }),3.f,false);
 	return true;
 }
 
@@ -106,10 +109,13 @@ void AJTSPreLaunchLobbyGameMode::ArrangeLobbyPlayers()
 			continue;
 		}
 		Character->SetActorLocation(LobbyStage->GetPresentationPosition(SlotIndex));
-		Character->SetActorRotation(FRotator(0.0f, 0.0f, 0.0f));
+		Character->SetActorRotation(LobbyStage->PresentationRotation);
 		if (UCharacterMovementComponent* const Movement = Character->GetCharacterMovement())
 		{
 			Movement->StopMovementImmediately();
+			// Presentation pads have no planet gravity. Freeze the capsule so the gameplay
+			// animation remains grounded instead of holding its falling/jump pose.
+			Movement->DisableMovement();
 		}
 	}
 }

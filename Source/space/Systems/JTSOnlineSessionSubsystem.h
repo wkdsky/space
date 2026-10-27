@@ -81,6 +81,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Online")
 	void CreateExpedition(const FString& RequestedJoinCode, const FString& Password, int32 MaximumPlayers, EJTSLobbyVisibility LobbyVisibility = EJTSLobbyVisibility::Public);
+	/** Selects a host-owned slot; commits it only after provider session creation succeeds. */
+	UFUNCTION(BlueprintCallable, Category="Online")
+	void HostExpedition(int32 Slot, const FString& Name, bool bResume, const FString& Code, const FString& Password, int32 MaximumPlayers, EJTSLobbyVisibility Visibility);
 
 	UFUNCTION(BlueprintCallable, Category = "Online")
 	void FindExpeditions(const FString& JoinCode);
@@ -153,7 +156,7 @@ public:
 
 	/** First map a newly created/listen-hosted session opens. It is staging only, never Earth gameplay. */
 	UPROPERTY(Config, EditAnywhere, Category = "Online")
-	FString PreLaunchLobbyMapPath = TEXT("/Game/Space/Maps/L_PreLaunchLobby");
+	FString PreLaunchLobbyMapPath = JTSMapPaths::PreLaunchLobby;
 
 	/** Retained for existing config migration; gameplay travel is now owned by AJTSPreLaunchLobbyGameMode. */
 	UPROPERTY(Config, EditAnywhere, Category = "Online")
@@ -224,6 +227,9 @@ private:
 	/** Operation which was paused while an asynchronous platform login completes. */
 	EJTSSessionOperationState DeferredOperationState = EJTSSessionOperationState::Idle;
 	FString PendingJoinCode;
+	int32 PendingSaveSlot = INDEX_NONE;
+	FString PendingExpeditionName;
+	bool bPendingResume = false;
 	FString PendingPassword;
 	int32 PendingMaximumPlayers = 4;
 	EJTSLobbyVisibility PendingLobbyVisibility = EJTSLobbyVisibility::Public;

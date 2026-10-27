@@ -38,6 +38,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Gameplay")
 	bool IsWaitingToStart() const;
+	UFUNCTION(BlueprintPure) double GetLaunchDeadline() const { return LaunchDeadline; }
+	void SetLaunchDeadline(double Value);
 
 	/** Replicated lobby admission state. A closed lobby remains visible to its current players. */
 	UFUNCTION(BlueprintPure, Category = "Multiplayer")
@@ -103,6 +105,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UPROPERTY(Replicated) double LaunchDeadline = 0;
 	void RefreshCachedRemainingTime();
 
 	UFUNCTION()

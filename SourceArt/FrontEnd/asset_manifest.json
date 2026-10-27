@@ -1,0 +1,3409 @@
+{
+  "schema": 1,
+  "sources": {
+    "sources": [
+      {
+        "file": "External/hangar_diffuse.jpg",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_diff_2k.jpg",
+        "sha256": "8662d6f8f1c40277a507fa259cd79392346e598de68add790b4102170092e34d",
+        "bytes": 2559056
+      },
+      {
+        "file": "External/hangar_normal_dx.jpg",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_nor_dx_2k.jpg",
+        "sha256": "ac7109f718c2b00d040a3a6528d5678cd02694a872065359d2ea910b932fa749",
+        "bytes": 3097643
+      },
+      {
+        "file": "External/hangar_arm.jpg",
+        "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/hangar_concrete_floor/hangar_concrete_floor_arm_2k.jpg",
+        "sha256": "a4912ae65c15d2f3a873e66b161bd5b5235cb3429eede8d3f4a4724513188bd1",
+        "bytes": 2994585
+      },
+      {
+        "file": "External/09_SourceHanSansSC_2.005R.zip",
+        "url": "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/09_SourceHanSansSC.zip",
+        "sha256": "ef7364f7ac2564be1ae9c1d74276de2653fe38b73449070398c4fc0b7e032ff1",
+        "bytes": 95177106
+      },
+      {
+        "file": "External/OFL_SourceHanSans.txt",
+        "url": "https://raw.githubusercontent.com/adobe-fonts/source-han-sans/2.005R/LICENSE.txt",
+        "sha256": "fcac737e761ec63dbfbdce11030a1780161920d80315edba9c8beff1c2bac5a2",
+        "bytes": 4463
+      },
+      {
+        "file": "External/PolyHaven_license.html",
+        "url": "https://polyhaven.com/license",
+        "sha256": "46158a6b319ae8ef55acd18bd96d986c9261fb0cc8086124e97bcbefe779a623",
+        "bytes": 72685
+      },
+      {
+        "file": "External/Casual_2_reference.fbx",
+        "url": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+        "sha256": "a6178223f72422ad16406ffd91644f51cd19dde3a0bc48bd5ba5f54c484583c2",
+        "usage": "Skeleton compatibility reference only; avatar geometry is original."
+      },
+      {
+        "file": "External/LICENSE_Quaternius.txt",
+        "url": "https://quaternius.com/packs/ultimatemodularcharacters.html",
+        "sha256": "de990ef6fc68cffd7fd1ae342c4d0c823b541b8848d8f76bca5d3339f4de6f6e",
+        "usage": "Skeleton compatibility reference only; avatar geometry is original."
+      }
+    ],
+    "licenses": {
+      "floor": "CC0-1.0",
+      "rig_reference": "CC0-1.0",
+      "font": "OFL-1.1"
+    },
+    "ship_source": "SourceArt/TwinforkR1; Tools/Art/generate_twinfork_meshes.py (project original)",
+    "reference_images": "User-provided visual direction only; no screenshot pixels, logo or models extracted.",
+    "visual_references": [
+      {
+        "title": "Star Wars: The Force Awakens ? official gallery",
+        "url": "https://www.starwars.com/films/star-wars-the-force-awakens-gallery",
+        "usage": "White-hot energy core and red atmospheric scattering reference only. No images, geometry, textures or logos included in game assets."
+      },
+      {
+        "title": "Starkiller Base ? official databank",
+        "url": "https://www.starwars.com/databank/starkiller-base",
+        "usage": "Science-fiction threat presentation reference only; all beam geometry and heat texture authored originally in Blender."
+      }
+    ]
+  },
+  "assets": [
+    {
+      "id": "SK_FE_Explorer",
+      "source": "original_blender",
+      "file": "Characters/SK_FE_Explorer.fbx",
+      "triangles": 18892,
+      "unweighted_vertices": 0,
+      "rig": "W3 compatible bones; original mesh and weights",
+      "material_slots": [
+        "FE_Helmet",
+        "FE_Upper",
+        "FE_Lower",
+        "FE_Seal",
+        "FE_Metal",
+        "FE_Visor",
+        "FE_Glow",
+        "FE_Eye",
+        "FE_Mouth",
+        "FE_Concrete",
+        "FE_Marking",
+        "FE_Glass"
+      ],
+      "sha256": "2404a0dbae71f0780217d3317f5dac948ddd551da2911b543b5387fca4a42222",
+      "bytes": 696940
+    },
+    {
+      "id": "SK_FE_Scout",
+      "source": "original_blender",
+      "file": "Characters/SK_FE_Scout.fbx",
+      "triangles": 18956,
+      "unweighted_vertices": 0,
+      "rig": "W3 compatible bones; original mesh and weights",
+      "material_slots": [
+        "FE_Helmet",
+        "FE_Upper",
+        "FE_Lower",
+        "FE_Seal",
+        "FE_Metal",
+        "FE_Visor",
+        "FE_Glow",
+        "FE_Eye",
+        "FE_Mouth",
+        "FE_Concrete",
+        "FE_Marking",
+        "FE_Glass"
+      ],
+      "sha256": "997fd7fa1e8023b1787c88543d4c02ef029b6e9d0b983b85ceb9e498c0028072",
+      "bytes": 698492
+    },
+    {
+      "id": "SK_FE_Engineer",
+      "source": "original_blender",
+      "file": "Characters/SK_FE_Engineer.fbx",
+      "triangles": 19276,
+      "unweighted_vertices": 0,
+      "rig": "W3 compatible bones; original mesh and weights",
+      "material_slots": [
+        "FE_Helmet",
+        "FE_Upper",
+        "FE_Lower",
+        "FE_Seal",
+        "FE_Metal",
+        "FE_Visor",
+        "FE_Glow",
+        "FE_Eye",
+        "FE_Mouth",
+        "FE_Concrete",
+        "FE_Marking",
+        "FE_Glass"
+      ],
+      "sha256": "0a18bb2118adc4e1dfdde25d14cff98ae92aeef52175120e7197bf7359f6fe96",
+      "bytes": 707740
+    },
+    {
+      "id": "SK_FE_Survey",
+      "source": "original_blender",
+      "file": "Characters/SK_FE_Survey.fbx",
+      "triangles": 19312,
+      "unweighted_vertices": 0,
+      "rig": "W3 compatible bones; original mesh and weights",
+      "material_slots": [
+        "FE_Helmet",
+        "FE_Upper",
+        "FE_Lower",
+        "FE_Seal",
+        "FE_Metal",
+        "FE_Visor",
+        "FE_Glow",
+        "FE_Eye",
+        "FE_Mouth",
+        "FE_Concrete",
+        "FE_Marking",
+        "FE_Glass"
+      ],
+      "sha256": "6578ea80835e0480b4a248cdd2304ac18844246d00791f457351a99fbf6d80c2",
+      "bytes": 708620
+    },
+    {
+      "id": "SK_FE_Tactical",
+      "source": "original_blender",
+      "file": "Characters/SK_FE_Tactical.fbx",
+      "triangles": 19324,
+      "unweighted_vertices": 0,
+      "rig": "W3 compatible bones; original mesh and weights",
+      "material_slots": [
+        "FE_Helmet",
+        "FE_Upper",
+        "FE_Lower",
+        "FE_Seal",
+        "FE_Metal",
+        "FE_Visor",
+        "FE_Glow",
+        "FE_Eye",
+        "FE_Mouth",
+        "FE_Concrete",
+        "FE_Marking",
+        "FE_Glass"
+      ],
+      "sha256": "8ef3e62b009de4137a2caa10b5214bb6b515385ca226231719cac1e331c86b6a",
+      "bytes": 711212
+    },
+    {
+      "id": "SM_FE_Floor",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Floor.fbx",
+      "triangles": 132,
+      "dimensions_m": [
+        4.0,
+        4.0,
+        0.20399999618530273
+      ],
+      "sha256": "e2004f2c2679647f5b39acbfac36bdde4b4a69874f0e9c1ca4828fc579af8574",
+      "bytes": 31084
+    },
+    {
+      "id": "SM_FE_GrateFloor",
+      "source": "original_blender",
+      "file": "Models/SM_FE_GrateFloor.fbx",
+      "triangles": 2076,
+      "dimensions_m": [
+        4.0,
+        4.0,
+        0.27000001072883606
+      ],
+      "sha256": "6827de7215d7cab3f4f341804dd0f34e805d2729e2091a2e632c8332e32d2add",
+      "bytes": 79500
+    },
+    {
+      "id": "SM_FE_Wall",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Wall.fbx",
+      "triangles": 540,
+      "dimensions_m": [
+        4.0,
+        0.33000001311302185,
+        4.0
+      ],
+      "sha256": "7b6757e8ff6f77cc605ca30aae45be812eabc27329f37716d7f52a3a3c2b05e4",
+      "bytes": 44636
+    },
+    {
+      "id": "SM_FE_ServiceWall",
+      "source": "original_blender",
+      "file": "Models/SM_FE_ServiceWall.fbx",
+      "triangles": 1092,
+      "dimensions_m": [
+        4.0,
+        0.6000000238418579,
+        4.0
+      ],
+      "sha256": "17b814ac26b2a55729d35ad1668de7cc1753ca6ad26a03776bbc568099c98983",
+      "bytes": 61884
+    },
+    {
+      "id": "SM_FE_Column",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Column.fbx",
+      "triangles": 540,
+      "dimensions_m": [
+        0.5400000214576721,
+        0.5600000023841858,
+        5.0
+      ],
+      "sha256": "203b7223a82eaa90eb6adadf38684940a3d6fb57e643a542ae1219c5b2b74e55",
+      "bytes": 45228
+    },
+    {
+      "id": "SM_FE_Beam",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Beam.fbx",
+      "triangles": 540,
+      "dimensions_m": [
+        0.5400000214576721,
+        0.5600000023841858,
+        4.0
+      ],
+      "sha256": "c18b53e8e303a2b8084cfe2ea247c3b47f3cff9add261d089724b1f818a629fe",
+      "bytes": 45164
+    },
+    {
+      "id": "SM_FE_Brace",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Brace.fbx",
+      "triangles": 540,
+      "dimensions_m": [
+        2.8035213947296143,
+        0.5600000023841858,
+        4.139213562011719
+      ],
+      "sha256": "eab26103dfa06b1ea2f6ec07b976d3e0d1bfd57a0f4bdcef92ee021a3702c4d8",
+      "bytes": 48748
+    },
+    {
+      "id": "SM_FE_DoorFrame",
+      "source": "original_blender",
+      "file": "Models/SM_FE_DoorFrame.fbx",
+      "triangles": 324,
+      "dimensions_m": [
+        3.5999999046325684,
+        0.5,
+        3.4499998092651367
+      ],
+      "sha256": "6f72dfa64f568586a3e95a309849c8070e5a43979a7811f2a84ac6623dda85ce",
+      "bytes": 37292
+    },
+    {
+      "id": "SM_FE_Door",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Door.fbx",
+      "triangles": 432,
+      "dimensions_m": [
+        3.0,
+        0.2549999952316284,
+        3.0
+      ],
+      "sha256": "1152ece3531dc2ddb3dd23e66b9513767280992a3213b6e111529cd8b83e13b3",
+      "bytes": 40972
+    },
+    {
+      "id": "SM_FE_PlatformEdge",
+      "source": "original_blender",
+      "file": "Models/SM_FE_PlatformEdge.fbx",
+      "triangles": 288,
+      "dimensions_m": [
+        4.0,
+        0.2670000195503235,
+        0.30000001192092896
+      ],
+      "sha256": "eba66447c9002de04fa1d60130107153ed08235888947ad5fcefb91f73daa90f",
+      "bytes": 34764
+    },
+    {
+      "id": "SM_FE_Stairs",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Stairs.fbx",
+      "triangles": 648,
+      "dimensions_m": [
+        1.600000023841858,
+        1.6999999284744263,
+        0.9000000357627869
+      ],
+      "sha256": "3e05ee593d68aacf4703083f017c60ec13813e063c811a01d9aa445cf0029e82",
+      "bytes": 47148
+    },
+    {
+      "id": "SM_FE_Rail",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Rail.fbx",
+      "triangles": 300,
+      "dimensions_m": [
+        4.0,
+        0.08000016957521439,
+        1.1400001049041748
+      ],
+      "sha256": "84381f23679dbea7b1345f156465fbc12cdd614bf0eca0e73a06e5fd127fb4df",
+      "bytes": 32924
+    },
+    {
+      "id": "SM_FE_TowerBase",
+      "source": "original_blender",
+      "file": "Models/SM_FE_TowerBase.fbx",
+      "triangles": 888,
+      "dimensions_m": [
+        2.4000000953674316,
+        2.4000000953674316,
+        4.0
+      ],
+      "sha256": "69681b730e4ef9dc6e3937340ea5f8c813aedb199b37d5be29cce06e024b4dbe",
+      "bytes": 53324
+    },
+    {
+      "id": "SM_FE_TowerMiddle",
+      "source": "original_blender",
+      "file": "Models/SM_FE_TowerMiddle.fbx",
+      "triangles": 888,
+      "dimensions_m": [
+        2.4000000953674316,
+        2.4000000953674316,
+        4.0
+      ],
+      "sha256": "1de7d74395e584cfa94dea1c2ff3cd0ca9cb8aecf6fb977aa8daf2622c7437bc",
+      "bytes": 53324
+    },
+    {
+      "id": "SM_FE_TowerTop",
+      "source": "original_blender",
+      "file": "Models/SM_FE_TowerTop.fbx",
+      "triangles": 948,
+      "dimensions_m": [
+        2.4000000953674316,
+        2.4000000953674316,
+        2.3000001907348633
+      ],
+      "sha256": "a35f7ca368d1e89fc7d40a60116b53818012669424b88fe7935c07a3c26412ab",
+      "bytes": 54268
+    },
+    {
+      "id": "SM_FE_TowerArm",
+      "source": "original_blender",
+      "file": "Models/SM_FE_TowerArm.fbx",
+      "triangles": 996,
+      "dimensions_m": [
+        7.199999809265137,
+        2.4000000953674316,
+        4.0
+      ],
+      "sha256": "3aec103dc46c580096702b37f7aa9537a8fbaa47920b08b0aca134e5cbd5d5cf",
+      "bytes": 57228
+    },
+    {
+      "id": "SM_FE_DistantBuilding",
+      "source": "original_blender",
+      "file": "Models/SM_FE_DistantBuilding.fbx",
+      "triangles": 1188,
+      "dimensions_m": [
+        12.5,
+        8.5,
+        6.199999809265137
+      ],
+      "sha256": "341777019193e22fdc9daf503633bb56f4955cf3fa6efc3dfa53712896faedba",
+      "bytes": 62044
+    },
+    {
+      "id": "SM_FE_Antenna",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Antenna.fbx",
+      "triangles": 348,
+      "dimensions_m": [
+        2.5999999046325684,
+        0.5,
+        5.034999847412109
+      ],
+      "sha256": "cfa6f587ef8360b3a4451f888380a03fd7370e964512ad32548c78dbc76916b7",
+      "bytes": 35596
+    },
+    {
+      "id": "SM_FE_CrateSmall",
+      "source": "original_blender",
+      "file": "Models/SM_FE_CrateSmall.fbx",
+      "triangles": 444,
+      "dimensions_m": [
+        0.699999988079071,
+        0.5600000023841858,
+        0.5740000009536743
+      ],
+      "sha256": "bb2c80cf6a0ac74a449bd6ce08f2f3aed9dc472052eba6f49869bb98f34c76e6",
+      "bytes": 41756
+    },
+    {
+      "id": "SM_FE_CrateLarge",
+      "source": "original_blender",
+      "file": "Models/SM_FE_CrateLarge.fbx",
+      "triangles": 444,
+      "dimensions_m": [
+        1.2000000476837158,
+        0.9474999904632568,
+        0.984000027179718
+      ],
+      "sha256": "79a82f5411984aa61d95d8471e90c141228afa7d1b1f89773d3163a2ed62d3b5",
+      "bytes": 41324
+    },
+    {
+      "id": "SM_FE_RepairTerminal",
+      "source": "original_blender",
+      "file": "Models/SM_FE_RepairTerminal.fbx",
+      "triangles": 804,
+      "dimensions_m": [
+        0.800000011920929,
+        0.6000000238418579,
+        1.3499999046325684
+      ],
+      "sha256": "352a6aec056e4f1b54e357b031be6c96311144d3840df74bc9d526aa63952bb7",
+      "bytes": 51820
+    },
+    {
+      "id": "SM_FE_PowerUnit",
+      "source": "original_blender",
+      "file": "Models/SM_FE_PowerUnit.fbx",
+      "triangles": 804,
+      "dimensions_m": [
+        0.800000011920929,
+        0.6000000238418579,
+        1.3499999046325684
+      ],
+      "sha256": "70e9c4f669089dc00343149c70e4adec4452e4749c7499352f193cea1ba4b667",
+      "bytes": 51820
+    },
+    {
+      "id": "SM_FE_CableStraight",
+      "source": "original_blender",
+      "file": "Models/SM_FE_CableStraight.fbx",
+      "triangles": 536,
+      "dimensions_m": [
+        0.10999999940395355,
+        3.059999942779541,
+        0.07000000029802322
+      ],
+      "sha256": "b816fb4ab8dfe30974d48abee0580fa77b802bc6845fc013a3eb84a5bd7bc6f9",
+      "bytes": 39708
+    },
+    {
+      "id": "SM_FE_CableCoil",
+      "source": "original_blender",
+      "file": "Models/SM_FE_CableCoil.fbx",
+      "triangles": 3080,
+      "dimensions_m": [
+        1.2740074396133423,
+        1.3209738731384277,
+        0.11474999785423279
+      ],
+      "sha256": "057c823edada9332243653f17cd8ad18d64ecd013b3a39c010370c8e67809d98",
+      "bytes": 118396
+    },
+    {
+      "id": "SM_FE_RepairCart",
+      "source": "original_blender",
+      "file": "Models/SM_FE_RepairCart.fbx",
+      "triangles": 804,
+      "dimensions_m": [
+        0.8999999761581421,
+        0.6899999976158142,
+        0.7950000166893005
+      ],
+      "sha256": "98292b5085680660e4e630bd9e0b98aeb07984dc3a29d2d41869ac0a054d57c6",
+      "bytes": 46028
+    },
+    {
+      "id": "SM_FE_Toolbox",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Toolbox.fbx",
+      "triangles": 444,
+      "dimensions_m": [
+        0.4000000059604645,
+        0.32749998569488525,
+        0.328000009059906
+      ],
+      "sha256": "ef57d3e8f5ed903c4ba0dadeb0011a30c9dee836e95cfa36f9860752ab505c8d",
+      "bytes": 41788
+    },
+    {
+      "id": "SM_FE_Barrier",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Barrier.fbx",
+      "triangles": 492,
+      "dimensions_m": [
+        2.0,
+        0.699999988079071,
+        1.0
+      ],
+      "sha256": "0d89e7eff0800fa88d1f7f0ec742e90b8ee7f427b032bbc9bf73f2c1a3139677",
+      "bytes": 42412
+    },
+    {
+      "id": "SM_FE_LightPole",
+      "source": "original_blender",
+      "file": "Models/SM_FE_LightPole.fbx",
+      "triangles": 276,
+      "dimensions_m": [
+        0.6499999761581421,
+        0.48000001907348633,
+        5.059999942779541
+      ],
+      "sha256": "93ee07f5d176cc1616183f1e840964b9623ca2e08a0427ab5ba00cc59652bfd1",
+      "bytes": 36012
+    },
+    {
+      "id": "SM_FE_Vent",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Vent.fbx",
+      "triangles": 1296,
+      "dimensions_m": [
+        1.0,
+        0.6499999761581421,
+        0.6000000238418579
+      ],
+      "sha256": "f48f04cb5f52b0dab97e3e21a384b1e63fa88b80213f6aa0903b0833e78d108c",
+      "bytes": 62380
+    },
+    {
+      "id": "SM_FE_DockMarker",
+      "source": "original_blender",
+      "file": "Models/SM_FE_DockMarker.fbx",
+      "triangles": 1484,
+      "dimensions_m": [
+        0.8399999737739563,
+        0.8399999737739563,
+        0.04000000283122063
+      ],
+      "sha256": "21597a200dae3ee386ee7a3911bc53d747ef378724e7bcee1d45f2bc88a20775",
+      "bytes": 62556
+    },
+    {
+      "id": "SM_FE_MaintenanceRobot",
+      "source": "original_blender",
+      "file": "Models/SM_FE_MaintenanceRobot.fbx",
+      "triangles": 2336,
+      "dimensions_m": [
+        0.7599999904632568,
+        0.5399999618530273,
+        0.8949999809265137
+      ],
+      "sha256": "feb03cf85689f49d4f090be52f2ab6f4e173b36aac8542a2727f07a28e2c4bba",
+      "bytes": 84444
+    },
+    {
+      "id": "SM_FE_RiflePose",
+      "source": "original_blender",
+      "file": "Models/SM_FE_RiflePose.fbx",
+      "triangles": 600,
+      "dimensions_m": [
+        0.11999999731779099,
+        1.0850000381469727,
+        0.35999998450279236
+      ],
+      "sha256": "9d69fa365bd4bf0d61a78e812eed713a7a2f428dfb3125b575f8706217292c14",
+      "bytes": 47580
+    },
+    {
+      "id": "SM_FE_MiningToolPose",
+      "source": "original_blender",
+      "file": "Models/SM_FE_MiningToolPose.fbx",
+      "triangles": 276,
+      "dimensions_m": [
+        0.5,
+        0.07999999821186066,
+        0.9399999380111694
+      ],
+      "sha256": "df6c50dc6ef63c841ee3dc0c48730ec3bfc5cf2600c4cb3b6740661750e79ae5",
+      "bytes": 35756
+    },
+    {
+      "id": "SM_FE_Hill1",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Hill1.fbx",
+      "triangles": 336,
+      "dimensions_m": [
+        59.999977111816406,
+        29.999996185302734,
+        16.0
+      ],
+      "sha256": "8bac6bda0ce530eed43d584bf08e5ed670f2da491fee5f4331a43b46102f5c11",
+      "bytes": 34700
+    },
+    {
+      "id": "SM_FE_Hill2",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Hill2.fbx",
+      "triangles": 336,
+      "dimensions_m": [
+        79.99996948242188,
+        35.99999237060547,
+        20.0
+      ],
+      "sha256": "b08347476f711ea7061190b5b9a7c4ccd9d365d7256b2296612e5b1f77fb1403",
+      "bytes": 34620
+    },
+    {
+      "id": "SM_FE_Hill3",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Hill3.fbx",
+      "triangles": 336,
+      "dimensions_m": [
+        99.99996948242188,
+        41.99999237060547,
+        24.0
+      ],
+      "sha256": "0fa9c11957caa9bc02b3bc3e0fc5881cd6a27a7b1f2e925b63cb6e07f5fb4e7b",
+      "bytes": 34636
+    },
+    {
+      "id": "SM_FE_Moon",
+      "source": "original_blender",
+      "file": "Models/SM_FE_Moon.fbx",
+      "triangles": 2976,
+      "dimensions_m": [
+        2.0000014305114746,
+        2.0000009536743164,
+        2.0
+      ],
+      "sha256": "bd4cee3831da3ba275a40a89f3de3d121752b2481b4160b5190e74a9522f5cfe",
+      "bytes": 85948
+    },
+    {
+      "id": "SM_FE_TwinforkDisplay",
+      "source": "project_twinfork_adapted",
+      "file": "Models/SM_FE_TwinforkDisplay.fbx",
+      "triangles": 26896,
+      "dimensions_m": [
+        9.139999389648438,
+        13.000000953674316,
+        3.5799999237060547
+      ],
+      "adaptations": [
+        "Separate display mesh",
+        "Welded vertices and recalculated normals",
+        "0.015m manufactured bevel",
+        "New industrial ivory/orange/graphite material palette",
+        "Removed gameplay-only internals and weapons"
+      ],
+      "sha256": "c93fbbd30bc7b828a2a2733ca51265495a63a0c24e6b71f9e889410f231437b4",
+      "bytes": 638956
+    },
+    {
+      "id": "SM_FE_FXCard",
+      "source": "original_blender",
+      "file": "Models/SM_FE_FXCard.fbx",
+      "triangles": 2,
+      "dimensions_m": [
+        1,
+        1,
+        0
+      ],
+      "sha256": "cb140a4dd9108106cae6f7bdb2cb99af95593a058daf6421dcc60214c227932f",
+      "bytes": 11708
+    },
+    {
+      "id": "T_FE_Eye0",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Eye0.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "32f9ba81a58b0fab45d59f79c6204dad385322c55f145f918c5c3d1121525a5e",
+      "bytes": 3834,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Eye1",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Eye1.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "6be856c6b3753e3bd087bd726de1e9335f291a66e3c83e6187b61ff8325216e6",
+      "bytes": 5302,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Eye2",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Eye2.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "e98a5b429d682faaaaaf96179bd8660af96bd585e623492ad02980565f6901f3",
+      "bytes": 3474,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Eye3",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Eye3.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "3be55816826ef1faed8246459b002d1a6c0615039bb80616497925d11dfa8b61",
+      "bytes": 4721,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Eye4",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Eye4.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "11656fc1af09405b6e1181d6164a56a46f10a31d611e96494c23919c1677eede",
+      "bytes": 7406,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Mouth0",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Mouth0.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "f431a0be443f32dcda84121897a9a57cc601d8d06985131c475b974190969051",
+      "bytes": 2356,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Mouth1",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Mouth1.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "20989be0f28f7b7d514f42486806cadb398f109fc2f406e6a330e9a61bdf9392",
+      "bytes": 5038,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Mouth2",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Mouth2.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "c6151ba10b45933cb590e51dfb5632d2da630eb2901b8cf5427ae042c6740748",
+      "bytes": 5846,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Mouth3",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Mouth3.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "595e5185f4603dc6a94af1bdcd7ce34585a1db281dc49180230afb749602f5b9",
+      "bytes": 4718,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_Mouth4",
+      "source": "original_blender_procedural",
+      "file": "UI/T_FE_Mouth4.png",
+      "size": [
+        256,
+        256
+      ],
+      "sha256": "f9ff33bfefd816c29e8a78ab19b2b91acf80caa22a2954fbf176726cbe91d1ef",
+      "bytes": 5501,
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "id": "T_FE_FaceAtlas",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_FaceAtlas.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "2b22e1f9414e1afb5a9ef5b33c94a644d24c620454355f0177f76d5e33715466",
+      "bytes": 117458,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_Icon_back",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_back.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "2697c64ce503e9ebbb296ea35c7fce8acf96f9cad3ec32e8566072eaa82dcdd9",
+      "bytes": 1391,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_left",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_left.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "ecd787f925e27c5b123cfcd95c62e59066ede15111435851bad5675e0c1efd28",
+      "bytes": 1328,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_right",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_right.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "b4faf9f6e7a73ac8961cf564a7b6d60c365b8b2cd8d2af347269fd56c1643fe2",
+      "bytes": 1329,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_up",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_up.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "36135abf6bcc716cde94a9a56492b0a839751c74aa1f849966d3a7ca2b60b214",
+      "bytes": 1262,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_down",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_down.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "39c5a67b657b4d27e26be949530131f20f0fcebc699118c3d474812ee8fd36b0",
+      "bytes": 1244,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_confirm",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_confirm.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "0bc3bf2d7664214ff5033d0050a747d75fbc573db3195632dd7e9cf3453f18a7",
+      "bytes": 2123,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_close",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_close.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "e112184f234342a189458ca381e6ecc882768d16bfb3b766850f760736c927fc",
+      "bytes": 1395,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_plus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_plus.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "89846db99309c3e959077f43ba22141baf46e8c2d35515b1ea3ea925d57330ed",
+      "bytes": 1244,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_minus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_minus.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "9074bab727da5698c89ff8f490c0d5e0783dfb885bbb26093a15ceccdb68c0ec",
+      "bytes": 1002,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_settings",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_settings.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "ea3da2d2884b19c905c62c56f2d4abac8e39052cf7fb4d81fe5732c480bdd74e",
+      "bytes": 3591,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_astronaut",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_astronaut.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "123ac2af8ecfa31a752f4e541a6b8e8ec6b0db5e66ec3d32db75b3df7e462b20",
+      "bytes": 2726,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_ship",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_ship.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "8adb4e3bbf02a75fed2bb8d710fa16570a94e32dcdb448d30a8714afc8fd4f5f",
+      "bytes": 3894,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_save",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_save.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "e28964e355ed20fb06e9972c0453eac0164648bfc8150b0e918190a68e820e5a",
+      "bytes": 1410,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_delete",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_delete.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "8ac480b0f3eaba0cb928b7ca558323909e324d48e068bead41614c54daa41b0c",
+      "bytes": 2376,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_refresh",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_refresh.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "0e8c383e4fa5d551fc093d844668cba7f79ed2f1c9e47b2b0cb749e5ef862984",
+      "bytes": 3116,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_search",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_search.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "fd29dafd642288773514086d8c7df50f0a28f0c82b776f5ccc4e57bb61e950bb",
+      "bytes": 2624,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_copy",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_copy.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "3af4bfd9a02717f4766672a637713398affcbc4799c0321eca692b948029ad4e",
+      "bytes": 1392,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_lock",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_lock.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "8f9da4fa5032b0df003b3974d2b4e2faed028580c3d29d213dab62c0bb94690a",
+      "bytes": 1995,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_unlock",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_unlock.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "f1b28d7e1fc1b162920dbb9778bbb6682881cf39f41aebe5b7f2d70ac22a6769",
+      "bytes": 2017,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_host",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_host.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "4f57bd534f218883605bf7fc9bce8300069b1fa9e62ea035888a00e66091a69c",
+      "bytes": 2715,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_ready",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_ready.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "0bc3bf2d7664214ff5033d0050a747d75fbc573db3195632dd7e9cf3453f18a7",
+      "bytes": 2123,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_unready",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_unready.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "e112184f234342a189458ca381e6ecc882768d16bfb3b766850f760736c927fc",
+      "bytes": 1395,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_mic",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_mic.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "60339ea44f188786eb3273709eefd2a085ae192b55092cb17d26c7f45d3fd948",
+      "bytes": 3013,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_micmute",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_micmute.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "f8ea5de2695153b07ed1361888cd78cd53ee91eb8573faca2cfaa9761978337d",
+      "bytes": 3246,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_speaker",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_speaker.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "4148de781e061feaa967aeedb2c709f42cf07ec115788908775044c45137c2d2",
+      "bytes": 2415,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_network",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_network.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "2e3e208d211fd13a459843c4726c935514ec6522a80ca5e2d2bf099478bfb67d",
+      "bytes": 3058,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_warning",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_warning.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "b6e7f325e233f3c2537e657c5ff8eb9e8c3c9ec0a09ceebb47739eb5de75e43f",
+      "bytes": 2520,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_info",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_info.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "b4b5661aa191ac065a2798042e982475fb5ddab0fcf76758fa95fe58644d36c8",
+      "bytes": 3311,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_eye",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_eye.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "9f61269d2da326c46475296fc9f93a4e377d32af55cf0c5063f5855f298b4cd7",
+      "bytes": 2922,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_mouth",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_mouth.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "f0519585701c78fbb26da34e3b4cb7ffb4399dbf4f1bcc4546e301f7ffb63cff",
+      "bytes": 2057,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_random",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_random.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "37935a444185e37b4ef5a6d863b9016ca2ed7c421922ecdd5eea39fceec27de0",
+      "bytes": 1873,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_Icon_reset",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Icon_reset.png",
+      "size": [
+        128,
+        128
+      ],
+      "sha256": "0e8c383e4fa5d551fc093d844668cba7f79ed2f1c9e47b2b0cb749e5ef862984",
+      "bytes": 3116,
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Panel_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Panel_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Subpanel_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Subpanel_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Card_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Card_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Button_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Button_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Tab_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Tab_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Scrollbar_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Scrollbar_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Slider_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Slider_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Toggle_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Toggle_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "04e86209191e5d8cb58ac7acb3632c2842d68f81b549f2cdd0e8e4d2fdb77888",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "081df7e1724fb1fbfef776942163e3e20b362261e9b1d209db6c121116d3cf5d",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "624efda9f78fea44111e26bcf76d85cd925d0fd822aa3117bd70ef0c82679f1a",
+      "bytes": 817,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "4daa87e8d8a3a5ef6828656c8ae2d555b2b987a0f3b863bcc98cf72deb49b77c",
+      "bytes": 797,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f1ad118e065bf55b2ea33589496f72740143fc31879fdc6abb15b208aebcf3b9",
+      "bytes": 816,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Radio_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Radio_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "355303b17c41c5863af856608fe02a501f959076defc2823a9de0c83013a1af6",
+      "bytes": 645,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Normal",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Normal.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "d9109644ba176e808bdedfd91dfa9949243a6acdbceb69c897b98c1c64e2ebbf",
+      "bytes": 788,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Hover",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Hover.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "a7e9f6085075a7dc629ba00b90255ca64717957e08ead9468f55595bd5645e65",
+      "bytes": 788,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Pressed",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Pressed.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "c59e3bd5be4952857bde1df58afcbe81dcc30b9a48350217781174752d008328",
+      "bytes": 786,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Selected",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Selected.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "73d81f874ee24534ebfe06e8ac78f187b2dedf5838678e75c2a90dd7c16588ad",
+      "bytes": 786,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Disabled",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Disabled.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "f4d4381de0a8d83e9420755fe44a7d6ff2c2655405a663d3cb88a661623b945b",
+      "bytes": 787,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_UI_Modal_Focus",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Modal_Focus.png",
+      "size": [
+        96,
+        96
+      ],
+      "sha256": "87eeec6628b9f12105967d9c8e242cc58a1169138ecde517c83807b11cc88ac0",
+      "bytes": 780,
+      "dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "T_Logo_Full",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Logo_Full.png",
+      "size": [
+        1024,
+        512
+      ],
+      "sha256": "c34d989d2825363cc87b192aab9ce1479f59a41dce70b6a5ae6b1163337fc590",
+      "bytes": 30164,
+      "dimensions": [
+        1024,
+        512
+      ]
+    },
+    {
+      "id": "T_Logo_Mono",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Logo_Mono.png",
+      "size": [
+        1024,
+        512
+      ],
+      "sha256": "b9eece6ebcf60aee283541dad621efbcc9963c2a7413a56c2b1d7b1ae59085c3",
+      "bytes": 30136,
+      "dimensions": [
+        1024,
+        512
+      ]
+    },
+    {
+      "id": "T_Logo_Compact",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Logo_Compact.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "d21b3e4b2ea404a24121979cd4184616e900d4ab27c92c77447ef2637a94c129",
+      "bytes": 16867,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_Illus_EmptySave",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Illus_EmptySave.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "9c087d02a4fc2b91abf6e0220eb1d4a8000fcbc709b96b3e6d98b86bcba2b898",
+      "bytes": 13679,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_Illus_NoCrews",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Illus_NoCrews.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "c7c511830e03525f9ce5b0f45afd30a7408c804d572bd879d35307a0a0314351",
+      "bytes": 19007,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_Illus_NetworkError",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Illus_NetworkError.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "babdf30562ff47ee779433edbeff0873825812f135f05f2c3f7658e9b4dd5fe8",
+      "bytes": 15611,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_Illus_ExpeditionCard",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Illus_ExpeditionCard.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "9c087d02a4fc2b91abf6e0220eb1d4a8000fcbc709b96b3e6d98b86bcba2b898",
+      "bytes": 13679,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_Illus_LoadingShip",
+      "source": "original_blender_procedural",
+      "file": "UI/T_Illus_LoadingShip.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "31ec1fb667ec3b9024f62fa0fd5dce4774eeb74039c3b43de00d8f19ef4a7df1",
+      "bytes": 17066,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_FE_Concrete_BaseColor",
+      "source": "polyhaven_cc0_adapted",
+      "file": "Textures/T_FE_Concrete_BaseColor.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "1e51f63e0a926ac9e70f79d74f671668fd05b35fdaa323e5a4880123d27989b8",
+      "bytes": 3891020,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Concrete_Normal",
+      "source": "polyhaven_cc0_adapted",
+      "file": "Textures/T_FE_Concrete_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "d60115881a7d5b84d495bed784e1e1718476afaf9eaf1ea87ff77446641f1eb0",
+      "bytes": 4510450,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Concrete_ORM",
+      "source": "polyhaven_cc0_adapted",
+      "file": "Textures/T_FE_Concrete_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "d68f0d9a172641597358b0cee1640e64610cfb4975677d1a858a64a221160ad9",
+      "bytes": 3931284,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit0_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit0_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "2faa01bfdd369c5dfc96c44a8a29f0c903d334bc04fec386ce8efbf9530f5d1e",
+      "bytes": 6959273,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit0_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit0_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "83e4443181f9b9603dd6b78d29c91d535b85fa09da04cbe9f7688966fa66c64b",
+      "bytes": 3327803,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit1_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit1_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "3f109e96ce3cf8d7dcf890d452170db0cdd5b2bca1708c393a5eba3ba30c3985",
+      "bytes": 6958419,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit1_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit1_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "bf66c96c5f29f57d4dfdf2b603100bc8968f9f471c7bc23ee3f791ae9b4ca029",
+      "bytes": 3326958,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit2_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit2_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "cb1fd655b72036d18803b08f81e9cff89b58f640635b7b2224b4c69338ed935a",
+      "bytes": 6957525,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit2_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit2_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "38bd8880f691f823faa9a5c1e7f2e77d60f03a2cf72b3a9ab88199154df5ca68",
+      "bytes": 3329035,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit3_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit3_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "9b16555e4bb61999aa397720250b82cc4a0c2dac17b033c3191490ad768be662",
+      "bytes": 6959286,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit3_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit3_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "6927c92641537277355c680d39b19b5a15bd589d0e9a29d1768d2e9c8f443259",
+      "bytes": 3329621,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit4_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit4_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "6a32778fae1ba75785cdad9e248770d43dc7d5a2f74b089ba104feea043b6915",
+      "bytes": 6960013,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Suit4_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Suit4_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "2e57f985e16e2bac772fcf7ffba56135bd26744cc021d3090440c29c08c7f486",
+      "bytes": 3330766,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Metal_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Metal_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "a00eb52b76995227253724370765808c6e200811da7878f649fb7b350c39d435",
+      "bytes": 3511614,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Rubber_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Rubber_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "30b40a00a107dcfbe4ef892c221f3b817097d19a1f0ca130a6f8f62ef180b7c6",
+      "bytes": 3514103,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Paint_ORM",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Paint_ORM.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "daec72b6aa6d227301d4a131b6b9ff4928cb008fdd392c52e2e7f151e79bfd12",
+      "bytes": 3514062,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Moon_BaseColor",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Moon_BaseColor.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "0b1291e8d5d2a95ead43260376bd573df7d3efb5a319d953779497373ebea339",
+      "bytes": 2947059,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FE_Moon_Normal",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_Moon_Normal.png",
+      "size": [
+        2048,
+        2048
+      ],
+      "sha256": "ae4975c1269c0779efa3746cdf84196101a0c9c3a3ebb8a9358dd6594dd83690",
+      "bytes": 7415113,
+      "dimensions": [
+        2048,
+        2048
+      ]
+    },
+    {
+      "id": "T_FX_SoftCircle",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FX_SoftCircle.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "4f907adf1fadcb3803b524e99acc084d9650b8857a5127aeed7ffd9e0cb99b20",
+      "bytes": 57962,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_FX_Noise",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FX_Noise.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "b5cca361ec97e15f96f1f35928355a3ea48ad3b679e7a00a2a209f2406570ac2",
+      "bytes": 406183,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_FX_Stars",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FX_Stars.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "7a3610f5717f4e9a75e9efa35b81ac142e56400e8e705c3b563000551bf27444",
+      "bytes": 11166,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_UI_Grain",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_Grain.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "f31c95268fa390ad5251c5ad3c51bb43da86ece699e7eba9a249db04065d0379",
+      "bytes": 247783,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_UI_WarningStripe",
+      "source": "original_blender_procedural",
+      "file": "UI/T_UI_WarningStripe.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "ba8d3bb0777a23e1a9d7929102f80ca230100ac4f5a6aa567feb421c0a3dcc25",
+      "bytes": 14481,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "T_FE_MarkingAtlas",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_MarkingAtlas.png",
+      "size": [
+        512,
+        512
+      ],
+      "sha256": "ec8ea69accd4fa54bec85097cf474b9541b5f1e4a1c724a735a29753c7bb7e17",
+      "bytes": 8302,
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "id": "S_UI_Focus",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Focus.wav",
+      "seconds": 0.12,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Focus",
+      "sha256": "e5efb8cf0d3fdde767f5edd692006d020df241894ccce2bd86fd55c23936aed3",
+      "bytes": 11564,
+      "audio_check": {
+        "peak": 0.64566,
+        "endpoint_delta": 0,
+        "seconds": 0.12
+      }
+    },
+    {
+      "id": "S_UI_Confirm",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Confirm.wav",
+      "seconds": 0.12,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Confirm",
+      "sha256": "a9401cad6b68e70ef76bc8ca7dc20f4df8eb34529ca6b1209ba1ae7b5938784d",
+      "bytes": 11564,
+      "audio_check": {
+        "peak": 0.64655,
+        "endpoint_delta": 0,
+        "seconds": 0.12
+      }
+    },
+    {
+      "id": "S_UI_Back",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Back.wav",
+      "seconds": 0.12,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Back",
+      "sha256": "01f36c9c029a819043b8feea4d89f180ab5e771acafa60774b93dedfbdf5a942",
+      "bytes": 11564,
+      "audio_check": {
+        "peak": 0.63071,
+        "endpoint_delta": 0,
+        "seconds": 0.12
+      }
+    },
+    {
+      "id": "S_UI_Tab",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Tab.wav",
+      "seconds": 0.12,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Tab",
+      "sha256": "de799275712ba06a3b40a2ce1264faa2c4aa0d24eb34b402d381b71ea3c0e10e",
+      "bytes": 11564,
+      "audio_check": {
+        "peak": 0.64731,
+        "endpoint_delta": 0,
+        "seconds": 0.12
+      }
+    },
+    {
+      "id": "S_UI_Apply",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Apply.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Apply",
+      "sha256": "025fc4f438b545366d61b4994368e24443a068a4a0e68a1a8de95cdb99a6202f",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.70468,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Random",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Random.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Random",
+      "sha256": "57b096929a8b675c2eb86ebd76b7b63c7ca8739ae06eb7fb2d784c152a6a8615",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71997,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Ready",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Ready.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Ready",
+      "sha256": "c0fa7bb56f54c05d25ba92ce39ca12a6395fac5b00d0ceded3eadc237a8b95f3",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71997,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Unready",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Unready.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Unready",
+      "sha256": "872f8f93e7bda43ef24622337b5de1083d0cff585c8b59448acd43b8a883c21f",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71997,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Join",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Join.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Join",
+      "sha256": "67849bdb0fb63377436d33e166d999a89ac00210b7772dae0f9e4618c6cb65a8",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71997,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Leave",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Leave.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Leave",
+      "sha256": "ee4e8c1aa9994b7f3a12027d391907ebdb17e27c0f3429a64930d4a2f13b418a",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71878,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Error",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Error.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Error",
+      "sha256": "77dea2019c8848e4c334725c064afebf464bd91806a282adca7d059ce0e59060",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71997,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_UI_Transition",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_UI_Transition.wav",
+      "seconds": 0.32,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Sine + second harmonic; exponential decay; Transition",
+      "sha256": "31520475611fc635eaef39f0e727bc9ea5f79c6f6b93698a3062bde5c9c10c69",
+      "bytes": 30764,
+      "audio_check": {
+        "peak": 0.71924,
+        "endpoint_delta": 0,
+        "seconds": 0.32
+      }
+    },
+    {
+      "id": "S_Amb_Wind",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Amb_Wind.wav",
+      "seconds": 12.0,
+      "sample_rate": 48000,
+      "loop": true,
+      "recipe": "Filtered noise and harmonic oscillator; original Wind",
+      "sha256": "ee12e4e55e3fd83b6908ec8ea30b67f50db6dfa72c299f52c11de652ed7c9735",
+      "bytes": 1152044,
+      "audio_check": {
+        "peak": 0.04639,
+        "endpoint_delta": 0,
+        "seconds": 12.0
+      }
+    },
+    {
+      "id": "S_Amb_Hangar",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Amb_Hangar.wav",
+      "seconds": 10.0,
+      "sample_rate": 48000,
+      "loop": true,
+      "recipe": "Filtered noise and harmonic oscillator; original Hangar",
+      "sha256": "6db7d313ada3fd594fd94481730a1b4b51dcc92f89f25a7e024bac0d65d1a850",
+      "bytes": 960044,
+      "audio_check": {
+        "peak": 0.03583,
+        "endpoint_delta": 0,
+        "seconds": 10.0
+      }
+    },
+    {
+      "id": "S_Amb_ShipCooling",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Amb_ShipCooling.wav",
+      "seconds": 8.0,
+      "sample_rate": 48000,
+      "loop": true,
+      "recipe": "Filtered noise and harmonic oscillator; original ShipCooling",
+      "sha256": "1b539683dcfdf02f60b587ca533f1f02667d6afce76258632639b4e96d631008",
+      "bytes": 768044,
+      "audio_check": {
+        "peak": 0.04761,
+        "endpoint_delta": 0,
+        "seconds": 8.0
+      }
+    },
+    {
+      "id": "S_Amb_Steam",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Amb_Steam.wav",
+      "seconds": 1.4,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Filtered noise and harmonic oscillator; original Steam",
+      "sha256": "c57e88fc9369d90216b0fdafaee303911e73aa2eb43304d5d8c81c36f565effe",
+      "bytes": 134444,
+      "audio_check": {
+        "peak": 0.13925,
+        "endpoint_delta": 0,
+        "seconds": 1.4
+      }
+    },
+    {
+      "id": "S_Amb_Motor",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Amb_Motor.wav",
+      "seconds": 2.2,
+      "sample_rate": 48000,
+      "loop": false,
+      "recipe": "Filtered noise and harmonic oscillator; original Motor",
+      "sha256": "7792a275f73da3fa523e75d8b85494eb3711e8cdcb47f246e56e8fa528c858db",
+      "bytes": 211244,
+      "audio_check": {
+        "peak": 0.07199,
+        "endpoint_delta": 0,
+        "seconds": 2.2
+      }
+    },
+    {
+      "id": "S_Music_LaunchShift",
+      "source": "original_blender_pcm_synthesis",
+      "file": "Audio/S_Music_LaunchShift.wav",
+      "seconds": 80.0,
+      "sample_rate": 48000,
+      "loop": true,
+      "recipe": "Original 96 BPM, 4/4, 32 bars (80 seconds); C/Am/F/G pad, alternating pluck, sine bass and filtered-noise rhythm",
+      "sha256": "dd987a0c3cac467872500c1d4e32771f71551549e2055d9825fbb261817cee00",
+      "bytes": 15360044,
+      "audio_check": {
+        "peak": 0.11108,
+        "endpoint_delta": 0,
+        "seconds": 80.0
+      }
+    },
+    {
+      "id": "A_FE_Idle",
+      "source": "original_blender_planted_relaxed_idle",
+      "file": "Animations/A_FE_Idle.fbx",
+      "seconds": 12,
+      "fps": 30,
+      "loop": true,
+      "description": "Soft knee IK, planted independent feet, weight shift, asymmetric elbow flex, curled fingers, breathing and head motion",
+      "sha256": "62725d1d179c215f7064da820e9425887c41f70e76e4f92e91e42309c09952a1",
+      "bytes": 2123692
+    },
+    {
+      "id": "A_FE_LookShip",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_LookShip.fbx",
+      "seconds": 5,
+      "fps": 30,
+      "loop": false,
+      "sha256": "cdd6467f3e8ff8ae156a774b6398d2959123cca082c35d8c3368c02bd69ab7ad",
+      "bytes": 1168172
+    },
+    {
+      "id": "A_FE_CheckWrist",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_CheckWrist.fbx",
+      "seconds": 4,
+      "fps": 30,
+      "loop": false,
+      "sha256": "f97d70864a0180b19a23fab63e3b3bf8b16045529379c744d6c840a832fc9640",
+      "bytes": 1038716
+    },
+    {
+      "id": "A_FE_AdjustGlove",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_AdjustGlove.fbx",
+      "seconds": 4,
+      "fps": 30,
+      "loop": false,
+      "sha256": "98097491dd1dea43ebc02c5b56e93739de297957c6ebd19f3dcde007834d67d4",
+      "bytes": 1041980
+    },
+    {
+      "id": "A_FE_Join",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_Join.fbx",
+      "seconds": 2,
+      "fps": 30,
+      "loop": false,
+      "sha256": "3cb2604502eda1a0d3c7c89b8b1e50f8a983fdd521617a01c0b3cdc9a6025c6d",
+      "bytes": 777692
+    },
+    {
+      "id": "A_FE_Ready",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_Ready.fbx",
+      "seconds": 2,
+      "fps": 30,
+      "loop": false,
+      "sha256": "99f782dfe9a155e0100332359f0b7a191540a4f85a5e701669fe1a6926bb4fde",
+      "bytes": 776972
+    },
+    {
+      "id": "A_FE_Unready",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_Unready.fbx",
+      "seconds": 2,
+      "fps": 30,
+      "loop": false,
+      "sha256": "aa109d4f3afbe411400cfff258119905d21417ad1e820ba16a002f3f78331239",
+      "bytes": 776284
+    },
+    {
+      "id": "A_FE_Leave",
+      "source": "original_blender_keyframes",
+      "file": "Animations/A_FE_Leave.fbx",
+      "seconds": 2,
+      "fps": 30,
+      "loop": false,
+      "sha256": "1c2bd292c4ff1054d6e9b66e4cf0840f670644a7ffa6c9979c31b8cfe350bbac",
+      "bytes": 777388
+    },
+    {
+      "id": "T_Thumb_Explorer",
+      "source": "rendered_original_suit",
+      "file": "UI/T_Thumb_Explorer.png",
+      "size": [
+        512,
+        768
+      ],
+      "sha256": "caa4f9907721ab4f0b93f49ad26dd9b65ab279ab2025615fee2dcb073342be13",
+      "bytes": 277700,
+      "dimensions": [
+        512,
+        768
+      ]
+    },
+    {
+      "id": "T_Thumb_Scout",
+      "source": "rendered_original_suit",
+      "file": "UI/T_Thumb_Scout.png",
+      "size": [
+        512,
+        768
+      ],
+      "sha256": "3fd34b640c70c99f56a7716a5f9cb0a41b3843db8c6b933fb1dd8b8d29623b05",
+      "bytes": 279207,
+      "dimensions": [
+        512,
+        768
+      ]
+    },
+    {
+      "id": "T_Thumb_Engineer",
+      "source": "rendered_original_suit",
+      "file": "UI/T_Thumb_Engineer.png",
+      "size": [
+        512,
+        768
+      ],
+      "sha256": "04d87496cef6b129b63874123ec30ef9d34d25e2f987c850eaf16cede1378821",
+      "bytes": 277916,
+      "dimensions": [
+        512,
+        768
+      ]
+    },
+    {
+      "id": "T_Thumb_Survey",
+      "source": "rendered_original_suit",
+      "file": "UI/T_Thumb_Survey.png",
+      "size": [
+        512,
+        768
+      ],
+      "sha256": "1b9edc0fdc50726208ff89ba8a577d7fe88ce2f6f4e03afff1eb94a408081e52",
+      "bytes": 279089,
+      "dimensions": [
+        512,
+        768
+      ]
+    },
+    {
+      "id": "T_Thumb_Tactical",
+      "source": "rendered_original_suit",
+      "file": "UI/T_Thumb_Tactical.png",
+      "size": [
+        512,
+        768
+      ],
+      "sha256": "1000b9b743e9660bdfd9c2041217b5135f893171dff38a87e7b2d10ee30d2f4f",
+      "bytes": 279298,
+      "dimensions": [
+        512,
+        768
+      ]
+    },
+    {
+      "id": "QA_Idle",
+      "source": "original_pose_qa",
+      "file": "Previews/Pose_Idle.png",
+      "bounds_m": [
+        [
+          -0.3580050468444824,
+          0.3580050468444824
+        ],
+        [
+          -0.25850000977516174,
+          0.1925000101327896
+        ],
+        [
+          0.0010000001639127731,
+          1.9069998264312744
+        ]
+      ],
+      "sha256": "9a322ca787f3cb42ff6bd670d1575b23a1b64095989b6e270c6955b135902aa9",
+      "bytes": 1091850,
+      "dimensions": [
+        900,
+        1100
+      ]
+    },
+    {
+      "id": "QA_RifleQA",
+      "source": "original_pose_qa",
+      "file": "Previews/Pose_RifleQA.png",
+      "bounds_m": [
+        [
+          -0.28851860761642456,
+          0.3128003478050232
+        ],
+        [
+          -0.5677265524864197,
+          0.1925000101327896
+        ],
+        [
+          0.0010000001639127731,
+          1.9069998264312744
+        ]
+      ],
+      "sha256": "5a2562493d1444a859ff30dbb21d63e91fa9087df2885f8add8bac3e4521a14a",
+      "bytes": 1082701,
+      "dimensions": [
+        900,
+        1100
+      ]
+    },
+    {
+      "id": "QA_RunQA",
+      "source": "original_pose_qa",
+      "file": "Previews/Pose_RunQA.png",
+      "bounds_m": [
+        [
+          -0.2880990505218506,
+          0.3345646858215332
+        ],
+        [
+          -0.5750707983970642,
+          0.7198721170425415
+        ],
+        [
+          0.19199378788471222,
+          1.893709659576416
+        ]
+      ],
+      "sha256": "aeb0d13abb57e02acd00483e90009af9d6d56bc1ffa23dfd6bb4c7c04317aae8",
+      "bytes": 1078554,
+      "dimensions": [
+        900,
+        1100
+      ]
+    },
+    {
+      "id": "QA_CrouchQA",
+      "source": "original_pose_qa",
+      "file": "Previews/Pose_CrouchQA.png",
+      "bounds_m": [
+        [
+          -0.3580050468444824,
+          0.3580050468444824
+        ],
+        [
+          -0.36147743463516235,
+          0.32335978746414185
+        ],
+        [
+          0.0010000001639127731,
+          1.5375384092330933
+        ]
+      ],
+      "sha256": "eed80192765e7c8299ce95f7700b10f30b2a7f55491c8d846a9d8a21df7ca890",
+      "bytes": 1091254,
+      "dimensions": [
+        900,
+        1100
+      ]
+    },
+    {
+      "id": "QA_CheckWrist",
+      "source": "original_pose_qa",
+      "file": "Previews/Pose_CheckWrist.png",
+      "bounds_m": [
+        [
+          -0.3580050468444824,
+          0.3734893500804901
+        ],
+        [
+          -0.5216193199157715,
+          0.1925000101327896
+        ],
+        [
+          0.0010000001639127731,
+          1.9011150598526
+        ]
+      ],
+      "sha256": "b219cec1c6d8f7bdd7313279f7efdc77b05e3a4a5be76c834f4260516eea71b7",
+      "bytes": 1082663,
+      "dimensions": [
+        900,
+        1100
+      ]
+    },
+    {
+      "id": "JTSUISans-Regular",
+      "source": "adobe_ofl_derivative",
+      "file": "Fonts/JTSUISans-Regular.otf",
+      "glyphs": 65535,
+      "adaptations": [
+        "Renamed modified family and PostScript names; reserved Source name removed",
+        "Tabular 0-9 metrics at 580/1000 em",
+        "ASCII punctuation +24/1000 em spacing",
+        "Chinese coverage retained without subsetting"
+      ],
+      "sha256": "ef1358d84ffd5a9c497a2424b5723fe9e002c686ba4adfba316f2ad3478b9fe1",
+      "bytes": 16529728
+    },
+    {
+      "id": "JTSUISans-Bold",
+      "source": "adobe_ofl_derivative",
+      "file": "Fonts/JTSUISans-Bold.otf",
+      "glyphs": 65535,
+      "adaptations": [
+        "Renamed modified family and PostScript names; reserved Source name removed",
+        "Tabular 0-9 metrics at 580/1000 em",
+        "ASCII punctuation +24/1000 em spacing",
+        "Chinese coverage retained without subsetting"
+      ],
+      "sha256": "df3de0b588ff472855ba5020c37964de26a07e6d330230746a1f486e4ebea743",
+      "bytes": 16963264
+    },
+    {
+      "id": "T_FE_SkyGradient",
+      "source": "original_blender_procedural",
+      "file": "Textures/T_FE_SkyGradient.png",
+      "size": [
+        2048,
+        1024
+      ],
+      "recipe": "Clear blue Earth daytime sky, quiet high white clouds; original procedural artwork",
+      "sha256": "6121daff7114e42e716dde987042d89cd1bd6c871b0da58f246fb88a950d5f60",
+      "bytes": 147351,
+      "dimensions": [
+        2048,
+        1024
+      ]
+    },
+    {
+      "id": "SM_FE_ThreatCore",
+      "file": "Models/SM_FE_ThreatCore.fbx",
+      "source": "original_blender",
+      "triangles": 3196,
+      "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry",
+      "sha256": "19eca346f42703cafda3a371089180d1eb28052de05aeb12faa53b6e07e2a3b7",
+      "bytes": 69484
+    },
+    {
+      "id": "SM_FE_ThreatHalo",
+      "file": "Models/SM_FE_ThreatHalo.fbx",
+      "source": "original_blender",
+      "triangles": 3196,
+      "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry",
+      "sha256": "3d2c7763ed632bf035069b7a572013e504edd189a724696cd3e685e69d43d819",
+      "bytes": 69388
+    },
+    {
+      "id": "SM_FE_ThreatFrontRings",
+      "file": "Models/SM_FE_ThreatFrontRings.fbx",
+      "source": "original_blender",
+      "triangles": 5080,
+      "purpose": "Rounded white-hot alien beam front suspended above Earth; original geometry",
+      "sha256": "fe4e1a64161bd0f2a78677906046e465421cb6f879747c7f818f884d2bc56414",
+      "bytes": 135948
+    },
+    {
+      "id": "T_FE_ThreatHeatCloud",
+      "file": "Textures/T_FE_ThreatHeatCloud.png",
+      "source": "original_blender_procedural",
+      "size": [
+        1024,
+        1024
+      ],
+      "recipe": "Seeded multiscale value noise, radial atmospheric scattering, white-orange center and red outer corona; no sampled artwork",
+      "sha256": "b48a696dbb04fa89628fa7007fd27c7d6709cb5e0020eb536d1d40734efced2e",
+      "bytes": 212703,
+      "dimensions": [
+        1024,
+        1024
+      ]
+    },
+    {
+      "id": "T_FE_FallbackBackground",
+      "file": "Textures\\T_FE_FallbackBackground.png",
+      "source": "original_unreal_scene_capture",
+      "sha256": "a83bb75e7c7f4d4783ecfe3b26efef37762fd6e91325fde9de3cebe35427737d"
+    }
+  ],
+  "unreal_authored": [
+    "16 parameterized material families + 12 palette instances",
+    "L_FrontEndArtLab original set dressing, lighting and four cameras",
+    "LS_FE_HangarLoop 60 seconds: maintenance robot and steam cards",
+    "Original suspended high-altitude alien laser front, clear blue daytime lighting"
+  ],
+  "adaptations": {
+    "floor": "Cool low contrast repaint; normal amplitude reduced; roughness raised; AO suppressed",
+    "font": "Renamed JTS UI Sans, tabular digits and punctuation spacing; full Chinese glyph coverage",
+    "rig_reference": "Bones only; original fitted suit geometry, weights, faces and animations",
+    "ship": "Project original Twinfork display derivative; welded, bevelled, recolored, gameplay internals removed"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "worlds": [
+    {
+      "world": "/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry",
+      "widgets": [
+        {
+          "class": "/Game/Space/FrontEnd/Widgets/WBP_FE_Main.WBP_FE_Main_C",
+          "page": "Settings",
+          "page_after": "Settings",
+          "labels": {
+            "VideoCountdown": "保留此显示设置？15 秒后恢复"
+          },
+          "controls": {
+            "KeepVideo": {
+              "enabled": true,
+              "visible": true
+            },
+            "RevertVideo": {
+              "enabled": true,
+              "visible": true
+            }
+          }
+        }
+      ],
+      "phase": "<Object '/Game/Space/FrontEnd/Maps/UEDPIE_0_L_Entry.L_Entry:PersistentLevel.GameStateBase_0' (0x000001538EB73C00) Class 'GameStateBase'>",
+      "player_count": 1,
+      "players": [
+        {
+          "name": "DESKTOP-1G74PU2-E966"
+        }
+      ]
+    }
+  ],
+  "success": true
+}

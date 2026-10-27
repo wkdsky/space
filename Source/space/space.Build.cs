@@ -10,7 +10,7 @@ public class space : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "RenderCore", "ProceduralMeshComponent", "OnlineSubsystem", "VoiceChat", "MassCore", "MassEntity" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "EngineSettings", "OnlineSubsystemUtils" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "EngineSettings", "OnlineSubsystemUtils", "LevelSequence", "MovieScene" });
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

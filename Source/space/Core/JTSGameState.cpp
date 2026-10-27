@@ -2,6 +2,11 @@
 
 #include "space/Core/JTSGameState.h"
 
+void AJTSGameState::SetLaunchDeadline(double Value)
+{
+	if (HasAuthority()) { LaunchDeadline=Value; ForceNetUpdate(); }
+}
+
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 
@@ -162,6 +167,7 @@ void AJTSGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSGameState, GameplayPhase);
+	DOREPLIFETIME(AJTSGameState, LaunchDeadline);
 	DOREPLIFETIME(AJTSGameState, bAcceptingNewPlayers);
 	DOREPLIFETIME(AJTSGameState, FailureReason);
 	DOREPLIFETIME(AJTSGameState, EarthCollectionEndTimeSeconds);

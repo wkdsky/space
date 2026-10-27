@@ -21,6 +21,8 @@ class UJTSRangedWeaponComponent;
 class UJTSStaminaComponent;
 class UJTSWallClimbComponent;
 class UJTSWeaponVisualComponent;
+class UJTSAvatarAppearanceComponent;
+class UJTSAvatarCatalog;
 class UPointLightComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 class UInteractionComponent;
@@ -56,6 +58,12 @@ class SPACE_API AJTSCharacter : public ACharacter
 
 public:
 	AJTSCharacter();
+	/** Blueprint selects the shared appearance assets for this character family. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Appearance")
+	TObjectPtr<UJTSAvatarCatalog> AvatarCatalog;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Appearance")
+	TObjectPtr<UJTSAvatarAppearanceComponent> AvatarAppearance;
 	/** Eye height follows spherical gravity instead of APawn's fixed world-Z offset. */
 	virtual FVector GetPawnViewLocation() const override;
 	/** Shared combat gating for composed weapon systems, including phase and local UI. */

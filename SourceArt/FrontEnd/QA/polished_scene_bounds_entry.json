@@ -1,0 +1,456 @@
+{
+  "success": true,
+  "operation": "probe",
+  "actors": [
+    {
+      "name": "FE_ServiceWall",
+      "location": [
+        -1200.0,
+        1600.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -1200.0,
+        1620.0,
+        200.0
+      ],
+      "extent": [
+        200.0,
+        30.0,
+        200.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_ServiceWall.SM_FE_ServiceWall' (0x000001CCBE482800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Wall",
+      "location": [
+        -800.0,
+        1600.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -800.0,
+        1606.5,
+        200.0
+      ],
+      "extent": [
+        200.0,
+        16.5,
+        200.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Wall.SM_FE_Wall' (0x000001CCBE41E800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Wall",
+      "location": [
+        800.0,
+        1600.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        800.0,
+        1606.5,
+        200.0
+      ],
+      "extent": [
+        200.0,
+        16.5,
+        200.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Wall.SM_FE_Wall' (0x000001CCBE41E800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_ServiceWall",
+      "location": [
+        1200.0,
+        1600.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        1200.0,
+        1620.0,
+        200.0
+      ],
+      "extent": [
+        200.0,
+        30.0,
+        200.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_ServiceWall.SM_FE_ServiceWall' (0x000001CCBE482800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_DoorFrame",
+      "location": [
+        -650.0,
+        1590.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -650.0,
+        1590.0,
+        172.5
+      ],
+      "extent": [
+        180.0,
+        25.0,
+        172.5
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_DoorFrame.SM_FE_DoorFrame' (0x000001CCBE414000) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Door",
+      "location": [
+        -650.0,
+        1570.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -650.0,
+        1575.25,
+        150.0
+      ],
+      "extent": [
+        150.0,
+        12.75,
+        150.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Door.SM_FE_Door' (0x000001CCBE419800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_TwinforkDisplay",
+      "location": [
+        -120.0,
+        1000.0,
+        44.92
+      ],
+      "scale": [
+        0.34,
+        0.34,
+        0.34
+      ],
+      "center": [
+        -120.0,
+        1000.0,
+        62.26
+      ],
+      "extent": [
+        254.04,
+        270.155,
+        60.86
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_TwinforkDisplay.SM_FE_TwinforkDisplay' (0x000001CCBE41A000) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_CrewPad_0",
+      "location": [
+        -240.0,
+        -80.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -240.0,
+        -80.0,
+        3.0
+      ],
+      "extent": [
+        42.0,
+        42.0,
+        2.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_DockMarker.SM_FE_DockMarker' (0x000001CCBE41B800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_CrewPad_1",
+      "location": [
+        -50.0,
+        -80.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        -50.0,
+        -80.0,
+        3.0
+      ],
+      "extent": [
+        42.0,
+        42.0,
+        2.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_DockMarker.SM_FE_DockMarker' (0x000001CCBE41B800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_CrewPad_2",
+      "location": [
+        80.0,
+        -80.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        80.0,
+        -80.0,
+        3.0
+      ],
+      "extent": [
+        42.0,
+        42.0,
+        2.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_DockMarker.SM_FE_DockMarker' (0x000001CCBE41B800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_CrewPad_3",
+      "location": [
+        240.0,
+        -80.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        240.0,
+        -80.0,
+        3.0
+      ],
+      "extent": [
+        42.0,
+        42.0,
+        2.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_DockMarker.SM_FE_DockMarker' (0x000001CCBE41B800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Hill1",
+      "location": [
+        -6000.0,
+        14000.0,
+        0.0
+      ],
+      "scale": [
+        2.0,
+        2.0,
+        0.6
+      ],
+      "center": [
+        -5999.999,
+        14000.0,
+        -120.0
+      ],
+      "extent": [
+        5999.998,
+        3000.0,
+        480.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Hill1.SM_FE_Hill1' (0x000001CCBE487800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Hill2",
+      "location": [
+        0.0,
+        14000.0,
+        0.0
+      ],
+      "scale": [
+        2.0,
+        2.0,
+        0.6
+      ],
+      "center": [
+        0.002,
+        14000.0,
+        -120.0
+      ],
+      "extent": [
+        8771.885,
+        6643.652,
+        600.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Hill2.SM_FE_Hill2' (0x000001CCBE488000) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_Hill3",
+      "location": [
+        6000.0,
+        14000.0,
+        0.0
+      ],
+      "scale": [
+        2.0,
+        2.0,
+        0.6
+      ],
+      "center": [
+        6000.001,
+        14000.001,
+        -120.0
+      ],
+      "extent": [
+        9645.26,
+        10360.149,
+        720.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_Hill3.SM_FE_Hill3' (0x000001CCBE488800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_AlienThreat_Core",
+      "location": [
+        -100000.0,
+        400000.0,
+        56000.0
+      ],
+      "scale": [
+        100.0,
+        100.0,
+        100.0
+      ],
+      "center": [
+        -100000.0,
+        400000.0,
+        359300.0
+      ],
+      "extent": [
+        4600.0,
+        4600.0,
+        303300.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_ThreatCore.SM_FE_ThreatCore' (0x000001CC4C858800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_AlienThreat_Halo",
+      "location": [
+        -100000.0,
+        400000.0,
+        56000.0
+      ],
+      "scale": [
+        100.0,
+        100.0,
+        100.0
+      ],
+      "center": [
+        -100000.0,
+        400000.0,
+        361500.0
+      ],
+      "extent": [
+        9500.0,
+        9500.0,
+        305500.0
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_ThreatHalo.SM_FE_ThreatHalo' (0x000001CC68B74800) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_AlienThreat_FrontRings",
+      "location": [
+        -100000.0,
+        400000.0,
+        56000.0
+      ],
+      "scale": [
+        100.0,
+        100.0,
+        100.0
+      ],
+      "center": [
+        -99479.302,
+        399747.52,
+        67748.121
+      ],
+      "extent": [
+        17432.749,
+        14588.151,
+        6294.021
+      ],
+      "mesh": "<Object '/Game/Space/FrontEnd/Models/SM_FE_ThreatFrontRings.SM_FE_ThreatFrontRings' (0x000001CC36202000) Class 'StaticMesh'>"
+    },
+    {
+      "name": "FE_MainPresentation",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center": [
+        75.0,
+        -650.0,
+        140.0
+      ],
+      "extent": [
+        1010.0,
+        1010.0,
+        1010.0
+      ],
+      "preview_transform": "<Struct 'Transform' (0x000001CCAADD7C90) {rotation: {x: -0.000000, y: 0.000000, z: -0.984808, w: 0.173648}, translation: {x: -50.000000, y: -80.000000, z: 5.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+      "views": {
+        "Home": {
+          "transform": "<Struct 'Transform' (0x000001CCC84E1030) {rotation: {x: -0.022296, y: 0.022296, z: 0.706755, w: 0.706755}, translation: {x: 75.000000, y: -650.000000, z: 140.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+          "fov": 50.0
+        },
+        "Head": {
+          "transform": "<Struct 'Transform' (0x000001CCC84E7E00) {rotation: {x: -0.026163, y: 0.021611, z: 0.770545, w: 0.636482}, translation: {x: 45.000000, y: -340.000000, z: 185.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+          "fov": 35.0
+        },
+        "Full": {
+          "transform": "<Struct 'Transform' (0x000001CCC84E8B90) {rotation: {x: -0.022296, y: 0.022296, z: 0.706755, w: 0.706755}, translation: {x: 75.000000, y: -650.000000, z: 140.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+          "fov": 50.0
+        },
+        "Crew": {
+          "transform": "<Struct 'Transform' (0x000001CCC84E4B40) {rotation: {x: -0.044093, y: 0.045268, z: 0.696349, w: 0.714915}, translation: {x: -30.000000, y: -1100.000000, z: 260.000000}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>",
+          "fov": 48.0
+        }
+      }
+    }
+  ]
+}

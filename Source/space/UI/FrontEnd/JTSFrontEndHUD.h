@@ -25,11 +25,11 @@ private:
 	void ApplyFrontEndInput(class APlayerController* Controller) const;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UJTSFrontEndRootWidget> RootWidget;
+	TObjectPtr<class UUserWidget> RootWidget;
 
 	/** Project-owned UMG composition point. Native root remains a safe fallback if this asset is unavailable. */
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI")
-	TSoftClassPtr<UJTSFrontEndRootWidget> FrontEndRootWidgetClass;
+	TSoftClassPtr<class UUserWidget> FrontEndRootWidgetClass;
 
 	FTimerHandle RootWidgetRetryTimer;
 	int32 RootWidgetCreationAttempts = 0;

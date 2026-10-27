@@ -546,6 +546,14 @@ void AJTSPlayerState::SetAvatarColor(EJTSAvatarColor NewAvatarColor)
 	}
 }
 
+void AJTSPlayerState::SetAppearance(const FJTSAvatarAppearance& NewAppearance)
+{
+	if (!HasAuthority() || !NewAppearance.IsValid()) return;
+	Appearance=NewAppearance;
+	OnRep_NetworkState();
+	ForceNetUpdate();
+}
+
 void AJTSPlayerState::SetExpeditionStatus(EJTSPlayerExpeditionStatus NewStatus)
 {
 	if (HasAuthority())
@@ -713,6 +721,7 @@ void AJTSPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AJTSPlayerState, bReady);
 	DOREPLIFETIME(AJTSPlayerState, bIsExpeditionHost);
 	DOREPLIFETIME(AJTSPlayerState, AvatarColor);
+	DOREPLIFETIME(AJTSPlayerState, Appearance);
 	DOREPLIFETIME(AJTSPlayerState, ExpeditionStatus);
 	DOREPLIFETIME(AJTSPlayerState, bIsBoarded);
 	DOREPLIFETIME(AJTSPlayerState, ProgressionLevel);
@@ -737,6 +746,7 @@ void AJTSPlayerState::CopyProperties(APlayerState* PlayerState)
 		Target->bReady = bReady;
 		Target->bIsExpeditionHost = bIsExpeditionHost;
 		Target->AvatarColor = AvatarColor;
+		Target->Appearance = Appearance;
 		Target->ExpeditionStatus = ExpeditionStatus;
 		Target->bIsBoarded = bIsBoarded;
 		Target->ProgressionLevel = ProgressionLevel;
@@ -765,6 +775,7 @@ void AJTSPlayerState::OverrideWith(APlayerState* PlayerState)
 		bReady = Source->bReady;
 		bIsExpeditionHost = Source->bIsExpeditionHost;
 		AvatarColor = Source->AvatarColor;
+		Appearance = Source->Appearance;
 		ExpeditionStatus = Source->ExpeditionStatus;
 		bIsBoarded = Source->bIsBoarded;
 		ProgressionLevel = Source->ProgressionLevel;

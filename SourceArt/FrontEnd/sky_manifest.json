@@ -1,0 +1,12 @@
+[
+  {
+    "id": "T_FE_SkyGradient",
+    "source": "original_blender_procedural",
+    "file": "Textures/T_FE_SkyGradient.png",
+    "size": [
+      2048,
+      1024
+    ],
+    "recipe": "Clear blue Earth daytime sky, quiet high white clouds; original procedural artwork"
+  }
+]
