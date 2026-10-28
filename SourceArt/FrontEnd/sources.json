@@ -19,10 +19,11 @@
       "bytes": 2994585
     },
     {
-      "file": "External/09_SourceHanSansSC_2.005R.zip",
       "url": "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/09_SourceHanSansSC.zip",
       "sha256": "ef7364f7ac2564be1ae9c1d74276de2653fe38b73449070398c4fc0b7e032ff1",
-      "bytes": 95177106
+      "bytes": 95177106,
+      "download_cache": "External/09_SourceHanSansSC_2.005R.zip",
+      "cache_retained": false
     },
     {
       "file": "External/OFL_SourceHanSans.txt",

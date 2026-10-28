@@ -26,7 +26,6 @@ def download(url, path):
 def fetch():
     api = 'https://api.polyhaven.com/files/hangar_concrete_floor'
     data = json.load(urllib.request.urlopen(urllib.request.Request(api, headers={'User-Agent': 'JTS'})))
-    (EXT / 'polyhaven_files.json').write_text(json.dumps(data, indent=2), encoding='utf-8')
     jobs = [(data[key]['2k']['jpg']['url'], EXT / ('hangar_' + name + '.jpg'))
             for key, name in [('Diffuse', 'diffuse'), ('nor_dx', 'normal_dx'), ('arm', 'arm')]]
     jobs += [
@@ -40,6 +39,10 @@ def fetch():
         for name in archive.namelist():
             if name.endswith(('SourceHanSansSC-Regular.otf', 'SourceHanSansSC-Bold.otf')):
                 (EXT / Path(name).name).write_bytes(archive.read(name))
+    (EXT / '09_SourceHanSansSC_2.005R.zip').unlink()
+    for entry in sources:
+        if entry['file'].endswith('.zip'):
+            entry['download_cache']=entry.pop('file');entry['cache_retained']=False
     for name in ['Casual_2_reference.fbx', 'LICENSE_Quaternius.txt']:
         destination = EXT / name
         shutil.copy2(ROOT / 'SourceArt/SkeletonAstronaut' / name, destination)

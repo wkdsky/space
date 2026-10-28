@@ -12,7 +12,8 @@ from mathutils import Vector, Matrix
 
 ROOT = Path('D:/projects/space')
 OUT = ROOT / 'SourceArt/FrontEnd'
-for folder in ['Models', 'Characters', 'Previews', 'Textures', 'Audio', 'UI']:
+PRODUCTION_FILES={e['file'] for e in json.loads((OUT/'asset_manifest.json').read_text(encoding='utf-8'))['assets']}
+for folder in ['Models', 'Characters', 'Textures', 'Audio', 'UI']:
     (OUT / folder).mkdir(parents=True, exist_ok=True)
 scene = bpy.data.scenes.new('JTS_FrontEnd_Source')
 bpy.context.window.scene = scene
@@ -155,6 +156,9 @@ def join(name, objects=None):
 def export_static(name):
     obj=join(name);parts.clear()
     path=OUT/'Models'/(name+'.fbx')
+    if path.relative_to(OUT).as_posix() not in PRODUCTION_FILES:
+        obj.hide_render=True;obj.hide_set(True)
+        return obj
     bpy.ops.export_scene.fbx(filepath=str(path),use_selection=True,object_types={'MESH'},bake_anim=False,axis_forward='-Y',axis_up='Z')
     obj.data.calc_loop_triangles()
     ASSETS.append({'id':name,'source':'original_blender','file':path.relative_to(OUT).as_posix(),'triangles':len(obj.data.loop_triangles),'dimensions_m':list(obj.dimensions)})
@@ -454,8 +458,6 @@ for location,power,size,color in [((-3,-4,5),650,4,(1,.79,.58)),((3,-1,4),500,3,
 bpy.ops.mesh.primitive_plane_add(size=200,location=(0,0,-.012));ground=bpy.context.object;ground.data.materials.append(MATS[3])
 scene.world=bpy.data.worlds.new('FrontEndStudio');scene.world.color=(.12,.12,.12)
 scene.render.resolution_x=900;scene.render.resolution_y=1100;scene.render.resolution_percentage=100
-scene.render.filepath=str(OUT/'Previews/Avatar_Explorer.png')
 (OUT/'models_manifest.json').write_text(json.dumps(ASSETS,indent=2),encoding='utf-8')
 bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'FrontEnd_Models.blend'))
-bpy.ops.render.render(write_still=True)
-result={'assets':len(ASSETS),'characters':ASSETS[:5],'preview':str(OUT/'Previews/Avatar_Explorer.png'),'blend':bpy.data.filepath}
+result={'assets':len(ASSETS),'characters':ASSETS[:5],'blend':bpy.data.filepath}

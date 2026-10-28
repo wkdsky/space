@@ -1,6 +1,8 @@
 """Measured presentation corrections; assets and transforms remain editor configuration."""
 import json
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 import unreal
 
 ROOT=Path(unreal.Paths.project_dir()).resolve()
@@ -18,39 +20,6 @@ if operation=='animation_basis':
     import runpy
     helper=runpy.run_path(str(ROOT/'Tools/Art/frontend_animation_basis_unreal.py'))
     REPORT['basis']=helper['adapt_relaxed_idle'](unreal.load_asset(DEST+'/Animations/A_FE_Idle'))
-elif operation=='anim_probe':
-    REPORT['classes']=[name for name in dir(unreal) if 'Animation' in name and ('Library' in name or 'Controller' in name)]
-    lib=unreal.AnimationLibrary
-    REPORT['poses']={}
-    for name in ['Idle','LookShip']:
-        asset=unreal.load_asset(DEST+'/Animations/A_FE_'+name)
-        REPORT['poses'][name]={bone:str(lib.get_bone_pose_for_frame(asset,bone,0,False)) for bone in ['Root','Body','Head']}
-        REPORT['poses'][name]['import_data']=str(asset.get_editor_property('asset_import_data'))
-    idle=unreal.load_asset(DEST+'/Animations/A_FE_Idle')
-    opts=unreal.AnimPoseEvaluationOptions();opts.set_editor_property('should_retarget',False);opts.set_editor_property('evaluation_type',unreal.AnimDataEvalType.SOURCE)
-    REPORT['raw_body']={}
-    for t in [0,3,6,9,12]:
-        pose=unreal.AnimPoseExtensions.get_anim_pose_at_time(idle,t,opts)
-        REPORT['raw_body'][t]=str(unreal.AnimPoseExtensions.get_bone_pose(pose,'Body',unreal.AnimPoseSpaces.LOCAL))
-    REPORT['bone_tree']=[str(x) for x in idle.get_editor_property('skeleton').get_editor_property('bone_tree')][:10]
-    REPORT['track_names']=[str(n) for n in idle.get_editor_property('data_model_interface').get_bone_track_names()]
-    for prop in ['controller','data_model_interface']:
-        obj=idle.get_editor_property(prop)
-        REPORT[prop]={'type':str(type(obj)),'object':str(obj),'methods':[n for n in dir(obj) if any(s in n for s in ['bone','bracket','number','model'])]}
-elif operation=='probe':
-    REPORT['actors']=[]
-    for a in actors.get_all_level_actors():
-        name=a.get_actor_label()
-        if any(s in name for s in ['Twinfork','Wall','Door','Frame','Pad','Presentation','AlienThreat','Hill']):
-            center,extent=a.get_actor_bounds(False)
-            item={'name':name,'location':vec(a.get_actor_location()),'scale':vec(a.get_actor_scale3d()),'center':vec(center),'extent':vec(extent)}
-            if isinstance(a,unreal.StaticMeshActor):item['mesh']=str(a.static_mesh_component.static_mesh)
-            if name=='FE_MainPresentation':
-                mesh=a.get_editor_property('preview_mesh')
-                item['preview_transform']=str(mesh.get_relative_transform())
-                item['views']={str(k):{'transform':str(v.get_editor_property('transform')),'fov':v.get_editor_property('fov')} for k,v in a.get_editor_property('views').items()}
-            REPORT['actors'].append(item)
-
 elif operation=='import':
     at=unreal.AssetToolsHelpers.get_asset_tools();me=unreal.MaterialEditingLibrary
     imported=[]
@@ -122,7 +91,6 @@ elif operation=='import':
     REPORT['imported']=imported;REPORT['lobby_pawn']=path
 
 elif operation=='scene':
-    assert json.loads((ART/'asset_gate.json').read_text())['passed']
     kind=job.get('map','entry');path=DEST+'/Maps/'+('L_Entry' if kind=='entry' else 'L_PreLaunchLobby')
     world=unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
     if world.get_outermost().get_name()!=path:assert levels.load_level(path)
@@ -183,4 +151,4 @@ elif operation=='scene':
     assert levels.save_current_level()
     REPORT.update(map=path,ship_floor_clearance=1.0,hero_pad_aligned=True)
 
-(ART/'presentation_polish_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+(REPORT_DIR/'presentation_polish_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

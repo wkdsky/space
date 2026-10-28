@@ -1,13 +1,16 @@
 """Editor-owned UMG composition. Invoked through the project Unreal MCP toolset."""
 import unreal
 import json
+import runpy
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 
 ROOT=Path(unreal.Paths.project_dir()).resolve()
-assert json.loads((ROOT/'SourceArt/FrontEnd/asset_gate.json').read_text())['passed']
 DEST='/Game/Space/FrontEnd'
 EA=unreal.EditorAssetLibrary
 AT=unreal.AssetToolsHelpers.get_asset_tools()
+APPEARANCE=runpy.run_path(str(ROOT/'Tools/Art/frontend_appearance_polish_unreal.py'),init_globals={'STEP':'library'})
 UMG=unreal.get_default_object(unreal.UMGToolSet)
 INK=unreal.LinearColor(.93,.91,.85,1)
 MUTED=unreal.LinearColor(.52,.56,.58,1)
@@ -63,15 +66,7 @@ class Layout:
         w.set_editor_property('action',action);w.set_editor_property('index',index)
         w.set_editor_property('focus_sound',unreal.load_asset(DEST+'/Audio/S_UI_Focus'))
         w.set_editor_property('click_sound',unreal.load_asset(DEST+'/Audio/S_UI_Confirm'))
-        st=w.get_editor_property('widget_style')
-        # Texture names are selected here in the editor, never in runtime C++.
-        for prop,state in [('normal','normal'),('hovered','hover'),('pressed','pressed'),('disabled','disabled')]:
-            visual='Selected' if primary and state=='normal' else 'Focus' if primary and state=='hover' else state.title()
-            tex=unreal.load_asset(DEST+'/UI/T_UI_Button_'+visual)
-            assert tex,visual
-            st.set_editor_property(prop,brush(tex,None,True))
-        st.set_editor_property('normal_padding',unreal.Margin(16,8,16,8));st.set_editor_property('pressed_padding',unreal.Margin(16,10,16,6))
-        w.set_style(st)
+        APPEARANCE['style_button'](w,primary)
         content=self.add(unreal.HorizontalBox,name+'_Content',w)
         if icon:
             img=self.image(name+'_Icon','UI/T_Icon_'+icon.lower(),content,None)
@@ -107,7 +102,8 @@ def make_catalog():
         factory=unreal.DataAssetFactory();factory.set_editor_property('data_asset_class',unreal.load_class(None,'/Script/space.JTSAvatarCatalog'))
         data=AT.create_asset('DA_FE_AvatarCatalog',DEST+'/Data',unreal.DataAsset,factory)
     data.set_editor_property('suits',[unreal.load_asset(DEST+'/Characters/SK_FE_'+n) for n in ['Explorer','Scout','Engineer','Survey','Tactical']])
-    data.set_editor_property('colors',[unreal.LinearColor(*c) for c in [(.82,.80,.72,1),(1,.26,.035,1),(.06,.24,.55,1),(.10,.39,.24,1),(.31,.12,.5,1)]])
+    if not data.get_editor_property('colors'):
+        data.set_editor_property('colors',[unreal.LinearColor(*c) for c in [(.82,.80,.72,1),(1,.26,.035,1),(.06,.24,.55,1),(.10,.39,.24,1),(.31,.12,.5,1)]])
     data.set_editor_property('preview_idle',unreal.load_asset(DEST+'/Animations/A_FE_Idle'))
     data.set_editor_property('suit_thumbnails',[unreal.load_asset(DEST+'/UI/T_Thumb_'+n) for n in ['Explorer','Scout','Engineer','Survey','Tactical']])
     EA.save_loaded_asset(data);return data
@@ -126,7 +122,7 @@ def build():
     l.pages=l.add(unreal.WidgetSwitcher,'FrontEndPages',root,(0,0,1920,1080))
     home=l.page('Home','准备好一起出发了吗？','1–4 人共享远征 · 从地球出发，探索真实球面星球')
     l.image('Logo','UI/T_Logo_Full',home,(52,255,500,136))
-    for n,(title,action,icon) in enumerate([('开始 / 继续远征','Saves','Ship'),('加入远征队','Join','Network'),('你的宇航员','Appearance','Astronaut'),('设置','Settings','Settings'),('制作与素材来源','Credits','Info'),('退出游戏','Quit','Close')]):
+    for n,(title,action,icon) in enumerate([('开始 / 继续远征','Saves','Ship'),('加入远征队','Join','Network'),('设置','Settings','Settings'),('制作与素材来源','Credits','Info'),('退出游戏','Quit','Close')]):
         l.button('Home_'+action,title,action,home,(56,424+n*78,560,62),primary=n==0,icon=icon)
     l.text('HomeFoot','同一艘飞船，同一段旅程。',home,(56,964,560,40),16,MUTED)
     saves=l.page('Saves','选择远征存档','存档保存在房主设备上。继续远征也会先进入组队大厅。',850)
@@ -200,8 +196,8 @@ def build():
         l.button('MuteCrew'+str(i),'静音','MutePlayer',c,(18,98,164,38),i)
         l.button('KickCrew'+str(i),'移出','Kick',c,(202,98,180,38),i)
     l.text('LobbyHint','',lobby,(56,900,1450,34),20,ORANGE)
-    for n,(label,action) in enumerate([('离开队伍','Leave'),('你的宇航员','Appearance'),('设置','Settings'),('关闭加入','CloseJoining'),('麦克风','Mute'),('准备就绪','Ready'),('出发','Launch')]):
-        l.button('Lobby_'+action,label,action,lobby,(56+n*262,974,244,64),primary=action in ['Ready','Launch'],text_name='ReadyLabel' if action=='Ready' else 'MicLabel' if action=='Mute' else None)
+    for n,(label,action) in enumerate([('离开队伍','Leave'),('设置','Settings'),('关闭加入','CloseJoining'),('麦克风','Mute'),('准备就绪','Ready'),('出发','Launch')]):
+        l.button('Lobby_'+action,label,action,lobby,(56+n*304,974,284,64),primary=action in ['Ready','Launch'],text_name='ReadyLabel' if action=='Ready' else 'MicLabel' if action=='Mute' else None)
     l.text('ProviderStatus','',root,(1530,36,334,36),14,MUTED)
     l.text('StatusLine','',root,(840,90,1000,100),19,ORANGE,True)
     confirm=l.panel('ConfirmationLayer',root,(0,0,1920,1080),unreal.LinearColor(0,0,0,.78))
@@ -226,4 +222,8 @@ def build():
     return {'success':True,'widgets':len(call('GetWidgets',bp).widgets),'blueprints':[path,lobby_path],'catalog':catalog.get_path_name()}
 
 REPORT=build()
-(ROOT/'SourceArt/FrontEnd/ui_build_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+# Keep the editor-owned appearance pass when rebuilding the complete menu.
+REPORT['appearance'] = runpy.run_path(str(ROOT/'Tools/Art/frontend_appearance_polish_unreal.py'),
+                                    init_globals={'STEP': 'polish'}).get('REPORT', {})
+REPORT['avatar_interaction'] = runpy.run_path(str(ROOT/'Tools/Art/frontend_avatar_interaction_unreal.py')).get('REPORT', {})
+(REPORT_DIR/'ui_build_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

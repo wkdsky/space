@@ -6,9 +6,12 @@ import unreal
 import json
 import hashlib
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 
 ROOT=Path(unreal.Paths.project_dir()).resolve()
 SOURCE=ROOT/'SourceArt/FrontEnd'
+SOURCE_FILES={entry['file'] for entry in json.loads((SOURCE/'asset_manifest.json').read_text(encoding='utf-8'))['assets'] if not entry.get('authoring_only')}
 DEST='/Game/Space/FrontEnd'
 EA=unreal.EditorAssetLibrary
 TOOLS=unreal.AssetToolsHelpers.get_asset_tools()
@@ -20,6 +23,7 @@ def save(obj):
 
 
 def import_file(path,folder,options=None,factory=None,name=None):
+    assert path.relative_to(SOURCE).as_posix() in SOURCE_FILES, path
     destination=DEST+'/'+folder+'/'+(name or path.stem)
     fingerprint=hashlib.sha256(path.read_bytes()).hexdigest()
     if folder=='Animations':fingerprint+=':fbx-centimetres-100'
@@ -68,6 +72,7 @@ def connect(a,b,port,output=''):
 
 for folder in ['Textures','UI']:
     for path in sorted((SOURCE/folder).glob('*.png')):
+        if path.relative_to(SOURCE).as_posix() not in SOURCE_FILES:continue
         texture=import_file(path,folder)
         normal=folder=='Textures' and path.stem.endswith('_Normal')
         if normal:
@@ -86,7 +91,7 @@ for folder in ['Textures','UI']:
         save(texture)
 
 # Twelve reusable material parents, configured by instances; no runtime paths in C++.
-parent_kinds=['Suit','Visor','Rubber','PaintedMetal','Concrete','Glass','Light','UI','Decal','Particle','Moon','Stars','Sky']
+parent_kinds=['Suit','Visor','Rubber','PaintedMetal','Concrete','Glass','Light','Decal','Particle','Moon','Sky']
 for kind in parent_kinds:
     name='M_FE_'+kind;path=DEST+'/Materials/'+name
     mat=unreal.load_asset(path)
@@ -115,14 +120,13 @@ for kind in parent_kinds:
             tex_name='T_FE_'+kind+'_BaseColor'
             albedo=expression(mat,unreal.MaterialExpressionTextureSampleParameter2D,parameter_name='BaseMap',texture=unreal.load_asset(DEST+'/Textures/'+tex_name))
             multiply=expression(mat,unreal.MaterialExpressionMultiply);connect(base,multiply,'A');connect(albedo,multiply,'B','RGB');connect_prop(multiply,unreal.MaterialProperty.MP_BASE_COLOR)
-    if kind in ['Light','UI','Decal','Particle','Stars','Visor']:
+    if kind in ['Light','Decal','Particle','Visor']:
         emission=scalar(mat,'Emission',.4 if kind=='Visor' else 1)
         mult=expression(mat,unreal.MaterialExpressionMultiply);connect(base,mult,'A');connect(emission,mult,'B');connect_prop(mult,unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    if kind in ['UI','Decal','Particle','Stars']:
-        mat.set_editor_property('blend_mode',unreal.BlendMode.BLEND_TRANSLUCENT if kind in ['UI','Particle','Stars'] else unreal.BlendMode.BLEND_MASKED)
-        if kind=='UI':mat.set_editor_property('material_domain',unreal.MaterialDomain.MD_UI)
+    if kind in ['Decal','Particle']:
+        mat.set_editor_property('blend_mode',unreal.BlendMode.BLEND_TRANSLUCENT if kind=='Particle' else unreal.BlendMode.BLEND_MASKED)
         mat.set_editor_property('two_sided',True)
-        graphic='/Textures/T_FX_SoftCircle' if kind=='Particle' else '/Textures/T_FX_Stars' if kind=='Stars' else '/UI/T_FE_Eye0'
+        graphic='/Textures/T_FX_SoftCircle' if kind=='Particle' else '/UI/T_FE_Eye0'
         texture=expression(mat,unreal.MaterialExpressionTextureSampleParameter2D,parameter_name='Graphic',texture=unreal.load_asset(DEST+graphic))
         # Face atlas rows are selected in the material instance; index is independently replicated for eye/mouth.
         uv=expression(mat,unreal.MaterialExpressionTextureCoordinate)
@@ -175,6 +179,7 @@ for name,(parent,color,metal,rough) in PALETTE.items():
 skeleton=unreal.load_asset(DEST+'/Characters/SK_FE_Engineer_Skeleton')
 for path in sorted((SOURCE/'Characters').glob('SK_*.fbx')):
     if '_LOD' in path.stem:continue
+    if path.relative_to(SOURCE).as_posix() not in SOURCE_FILES:continue
     options=unreal.FbxImportUI();options.set_editor_property('import_mesh',True)
     options.set_editor_property('import_as_skeletal',True);options.set_editor_property('skeleton',skeleton)
     options.set_editor_property('create_physics_asset',False)
@@ -200,6 +205,7 @@ for path in sorted((SOURCE/'Characters').glob('SK_*.fbx')):
             assert subsystem.import_lod(mesh,lod,str(path.with_stem(path.stem+'_LOD'+str(lod))))
     save(mesh)
 for path in sorted((SOURCE/'Models').glob('*.fbx')):
+    if path.relative_to(SOURCE).as_posix() not in SOURCE_FILES:continue
     options=unreal.FbxImportUI();options.set_editor_property('import_as_skeletal',False)
     options.set_editor_property('import_materials',False);options.set_editor_property('import_textures',False)
     options.set_editor_property('automated_import_should_detect_type',False)
@@ -211,6 +217,7 @@ for path in sorted((SOURCE/'Models').glob('*.fbx')):
         if key in instances:mesh.set_material(i,instances[key])
     save(mesh)
 for path in sorted((SOURCE/'Animations').glob('*.fbx')):
+    if path.relative_to(SOURCE).as_posix() not in SOURCE_FILES:continue
     options=unreal.FbxImportUI();options.set_editor_property('import_mesh',False)
     options.set_editor_property('import_as_skeletal',True);options.set_editor_property('skeleton',skeleton)
     options.set_editor_property('import_animations',True)
@@ -222,15 +229,16 @@ for path in sorted((SOURCE/'Animations').glob('*.fbx')):
         import runpy
         runpy.run_path(str(ROOT/'Tools/Art/frontend_animation_basis_unreal.py'))['adapt_relaxed_idle'](animation)
 for path in sorted((SOURCE/'Audio').glob('*.wav')):
+    if path.relative_to(SOURCE).as_posix() not in SOURCE_FILES:continue
     sound=import_file(path,'Audio')
     if 'Music' in path.stem or any(w in path.stem for w in ['Wind','Hangar','ShipCooling']):sound.set_editor_property('looping',True)
     save(sound)
 for path in sorted((SOURCE/'Fonts').glob('*.otf')):
     factory=unreal.FontFileImportFactory()
-    factory.set_editor_property('batch_create_font_asset',unreal.BatchCreateFontAsset.CREATE_IF_NO_FONT_EXISTS)
-    import_file(path,'Fonts',factory=factory)
+    factory.set_editor_property('batch_create_font_asset',unreal.BatchCreateFontAsset.YES)
+    import_file(path,'Fonts',factory=factory,name='F_JTS_UI_'+path.stem.rsplit('-',1)[-1])
 # The original presentation materials and lobby pawn are authored after source import.
 import runpy
 REPORT['presentation_polish']=runpy.run_path(str(ROOT/'Tools/Art/frontend_presentation_polish_unreal.py'),
     init_globals={'AUTHORING_JOB':{'operation':'import'}})['REPORT']
-(SOURCE/'unreal_import_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+(REPORT_DIR/'unreal_import_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

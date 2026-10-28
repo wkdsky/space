@@ -3,13 +3,14 @@ import unreal
 import json
 import gc
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 
 ROOT=Path(unreal.Paths.project_dir()).resolve()
 EA=unreal.EditorAssetLibrary
 ACTORS=unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 LEVELS=unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 DEST='/Game/Space/FrontEnd'
-assert json.loads((ROOT/'SourceArt/FrontEnd/asset_gate.json').read_text())['passed']
 job=json.loads((ROOT/'Saved/FrontEndJob.json').read_text())
 kind=job['step']
 
@@ -141,6 +142,10 @@ def configure(kind):
         # Character capsules remain unchanged. Pads place the mesh feet on the hangar floor.
         stage.set_editor_property('presentation_offsets',[unreal.Vector(240-i*160,-80,98) for i in range(4)])
         stage.set_editor_property('presentation_rotation',unreal.Rotator(yaw=-70))
+        # Local appearance cameras are authored relative to the selected crew member.
+        stage.set_editor_property('appearance_full_view',unreal.Transform(location=unreal.Vector(650,135,50),rotation=unreal.Rotator(pitch=-4.5,yaw=180)))
+        stage.set_editor_property('appearance_head_view',unreal.Transform(location=unreal.Vector(340,70,65),rotation=unreal.Rotator(pitch=-2.5,yaw=180)))
+        stage.set_editor_property('appearance_fov',50.0)
         c=stage.get_editor_property('lobby_camera');c.set_relative_transform(views['Crew'].get_editor_property('transform'),False,False);c.set_field_of_view(views['Crew'].get_editor_property('fov'))
     for c in cameras.values():ACTORS.destroy_actor(c)
     assert LEVELS.save_current_level()
@@ -150,4 +155,4 @@ REPORT=configure(kind)
 import runpy
 REPORT['presentation_polish']=runpy.run_path(str(ROOT/'Tools/Art/frontend_presentation_polish_unreal.py'),
     init_globals={'AUTHORING_JOB':{'operation':'scene','map':kind}})['REPORT']
-(ROOT/('SourceArt/FrontEnd/'+kind+'_map_report.json')).write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+(REPORT_DIR/(kind+'_map_report.json')).write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

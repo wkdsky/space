@@ -1,4 +1,4 @@
-"""Original menu actions, facial materials, suit thumbnails and movement pose QA."""
+"""Original menu actions, facial materials, suit thumbnails and suit thumbnails."""
 import bpy
 import json
 import math
@@ -6,7 +6,8 @@ from pathlib import Path
 from mathutils import Vector, Quaternion, Matrix
 
 OUT=Path('D:/projects/space/SourceArt/FrontEnd')
-RENDER_PREVIEWS=globals().get('RENDER_PREVIEWS',True)
+PRODUCTION_FILES={e['file'] for e in json.loads((OUT/'asset_manifest.json').read_text(encoding='utf-8'))['assets']}
+RENDER_THUMBNAILS=globals().get('RENDER_THUMBNAILS',True)
 if Path(bpy.data.filepath) != OUT/'FrontEnd_Models.blend':
     raise RuntimeError('Open FrontEnd_Models.blend in a separate MCP call before running animation authoring')
 scene=bpy.context.scene
@@ -76,35 +77,6 @@ def pose(kind,t):
     if kind=='Leave':
         rotate('Torso',(0,0,1),t*18)
         rotate('Head',(0,0,1),-t*18)
-    if kind=='RifleQA':
-        reach('L',(.26,-.13,1.28),(.08,-.48,1.30))
-        reach('R',(-.24,-.10,1.24),(-.08,-.39,1.30))
-    if kind=='RunQA':
-        rotate('UpperLeg_L',(1,0,0),-40);rotate('LowerLeg_L',(1,0,0),65)
-        rotate('UpperLeg_R',(1,0,0),35);rotate('LowerLeg_R',(1,0,0),25)
-        rotate('Torso',(1,0,0),12)
-        reach('L',(.25,-.19,1.29),(.25,-.40,1.45))
-        reach('R',(-.24,.10,1.30),(-.24,-.03,1.06))
-    if kind=='CrouchQA':
-        for side in ['L','R']:
-            rotate('UpperLeg_'+side,(1,0,0),-58)
-            rotate('LowerLeg_'+side,(1,0,0),102)
-            rotate('Foot_'+side,(1,0,0),-44)
-        bpy.context.view_layer.update()
-        hips=rig.pose.bones['Body']
-        world=rig.matrix_world@hips.matrix
-        world.translation+=Vector((0,.16,-.34))
-        hips.matrix=rig.matrix_world.inverted()@world
-        rotate('Torso',(1,0,0),18)
-        # This source rig has root-level IK feet, separate from the thigh chains.
-        for side in ['L','R']:rotate('Foot_'+side,(1,0,0),0)
-    if kind=='RunQA':
-        bpy.context.view_layer.update()
-        for side in ['L','R']:
-            foot=rig.pose.bones['Foot_'+side]
-            world=rig.matrix_world@foot.matrix
-            world.translation=rig.matrix_world@rig.pose.bones['LowerLeg_'+side].tail+Vector((0,0,.038))
-            foot.matrix=rig.matrix_world.inverted()@world
     bpy.context.view_layer.update()
 
 
@@ -112,6 +84,7 @@ def pose(kind,t):
 actions=[]
 scene.render.fps=30
 for name,duration in [('Idle',8),('LookShip',5),('CheckWrist',4),('AdjustGlove',4),('Join',2),('Ready',2),('Unready',2),('Leave',2)]:
+    if 'Animations/A_FE_'+name+'.fbx' not in PRODUCTION_FILES:continue
     rig.animation_data_clear();action=bpy.data.actions.new('A_FE_'+name);rig.animation_data_create();rig.animation_data.action=action
     last=duration*30+1;scene.frame_start=1;scene.frame_end=last
     for frame in range(1,last+1,5):
@@ -134,7 +107,7 @@ scene.render.film_transparent=True
 ground=next(o for o in scene.objects if o.type=='MESH' and o.dimensions.x>150)
 ground.name='FE_StudioGround'
 ground.hide_render=True
-for mesh in characters if RENDER_PREVIEWS else []:
+for mesh in characters if RENDER_THUMBNAILS else []:
     mesh.hide_render=False;mesh.hide_set(False)
     scene.render.filepath=str(OUT/'UI'/('T_Thumb_'+mesh.name.removeprefix('SK_FE_')+'.png'))
     bpy.ops.render.render(write_still=True)
@@ -143,22 +116,9 @@ for mesh in characters if RENDER_PREVIEWS else []:
 characters[0].hide_render=False;characters[0].hide_set(False)
 ground.hide_render=False;scene.render.film_transparent=False
 scene.render.resolution_x=900;scene.render.resolution_y=1100
-for kind in ['Idle','RifleQA','RunQA','CrouchQA','CheckWrist'] if RENDER_PREVIEWS else []:
-    pose(kind,.5)
-    if kind=='RifleQA':
-        rifle=bpy.data.objects['SM_FE_RiflePose']
-        rifle.hide_render=False;rifle.hide_set(False)
-        rifle.location=(0,-.43,1.30);rifle.rotation_euler=(0,0,0)
-    evaluated=characters[0].evaluated_get(bpy.context.evaluated_depsgraph_get())
-    points=[evaluated.matrix_world@v.co for v in evaluated.data.vertices]
-    bounds=[[min(p[i] for p in points),max(p[i] for p in points)] for i in range(3)]
-    assert all(math.isfinite(c) for p in points for c in p)
-    scene.render.filepath=str(OUT/'Previews'/('Pose_'+kind+'.png'));bpy.ops.render.render(write_still=True)
-    if kind=='RifleQA':rifle.hide_render=True;rifle.hide_set(True)
-    actions.append({'id':'QA_'+kind,'source':'original_pose_qa','file':'Previews/'+Path(scene.render.filepath).name,'bounds_m':bounds})
 pose('Idle',0)
-if not RENDER_PREVIEWS:
+if not RENDER_THUMBNAILS:
     actions += [e for e in json.loads((OUT/'animations_manifest.json').read_text(encoding='utf-8')) if not e['id'].startswith('A_FE_')]
 (OUT/'animations_manifest.json').write_text(json.dumps(actions,indent=2),encoding='utf-8')
 bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'FrontEnd_Models.blend'))
-result={'actions':8,'thumbnails':5,'pose_previews':5}
+result={'actions':sum(e['id'].startswith('A_FE_') for e in actions),'thumbnails':5}

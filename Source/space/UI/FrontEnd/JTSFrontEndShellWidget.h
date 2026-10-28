@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Styling/SlateTypes.h"
 #include "space/UI/FrontEnd/JTSAvatarTypes.h"
 #include "space/Core/JTSExpeditionTypes.h"
 #include "JTSFrontEndShellWidget.generated.h"
@@ -17,6 +18,9 @@ public:
  UFUNCTION(BlueprintCallable) void Navigate(FName Page);
  UFUNCTION(BlueprintPure) FName GetCurrentPage() const { return CurrentPage; }
  UFUNCTION(BlueprintPure) UWidget* FindControl(FName Name) const { return GetWidgetFromName(Name); }
+ /** Outline drawn on the selected option or swatch; the button's authored brush is kept otherwise. */
+ UPROPERTY(EditDefaultsOnly, Category="FrontEnd") FLinearColor SelectionOutline=FLinearColor(0.f,.8f,1.f,1.f);
+ UPROPERTY(EditDefaultsOnly, Category="FrontEnd") float SelectionOutlineWidth=2.f;
 protected:
  virtual void NativeConstruct() override;
  virtual void NativeDestruct() override;
@@ -26,16 +30,34 @@ private:
  void Back();
  void Refresh();
  void Preview();
+ void RefreshAvatarViews();
+ void EditAvatar();
+ void RenameAvatar(const FString& Name);
+ bool CanEditAppearance() const;
  void SetText(FName Name,const FString& Text);
  FString Input(FName Name) const;
  void Confirm(FName Action,int32 Index,const FString& Message);
  bool Busy() const;
  class AJTSPlayerState* PlayerAt(int32 Index) const;
  UFUNCTION() void OperationFinished(bool bSucceeded,const FString& Message);
+ FColor& PartColor();
+ void SyncColorControls();
+ void ApplyHSV();
+ void RefreshColorReadout();
+ UFUNCTION() void HueChanged(float Value);
+ UFUNCTION() void SaturationChanged(float Value);
+ UFUNCTION() void BrightnessChanged(float Value);
+ TArray<FButtonStyle> AuthoredStyles;
+ TArray<bool> SelectedStates;
+ int32 ColorPart=0;
+ float Hue=0,Saturation=0,Brightness=1;
+ bool bSyncingColor=false;
+ bool bHeadView=false;
  UPROPERTY(Transient) TObjectPtr<class UWidgetSwitcher> Pages;
  UPROPERTY(Transient) TObjectPtr<class UJTSFrontEndSettingsModel> SettingsModel;
  UPROPERTY(Transient) TObjectPtr<UWidget> Confirmation;
  UPROPERTY(Transient) TArray<TObjectPtr<class UJTSMenuActionButton>> Actions;
+ UPROPERTY(Transient) TArray<TObjectPtr<class UJTSFrontEndAvatarWidget>> AvatarViews;
  TMap<FName,TWeakObjectPtr<UWidget>> Focus;
  TWeakObjectPtr<UWidget> ModalReturnFocus;
  TArray<FName> History;

@@ -272,7 +272,8 @@ void UJTSPreLaunchLobbyWidget::Refresh()
 	LaunchButtonText->SetText(FText::FromString(bAllReady ? TEXT("LAUNCH EXPEDITION") : TEXT("LAUNCH LOCKED")));
 	HostOptionsButton->SetVisibility(LocalState->IsExpeditionHost() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	HostOptionsStatusText->SetText(FText::FromString(State->IsAcceptingNewPlayers() ? TEXT("JOINING IS OPEN") : TEXT("JOINING IS CLOSED")));
-	CloseJoiningButton->SetIsEnabled(State->IsAcceptingNewPlayers());
+	CloseJoiningButton->SetIsEnabled(LocalState->IsExpeditionHost() && State->IsWaitingToStart() && State->GetLaunchDeadline()==0);
+	if (auto* Label=Cast<UTextBlock>(CloseJoiningButton->GetContent())) Label->SetText(FText::FromString(State->IsAcceptingNewPlayers() ? TEXT("CLOSE JOINING") : TEXT("REOPEN JOINING")));
 
 	UJTSVoiceSubsystem* const Voice = GetGameInstance() != nullptr ? GetGameInstance()->GetSubsystem<UJTSVoiceSubsystem>() : nullptr;
 	const bool bVoiceAvailable = Voice != nullptr && Voice->IsVoiceAvailable();
@@ -375,7 +376,11 @@ void UJTSPreLaunchLobbyWidget::ToggleInputMute()
 
 void UJTSPreLaunchLobbyWidget::OpenHostOptions() { SetHostOptionsVisible(true); }
 void UJTSPreLaunchLobbyWidget::CloseHostOptions() { SetHostOptionsVisible(false); }
-void UJTSPreLaunchLobbyWidget::CloseJoining() { if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer())) Controller->RequestCloseJoining(); }
+void UJTSPreLaunchLobbyWidget::CloseJoining()
+{
+	if (auto* Controller=Cast<AJTSPlayerController>(GetOwningPlayer()))
+		if (const auto* State=GetWorld()->GetGameState<AJTSGameState>()) Controller->RequestSetJoiningOpen(!State->IsAcceptingNewPlayers());
+}
 
 void UJTSPreLaunchLobbyWidget::ToggleTargetMute()
 {

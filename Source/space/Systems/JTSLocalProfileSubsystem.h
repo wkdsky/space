@@ -11,6 +11,7 @@ class SPACE_API UJTSLocalProfileSave : public USaveGame
  GENERATED_BODY()
 public:
  UPROPERTY() FJTSAvatarAppearance Appearance;
+ UPROPERTY() FString DisplayName;
  UPROPERTY() float MasterVolume = .8f;
  UPROPERTY() float MusicVolume = .55f;
  UPROPERTY() float EffectsVolume = .8f;

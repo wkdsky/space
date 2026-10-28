@@ -3,11 +3,19 @@
 #include "space/Core/JTSGameInstance.h"
 
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
+#include "GameFramework/GameUserSettings.h"
 
 void UJTSGameInstance::Init()
 {
 	Super::Init();
 	SelectedAvatarColor = EJTSAvatarColor::Blue;
+
+	// Load and apply saved video settings on startup
+	if (UGameUserSettings* Settings = UGameUserSettings::GetGameUserSettings())
+	{
+		Settings->LoadSettings(false);
+		Settings->ApplySettings(false);
+	}
 }
 
 void UJTSGameInstance::Shutdown()

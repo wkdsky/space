@@ -118,7 +118,11 @@ void UJTSLobbyWidget::CycleAvatarColor()
 	}
 }
 void UJTSLobbyWidget::RequestStart() { if (AJTSPlayerController* PC = Cast<AJTSPlayerController>(GetOwningPlayer())) PC->StartGame(); }
-void UJTSLobbyWidget::CloseJoining() { if (AJTSPlayerController* PC = Cast<AJTSPlayerController>(GetOwningPlayer())) PC->RequestCloseJoining(); }
+void UJTSLobbyWidget::CloseJoining()
+{
+	if (auto* Controller=Cast<AJTSPlayerController>(GetOwningPlayer()))
+		if (const auto* State=GetWorld()->GetGameState<AJTSGameState>()) Controller->RequestSetJoiningOpen(!State->IsAcceptingNewPlayers());
+}
 void UJTSLobbyWidget::Leave() { if (UJTSOnlineSessionSubsystem* Online = GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>()) Online->LeaveExpedition(); }
 void UJTSLobbyWidget::KickSlotOne() { KickSlot(0); }
 void UJTSLobbyWidget::KickSlotTwo() { KickSlot(1); }
@@ -185,7 +189,8 @@ void UJTSLobbyWidget::Refresh()
 	StartButton->SetVisibility(LocalState->IsExpeditionHost() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	StartButton->SetIsEnabled(LocalState->IsExpeditionHost() && State->IsWaitingToStart() && Players.Num() > 0 && !Players.ContainsByPredicate([](const AJTSPlayerState* Player) { return Player == nullptr || !Player->IsReady(); }));
 	CloseJoiningButton->SetVisibility(LocalState->IsExpeditionHost() && State->IsWaitingToStart() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	CloseJoiningButton->SetIsEnabled(State->IsAcceptingNewPlayers());
+	CloseJoiningButton->SetIsEnabled(LocalState->IsExpeditionHost() && State->IsWaitingToStart() && State->GetLaunchDeadline()==0);
+	if (auto* Label=Cast<UTextBlock>(CloseJoiningButton->GetContent())) Label->SetText(FText::FromString(State->IsAcceptingNewPlayers() ? TEXT("Host: Close joining") : TEXT("Host: Reopen joining")));
 	for (int32 SlotIndex = 0; SlotIndex < KickButtons.Num(); ++SlotIndex)
 	{
 		const AJTSPlayerState* const Target = SlotPlayers.IsValidIndex(SlotIndex) ? SlotPlayers[SlotIndex].Get() : nullptr;

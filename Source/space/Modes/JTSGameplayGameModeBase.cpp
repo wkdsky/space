@@ -201,12 +201,18 @@ bool AJTSGameplayGameModeBase::RequestStartExpedition(AJTSPlayerController* Requ
 
 bool AJTSGameplayGameModeBase::RequestCloseJoining(AJTSPlayerController* RequestingController)
 {
+	return RequestSetJoiningOpen(RequestingController, false);
+}
+
+bool AJTSGameplayGameModeBase::RequestSetJoiningOpen(AJTSPlayerController* RequestingController, bool bOpen)
+{
 	const AJTSGameState* const State = GetGameState<AJTSGameState>();
-	if (!IsHostController(RequestingController) || State == nullptr || !State->IsWaitingToStart())
+	if (!HasAuthority() || !IsHostController(RequestingController) || State == nullptr
+		|| !State->IsWaitingToStart() || State->GetLaunchDeadline() > 0)
 	{
 		return false;
 	}
-	SetLobbyAdmission(false);
+	SetLobbyAdmission(bOpen);
 	return true;
 }
 

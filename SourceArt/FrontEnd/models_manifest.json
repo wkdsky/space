@@ -176,17 +176,6 @@
     ]
   },
   {
-    "id": "SM_FE_Brace",
-    "source": "original_blender",
-    "file": "Models/SM_FE_Brace.fbx",
-    "triangles": 540,
-    "dimensions_m": [
-      2.8035213947296143,
-      0.5600000023841858,
-      4.139213562011719
-    ]
-  },
-  {
     "id": "SM_FE_DoorFrame",
     "source": "original_blender",
     "file": "Models/SM_FE_DoorFrame.fbx",
@@ -448,28 +437,6 @@
       0.7599999904632568,
       0.5399999618530273,
       0.8949999809265137
-    ]
-  },
-  {
-    "id": "SM_FE_RiflePose",
-    "source": "original_blender",
-    "file": "Models/SM_FE_RiflePose.fbx",
-    "triangles": 600,
-    "dimensions_m": [
-      0.11999999731779099,
-      1.0850000381469727,
-      0.35999998450279236
-    ]
-  },
-  {
-    "id": "SM_FE_MiningToolPose",
-    "source": "original_blender",
-    "file": "Models/SM_FE_MiningToolPose.fbx",
-    "triangles": 276,
-    "dimensions_m": [
-      0.5,
-      0.07999999821186066,
-      0.9399999380111694
     ]
   },
   {

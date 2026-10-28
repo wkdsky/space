@@ -12,6 +12,7 @@ void UJTSFrontEndSettingsModel::Initialize(UGameInstance* GI)
 {
  Instance=GI;
  auto* V=UGameUserSettings::GetGameUserSettings();
+ V->LoadSettings(false);
  Resolution=V->GetScreenResolution(); WindowMode=V->GetFullscreenMode(); Quality=V->GetOverallScalabilityLevel(); bVsync=V->IsVSyncEnabled(); FPS=V->GetFrameRateLimit();
 }
 void UJTSFrontEndSettingsModel::Change(FName S,int32 D)

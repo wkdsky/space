@@ -163,8 +163,9 @@ void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 	Snapshot.PlaytimeSeconds = FMath::Max(0.0, Snapshot.PlaytimeSeconds);
 	if (Snapshot.SaveVersion<6)
 	{
-		const uint8 Palette[4]={2,1,3,4};
-		for (auto& Player:Snapshot.Players) Player.Appearance.Upper=Palette[FMath::Clamp(int32(Player.AvatarColor),0,3)];
+		// Matches EJTSAvatarColor order and UJTSGameInstance::GetSelectedAvatarLinearColor.
+		const FLinearColor Palette[4]={FLinearColor(.10f,.45f,1.f),FLinearColor(1.f,.34f,.06f),FLinearColor(.18f,.85f,.28f),FLinearColor(.58f,.25f,.90f)};
+		for (auto& Player:Snapshot.Players) Player.Appearance.UpperColor=Palette[FMath::Clamp(int32(Player.AvatarColor),0,3)].ToFColor(true);
 	}
 	Snapshot.SaveVersion = FMath::Max(6, Snapshot.SaveVersion);
 }

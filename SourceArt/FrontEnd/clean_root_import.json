@@ -1,5 +1,0 @@
-{
-  "reset": true,
-  "version": 2,
-  "reason": "Bake armature scale before FBX export; isolated compatible skeleton"
-}

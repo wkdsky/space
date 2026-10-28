@@ -3,6 +3,8 @@ import bpy
 import json
 import math
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 from mathutils import Vector, Quaternion, Matrix
 
 OUT=Path('D:/projects/space/SourceArt/FrontEnd')
@@ -132,5 +134,5 @@ for asset in manifest:
 (OUT/'animations_manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
 scene.frame_set(1)
 bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'FrontEnd_Models.blend'))
-(OUT/'relaxed_idle_pose_report.json').write_text(json.dumps({'samples':samples,'seconds':12,'source':'original'},indent=2),encoding='utf-8')
+(REPORT_DIR/'relaxed_idle_pose_report.json').write_text(json.dumps({'samples':samples,'seconds':12,'source':'original'},indent=2),encoding='utf-8')
 result={'animation':'A_FE_Idle','seconds':12,'samples':len(samples),'feet_planted':True}

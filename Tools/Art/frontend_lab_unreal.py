@@ -3,6 +3,8 @@ import unreal
 import json
 import math
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 import traceback
 
 ROOT=Path(unreal.Paths.project_dir()).resolve()
@@ -164,4 +166,4 @@ def build():
 
 try:build()
 except Exception:REPORT={'success':False,'traceback':traceback.format_exc()}
-(ROOT/'SourceArt/FrontEnd/art_lab_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+(REPORT_DIR/'art_lab_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

@@ -1,5 +1,6 @@
 #include "space/UI/FrontEnd/JTSFrontEndShellWidget.h"
 #include "space/UI/FrontEnd/JTSMenuActionButton.h"
+#include "space/UI/FrontEnd/JTSFrontEndAvatarWidget.h"
 #include "space/UI/FrontEnd/JTSFrontEndSettingsModel.h"
 #include "space/Systems/JTSLocalProfileSubsystem.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
@@ -16,6 +17,9 @@
 #include "Components/PanelWidget.h"
 #include "Components/EditableTextBox.h"
 #include "Components/TextBlock.h"
+#include "Components/Slider.h"
+#include "Components/Border.h"
+#include "space/UI/FrontEnd/JTSGradientBar.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
 #include "InputCoreTypes.h"
@@ -36,9 +40,24 @@ void UJTSFrontEndShellWidget::NativeConstruct()
  Confirmation=GetWidgetFromName(TEXT("ConfirmationLayer"));
  if (Confirmation) Confirmation->SetVisibility(ESlateVisibility::Collapsed);
  SettingsModel=NewObject<UJTSFrontEndSettingsModel>(this); SettingsModel->Initialize(GetGameInstance()); SettingsModel->SaveLocal();
- TArray<UWidget*> Widgets; WidgetTree->GetAllWidgets(Widgets); Actions.Reset();
+ TArray<UWidget*> Widgets; WidgetTree->GetAllWidgets(Widgets); Actions.Reset(); AuthoredStyles.Reset(); SelectedStates.Reset();
+ AvatarViews.Reset();
+ for (UWidget* W:Widgets) if (auto* View=Cast<UJTSFrontEndAvatarWidget>(W))
+ {
+  View->OnEditAvatar.RemoveAll(this); View->OnEditAvatar.AddUObject(this,&UJTSFrontEndShellWidget::EditAvatar);
+  View->OnRenameAvatar.RemoveAll(this); View->OnRenameAvatar.AddUObject(this,&UJTSFrontEndShellWidget::RenameAvatar);
+  AvatarViews.Add(View);
+ }
  for (UWidget* W:Widgets) if (auto* B=Cast<UJTSMenuActionButton>(W))
- { B->OnAction.RemoveAll(this); B->OnAction.AddUObject(this,&UJTSFrontEndShellWidget::DispatchAction); Actions.Add(B); }
+ {
+  B->OnAction.RemoveAll(this); B->OnAction.AddUObject(this,&UJTSFrontEndShellWidget::DispatchAction);
+  Actions.Add(B); AuthoredStyles.Add(B->GetStyle()); SelectedStates.Add(false);
+  // Swatch fill comes from the catalog so palette edits need no widget changes.
+  if (B->Action==TEXT("Swatch") && AvatarCatalog && AvatarCatalog->Colors.IsValidIndex(B->Index)) B->SetBackgroundColor(AvatarCatalog->Colors[B->Index]);
+ }
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("HueSlider")))) S->OnValueChanged.AddUniqueDynamic(this,&UJTSFrontEndShellWidget::HueChanged);
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("SaturationSlider")))) S->OnValueChanged.AddUniqueDynamic(this,&UJTSFrontEndShellWidget::SaturationChanged);
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("BrightnessSlider")))) S->OnValueChanged.AddUniqueDynamic(this,&UJTSFrontEndShellWidget::BrightnessChanged);
  auto* Online=GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>();
  Online->OnSessionOperationFinished.AddUniqueDynamic(this,&UJTSFrontEndShellWidget::OperationFinished);
  History.Reset(); Navigate(bLobby ? TEXT("Lobby") : TEXT("Home")); History.Reset();
@@ -49,6 +68,7 @@ void UJTSFrontEndShellWidget::NativeDestruct()
  if (SettingsModel) { SettingsModel->RevertVideo(); SettingsModel->SaveLocal(); }
  if (GetGameInstance()) GetGameInstance()->GetSubsystem<UJTSOnlineSessionSubsystem>()->OnSessionOperationFinished.RemoveDynamic(this,&UJTSFrontEndShellWidget::OperationFinished);
  for (UJTSMenuActionButton* B:Actions) if (B) B->OnAction.RemoveAll(this);
+ for (UJTSFrontEndAvatarWidget* View:AvatarViews) if (View) { View->SetAvatars({}); View->OnEditAvatar.RemoveAll(this); View->OnRenameAvatar.RemoveAll(this); }
  Super::NativeDestruct();
 }
 void UJTSFrontEndShellWidget::SetText(FName Name,const FString& Value) { if (auto* T=Cast<UTextBlock>(GetWidgetFromName(Name))) T->SetText(FText::FromString(Value)); }
@@ -72,11 +92,16 @@ void UJTSFrontEndShellWidget::Navigate(FName Page)
  if (Page==TEXT("Saves")) SaveSummaries=GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>()->GetSaveSlotSummaries();
  if (Page==TEXT("Appearance"))
  {
+  bHeadView=false;
   Draft=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile->Appearance;
   if (auto* C=Cast<AJTSPlayerController>(GetOwningPlayer())) C->ServerSetReady(false);
-  Preview();
+  SyncColorControls(); Preview();
  }
- else for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It) It->ShowView(TEXT("Home"));
+ else
+ {
+  for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It) It->ShowView(TEXT("Home"));
+  for (TActorIterator<AJTSPreLaunchLobbyStage> It(GetWorld());It;++It) It->RestoreCamera();
+ }
  Refresh();
  if (auto* Saved=Focus.Find(Page); Saved && Saved->IsValid()) Saved->Get()->SetKeyboardFocus();
  else for (UJTSMenuActionButton* B:Actions) if (B->IsVisible() && B->GetIsEnabled())
@@ -100,7 +125,11 @@ void UJTSFrontEndShellWidget::Back()
 FReply UJTSFrontEndShellWidget::NativeOnPreviewKeyDown(const FGeometry& G,const FKeyEvent& E)
 {
  if (!SettingsModel || !GetOwningPlayer()) return Super::NativeOnPreviewKeyDown(G,E);
- if (E.GetKey()==EKeys::Escape || E.GetKey()==EKeys::Gamepad_FaceButton_Right) { Back(); return FReply::Handled(); }
+ if (E.GetKey()==EKeys::Escape || E.GetKey()==EKeys::Gamepad_FaceButton_Right)
+ {
+  for (UJTSFrontEndAvatarWidget* View:AvatarViews) if (View && View->IsEditingName()) { View->CancelNameEdit(); View->SetKeyboardFocus(); return FReply::Handled(); }
+  Back(); return FReply::Handled();
+ }
  if (!PendingAction.IsNone() && (E.GetKey()==EKeys::Tab || E.GetKey()==EKeys::Left || E.GetKey()==EKeys::Right || E.GetKey()==EKeys::Gamepad_DPad_Left || E.GetKey()==EKeys::Gamepad_DPad_Right))
  {
   auto* Cancel=GetWidgetFromName(TEXT("CancelConfirmation")); auto* Accept=GetWidgetFromName(TEXT("AcceptConfirmation"));
@@ -118,9 +147,14 @@ void UJTSFrontEndShellWidget::Confirm(FName A,int32 I,const FString& Message)
 }
 void UJTSFrontEndShellWidget::Preview()
 {
- for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It) { It->ShowView(TEXT("Full")); It->PreviewAppearance(Draft); }
+ for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It) { It->ShowView(bHeadView ? TEXT("Head") : TEXT("Full")); It->PreviewAppearance(Draft); }
+ RefreshColorReadout();
  // Lobby preview is local until Apply; cancel restores the authoritative appearance.
- if (bLobby) if (auto* Pawn=GetOwningPlayerPawn()) if (auto* C=Pawn->FindComponentByClass<UJTSAvatarAppearanceComponent>()) C->Apply(Draft);
+ if (bLobby) if (auto* Pawn=GetOwningPlayerPawn())
+ {
+  if (auto* C=Pawn->FindComponentByClass<UJTSAvatarAppearanceComponent>()) C->Apply(Draft);
+  for (TActorIterator<AJTSPreLaunchLobbyStage> It(GetWorld());It;++It) It->ShowAppearance(Pawn,bHeadView);
+ }
 }
 AJTSPlayerState* UJTSFrontEndShellWidget::PlayerAt(int32 Index) const
 {
@@ -129,6 +163,68 @@ AJTSPlayerState* UJTSFrontEndShellWidget::PlayerAt(int32 Index) const
  for (APlayerState* P:GS->PlayerArray) if (auto* J=Cast<AJTSPlayerState>(P)) Players.Add(J);
  Players.Sort([](const AJTSPlayerState& A,const AJTSPlayerState& B){return A.GetPlayerId()<B.GetPlayerId();});
  return Players.IsValidIndex(Index) ? Players[Index] : nullptr;
+}
+bool UJTSFrontEndShellWidget::CanEditAppearance() const
+{
+ if (!PendingAction.IsNone() || Busy()) return false;
+ const auto* GS=GetWorld()->GetGameState<AJTSGameState>();
+ return !bLobby || (GS && GS->GetLaunchDeadline()==0);
+}
+void UJTSFrontEndShellWidget::EditAvatar()
+{
+ if ((CurrentPage==TEXT("Home") || CurrentPage==TEXT("Lobby")) && CanEditAppearance())
+ {
+  for (UJTSFrontEndAvatarWidget* View:AvatarViews)
+  {
+   UWidget* Parent=View->GetParent(); while (Parent && Parent!=Pages->GetActiveWidget()) Parent=Parent->GetParent();
+   if (Parent) { Focus.Add(CurrentPage,View); break; }
+  }
+  DispatchAction(TEXT("Appearance"));
+ }
+}
+void UJTSFrontEndShellWidget::RefreshAvatarViews()
+{
+ TArray<FJTSFrontEndAvatarTarget> Targets;
+ const auto* Me=GetOwningPlayer()->GetPlayerState<AJTSPlayerState>();
+ if (CurrentPage==TEXT("Home"))
+ {
+  for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It)
+  {
+   FJTSFrontEndAvatarTarget Target; Target.Mesh=It->PreviewMesh;
+   const auto* Player=GetOwningPlayer()->PlayerState.Get();
+   const FString& SavedName=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile->DisplayName;
+   Target.Name=!SavedName.IsEmpty() ? SavedName : Player && !Player->GetPlayerName().IsEmpty() ? Player->GetPlayerName() : TEXT("我的宇航员");
+   Target.Status=TEXT("你  ·  悬停人物编辑外观"); Target.bEditable=CanEditAppearance();
+   Targets.Add(Target); break;
+  }
+ }
+ else if (CurrentPage==TEXT("Lobby"))
+ {
+  const auto* GS=GetWorld()->GetGameState<AJTSGameState>();
+  for (int32 I=0;I<4;++I) if (auto* Player=PlayerAt(I)) if (auto* Pawn=Player->GetPawn())
+  {
+   FJTSFrontEndAvatarTarget Target; Target.Mesh=Pawn->FindComponentByClass<USkeletalMeshComponent>();
+   Target.Name=Player->GetPlayerName(); Target.bEditable=Player==Me && CanEditAppearance();
+   Target.Status=FString::Printf(TEXT("%s%s · %s"),Player==Me ? TEXT("你 · ") : TEXT(""),Player->IsExpeditionHost() ? TEXT("队长") : TEXT("队员"),GS && GS->GetLaunchDeadline()>0 ? TEXT("即将出发") : Player->IsReady() ? TEXT("已准备") : TEXT("未准备"));
+   Targets.Add(Target);
+  }
+ }
+ for (UJTSFrontEndAvatarWidget* View:AvatarViews)
+ {
+  // Inactive switcher pages do not tick, so clear them explicitly on navigation.
+  UWidget* Parent=View->GetParent(); while (Parent && Parent!=Pages) { if (Parent==Pages->GetActiveWidget()) break; Parent=Parent->GetParent(); }
+  View->SetAvatars(Parent==Pages->GetActiveWidget() ? Targets : TArray<FJTSFrontEndAvatarTarget>());
+ }
+}
+void UJTSFrontEndShellWidget::RenameAvatar(const FString& Name)
+{
+ if (!CanEditAppearance()) return;
+ auto* Local=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>();
+ const FString Previous=Local->Profile->DisplayName;
+ Local->Profile->DisplayName=Name;
+ if (!Local->Save()) { Local->Profile->DisplayName=Previous; Status=TEXT("名字保存失败，请重试。"); }
+ else if (auto* Controller=Cast<AJTSPlayerController>(GetOwningPlayer())) Controller->ServerSetDisplayName(Name);
+ Refresh();
 }
 void UJTSFrontEndShellWidget::DispatchAction(FName A,int32 I)
 {
@@ -151,6 +247,7 @@ void UJTSFrontEndShellWidget::DispatchAction(FName A,int32 I)
   return;
  }
  if (!PendingAction.IsNone() || Busy()) return;
+ if (A==TEXT("Appearance") && !CanEditAppearance()) return;
  if (A==TEXT("Home") || A==TEXT("Saves") || A==TEXT("Join") || A==TEXT("Appearance") || A==TEXT("Settings") || A==TEXT("Credits")) Navigate(A);
  else if (A==TEXT("Slot"))
  {
@@ -167,16 +264,19 @@ void UJTSFrontEndShellWidget::DispatchAction(FName A,int32 I)
  else if (A==TEXT("Listing")) SelectedListing=ListingOffset+I;
  else if (A==TEXT("ListingPage")) { ListingOffset=FMath::Clamp(ListingOffset+I*4,0,FMath::Max(0,((Online->GetDiscoveredListings().Num()-1)/4)*4)); SelectedListing=INDEX_NONE; }
  else if (A==TEXT("Connect")) { if (SelectedListing!=INDEX_NONE) { ConnectionReturn=TEXT("Join"); Navigate(TEXT("Connecting")); Online->JoinExpedition(SelectedListing,Input(TEXT("JoinPassword"))); } else Status=TEXT("请先选择一个远征队。"); }
- else if (A==TEXT("Suit") || A==TEXT("Eyes") || A==TEXT("Mouth") || A==TEXT("Helmet") || A==TEXT("Upper") || A==TEXT("Lower"))
+ else if (A==TEXT("Suit") || A==TEXT("Eyes") || A==TEXT("Mouth"))
  {
-  if (I<0 || I>=5) return;
-  if (A==TEXT("Suit")) Draft.Suit=I; else if (A==TEXT("Eyes")) Draft.Eyes=I; else if (A==TEXT("Mouth")) Draft.Mouth=I; else if (A==TEXT("Helmet")) Draft.Helmet=I; else if (A==TEXT("Upper")) Draft.Upper=I; else Draft.Lower=I;
+  if (A==TEXT("Suit") && I>=0 && I<5) Draft.Suit=I;
+  else if (A==TEXT("Eyes") && I>=0 && I<5) Draft.Eyes=I;
+  else if (A==TEXT("Mouth") && I>=0 && I<5) Draft.Mouth=I;
   Preview();
  }
- else if (A==TEXT("HeadView")) { for (TActorIterator<AJTSEntryPresentationStage> It(GetWorld());It;++It) It->ShowView(TEXT("Head")); }
- else if (A==TEXT("FullView")) Preview();
- else if (A==TEXT("Random")) { Draft.Suit=FMath::RandRange(0,4); Draft.Eyes=FMath::RandRange(0,4); Draft.Mouth=FMath::RandRange(0,4); Draft.Helmet=FMath::RandRange(0,4); Draft.Upper=FMath::RandRange(0,4); Draft.Lower=FMath::RandRange(0,4); Preview(); }
- else if (A==TEXT("Reset")) { Draft=FJTSAvatarAppearance(); Preview(); }
+ else if (A==TEXT("ColorPart") && I>=0 && I<3) { ColorPart=I; SyncColorControls(); }
+ else if (A==TEXT("Swatch") && AvatarCatalog && AvatarCatalog->Colors.IsValidIndex(I)) { PartColor()=AvatarCatalog->Colors[I].ToFColor(true); SyncColorControls(); Preview(); }
+ else if (A==TEXT("HeadView")) { bHeadView=true; Preview(); }
+ else if (A==TEXT("FullView")) { bHeadView=false; Preview(); }
+ else if (A==TEXT("Random")) { Draft.Suit=FMath::RandRange(0,4); Draft.Eyes=FMath::RandRange(0,4); Draft.Mouth=FMath::RandRange(0,4); Draft.HelmetColor=FColor::MakeRandomColor(); Draft.UpperColor=FColor::MakeRandomColor(); Draft.LowerColor=FColor::MakeRandomColor(); SyncColorControls(); Preview(); }
+ else if (A==TEXT("Reset")) { Draft=FJTSAvatarAppearance(); SyncColorControls(); Preview(); }
  else if (A==TEXT("ApplyAppearance"))
  {
   const auto Previous=Local->Profile->Appearance; Local->Profile->Appearance=Draft;
@@ -189,7 +289,10 @@ void UJTSFrontEndShellWidget::DispatchAction(FName A,int32 I)
  else if (SettingNames.Contains(A)) SettingsModel->Change(A,I);
  else if (A==TEXT("Ready") && C) C->RequestSetReady();
  else if (A==TEXT("Launch") && C) C->ServerRequestStartExpedition();
- else if (A==TEXT("CloseJoining") && C) C->RequestCloseJoining();
+ else if (A==TEXT("CloseJoining") && C)
+ {
+  if (const auto* GS=GetWorld()->GetGameState<AJTSGameState>()) C->RequestSetJoiningOpen(!GS->IsAcceptingNewPlayers());
+ }
  else if (A==TEXT("Copy")) { FPlatformApplicationMisc::ClipboardCopy(*Online->GetCurrentJoinCode()); Status=TEXT("房间码已复制。"); }
  else if (A==TEXT("Mute")) Voice->SetInputMuted(!Voice->IsInputMuted());
  else if (A==TEXT("MutePlayer")) { if (auto* P=PlayerAt(I)) Voice->SetPlayerMuted(P->GetVoiceIdentityString(),!Voice->IsPlayerMuted(P->GetVoiceIdentityString())); }
@@ -212,12 +315,53 @@ void UJTSFrontEndShellWidget::NativeTick(const FGeometry& G,float D)
  if (bLobby && !bProfileSent)
  {
   if (auto* C=Cast<AJTSPlayerController>(GetOwningPlayer()); C && C->GetPlayerState<AJTSPlayerState>())
-  { C->ServerSetAppearance(GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile->Appearance); bProfileSent=true; }
+  {
+   const auto* Profile=GetGameInstance()->GetSubsystem<UJTSLocalProfileSubsystem>()->Profile.Get();
+   C->ServerSetAppearance(Profile->Appearance);
+   if (!Profile->DisplayName.IsEmpty()) C->ServerSetDisplayName(Profile->DisplayName);
+   bProfileSent=true;
+  }
  }
  // Camera stays fixed in lobby on each local client, including remote clients.
  if (bLobby) for (TActorIterator<AJTSPreLaunchLobbyStage> It(GetWorld());It;++It) { GetOwningPlayer()->SetViewTarget(*It); break; }
  Refresh();
 }
+FColor& UJTSFrontEndShellWidget::PartColor() { return ColorPart==0 ? Draft.HelmetColor : ColorPart==1 ? Draft.UpperColor : Draft.LowerColor; }
+// HSB is edited in sRGB byte space so slider positions match what the player sees.
+void UJTSFrontEndShellWidget::SyncColorControls()
+{
+ const FLinearColor HSV=FLinearColor(PartColor().R/255.f,PartColor().G/255.f,PartColor().B/255.f).LinearRGBToHSV();
+ Hue=HSV.R; Saturation=HSV.G; Brightness=HSV.B;
+ // USlider::SetValue broadcasts OnValueChanged; keep the exact part color instead of re-quantizing it.
+ TGuardValue<bool> Guard(bSyncingColor,true);
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("HueSlider")))) S->SetValue(Hue/360.f);
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("SaturationSlider")))) S->SetValue(Saturation);
+ if (auto* S=Cast<USlider>(GetWidgetFromName(TEXT("BrightnessSlider")))) S->SetValue(Brightness);
+ const FColor Exact=PartColor(); ApplyHSV(); PartColor()=Exact;
+}
+void UJTSFrontEndShellWidget::ApplyHSV()
+{
+ auto Display=[](float H,float S,float V){ const FLinearColor C=FLinearColor(H,S,V).HSVToLinearRGB(); return FLinearColor::FromSRGBColor(FColor(FMath::RoundToInt(C.R*255),FMath::RoundToInt(C.G*255),FMath::RoundToInt(C.B*255))); };
+ const FLinearColor C=FLinearColor(Hue,Saturation,Brightness).HSVToLinearRGB();
+ PartColor()=FColor(FMath::RoundToInt(C.R*255),FMath::RoundToInt(C.G*255),FMath::RoundToInt(C.B*255));
+ if (auto* Bar=Cast<UJTSGradientBar>(GetWidgetFromName(TEXT("HueBar"))))
+ { TArray<FLinearColor> Stops; for (int32 I=0;I<=6;++I) Stops.Add(Display(I*60.f,1,1)); Bar->SetStops(Stops); }
+ if (auto* Bar=Cast<UJTSGradientBar>(GetWidgetFromName(TEXT("SaturationBar")))) Bar->SetStops({Display(Hue,0,Brightness),Display(Hue,1,Brightness)});
+ if (auto* Bar=Cast<UJTSGradientBar>(GetWidgetFromName(TEXT("BrightnessBar")))) Bar->SetStops({FLinearColor::Black,Display(Hue,Saturation,1)});
+ RefreshColorReadout();
+}
+void UJTSFrontEndShellWidget::RefreshColorReadout()
+{
+ const FColor Colors[]={Draft.HelmetColor,Draft.UpperColor,Draft.LowerColor};
+ for (int32 I=0;I<3;++I)
+  if (auto* Chip=Cast<UBorder>(GetWidgetFromName(*FString::Printf(TEXT("PartColor%d"),I)))) Chip->SetBrushColor(FLinearColor::FromSRGBColor(Colors[I]));
+ SetText(TEXT("HueValue"),FString::Printf(TEXT("%.0f°"),Hue));
+ SetText(TEXT("SaturationValue"),FString::Printf(TEXT("%.0f%%"),Saturation*100.f));
+ SetText(TEXT("BrightnessValue"),FString::Printf(TEXT("%.0f%%"),Brightness*100.f));
+}
+void UJTSFrontEndShellWidget::HueChanged(float Value) { if (bSyncingColor) return; Hue=Value*360.f; ApplyHSV(); Preview(); }
+void UJTSFrontEndShellWidget::SaturationChanged(float Value) { if (bSyncingColor) return; Saturation=Value; ApplyHSV(); Preview(); }
+void UJTSFrontEndShellWidget::BrightnessChanged(float Value) { if (bSyncingColor) return; Brightness=Value; ApplyHSV(); Preview(); }
 void UJTSFrontEndShellWidget::Refresh()
 {
  if (!SettingsModel || !GetOwningPlayer() || !GetGameInstance() || !GetWorld() || GetWorld()->bIsTearingDown) return;
@@ -254,25 +398,38 @@ void UJTSFrontEndShellWidget::Refresh()
  for (int32 I=0;I<4;++I)
  {
   auto* Player=PlayerAt(I); if (Player) { ++Count; AllReady &= Player->IsReady(); }
-  SetText(*FString::Printf(TEXT("CrewLabel%d"),I),Player ? FString::Printf(TEXT("%s%s\n%s%s"),Player->IsExpeditionHost() ? TEXT("★ ") : TEXT(""),*Player->GetPlayerName().Left(14),Player->IsReady() ? TEXT("已准备") : TEXT("未准备"),Voice->IsPlayerTalking(Player->GetVoiceIdentityString()) ? TEXT(" · 正在说话") : TEXT("")) : TEXT("等待队员\n邀请好友或分享房间码"));
+  SetText(*FString::Printf(TEXT("CrewLabel%d"),I),Player ? FString::Printf(TEXT("%02d · %s\n%s%s"),I+1,Player==Me ? TEXT("本机队员") : Player->IsExpeditionHost() ? TEXT("队长") : TEXT("队员"),Player->IsReady() ? TEXT("已准备") : TEXT("未准备"),Voice->IsPlayerTalking(Player->GetVoiceIdentityString()) ? TEXT(" · 正在说话") : TEXT("")) : TEXT("等待队员\n邀请好友或分享房间码"));
  }
  SetText(TEXT("LobbyCode"),FString::Printf(TEXT("房间码  %s  ·  %d/%d  ·  %s"),*Online->GetCurrentJoinCode(),Count,Online->GetCurrentMaximumPlayers(),GS && !GS->IsAcceptingNewPlayers() ? TEXT("加入已关闭") : TEXT("可加入")));
  SetText(TEXT("ReadyLabel"),Me && Me->IsReady() ? TEXT("取消准备") : TEXT("准备就绪"));
  SetText(TEXT("MicLabel"),Voice->IsInputMuted() ? TEXT("麦克风已静音") : TEXT("麦克风开启"));
  SetText(TEXT("LobbyHint"),GS && GS->GetLaunchDeadline()>0 ? FString::Printf(TEXT("即将出发  %.0f"),FMath::Max(0.,FMath::CeilToDouble(GS->GetLaunchDeadline()-GS->GetSynchronizedServerTimeSeconds()))) : TEXT("所有队员（包括房主）准备后即可出发 · 单人也可开始"));
- for (UJTSMenuActionButton* B:Actions)
+ RefreshAvatarViews();
+ for (int32 N=0;N<Actions.Num();++N)
  {
+  UJTSMenuActionButton* B=Actions[N];
   bool Enabled=!BusyNow;
   if (B->Action==TEXT("Delete")) Enabled &= SaveSummaries.IsValidIndex(B->Index-1) && SaveSummaries[B->Index-1].bOccupied;
   if (B->Action==TEXT("Listing")) Enabled &= Listings.IsValidIndex(ListingOffset+B->Index);
   if (B->Action==TEXT("Launch")) Enabled &= Me && Me->IsExpeditionHost() && Count>0 && AllReady && GS && GS->GetLaunchDeadline()==0;
-  if (B->Action==TEXT("CloseJoining")) Enabled &= Me && Me->IsExpeditionHost() && GS && GS->IsAcceptingNewPlayers();
+  if (B->Action==TEXT("CloseJoining"))
+  {
+   Enabled &= Me && Me->IsExpeditionHost() && GS && GS->IsWaitingToStart() && GS->GetLaunchDeadline()==0;
+   SetText(TEXT("Lobby_CloseJoining_Label"),GS && !GS->IsAcceptingNewPlayers() ? TEXT("重新开放加入") : TEXT("关闭加入"));
+  }
   if (B->Action==TEXT("Kick")) { auto* Target=PlayerAt(B->Index); Enabled &= Me && Me->IsExpeditionHost() && Target && !Target->IsExpeditionHost(); }
   if (B->Action==TEXT("MutePlayer")) Enabled &= PlayerAt(B->Index)!=nullptr;
   if (B->Action==TEXT("Ready") || B->Action==TEXT("Appearance")) Enabled &= !bLobby || (GS && GS->GetLaunchDeadline()==0);
   if (B->Action==TEXT("VideoKeep") || B->Action==TEXT("VideoRevert")) Enabled=SettingsModel->IsVideoPending();
   B->SetIsEnabled(Enabled);
-  bool Selected=(B->Action==TEXT("Suit") && Draft.Suit==B->Index)||(B->Action==TEXT("Eyes") && Draft.Eyes==B->Index)||(B->Action==TEXT("Mouth") && Draft.Mouth==B->Index)||(B->Action==TEXT("Helmet") && Draft.Helmet==B->Index)||(B->Action==TEXT("Upper") && Draft.Upper==B->Index)||(B->Action==TEXT("Lower") && Draft.Lower==B->Index);
-  B->SetBackgroundColor(Selected ? FLinearColor(1,.4f,.08f,1) : FLinearColor::White);
+  const bool Selected=(B->Action==TEXT("Suit") && Draft.Suit==B->Index)||(B->Action==TEXT("Eyes") && Draft.Eyes==B->Index)||(B->Action==TEXT("Mouth") && Draft.Mouth==B->Index)||(B->Action==TEXT("ColorPart") && ColorPart==B->Index)
+   ||(B->Action==TEXT("HeadView") && bHeadView)||(B->Action==TEXT("FullView") && !bHeadView)
+   ||(B->Action==TEXT("Swatch") && AvatarCatalog && AvatarCatalog->Colors.IsValidIndex(B->Index) && AvatarCatalog->Colors[B->Index].ToFColor(true)==PartColor());
+  if (SelectedStates[N]!=Selected)
+  {
+   SelectedStates[N]=Selected; FButtonStyle Style=AuthoredStyles[N];
+   if (Selected) for (FSlateBrush* Brush:{&Style.Normal,&Style.Hovered,&Style.Pressed}) { Brush->OutlineSettings.Color=SelectionOutline; Brush->OutlineSettings.Width=SelectionOutlineWidth; }
+   B->SetStyle(Style);
+  }
  }
 }

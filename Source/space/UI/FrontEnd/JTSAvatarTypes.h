@@ -11,11 +11,11 @@ struct SPACE_API FJTSAvatarAppearance
  UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Suit = 0;
  UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Eyes = 0;
  UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Mouth = 1;
- UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Helmet = 0;
- UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Upper = 1;
- UPROPERTY(EditAnywhere, BlueprintReadWrite) uint8 Lower = 0;
- bool IsValid() const { return Suit < 5 && Eyes < 5 && Mouth < 5 && Helmet < 5 && Upper < 5 && Lower < 5; }
- bool operator==(const FJTSAvatarAppearance& B) const { return Suit==B.Suit && Eyes==B.Eyes && Mouth==B.Mouth && Helmet==B.Helmet && Upper==B.Upper && Lower==B.Lower; }
+ UPROPERTY(EditAnywhere, BlueprintReadWrite) FColor HelmetColor = FColor(255, 128, 64);
+ UPROPERTY(EditAnywhere, BlueprintReadWrite) FColor UpperColor = FColor(64, 128, 255);
+ UPROPERTY(EditAnywhere, BlueprintReadWrite) FColor LowerColor = FColor(32, 32, 32);
+ bool IsValid() const { return Suit < 5 && Eyes < 5 && Mouth < 5; }
+ bool operator==(const FJTSAvatarAppearance& B) const { return Suit==B.Suit && Eyes==B.Eyes && Mouth==B.Mouth && HelmetColor==B.HelmetColor && UpperColor==B.UpperColor && LowerColor==B.LowerColor; }
 };
 
 UCLASS(BlueprintType)

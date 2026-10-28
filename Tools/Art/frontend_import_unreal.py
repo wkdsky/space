@@ -9,4 +9,6 @@ try:
     REPORT['success']=True
 except Exception:
     REPORT={'success':False,'traceback':traceback.format_exc()}
-Path(unreal.Paths.project_dir(),'SourceArt/FrontEnd/unreal_import_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+report=Path(unreal.Paths.project_dir(),'Saved/Art/FrontEnd/unreal_import_report.json')
+report.parent.mkdir(parents=True,exist_ok=True)
+report.write_text(json.dumps(REPORT,indent=2),encoding='utf-8')

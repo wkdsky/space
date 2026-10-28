@@ -10,10 +10,12 @@ import wave
 from pathlib import Path
 
 OUT=Path('D:/projects/space/SourceArt/FrontEnd')
+PRODUCTION_FILES={e['file'] for e in json.loads((OUT/'asset_manifest.json').read_text(encoding='utf-8'))['assets']}
 ENTRIES=[]
 
 
 def png(name, pixels, folder='UI', origin='original_blender_procedural'):
+    if folder+'/'+name+'.png' not in PRODUCTION_FILES:return
     pixels=np.clip(pixels,0,1).astype(np.float32)
     h,w=pixels.shape[:2]
     if pixels.shape[2]==3:pixels=np.dstack([pixels,np.ones((h,w),dtype=np.float32)])
@@ -178,7 +180,6 @@ LETTERS={
  'C':[[(1,.12),(.8,0),(.2,0),(0,.2),(0,.8),(.2,1),(.8,1),(1,.88)]],
  'E':[[(1,0),(0,0),(0,1),(1,1)],[(0,.5),(.8,.5)]],
 }
-(OUT/'UI/Logo_strokes.json').write_text(json.dumps(LETTERS,indent=2))
 x,y=np.meshgrid((np.arange(1024)+.5)/1024,(np.arange(512)+.5)/512)
 logo=np.zeros_like(x)
 for text,top,left,width,height in [('JUMP',.08,.06,.62,.33),('TO SPACE',.58,.06,.88,.31)]:
@@ -256,6 +257,7 @@ png('T_FE_MarkingAtlas',rgba(mark,(.97,.60,.22)),'Textures')
 # Original PCM synthesis. All time-domain sources are saved; deterministic seed above.
 RATE=48000
 def wav(name, signal, loop=False, recipe=''):
+    if 'Audio/'+name+'.wav' not in PRODUCTION_FILES:return
     signal=np.asarray(signal,dtype=np.float64)
     if loop:
         # Smoothly bridge the endpoints with a half-second zero-slope correction.

@@ -32,6 +32,7 @@ public:
 
 	/** Host-only lobby controls. They are server rules, never direct widget actions. */
 	bool RequestCloseJoining(AJTSPlayerController* RequestingController);
+	bool RequestSetJoiningOpen(AJTSPlayerController* RequestingController, bool bOpen);
 	bool RequestKickPlayer(AJTSPlayerController* RequestingController, AJTSPlayerState* TargetPlayerState);
 
 	bool IsHostController(const AJTSPlayerController* Controller) const;

@@ -41,9 +41,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
 	void RequestAvatarColor(EJTSAvatarColor NewColor);
 	UFUNCTION(Server, Reliable) void ServerSetAppearance(FJTSAvatarAppearance Appearance);
+	UFUNCTION(Server, Reliable) void ServerSetDisplayName(const FString& DisplayName);
 
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
 	void RequestCloseJoining();
+
+	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
+	void RequestSetJoiningOpen(bool bOpen);
 
 	UFUNCTION(BlueprintCallable, Category = "Multiplayer|Lobby")
 	void RequestKickPlayer(AJTSPlayerState* TargetPlayerState);
@@ -59,6 +63,9 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestCloseJoining();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestSetJoiningOpen(bool bOpen);
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestKickPlayer(AJTSPlayerState* TargetPlayerState);

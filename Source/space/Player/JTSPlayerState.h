@@ -21,6 +21,8 @@ class SPACE_API AJTSPlayerState : public APlayerState
 	GENERATED_BODY()
 
 public:
+	/** Shared validation for local name entry and the authoritative rename RPC. */
+	static bool NormalizeDisplayName(const FString& Value, FString& Normalized);
 	AJTSPlayerState();
 
 	UFUNCTION(BlueprintPure, Category = "Stellar")

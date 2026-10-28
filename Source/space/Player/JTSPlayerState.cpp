@@ -10,6 +10,14 @@
 #include "space/Items/JTSStellarProgression.h"
 #include "space/Items/JTSWeaponProgression.h"
 
+bool AJTSPlayerState::NormalizeDisplayName(const FString& Value,FString& Normalized)
+{
+	Normalized=Value.TrimStartAndEnd();
+	if (Normalized.IsEmpty() || Normalized.Len()>20) return false;
+	for (const TCHAR C:Value) if (FChar::IsControl(C)) return false;
+	return true;
+}
+
 namespace
 {
 	FJTSItemInstance MakeLockerCarriedItem(const FJTSShipLockerSlot& Slot,

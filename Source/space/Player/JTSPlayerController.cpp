@@ -139,9 +139,14 @@ void AJTSPlayerController::RequestAvatarColor(EJTSAvatarColor NewColor)
 
 void AJTSPlayerController::RequestCloseJoining()
 {
+	RequestSetJoiningOpen(false);
+}
+
+void AJTSPlayerController::RequestSetJoiningOpen(bool bOpen)
+{
 	if (IsLocalController())
 	{
-		ServerRequestCloseJoining();
+		ServerRequestSetJoiningOpen(bOpen);
 	}
 }
 
@@ -191,6 +196,15 @@ void AJTSPlayerController::ServerSetAppearance_Implementation(FJTSAvatarAppearan
 	}
 }
 
+void AJTSPlayerController::ServerSetDisplayName_Implementation(const FString& DisplayName)
+{
+	const AJTSGameState* State=GetWorld() ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	FString Name;
+	if (!State || !State->IsWaitingToStart() || State->GetLaunchDeadline()>0
+		|| !AJTSPlayerState::NormalizeDisplayName(DisplayName,Name)) return;
+	if (auto* Mode=GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>()) Mode->ChangeName(this,Name,false);
+}
+
 void AJTSPlayerController::ServerRequestStartExpedition_Implementation()
 {
 	if (AJTSGameplayGameModeBase* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>() : nullptr)
@@ -201,9 +215,14 @@ void AJTSPlayerController::ServerRequestStartExpedition_Implementation()
 
 void AJTSPlayerController::ServerRequestCloseJoining_Implementation()
 {
+	ServerRequestSetJoiningOpen_Implementation(false);
+}
+
+void AJTSPlayerController::ServerRequestSetJoiningOpen_Implementation(bool bOpen)
+{
 	if (AJTSGameplayGameModeBase* const GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>() : nullptr)
 	{
-		GameMode->RequestCloseJoining(this);
+		GameMode->RequestSetJoiningOpen(this, bOpen);
 	}
 }
 

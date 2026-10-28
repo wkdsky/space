@@ -1,7 +1,0 @@
-{
-  "success": true,
-  "operation": "scene",
-  "map": "/Game/Space/FrontEnd/Maps/L_PreLaunchLobby",
-  "ship_floor_clearance": 1.0,
-  "hero_pad_aligned": true
-}

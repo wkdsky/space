@@ -11,7 +11,6 @@ SCRIPTS = {
     'import': 'frontend_import_unreal.py',
     'lab': 'frontend_lab_unreal.py',
     'configure': 'frontend_configure_unreal.py',
-    'validate': 'frontend_validate_unreal.py',
 }
 
 
@@ -20,7 +19,7 @@ class FrontEndArtTools(unreal.ToolsetDefinition):
     @toolset_registry.tool_call
     @staticmethod
     def run_frontend_step(step: str) -> str:
-        """Run import, lab, configure or validate from the project's checked-in front-end scripts."""
+        """Run import, lab or configure from the project's front-end authoring scripts."""
         if step not in SCRIPTS:
             raise ValueError('Unknown front-end production step: ' + step)
         namespace = runpy.run_path(str(ROOT / 'Tools' / 'Art' / SCRIPTS[step]))

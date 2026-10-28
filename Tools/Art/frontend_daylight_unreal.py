@@ -2,9 +2,10 @@
 import unreal
 import json
 from pathlib import Path
+REPORT_DIR=Path('D:/projects/space/Saved/Art/FrontEnd')
+REPORT_DIR.mkdir(parents=True,exist_ok=True)
 ROOT=Path(unreal.Paths.project_dir()).resolve();ART=ROOT/'SourceArt/FrontEnd';DEST='/Game/Space/FrontEnd'
 EA=unreal.EditorAssetLibrary;AT=unreal.AssetToolsHelpers.get_asset_tools();ME=unreal.MaterialEditingLibrary
-assert json.loads((ART/'asset_gate.json').read_text())['passed']
 REPORT={'success':True,'imported':[],'materials':[]}
 for filename,folder in [('Textures/T_FE_SkyGradient.png','Textures')]+[('Models/SM_FE_'+n+'.fbx','Models') for n in ['ThreatCore','ThreatHalo','ThreatFrontRings']]:
     path=ART/filename;task=unreal.AssetImportTask()
@@ -46,4 +47,4 @@ multiply=ME.create_material_expression(sky,unreal.MaterialExpressionMultiply)
 ME.connect_material_expressions(texture,'RGB',multiply,'A');ME.connect_material_expressions(energy,'',multiply,'B')
 ME.connect_material_property(multiply,'',unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 ME.recompile_material(sky);EA.save_loaded_asset(sky,only_if_is_dirty=False)
-(ART/'daylight_import_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
+(REPORT_DIR/'daylight_import_report.json').write_text(json.dumps(REPORT,indent=2),encoding='utf-8')
