@@ -518,6 +518,12 @@ float UJTSSpacecraftPresentationComponent::GetDesiredGearAlpha() const
 	{
 		return 1.0f;
 	}
+	// A launch-stage craft has no orbital flight world yet. Its default Flying state
+	// must not retract the authored parked stance before the expedition enters space.
+	if (!IsValid(AJTSSpaceWorldManager::FindSpaceWorldManager(Ship)))
+	{
+		return 1.0f;
+	}
 
 	// Touchdown and a parked ship keep the feet down. The fold starts as soon as
 	// the pilot leaves the surface, and the feet come back out for the whole descent.

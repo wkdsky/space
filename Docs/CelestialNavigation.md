@@ -1,3 +1,5 @@
+> 2026-10-30：导航图已扩展为近地/地表、星域、星际三阶段，当前行为与配置见 [三阶段动态导航图](NavigationMap.md)。下文两阶段星盘与背景排除的历史记录不再代表当前地图显示。
+>
 > Current space architecture: [Independent planet bubbles](IndependentSpaceBubbles.md). Shared-sky rules, old positions and old distance values below are historical and superseded.
 
 # 天体导航与画面标记

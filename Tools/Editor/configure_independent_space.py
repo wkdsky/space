@@ -171,7 +171,9 @@ def configure(actors):
     for key in ['Mars','MarI']:
         actor = bodies[key]
         _,extent=actor.get_actor_bounds(False)
-        desired_radius=170000 if key=='Mars' else 3000
+        # Mars's rotated AABB encloses a ~600.15 m visible globe, matching the
+        # existing Moon's ~307.63 m mesh diameter at the real 1.9509 ratio.
+        desired_radius=49561.031064 if key=='Mars' else 3000
         actor.set_actor_scale3d(actor.get_actor_scale3d()*(desired_radius/max(extent.x,extent.y,extent.z)))
         center, _ = actor.get_actor_bounds(False)
         actor.set_actor_location(actor.get_actor_location()+earth+unreal.Vector(*offsets[key])-center, False, True)

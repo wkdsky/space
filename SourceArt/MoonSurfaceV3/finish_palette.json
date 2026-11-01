@@ -1,0 +1,38 @@
+{
+  "species": {
+    "MirrorSkimmer": {
+      "Shell": "#8FAEB9",
+      "Crown": "#C7C4A5",
+      "Wear": "#637A83",
+      "Joint": "#34414A"
+    },
+    "Riftlip": {
+      "Shell": "#8D967A",
+      "Wear": "#69745F",
+      "Joint": "#3C4645",
+      "Seal": "#423844",
+      "LipRim": "#B29A65"
+    },
+    "SpireWorker": {
+      "Shell": "#A18B66",
+      "Wear": "#695E4B",
+      "Joint": "#424642"
+    },
+    "SpireSoldier": {
+      "Shell": "#788A98",
+      "Crown": "#A5AFB4",
+      "Wear": "#62655D",
+      "Joint": "#343F49"
+    }
+  },
+  "environment": {
+    "Moon": "#929AA5",
+    "Lip": "#B2A991",
+    "Void": "#383B46",
+    "Tower": "#97866B",
+    "TowerLight": "#B3A285",
+    "Feed": "#9B8E6A",
+    "FeedLight": "#C5BA96"
+  },
+  "texture_folder": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\Textures"
+}

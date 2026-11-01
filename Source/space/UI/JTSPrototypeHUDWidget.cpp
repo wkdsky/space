@@ -520,6 +520,7 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	}
 	else
 	{
+		RefreshFlightNavigation();
 		if (!bEarthCollectionActive && !bSpaceWorldSurfaceActive)
 		{
 			SetBoardingProgressVisible(false);
@@ -1589,6 +1590,9 @@ void UJTSPrototypeHUDWidget::SetFlightNavigationVisible(bool bVisible)
 		CelestialMarkerWidget->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 	ApplyLayerVisibility(CruiseNavigationWidget, bVisible);
+	if (RightSidebarPanel)
+		if (auto* SidebarSlot = Cast<UCanvasPanelSlot>(RightSidebarPanel->Slot))
+			SidebarSlot->SetPosition(FVector2D(-28.0f, bVisible ? 310.0f : 90.0f));
 	ApplyLayerVisibility(FlightSpeedText, bVisible);
 	ApplyLayerVisibility(FlightNavPanel, false);
 	ApplyLayerVisibility(FlightTelemetryText, false);
@@ -1624,117 +1628,36 @@ bool UJTSPrototypeHUDWidget::IsLocalFlightDriver(const AJTSSpacecraftActor* Spac
 
 void UJTSPrototypeHUDWidget::RefreshFlightNavigation()
 {
-	AJTSSpacecraftActor* const Spacecraft = ResolveFlightSpacecraft();
-	const AJTSSpaceWorldManager* const SpaceWorldManager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	const bool bShowNavigation = IsValid(Spacecraft)
-		&& !Spacecraft->IsLanded()
-		&& IsValid(SpaceWorldManager)
-		&& SpaceWorldManager->IsAirborneTravel();
-	SetFlightNavigationVisible(bShowNavigation);
-	const bool bLocalDriver = IsLocalFlightDriver(Spacecraft);
-	if (FlightControlsPanel != nullptr)
+	AJTSSpacecraftActor* Spacecraft = ResolveFlightSpacecraft();
+	const AJTSSpaceWorldManager* const Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
+	AJTSCharacter* const Character = FindPlayerCharacter();
+	const bool bOnFoot = IsValid(Character) && !Character->IsBoarded();
+	if (!IsValid(Spacecraft) && bOnFoot)
 	{
-		FlightControlsPanel->SetVisibility(bLocalDriver && !bGameMenuOpen
-			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		// Surface controllers may be streaming independently. The expedition's replicated
+		// ship remains the navigation contact even when a controller has no ship reference.
+		const AJTSGameState* const State = GetWorld() ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+		Spacecraft = State ? State->GetActiveSpacecraft() : nullptr;
+		if (!IsValid(Spacecraft)) Spacecraft = FindSpacecraft();
 	}
-	if (FlightLandedExitRow != nullptr)
-	{
-		FlightLandedExitRow->SetVisibility(bLocalDriver && Spacecraft->IsLanded()
-			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-	}
-	if (!bShowNavigation || CruiseNavigationWidget == nullptr)
-	{
-		return;
-	}
-
-	const AActor* const NearBody = SpaceWorldManager->CompressedSpace->IsConfigured()
-		? SpaceWorldManager->CompressedSpace->ContainingNearFlightBody(Spacecraft->GetActorLocation()) : nullptr;
-	const AJTSPlanetAnchor* const SurfacePlanet = SpaceWorldManager->CompressedSpace->IsConfigured()
-		? Cast<AJTSPlanetAnchor>(NearBody) : SpaceWorldManager->GetNavigationReferencePlanet(Spacecraft);
-
-	// The same release shell that starts the planet shrink switches the dial to the star chart.
-	const bool bNearSurface = (IsValid(NearBody) || IsValid(SurfacePlanet))
-		&& !SpaceWorldManager->IsCruisePresentationActive(Spacecraft);
-
-	const FVector ShipLocation = Spacecraft->GetActorLocation();
-	const FVector ShipForward = Spacecraft->GetActorForwardVector().GetSafeNormal();
-	const FVector ShipRight = Spacecraft->GetActorRightVector().GetSafeNormal();
-	const FVector ShipUp = Spacecraft->GetActorUpVector().GetSafeNormal();
-
-	const TArray<FJTSCelestialNavigationBody> Bodies = UJTSCelestialNavigationLibrary::GatherBodies(SpaceWorldManager, Spacecraft);
-	const auto* NearContact = Bodies.FindByPredicate([NearBody](const FJTSCelestialNavigationBody& Body)
-	{
-		return NearBody && (Body.Planet == NearBody || Body.VisualActor == NearBody);
-	});
+	const bool bShow = IsValid(Manager) && !bGameMenuOpen
+		&& (IsValid(Spacecraft) || (bOnFoot && Manager->IsSurfaceGameplayReady()));
+	SetFlightNavigationVisible(bShow);
+	const bool bDriver = IsLocalFlightDriver(Spacecraft);
+	ApplyLayerVisibility(FlightControlsPanel, bShow && bDriver);
+	ApplyLayerVisibility(FlightLandedExitRow, bShow && bDriver && Spacecraft->IsLanded());
+	ApplyLayerVisibility(FlightSpeedText, bShow && !bOnFoot && IsValid(Spacecraft) && !Spacecraft->IsLanded());
+	if (!bShow || !CruiseNavigationWidget) return;
+	CruiseNavigationWidget->UpdateNavigation(Manager, Spacecraft, Character);
 	if (CelestialMarkerWidget)
 	{
-		CelestialMarkerWidget->UpdateMarkers(GetOwningPlayer(), Bodies, !bNearSurface && !bGameMenuOpen);
+		const auto Bodies = UJTSCelestialNavigationLibrary::GatherBodies(Manager, Spacecraft);
+		CelestialMarkerWidget->UpdateMarkers(GetOwningPlayer(), Bodies,
+			!bOnFoot && IsValid(Spacecraft) && Manager->IsCruisePresentationActive(Spacecraft));
 	}
-
-	TArray<FJTSCruiseNavigationContact> Contacts;
-	const bool bShowNearContact = NearContact ? NearContact->bShowOnStarChart
-		: IsValid(SurfacePlanet) && SurfacePlanet->ShouldShowOnStarChart();
-	if (bNearSurface && (IsValid(SurfacePlanet) || NearContact))
-	{
-		// The local altimeter still measures terrain without identifying an uncharted body.
-		FJTSCruiseNavigationContact& Contact = Contacts.AddDefaulted_GetRef();
-		Contact.DisplayName = bShowNearContact
-			? (NearContact ? NearContact->DisplayName.ToString() : SurfacePlanet->GetNavigationDisplayName().ToString()) : FString();
-		Contact.RangeCentimeters = IsValid(SurfacePlanet)
-			? SpaceWorldManager->GetNavigationSurfaceRangeCentimeters(Spacecraft, SurfacePlanet) : NearContact->RangeCentimeters;
-		Contact.PaletteIndex = NearContact ? NearContact->PaletteIndex : SurfacePlanet->GetNavigationPaletteIndex();
-	}
-	else
-	{
-		for (const FJTSCelestialNavigationBody& Candidate : Bodies)
-		{
-			if (!Candidate.bShowOnStarChart) continue;
-			const FVector ToPlanet = (Candidate.Center - ShipLocation).GetSafeNormal();
-			if (ToPlanet.IsNearlyZero() || ShipForward.IsNearlyZero())
-			{
-				continue;
-			}
-
-			FJTSCruiseNavigationContact& Contact = Contacts.AddDefaulted_GetRef();
-			Contact.DisplayName = Candidate.DisplayName.ToString();
-			Contact.RangeCentimeters = Candidate.RangeCentimeters;
-			Contact.PaletteIndex = Candidate.PaletteIndex;
-			const float ForwardComponent = FVector::DotProduct(ToPlanet, ShipForward);
-			const float RightComponent = FVector::DotProduct(ToPlanet, ShipRight);
-			Contact.BearingDegrees = FMath::RadiansToDegrees(FMath::Atan2(RightComponent, ForwardComponent));
-			Contact.ElevationDegrees = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
-				static_cast<float>(FVector::DotProduct(ToPlanet, ShipUp)),
-				-1.0f,
-				1.0f)));
-		}
-
-		Contacts.Sort([](const FJTSCruiseNavigationContact& Left, const FJTSCruiseNavigationContact& Right)
-		{
-			return Left.DisplayName < Right.DisplayName;
-		});
-	}
-
-	const FString LeftCaption = bNearSurface && bShowNearContact
-		? (NearContact ? NearContact->DisplayName.ToString() : SurfacePlanet->GetNavigationDisplayName().ToString())
-		: FString(bNearSurface ? TEXT("LOCAL") : TEXT("SPACE"));
-	const FString RightCaption = bNearSurface
-		? FString(TEXT("NEAR SURFACE"))
-		: FString::Printf(TEXT("FUEL  %d"), Spacecraft->GetFuelCount());
-	if (FlightSpeedText != nullptr)
-	{
+	if (FlightSpeedText && IsValid(Spacecraft))
 		FlightSpeedText->SetText(FText::FromString(FString::Printf(TEXT("NAV  %s"),
-			*UJTSCruiseNavigationWidget::FormatNavigationSpeed(
-				SpaceWorldManager->GetNavigationSpeedCentimetersPerSecond(Spacecraft)))));
-	}
-	if (CruiseNavigationWidget != nullptr)
-	{
-		CruiseNavigationWidget->SetCruisePresentation(
-			Contacts,
-			LeftCaption,
-			RightCaption,
-			bNearSurface,
-			0.0f);
-	}
+			*UJTSCruiseNavigationWidget::FormatNavigationSpeed(Manager->GetNavigationSpeedCentimetersPerSecond(Spacecraft)))));
 }
 
 void UJTSPrototypeHUDWidget::RefreshFlightHud()
@@ -1919,7 +1842,8 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		&& PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded()
 		&& IsValid(CrosshairRanged)
-		&& (CrosshairRanged->IsAiming() || (CrosshairStellar && CrosshairStellar->HasActiveWeapon()));
+		&& (CrosshairRanged->HasActiveRangedWeapon() || CrosshairRanged->IsAiming()
+			|| (CrosshairStellar && CrosshairStellar->HasActiveWeapon()));
 	const bool bShowPunchHit = !bGameMenuOpen && PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded() && PunchHitFeedback > 0.0f;
 	ApplyLayerVisibility(CrosshairText, bShowGameplayAiming || bShowPunchHit);

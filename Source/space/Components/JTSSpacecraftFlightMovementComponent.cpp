@@ -854,6 +854,15 @@ bool UJTSSpacecraftFlightMovementComponent::ApplySurfaceEnvelope(float DeltaTime
             Velocity += Up * FMath::Clamp((Settings.HoverOffset - Height) * Response, -EffectiveStats.LiftSpeed, SurfaceClearanceRecoverySpeed);
         }
     }
+    // Planet handling can multiply normal lift above the landing capture limit.
+    // Holding descent at the terrain envelope must slow into capture, otherwise
+    // every retry rejects the same full-throttle command as TooFast forever.
+    if (bFollowing && !bEnvelopeEscape && VerticalInput < -MovementDeadZone)
+    {
+        const float Limit = FMath::Max(0.0f, Ship->GetLandingSupportComponent()->GetSettings().MaxCaptureDescentSpeed);
+        const float DescentSpeed = -FVector::DotProduct(Velocity, Up);
+        if (DescentSpeed > Limit) Velocity += Up * (DescentSpeed - Limit);
+    }
     FJTSSurfaceEnvelopeFrame Next;
     const FVector Proposed = Current + Velocity * DeltaTime;
     if (!Envelope->Evaluate(Planet, Proposed, Next)) return false;

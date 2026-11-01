@@ -1,14 +1,14 @@
 # SpaceWorld 调试旅行与物品栏
 
-`L_SpaceWorld` 首次默认将人物和同一艘共享飞船放在火卫二（`MarII`）。
-月球、火卫二继续使用各自已有的 ArrivalAnchor，飞船按真实 Mesh 地表和停靠支撑检测停放，人物使用船外净空检测落点。
+`L_SpaceWorld` 首次默认将人物和同一艘共享飞船放在火星（`Mars`）。
+月球、火星使用关卡配置的 ArrivalAnchor，飞船按真实 Mesh 地表和停靠支撑检测停放，人物使用船外净空检测落点。火卫二仍可正常飞行接近、降落和下船，但关闭场景标记和导航图标记，且不列入 Debug 旅行菜单；火星开启两类导航标记。2026-10-30 的模型替换及火星落点见 [MarsMoonModels.md](MarsMoonModels.md)。
 
 ## 操作
 
 - 按住左/右 Alt：临时显示鼠标，停止移动与视角输入；松开恢复游戏。拖动中松开 Alt 会取消拖动，不丢弃物品。原有 I 键整理模式仍保留。
 - 下方物品栏：左键拖到另一格移动/交换；右键装备。腰灯装备后点亮。
 - 将物品拖出物品栏松开：将整格物品丢到人物附近的真实地表。掉落生成失败时，物品仍留在背包。拖到 Debug 菜单上取消丢弃；原有星核栏/飞船商店拖拽继续使用对应交互。
-- 右下角 Debug 菜单：点“月球 / Moon”或“火卫二 / Deimos”传送队伍和飞船。已经登船的玩家保留座位，船外人物移动到船旁地表。人物、物品与飞船仓储不会重建。
+- 右下角 Debug 菜单：点“月球 / Moon”或“火星 / Mars”传送队伍和飞船。已经登船的玩家保留座位，船外人物移动到船旁地表。人物、物品与飞船仓储不会重建。
 - 每行 Default：只设置下次直接进入 SpaceWorld 的默认星球，不立即传送；星号标记当前选择。
 
 Default 使用主机本地 `Saved/SaveGames/JumpToSpaceDebugPreferences.sav`，与四个远征存档分开。正常从其他地图旅行或恢复远征时，优先保留远征的星球状态。
@@ -27,7 +27,7 @@ Default 使用主机本地 `Saved/SaveGames/JumpToSpaceDebugPreferences.sav`，�
 - `Items/JTSWorldPickupActor.cpp`：掉落绑定人物当前星球，按球面重力放置；船边丢弃检查实际碰撞体。
 - `Systems/JTSExpeditionSubsystem.h/.cpp`、`Systems/JTSExpeditionSaveGame.h`：主机本地 Debug 偏好持久化。
 - `Tests/JTSSpaceDebugTests.cpp`：过期物品请求、交换/装备、失败丢弃不丢物、有效世界掉落及主机权限测试。
-- `Content/Space/Maps/L_SpaceWorld.umap`：InitialPlanet 改为 MarII，新增 `Debug/Space_DebugTravel` 配置 Actor。
+- `Content/Space/Maps/L_SpaceWorld.umap`：InitialPlanet 为 Mars，`Debug/Space_DebugTravel` 配置 Moon 与 Mars。
 - `Tools/Editor/configure_space_debug.py`：通过 Unreal MCP 配置关卡、检查 PIE、调用正式拥有者 RPC。
 
 ## Editor 步骤

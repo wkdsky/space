@@ -14,19 +14,19 @@ def configure():
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     all_actors = actors.get_all_level_actors()
     manager = next(a for a in all_actors if isinstance(a, unreal.JTSSpaceWorldManager))
-    deimos = next(a for a in all_actors if isinstance(a, unreal.JTSPlanetAnchor) and str(a.get_planet_id()) == 'MarII')
+    mars = next(a for a in all_actors if isinstance(a, unreal.JTSPlanetAnchor) and str(a.get_planet_id()) == 'Mars')
     backup = OUT / 'L_SpaceWorld_before_debug.umap'
     if not backup.exists():
         backup.write_bytes((ROOT / 'Content/Space/Maps/L_SpaceWorld.umap').read_bytes())
-    manager.set_editor_property('initial_planet', deimos)
-    manager.set_editor_property('initial_planet_id', 'MarII')
+    manager.set_editor_property('initial_planet', mars)
+    manager.set_editor_property('initial_planet_id', 'Mars')
     debug = next((a for a in all_actors if isinstance(a, unreal.JTSSpaceDebugTravelManager)), None)
     if not debug:
         debug = actors.spawn_actor_from_class(unreal.JTSSpaceDebugTravelManager, unreal.Vector(0, 0, 0))
     debug.set_actor_label('Space_DebugTravel')
     debug.set_folder_path('Debug')
     entries = []
-    for planet_id, label in [('Moon', '月球 / Moon'), ('MarII', '火卫二 / Deimos')]:
+    for planet_id, label in [('Moon', '月球 / Moon'), ('Mars', '火星 / Mars')]:
         entry = unreal.JTSDebugTravelDestination()
         entry.set_editor_property('planet_id', planet_id)
         entry.set_editor_property('display_name', unreal.Text(label))
@@ -179,9 +179,9 @@ def run(operation):
                 result.append({'widget': widget.get_name(), 'visibility': str(widget.get_visibility()),
                                'opacity': widget.get_render_opacity(), 'geometry': str(widget.get_cached_geometry())})
         return json.dumps(result, ensure_ascii=False)
-    actions = {'travel_moon': ('Moon', False), 'travel_deimos': ('MarII', False),
-               'default_moon': ('Moon', True), 'default_deimos': ('MarII', True),
-               'invalid_travel': ('Mars', False)}
+    actions = {'travel_moon': ('Moon', False), 'travel_mars': ('Mars', False),
+               'default_moon': ('Moon', True), 'default_mars': ('Mars', True),
+               'invalid_travel': ('MarII', False)}
     if operation in actions:
         pc.call_method('ServerRequestDebugPlanet', actions[operation])
         return inspect()

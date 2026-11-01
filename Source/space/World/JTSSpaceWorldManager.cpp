@@ -1537,6 +1537,8 @@ bool AJTSSpaceWorldManager::ActorBelongsToPlanet(const AActor* Actor, const AJTS
 	}
 
 	const FName PlanetId = Planet->GetPlanetId();
+	// Explicit attachments share the planet's near-surface visibility policy.
+	if (Actor->ActorHasTag(TEXT("PlanetSurfaceContent"))) return Actor->GetOwner() == Planet;
 	if (const AJTSPlanetLandingSite* const LandingSite = Cast<AJTSPlanetLandingSite>(Actor))
 	{
 		return LandingSite->GetPlanetAnchor() == Planet

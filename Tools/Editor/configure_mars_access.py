@@ -10,7 +10,8 @@ from pathlib import Path
 import unreal
 
 OUT = Path(unreal.Paths.project_saved_dir()) / 'SpaceDebug'
-PHOBOS_GAMEPLAY_RADIUS_CM = 9000.0
+# Retain enough continuous terrain for the production four-foot spacecraft.
+PHOBOS_GAMEPLAY_RADIUS_CM = 18000.0
 
 
 def vec(v): return [v.x, v.y, v.z]
@@ -92,7 +93,7 @@ def run(operation):
         planet.set_actor_label('MarI_PlanetAnchor')
         settings = dict(planet_id='MarI', navigation_display_name='火卫一 / Phobos', approximate_radius=radius,
             gameplay_surface_actor=visual, gameplay_surface_component=visual.static_mesh_component,
-            gravity_strength=75.0, gravity_influence_range=20000.0, space_exit_range=22000.0,
+            gravity_strength=75.0, gravity_influence_range=radius+11000.0, space_exit_range=radius+13000.0,
             takeoff_transition_altitude=c.get_editor_property('near_altitude_centimeters'),
             space_flight_altitude=c.get_editor_property('near_altitude_centimeters'),
             approach_transition_altitude=c.get_editor_property('near_altitude_centimeters'),

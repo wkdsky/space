@@ -50,7 +50,7 @@ def inspect_scene():
 
 ASSETS = {
     'Mars': ('mars planet 3d model/mars+planet+3d+model.fbx', 'mars planet 3d model/mars+planet+3d+model.fbm/mars+planet+3d+model_basecolor.jpg'),
-    'MarI': ('marI 3d model/marI+3d+model.fbx', 'marI 3d model/marI+3d+model.fbm/marI+3d+model_basecolor.jpg'),
+    'MarI': ('MarI 3d model/asteroid_rock_3d_model.fbx', 'MarI 3d model/asteroid_rock_3d_model.fbm/asteroid_rock_3d_model_basecolor.jpg'),
 }
 FOLDER = '/Game/Space/Environment/MarsSystem'
 # Keep orbital distances physical; compensate only the tiny moon's raster footprint.

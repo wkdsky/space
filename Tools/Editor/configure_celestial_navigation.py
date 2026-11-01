@@ -7,20 +7,26 @@ OUT = Path(unreal.Paths.project_saved_dir()) / 'SpaceDebug'
 OUT.mkdir(parents=True, exist_ok=True)
 # Estimated once at 90-degree horizontal FOV / 16:9 using the existing flight scale profile.
 # Runtime never compares projected size with a threshold.
-MARKER_DISTANCES_CM = {'Moon': 265000.0, 'MarII': 145000.0, 'EarthFragments': 150000.0}
+MARKER_DISTANCES_CM = {'Moon': 265000.0, 'Mars': 145000.0, 'EarthFragments': 150000.0}
 
 
 def configure():
     assert not unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(), 'Stop PIE first'
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
     anchors = {str(a.get_planet_id()): a for a in actors if isinstance(a, unreal.JTSPlanetAnchor)}
-    for key, name, palette in [('Moon', '月球', 0), ('MarII', '火卫二', 1), ('EarthFragments', '地球', 2)]:
+    for key, name, palette in [('Moon', '月球', 0), ('Mars', '火星', 1), ('EarthFragments', '地球', 2)]:
         anchors[key].set_editor_property('navigation_display_name', unreal.Text(name))
         anchors[key].set_editor_property('navigation_palette_index', palette)
         anchors[key].set_editor_property('navigation_marker_distance', MARKER_DISTANCES_CM[key])
+    for key, visible in [('Mars', True), ('MarI', False), ('MarII', False)]:
+        anchors[key].set_editor_property('bShowOnStarChart', visible)
+        anchors[key].set_editor_property('bShowScreenMarker', visible and key != 'MarII')
+    gameplay_surfaces = [a.get_gameplay_surface_actor() for a in anchors.values()]
     entries = []
     for tag, name, palette in [('Mars', '火星', 1), ('MarI', '火卫一', 2)]:
         actor = next(a for a in actors if a.actor_has_tag(tag))
+        if actor in gameplay_surfaces:
+            continue
         box = actor.static_mesh_component.static_mesh.get_bounding_box()
         extent = (box.max - box.min) * 0.5
         radius = max(extent.x, extent.y, extent.z) if tag == 'Mars' else (extent.x * extent.y * extent.z) ** (1.0 / 3.0)
@@ -29,10 +35,11 @@ def configure():
         entry.set_editor_property('display_name', unreal.Text(name))
         entry.set_editor_property('palette_index', palette)
         entry.set_editor_property('local_visual_radius', radius)
-        entry.set_editor_property('show_on_star_chart', False)
+        entry.set_editor_property('show_on_star_chart', tag not in {'MarI', 'MarII'})
         entry.set_editor_property('show_screen_marker', False)
         entries.append(entry)
-    anchors['MarII'].set_editor_property('background_navigation', entries)
+    anchors['Mars'].set_editor_property('background_navigation', entries)
+    anchors['MarII'].set_editor_property('background_navigation', [])
     assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
     report = {'anchors': {key: str(a.get_editor_property('navigation_display_name')) for key, a in anchors.items()},
               'marker_distances_cm': {key: a.get_editor_property('navigation_marker_distance') for key, a in anchors.items()},

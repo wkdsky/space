@@ -434,6 +434,7 @@ void UJTSWeaponVisualComponent::ConfigureAttachment()
 		// weapon_r instead multiplied its few-centimetre offset by the skeleton's
 		// bone scale and threw the item far from the body.
 		static const FName SocketCandidates[] = {
+			TEXT("Wrist_R"),
 			TEXT("hand_r"), TEXT("hand_rSocket"), TEXT("RightHand"), TEXT("Hand_R"), TEXT("RightHandSocket")
 		};
 		for (const FName SocketName : SocketCandidates)
@@ -966,6 +967,13 @@ bool UJTSWeaponVisualComponent::GetMuzzleWorldLocation(FVector& OutLocation, boo
 	return true;
 }
 
+FVector UJTSWeaponVisualComponent::GetMuzzleOffsetFromHand() const
+{
+	return IsValid(WeaponMuzzle) && IsValid(HandAttachmentAnchor)
+		? HandAttachmentAnchor->GetComponentTransform().InverseTransformPosition(WeaponMuzzle->GetComponentLocation())
+		: FVector::ZeroVector;
+}
+
 bool UJTSWeaponVisualComponent::GetMuzzleWorldTransform(FTransform& OutTransform, bool bLeftHand) const
 {
 	OutTransform = FTransform::Identity;
@@ -1075,12 +1083,14 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	{
 		// Aim and melee animation rotate the whole held item around its actual grip, not around
 		// the origin of each primitive piece.
-		WeaponPresentationRoot->SetRelativeLocation(bUprightScepter ? FVector::ZeroVector : AimOffset);
+		WeaponPresentationRoot->SetRelativeLocation(bUprightScepter || bRangedVisible ? FVector::ZeroVector : AimOffset);
 		WeaponPresentationRoot->SetAbsolute(false, bUprightScepter, true);
 		// Relative to the palm frame: ranged stays forward, melee pitch stands the shaft up.
 		// The grip inverse still pins the handle on the palm, so this rotation cannot
 		// throw the item off the hand the way a world rotation on this root did.
-		const FRotator Kick(4.0f * ShotKickAlpha, 0.0f, 0.0f);
+		// Firearms recoil through the existing camera/arm pose. Rotating only the gun
+		// pulled the handle out of the palm and sent later rounds above the reticle.
+		const FRotator Kick(bRangedVisible ? 0.0f : 4.0f * ShotKickAlpha, 0.0f, 0.0f);
 		if (bUprightScepter && GetOwner())
 		{
 			const FVector Up = GetOwner()->GetActorUpVector().GetSafeNormal();

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "SM_MS3_PortableFeed_0",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_PortableFeed_0.fbx",
+    "triangles": 688,
+    "materials": [
+      "M_MS3_Feed",
+      "M_MS3_FeedLight"
+    ]
+  },
+  {
+    "name": "SM_MS3_PortableFeed_1",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_PortableFeed_1.fbx",
+    "triangles": 912,
+    "materials": [
+      "M_MS3_Feed",
+      "M_MS3_FeedLight"
+    ]
+  },
+  {
+    "name": "SM_MS3_PortableFeed_2",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_PortableFeed_2.fbx",
+    "triangles": 704,
+    "materials": [
+      "M_MS3_Feed",
+      "M_MS3_FeedLight"
+    ]
+  },
+  {
+    "name": "SM_MS3_PortableFeed_3",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_PortableFeed_3.fbx",
+    "triangles": 960,
+    "materials": [
+      "M_MS3_Feed",
+      "M_MS3_FeedLight"
+    ]
+  }
+]

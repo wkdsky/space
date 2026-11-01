@@ -19,6 +19,10 @@
 #include "space/World/JTSPlanetSurfaceAnchor.h"
 #include "space/World/JTSMoonAntNestActor.h"
 #include "space/World/JTSMoonCubeCluster.h"
+#include "space/World/JTSPlanetEnemySettlement.h"
+#include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/Components/JTSPlanetSurfaceScatterComponent.h"
+#include "space/Components/JTSPlanetSurfaceCutComponent.h"
 
 namespace
 {
@@ -125,6 +129,12 @@ void AJTSMoonSurfaceController::ShutdownSurfaceGameplay()
 	{
 		ClearGeneratedMoonAntNests();
 		if (IsValid(MoonCubeCluster)) MoonCubeCluster->Deactivate();
+		for (AJTSPlanetEnemySettlement* Habitat : PlacedEcologyHabitats)
+			if (IsValid(Habitat))
+			{
+				Habitat->Deactivate();
+				if (auto* Ecology = Cast<AJTSPlanetEcologyHabitat>(Habitat)) Ecology->SurfaceScatter->Clear();
+			}
 	}
 	bSurfaceGameplayInitialized = false;
 	bMissingSpacecraftLogged = false;
@@ -417,6 +427,16 @@ bool AJTSMoonSurfaceController::InitializeConfiguredSurfaceGameplay()
 	InitializeMoonLandmarksAndMoonAntNests();
 	InitializeMoonResources();
 	if (IsValid(MoonCubeCluster)) MoonCubeCluster->Activate(Planet, this);
+	// Regions place independent props; cuts are applied only to their private runtime surface.
+	for (TActorIterator<AJTSPlanetEcologyHabitat> It(World); It; ++It)
+		if (It->GetOwner() == Planet && It->GetLevel() == GetSurfaceLevel()) It->SurfaceScatter->Generate(Planet, this);
+	Planet->SurfaceCuts->RebuildNow(); // Residents must emerge on the finished collision surface.
+	for (AJTSPlanetEnemySettlement* Habitat : PlacedEcologyHabitats)
+	{
+		if (!IsValid(Habitat) || Habitat->GetLevel() != GetSurfaceLevel()) continue;
+		if (auto* Ecology = Cast<AJTSPlanetEcologyHabitat>(Habitat)) Ecology->ActivateEcology(Planet, this);
+		else Habitat->Activate(Planet, this);
+	}
 
 	World->GetTimerManager().ClearTimer(ExpeditionConsumptionTimerHandle);
 	const float ConsumptionInterval = MoonSettings->GetConsumptionTickInterval();

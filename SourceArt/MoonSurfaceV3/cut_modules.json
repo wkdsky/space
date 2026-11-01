@@ -1,0 +1,291 @@
+[
+  {
+    "name": "SM_MS3_RiftRim_0",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftRim_0.fbx",
+    "triangles": 112,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftCutVolume_0",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftCutVolume_0.fbx",
+    "triangles": 430,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorRefuge_0",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorRefuge_0.fbx",
+    "triangles": 104,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorCutVolume_0",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorCutVolume_0.fbx",
+    "triangles": 152,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftRim_1",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftRim_1.fbx",
+    "triangles": 112,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftCutVolume_1",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftCutVolume_1.fbx",
+    "triangles": 430,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorRefuge_1",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorRefuge_1.fbx",
+    "triangles": 104,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorCutVolume_1",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorCutVolume_1.fbx",
+    "triangles": 152,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftRim_2",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftRim_2.fbx",
+    "triangles": 112,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftCutVolume_2",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftCutVolume_2.fbx",
+    "triangles": 430,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorRefuge_2",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorRefuge_2.fbx",
+    "triangles": 104,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorCutVolume_2",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorCutVolume_2.fbx",
+    "triangles": 152,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftRim_3",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftRim_3.fbx",
+    "triangles": 112,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_RiftCutVolume_3",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_RiftCutVolume_3.fbx",
+    "triangles": 430,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorRefuge_3",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorRefuge_3.fbx",
+    "triangles": 104,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_MirrorCutVolume_3",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_MirrorCutVolume_3.fbx",
+    "triangles": 152,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_01",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_01.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_01",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_01.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_02",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_02.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_02",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_02.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_03",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_03.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_03",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_03.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_04",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_04.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_04",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_04.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_05",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_05.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_05",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_05.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_06",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_06.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_06",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_06.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_07",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_07.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_07",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_07.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_08",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_08.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_08",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_08.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedNest_09",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedNest_09.fbx",
+    "triangles": 48,
+    "materials": [
+      "M_MS3_PropStone"
+    ]
+  },
+  {
+    "name": "SM_MS3_FixedCutVolume_09",
+    "file": "D:\\projects\\space\\SourceArt\\MoonSurfaceV3\\FBX\\SM_MS3_FixedCutVolume_09.fbx",
+    "triangles": 128,
+    "materials": [
+      "M_MS3_PropStone",
+      "M_MS3_Void"
+    ]
+  }
+]

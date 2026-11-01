@@ -14,6 +14,7 @@ class UPrimitiveComponent;
 class USceneComponent;
 class UWorld;
 class UJTSPlanetFragmentEnvelopeComponent;
+class UJTSPlanetSurfaceCutComponent;
 
 /** Result from one radial query against a planet's real gameplay mesh collision. */
 USTRUCT(BlueprintType)
@@ -140,6 +141,8 @@ public:
 	UJTSPlanetFragmentEnvelopeComponent* GetFragmentEnvelope() const { return FragmentEnvelope; }
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Planet|Surface")
 	TObjectPtr<UJTSPlanetFragmentEnvelopeComponent> FragmentEnvelope;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Planet|Surface")
+	TObjectPtr<UJTSPlanetSurfaceCutComponent> SurfaceCuts;
 
 	/** Query the configured real mesh directly, including meshes that ignore Visibility. */
 	bool TraceGameplaySurfaceSegment(const FVector& TraceStart, const FVector& TraceEnd, FHitResult& OutTraceHit) const;

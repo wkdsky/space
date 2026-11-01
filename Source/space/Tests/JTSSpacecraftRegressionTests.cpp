@@ -89,6 +89,9 @@ namespace
 			FActorSpawnParameters Params;
 			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 			Ship = World->SpawnActor<AJTSSpacecraftActor>(ShipClass, FVector(0, 0, 12000), FRotator::ZeroRotator, Params);
+			// This small sphere fixture authors its own compact support rig below. The
+			// compatibility Blueprint now inherits production feet, tested on the real map.
+			Ship->GetLandingSupportComponent()->Feet.Reset();
 			Ship->DispatchBeginPlay();
 		}
 
@@ -241,6 +244,26 @@ bool FJTSLandedHeadlightsRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Driver disembarks the landed ship"), Fixture.Ship->TryDisembarkPlayer(Character));
 	Fixture.Ship->ServerToggleHeadlights_Implementation();
 	TestTrue(TEXT("Disembarking preserves illumination and denies further control"), Fixture.Ship->AreHeadlightsOn());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPreflightGearRegression, "JTS.Spacecraft.PreflightGear",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSPreflightGearRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	auto* Presentation = Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>();
+	if (!TestNotNull(TEXT("Production craft has presentation"), Presentation)) return false;
+	Fixture.Manager->Destroy();
+	Presentation->TickComponent(5.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Preflight craft keeps its landing gear deployed"), Presentation->GetGearDeployAlpha(), 1.0f);
+	Fixture.Manager = Fixture.World->SpawnActor<AJTSSpaceWorldManager>();
+	Presentation->TickComponent(5.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Flying in space retracts the same gear"), Presentation->GetGearDeployAlpha(), 0.0f);
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Presentation->TickComponent(5.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("Touchdown deploys the gear again"), Presentation->GetGearDeployAlpha(), 1.0f);
 	return true;
 }
 
@@ -2551,6 +2574,12 @@ bool FJTSAutomaticLandingRegression::RunTest(const FString& Parameters)
 	Fixture.Ship->AddActorWorldOffset(FVector::UpVector * 1800.0f);
 
 	UJTSSpacecraftFlightMovementComponent* const Movement = Fixture.Ship->GetFlightMovementComponent();
+	// Large planets adapt lift speed above the fixed safe capture speed. A held
+	// descent must brake at the envelope rather than reject itself indefinitely.
+	auto DescentStats = Movement->GetEffectiveStats();
+	DescentStats.LiftSpeed = Fixture.Ship->GetLandingSupportComponent()->GetSettings().MaxCaptureDescentSpeed * 3.0f;
+	DescentStats.bInstantVelocityResponse = true;
+	Movement->SetEffectiveStats(DescentStats);
 	Fixture.Ship->FlightMoveVertical(FInputActionValue(-1.0f));
 	for (int32 Step = 0; Step < 240
 		&& Fixture.Ship->GetFlightState() != EJTSSpacecraftFlightState::LandingAssist;
@@ -2661,10 +2690,10 @@ bool FJTSLandingCycleRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMarIILandingMapRegression, "JTS.Spacecraft.MarIILandingMap",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMarsLandingMapRegression, "JTS.Spacecraft.MarsLandingMap",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
+bool FJTSMarsLandingMapRegression::RunTest(const FString& Parameters)
 {
 	// This is deliberately a map-data regression rather than a synthetic sphere test. The actor
 	// transforms, static mesh, collision profile, and arrival anchor all come from the
@@ -2676,91 +2705,91 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	AJTSPlanetAnchor* SourceMarII = nullptr;
+	AJTSPlanetAnchor* SourceMars = nullptr;
 	AJTSPlanetArrivalAnchor* SourceArrival = nullptr;
 	for (AActor* const Actor : SourceMap->PersistentLevel->Actors)
 	{
 		if (AJTSPlanetAnchor* const CandidateAnchor = Cast<AJTSPlanetAnchor>(Actor);
-			IsValid(CandidateAnchor) && CandidateAnchor->GetPlanetId() == TEXT("MarII"))
+			IsValid(CandidateAnchor) && CandidateAnchor->GetPlanetId() == TEXT("Mars"))
 		{
-			SourceMarII = CandidateAnchor;
+			SourceMars = CandidateAnchor;
 		}
 	}
 	for (AActor* const Actor : SourceMap->PersistentLevel->Actors)
 	{
 		if (AJTSPlanetArrivalAnchor* const CandidateSite = Cast<AJTSPlanetArrivalAnchor>(Actor);
-			IsValid(CandidateSite) && CandidateSite->GetPlanetAnchor() == SourceMarII)
+			IsValid(CandidateSite) && CandidateSite->GetPlanetAnchor() == SourceMars)
 		{
 			SourceArrival = CandidateSite;
 			break;
 		}
 	}
-	if (!TestNotNull(TEXT("MarII PlanetAnchor exists in SpaceWorld"), SourceMarII)
-		|| !TestNotNull(TEXT("MarII draggable arrival anchor exists and is directly bound"), SourceArrival))
+	if (!TestNotNull(TEXT("Mars PlanetAnchor exists in SpaceWorld"), SourceMars)
+		|| !TestNotNull(TEXT("Mars draggable arrival anchor exists and is directly bound"), SourceArrival))
 	{
 		return false;
 	}
 
-	AActor* const SourceSurfaceActor = SourceMarII->GetGameplaySurfaceActor();
+	AActor* const SourceSurfaceActor = SourceMars->GetGameplaySurfaceActor();
 	UStaticMeshComponent* const SourceSurfaceMesh = IsValid(SourceSurfaceActor)
 		? SourceSurfaceActor->FindComponentByClass<UStaticMeshComponent>()
 		: nullptr;
-	if (!TestNotNull(TEXT("MarII has a configured gameplay surface mesh"), SourceSurfaceMesh)
-		|| !TestNotNull(TEXT("MarII gameplay surface has a static mesh"), SourceSurfaceMesh->GetStaticMesh().Get()))
+	if (!TestNotNull(TEXT("Mars has a configured gameplay surface mesh"), SourceSurfaceMesh)
+		|| !TestNotNull(TEXT("Mars gameplay surface has a static mesh"), SourceSurfaceMesh->GetStaticMesh().Get()))
 	{
 		return false;
 	}
 	UStaticMesh* const SourceStaticMesh = SourceSurfaceMesh->GetStaticMesh().Get();
-	AddInfo(FString::Printf(TEXT("MarII source geometry: Triangles=%d HasComplexData=%d"),
+	AddInfo(FString::Printf(TEXT("Mars source geometry: Triangles=%d HasComplexData=%d"),
 		SourceStaticMesh->GetNumTriangles(0),
 		static_cast<int32>(SourceStaticMesh->ContainsPhysicsTriMeshData(true))));
 
 	FShipTestWorld Fixture;
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AJTSPlanetAnchor* const MarII = Fixture.World->SpawnActor<AJTSPlanetAnchor>(
-		AJTSPlanetAnchor::StaticClass(), SourceMarII->GetActorTransform(), SpawnParameters);
-	AStaticMeshActor* const MarIISurface = Fixture.World->SpawnActor<AStaticMeshActor>(
+	AJTSPlanetAnchor* const Mars = Fixture.World->SpawnActor<AJTSPlanetAnchor>(
+		AJTSPlanetAnchor::StaticClass(), SourceMars->GetActorTransform(), SpawnParameters);
+	AStaticMeshActor* const MarsSurface = Fixture.World->SpawnActor<AStaticMeshActor>(
 		AStaticMeshActor::StaticClass(), SourceSurfaceActor->GetActorTransform(), SpawnParameters);
-	if (!TestNotNull(TEXT("Isolated MarII anchor spawns"), MarII)
-		|| !TestNotNull(TEXT("Isolated MarII surface spawns"), MarIISurface))
+	if (!TestNotNull(TEXT("Isolated Mars anchor spawns"), Mars)
+		|| !TestNotNull(TEXT("Isolated Mars surface spawns"), MarsSurface))
 	{
 		return false;
 	}
 
-	UStaticMeshComponent* const MarIISurfaceMesh = MarIISurface->GetStaticMeshComponent();
-	MarIISurfaceMesh->SetMobility(EComponentMobility::Movable);
-	MarIISurfaceMesh->SetStaticMesh(SourceStaticMesh);
-	MarIISurfaceMesh->SetCollisionEnabled(SourceSurfaceMesh->GetCollisionEnabled());
-	MarIISurfaceMesh->SetCollisionProfileName(SourceSurfaceMesh->GetCollisionProfileName());
+	UStaticMeshComponent* const MarsSurfaceMesh = MarsSurface->GetStaticMeshComponent();
+	MarsSurfaceMesh->SetMobility(EComponentMobility::Movable);
+	MarsSurfaceMesh->SetStaticMesh(SourceStaticMesh);
+	MarsSurfaceMesh->SetCollisionEnabled(SourceSurfaceMesh->GetCollisionEnabled());
+	MarsSurfaceMesh->SetCollisionProfileName(SourceSurfaceMesh->GetCollisionProfileName());
 	// The test world is created before this component receives its mesh. Refresh the registered
 	// collision state explicitly so a map asset using complex-as-simple collision is queryable too.
-	MarIISurfaceMesh->SetCollisionObjectType(SourceSurfaceMesh->GetCollisionObjectType());
-	MarIISurfaceMesh->SetCollisionResponseToChannel(ECC_Pawn, SourceSurfaceMesh->GetCollisionResponseToChannel(ECC_Pawn));
-	MarIISurfaceMesh->SetCollisionResponseToChannel(ECC_Visibility, SourceSurfaceMesh->GetCollisionResponseToChannel(ECC_Visibility));
-	MarIISurfaceMesh->UpdateBounds();
-	MarIISurfaceMesh->RecreatePhysicsState();
-	MarIISurface->SetActorTransform(SourceSurfaceActor->GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
-	FindFProperty<FNameProperty>(MarII->GetClass(), TEXT("PlanetId"))
-		->SetPropertyValue_InContainer(MarII, SourceMarII->GetPlanetId());
-	FindFProperty<FFloatProperty>(MarII->GetClass(), TEXT("ApproximateRadius"))
-		->SetPropertyValue_InContainer(MarII, SourceMarII->GetApproximateRadius());
-	FindFProperty<FObjectProperty>(MarII->GetClass(), TEXT("GameplaySurfaceActor"))
-		->SetObjectPropertyValue_InContainer(MarII, MarIISurface);
-	Fixture.Manager->RegisterPlanet(MarII);
-	Fixture.Manager->SetCurrentPlanet(MarII);
+	MarsSurfaceMesh->SetCollisionObjectType(SourceSurfaceMesh->GetCollisionObjectType());
+	MarsSurfaceMesh->SetCollisionResponseToChannel(ECC_Pawn, SourceSurfaceMesh->GetCollisionResponseToChannel(ECC_Pawn));
+	MarsSurfaceMesh->SetCollisionResponseToChannel(ECC_Visibility, SourceSurfaceMesh->GetCollisionResponseToChannel(ECC_Visibility));
+	MarsSurfaceMesh->UpdateBounds();
+	MarsSurfaceMesh->RecreatePhysicsState();
+	MarsSurface->SetActorTransform(SourceSurfaceActor->GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
+	FindFProperty<FNameProperty>(Mars->GetClass(), TEXT("PlanetId"))
+		->SetPropertyValue_InContainer(Mars, SourceMars->GetPlanetId());
+	FindFProperty<FFloatProperty>(Mars->GetClass(), TEXT("ApproximateRadius"))
+		->SetPropertyValue_InContainer(Mars, SourceMars->GetApproximateRadius());
+	FindFProperty<FObjectProperty>(Mars->GetClass(), TEXT("GameplaySurfaceActor"))
+		->SetObjectPropertyValue_InContainer(Mars, MarsSurface);
+	Fixture.Manager->RegisterPlanet(Mars);
+	Fixture.Manager->SetCurrentPlanet(Mars);
 
 	Fixture.ConfigureLandingRig();
 	Fixture.World->SpawnActor<AJTSPlanetLandingManager>();
 
 	FJTSPlanetSurfaceFrame LandingFrame;
-	AddInfo(FString::Printf(TEXT("MarII surface setup: SourceMesh=%s Collision=%d Visibility=%d Bounds=%s"),
+	AddInfo(FString::Printf(TEXT("Mars surface setup: SourceMesh=%s Collision=%d Visibility=%d Bounds=%s"),
 		*GetNameSafe(SourceSurfaceMesh->GetStaticMesh().Get()),
-		static_cast<int32>(MarIISurfaceMesh->GetCollisionEnabled()),
-		static_cast<int32>(MarIISurfaceMesh->GetCollisionResponseToChannel(ECC_Visibility)),
-		*MarIISurfaceMesh->Bounds.GetBox().ToString()));
-	if (!TestTrue(TEXT("MarII authored landing frame resolves against its actual mesh collision"),
-		MarII->GetSurfaceFrameAt(SourceArrival->GetSpacecraftArrivalTransform().GetLocation(), FVector::ForwardVector, LandingFrame)))
+		static_cast<int32>(MarsSurfaceMesh->GetCollisionEnabled()),
+		static_cast<int32>(MarsSurfaceMesh->GetCollisionResponseToChannel(ECC_Visibility)),
+		*MarsSurfaceMesh->Bounds.GetBox().ToString()));
+	if (!TestTrue(TEXT("Mars authored landing frame resolves against its actual mesh collision"),
+		Mars->GetSurfaceFrameAt(SourceArrival->GetSpacecraftArrivalTransform().GetLocation(), FVector::ForwardVector, LandingFrame)))
 	{
 		return false;
 	}
@@ -2772,25 +2801,25 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
-	Fixture.Ship->SetFlightTargetPlanet(MarII);
+	Fixture.Ship->SetFlightTargetPlanet(Mars);
 	Fixture.Ship->GetFlightMovementComponent()->StopMovementImmediately();
 	FJTSPlanetLandingValidationResult AuthoredFit;
-	Fixture.Ship->GetLandingSupportComponent()->FitAtSurface(MarII, LandingFrame.Location, LandingFrame.Forward, AuthoredFit);
-	AddInfo(FString::Printf(TEXT("MarII exact fit: Failure=%d Pose=%s Clearance=%.2f Slope=%.2f FootLocal=%s"),
+	Fixture.Ship->GetLandingSupportComponent()->FitAtSurface(Mars, LandingFrame.Location, LandingFrame.Forward, AuthoredFit);
+	AddInfo(FString::Printf(TEXT("Mars exact fit: Failure=%d Pose=%s Clearance=%.2f Slope=%.2f FootLocal=%s"),
 		int32(AuthoredFit.Failure), *AuthoredFit.LandingTransform.ToString(), AuthoredFit.LandingClearance, AuthoredFit.GroundSlopeDegrees,
 		*Fixture.Ship->GetLandingSupportComponent()->Feet[0].DeployedContactFrame.GetLocation().ToString()));
 	FJTSPlanetLandingValidationResult PreCapture;
-	Fixture.Ship->GetLandingSupportComponent()->FindLanding(MarII,true,PreCapture);
-	AddInfo(FString::Printf(TEXT("MarII before crossing: valid=%d failure=%d position=%s ground=%s"),PreCapture.bIsValid,int32(PreCapture.Failure),*Fixture.Ship->GetActorLocation().ToCompactString(),*Fixture.Ship->GetGroundInfo().GroundLocation.ToCompactString()));
+	Fixture.Ship->GetLandingSupportComponent()->FindLanding(Mars,true,PreCapture);
+	AddInfo(FString::Printf(TEXT("Mars before crossing: valid=%d failure=%d position=%s ground=%s"),PreCapture.bIsValid,int32(PreCapture.Failure),*Fixture.Ship->GetActorLocation().ToCompactString(),*Fixture.Ship->GetGroundInfo().GroundLocation.ToCompactString()));
 	auto* CaptureMovement=Fixture.Ship->GetFlightMovementComponent();
     CaptureMovement->SetVerticalInput(-1);
     for(int32 I=0;I<240 && !CaptureMovement->IsAssistedLanding();++I) CaptureMovement->TickComponent(1.0f/60,LEVELTICK_All,nullptr);
     const bool bAccepted = CaptureMovement->IsAssistedLanding();
-	AddInfo(FString::Printf(TEXT("MarII landing request: Accepted=%d Failure=%d Ground=%s"),
+	AddInfo(FString::Printf(TEXT("Mars landing request: Accepted=%d Failure=%d Ground=%s"),
 		bAccepted,
 		static_cast<int32>(Fixture.Ship->GetLastLandingFailure()),
 		*Fixture.Ship->GetGroundInfo().GroundLocation.ToCompactString()));
-	if (!TestTrue(TEXT("MarII accepts a stationary spacecraft over unmarked real terrain"), bAccepted))
+	if (!TestTrue(TEXT("Mars accepts a stationary spacecraft over unmarked real terrain"), bAccepted))
 	{
 		return false;
 	}
@@ -2802,28 +2831,28 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>()->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 		Movement->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	}
-	AddInfo(FString::Printf(TEXT("MarII landing result: State=%d Phase=%d Failure=%d Height=%.2f"),
+	AddInfo(FString::Printf(TEXT("Mars landing result: State=%d Phase=%d Failure=%d Height=%.2f"),
 		static_cast<int32>(Fixture.Ship->GetFlightState()),
 		static_cast<int32>(Fixture.Ship->GetLandingAssistPhase()),
 		static_cast<int32>(Fixture.Ship->GetLastLandingFailure()),
 		Fixture.Ship->GetGroundInfo().DockingHeight));
-	if (!TestTrue(TEXT("MarII controlled landing reaches the landed state"), Fixture.Ship->IsLanded()))
+	if (!TestTrue(TEXT("Mars controlled landing reaches the landed state"), Fixture.Ship->IsLanded()))
 	{
 		return false;
 	}
 
 	AJTSCharacter* DisembarkedCharacter = nullptr;
 	APlayerController* const DisembarkController = Fixture.AddPlayer(DisembarkedCharacter);
-	if (!TestTrue(TEXT("MarII driver boards the landed spacecraft"), Fixture.Ship->TryBoardPlayer(DisembarkedCharacter))
-		|| !TestTrue(TEXT("MarII driver exits to the real mesh surface"), Fixture.Ship->TryDisembarkPlayerForController(DisembarkController)))
+	if (!TestTrue(TEXT("Mars driver boards the landed spacecraft"), Fixture.Ship->TryBoardPlayer(DisembarkedCharacter))
+		|| !TestTrue(TEXT("Mars driver exits to the real mesh surface"), Fixture.Ship->TryDisembarkPlayerForController(DisembarkController)))
 	{
 		return false;
 	}
-	TestEqual(TEXT("MarII disembark assigns the landed planet"), DisembarkedCharacter->GetGameplayPlanet(), MarII);
-	TestTrue(TEXT("MarII disembark enters walking mode instead of settling from inside terrain"),
+	TestEqual(TEXT("Mars disembark assigns the landed planet"), DisembarkedCharacter->GetGameplayPlanet(), Mars);
+	TestTrue(TEXT("Mars disembark enters walking mode instead of settling from inside terrain"),
 		DisembarkedCharacter->GetCharacterMovement()->MovementMode == MOVE_Walking);
 	FJTSPlanetSurfaceFrame DisembarkSurfaceFrame;
-	if (TestTrue(TEXT("MarII disembark resolves the actual mesh beneath the capsule"), MarII->GetSurfaceFrameAt(
+	if (TestTrue(TEXT("Mars disembark resolves the actual mesh beneath the capsule"), Mars->GetSurfaceFrameAt(
 		DisembarkedCharacter->GetActorLocation(), DisembarkedCharacter->GetActorForwardVector(), DisembarkSurfaceFrame)))
 	{
 		const UCapsuleComponent* const DisembarkCapsule = DisembarkedCharacter->GetCapsuleComponent();
@@ -2834,7 +2863,7 @@ bool FJTSMarIILandingMapRegression::RunTest(const FString& Parameters)
 		const float SurfaceClearance = FVector::DotProduct(
 			DisembarkedCharacter->GetActorLocation() - DisembarkSurfaceFrame.Location,
 			DisembarkSurfaceFrame.Up);
-		TestTrue(TEXT("MarII disembark capsule clears the terrain instead of embedding to knee height"),
+		TestTrue(TEXT("Mars disembark capsule clears the terrain instead of embedding to knee height"),
 			SurfaceClearance >= CapsuleSupport + 1.0f);
 	}
 	return true;

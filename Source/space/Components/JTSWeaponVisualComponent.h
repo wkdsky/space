@@ -26,6 +26,8 @@ class SPACE_API UJTSWeaponVisualComponent : public UActorComponent
 	GENERATED_BODY()
 
 public:
+	/** Centimetre offset used by the arm pose to converge the visible barrel on the camera target. */
+	FVector GetMuzzleOffsetFromHand() const;
 	UJTSWeaponVisualComponent();
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

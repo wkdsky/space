@@ -57,6 +57,10 @@ public:
 	UJTSRangedWeaponComponent();
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	/** Camera selects a target; the posed hand and physical muzzle still determine the shot. */
+	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
+	bool GetCameraAimPoint(FVector& OutPoint) const;
 
 	UFUNCTION(BlueprintPure, Category = "Ranged")
 	bool HasActiveRangedWeapon() const;
@@ -149,6 +153,13 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	bool GetCameraRay(FVector& Origin, FVector& Direction) const;
+	UFUNCTION(Server, Unreliable)
+	void ServerUpdateViewRay(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction);
+	UPROPERTY(Replicated) FVector_NetQuantize10 AimCameraEyeOffset;
+	UPROPERTY(Replicated) FVector_NetQuantizeNormal AimViewDirection;
+	UPROPERTY(Replicated) bool bHasViewRay = false;
+	double LastViewRaySendTime = -1.0;
 	const UJTSItemDefinition* GetActiveRangedDefinition() const;
 	bool IsEmptyHanded() const;
 	bool CanUseWeapon() const;

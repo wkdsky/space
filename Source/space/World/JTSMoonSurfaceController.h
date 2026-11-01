@@ -18,6 +18,7 @@ class AJTSPlanetSurfaceAnchor;
 class AJTSMoonAntActor;
 class AJTSMoonAntNestActor;
 class AJTSMoonCubeCluster;
+class AJTSPlanetEnemySettlement;
 class AJTSSpacecraftActor;
 class IJTSMoonSurfaceGameplaySettings;
 class UJTSMoonSurfaceGameplayData;
@@ -145,6 +146,10 @@ private:
 	/** Optional independently authored nests. Their transforms and visuals belong to the level. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TArray<TObjectPtr<AJTSMoonAntNestActor>> PlacedMoonAntNests;
+
+	/** Level recipes reuse the shared population template; configuration stays in the level. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Moon|Ecology", meta=(AllowPrivateAccess="true"))
+	TArray<TObjectPtr<AJTSPlanetEnemySettlement>> PlacedEcologyHabitats;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Moon|Real Surface", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AJTSMoonCorpseActor> MoonCorpseClass;

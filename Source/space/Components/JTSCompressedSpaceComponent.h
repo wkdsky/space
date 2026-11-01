@@ -20,6 +20,9 @@ struct SPACE_API FJTSCompressedCelestialBody
 	/** Bodies in one local system retain their authored size/separation ratios through one shared transform.
 	 * None keeps the independent presentation used for isolated bodies. Does not merge gameplay bubbles. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FName PresentationGroup;
+	/** Map-only field contribution for visual scenery; gameplay anchors use their existing gravity strength.
+	 * Zero hides this body's field. Never enables physical gravity, collision or landing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0")) double NavigationSurfaceGravity = 980.0;
 	/** Opt visual-only bodies into flight proximity without creating gravity, landing or collision. Gameplay anchors always participate. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bEnableNearFlight = true;
 	/** Optional server-driven narrative intercept before this body's near-flight boundary. */

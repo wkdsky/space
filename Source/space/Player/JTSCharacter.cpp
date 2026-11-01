@@ -469,8 +469,8 @@ float AJTSCharacter::GetRawViewYawDelta() const
 		return 0.0f;
 	}
 
-	const FRotator RelativeAim = (Controller->GetControlRotation() - GetActorRotation()).GetNormalized();
-	return FRotator::NormalizeAxis(RelativeAim.Yaw);
+	const FVector ViewForward = FVector::VectorPlaneProject(Controller->GetControlRotation().Vector(), GetActorUpVector()).GetSafeNormal();
+	return ViewForward.IsNearlyZero() ? 0.0f : GetViewBodyYawDeltaDegrees(ViewForward);
 }
 
 float AJTSCharacter::GetPresentationAimYaw() const

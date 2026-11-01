@@ -1,0 +1,914 @@
+{
+  "version": 3,
+  "coordinate_system": "Blender metres; +X forward; +Z surface normal",
+  "fps": 30,
+  "provenance": "Original geometry, rig and animation authored in Blender through MCP. No third-party meshes embedded.",
+  "creatures": [
+    {
+      "species": "MirrorSkimmer",
+      "mesh": "SK_MirrorSkimmer",
+      "bones": 24,
+      "triangles": 1740,
+      "clips": [
+        {
+          "name": "Idle",
+          "action": "A_MirrorSkimmer_Idle",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Walk",
+          "action": "A_MirrorSkimmer_Walk",
+          "frames": 49,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 4.234
+        },
+        {
+          "name": "Run",
+          "action": "A_MirrorSkimmer_Run",
+          "frames": 13,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 22.863
+        },
+        {
+          "name": "FleeStart",
+          "action": "A_MirrorSkimmer_FleeStart",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnLeft",
+          "action": "A_MirrorSkimmer_TurnLeft",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnRight",
+          "action": "A_MirrorSkimmer_TurnRight",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Attack",
+          "action": "A_MirrorSkimmer_Attack",
+          "frames": 43,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 18,
+              "name": "Contact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Burrow",
+          "action": "A_MirrorSkimmer_Burrow",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 22,
+              "name": "EnterSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyHidden"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.000877
+        },
+        {
+          "name": "UndergroundIdle",
+          "action": "A_MirrorSkimmer_UndergroundIdle",
+          "frames": 61,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Emerge",
+          "action": "A_MirrorSkimmer_Emerge",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 24,
+              "name": "BreakSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyVisible"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.001384
+        },
+        {
+          "name": "Forage",
+          "action": "A_MirrorSkimmer_Forage",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [
+            {
+              "frame": 46,
+              "name": "FoodContact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Feed",
+          "action": "A_MirrorSkimmer_Feed",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "HitReact",
+          "action": "A_MirrorSkimmer_HitReact",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Death",
+          "action": "A_MirrorSkimmer_Death",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Bask",
+          "action": "A_MirrorSkimmer_Bask",
+          "frames": 121,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "FlipRecover",
+          "action": "A_MirrorSkimmer_FlipRecover",
+          "frames": 73,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        }
+      ],
+      "mesh_fbx": "MirrorSkimmer/SK_MirrorSkimmer.fbx",
+      "blend": "MoonCreaturesV3.blend",
+      "glb": "MirrorSkimmer/MirrorSkimmer.glb"
+    },
+    {
+      "species": "Riftlip",
+      "mesh": "SK_Riftlip",
+      "bones": 24,
+      "triangles": 2168,
+      "clips": [
+        {
+          "name": "Idle",
+          "action": "A_Riftlip_Idle",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Walk",
+          "action": "A_Riftlip_Walk",
+          "frames": 31,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 10.484
+        },
+        {
+          "name": "Run",
+          "action": "A_Riftlip_Run",
+          "frames": 11,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 34.597
+        },
+        {
+          "name": "FleeStart",
+          "action": "A_Riftlip_FleeStart",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnLeft",
+          "action": "A_Riftlip_TurnLeft",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnRight",
+          "action": "A_Riftlip_TurnRight",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Attack",
+          "action": "A_Riftlip_Attack",
+          "frames": 43,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 18,
+              "name": "Contact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Burrow",
+          "action": "A_Riftlip_Burrow",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 22,
+              "name": "EnterSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyHidden"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "UndergroundIdle",
+          "action": "A_Riftlip_UndergroundIdle",
+          "frames": 61,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Emerge",
+          "action": "A_Riftlip_Emerge",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 24,
+              "name": "BreakSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyVisible"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.000692
+        },
+        {
+          "name": "Forage",
+          "action": "A_Riftlip_Forage",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [
+            {
+              "frame": 46,
+              "name": "FoodContact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Feed",
+          "action": "A_Riftlip_Feed",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "HitReact",
+          "action": "A_Riftlip_HitReact",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Death",
+          "action": "A_Riftlip_Death",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "SurfaceProbe",
+          "action": "A_Riftlip_SurfaceProbe",
+          "frames": 73,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "ClingBite",
+          "action": "A_Riftlip_ClingBite",
+          "frames": 55,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 23,
+              "name": "Contact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "CrackDash",
+          "action": "A_Riftlip_CrackDash",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        }
+      ],
+      "mesh_fbx": "Riftlip/SK_Riftlip.fbx",
+      "blend": "MoonCreaturesV3.blend",
+      "glb": "Riftlip/Riftlip.glb"
+    },
+    {
+      "species": "SpireWorker",
+      "mesh": "SK_SpireWorker",
+      "bones": 24,
+      "triangles": 1832,
+      "clips": [
+        {
+          "name": "Idle",
+          "action": "A_SpireWorker_Idle",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Walk",
+          "action": "A_SpireWorker_Walk",
+          "frames": 43,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 6.336
+        },
+        {
+          "name": "Run",
+          "action": "A_SpireWorker_Run",
+          "frames": 19,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 19.96
+        },
+        {
+          "name": "FleeStart",
+          "action": "A_SpireWorker_FleeStart",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnLeft",
+          "action": "A_SpireWorker_TurnLeft",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnRight",
+          "action": "A_SpireWorker_TurnRight",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Attack",
+          "action": "A_SpireWorker_Attack",
+          "frames": 43,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 18,
+              "name": "Contact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Burrow",
+          "action": "A_SpireWorker_Burrow",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 22,
+              "name": "EnterSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyHidden"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "UndergroundIdle",
+          "action": "A_SpireWorker_UndergroundIdle",
+          "frames": 61,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Emerge",
+          "action": "A_SpireWorker_Emerge",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 24,
+              "name": "BreakSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyVisible"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Forage",
+          "action": "A_SpireWorker_Forage",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [
+            {
+              "frame": 46,
+              "name": "FoodContact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Feed",
+          "action": "A_SpireWorker_Feed",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "HitReact",
+          "action": "A_SpireWorker_HitReact",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Death",
+          "action": "A_SpireWorker_Death",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Gather",
+          "action": "A_SpireWorker_Gather",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [
+            {
+              "frame": 46,
+              "name": "FoodContact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Carry",
+          "action": "A_SpireWorker_Carry",
+          "frames": 43,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 4.752
+        },
+        {
+          "name": "Repair",
+          "action": "A_SpireWorker_Repair",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "FeedColony",
+          "action": "A_SpireWorker_FeedColony",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "FlipRecover",
+          "action": "A_SpireWorker_FlipRecover",
+          "frames": 79,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        }
+      ],
+      "mesh_fbx": "SpireWorker/SK_SpireWorker.fbx",
+      "blend": "MoonCreaturesV3.blend",
+      "glb": "SpireWorker/SpireWorker.glb"
+    },
+    {
+      "species": "SpireSoldier",
+      "mesh": "SK_SpireSoldier",
+      "bones": 24,
+      "triangles": 1656,
+      "clips": [
+        {
+          "name": "Idle",
+          "action": "A_SpireSoldier_Idle",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Walk",
+          "action": "A_SpireSoldier_Walk",
+          "frames": 49,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 7.157
+        },
+        {
+          "name": "Run",
+          "action": "A_SpireSoldier_Run",
+          "frames": 15,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 33.128
+        },
+        {
+          "name": "FleeStart",
+          "action": "A_SpireSoldier_FleeStart",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnLeft",
+          "action": "A_SpireSoldier_TurnLeft",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "TurnRight",
+          "action": "A_SpireSoldier_TurnRight",
+          "frames": 37,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Attack",
+          "action": "A_SpireSoldier_Attack",
+          "frames": 43,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 18,
+              "name": "Contact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Burrow",
+          "action": "A_SpireSoldier_Burrow",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 22,
+              "name": "EnterSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyHidden"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "UndergroundIdle",
+          "action": "A_SpireSoldier_UndergroundIdle",
+          "frames": 61,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Emerge",
+          "action": "A_SpireSoldier_Emerge",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [
+            {
+              "frame": 24,
+              "name": "BreakSurface"
+            },
+            {
+              "frame": 61,
+              "name": "FullyVisible"
+            }
+          ],
+          "vertical_root_motion": true,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Forage",
+          "action": "A_SpireSoldier_Forage",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [
+            {
+              "frame": 46,
+              "name": "FoodContact_PresentationOnly"
+            }
+          ],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Feed",
+          "action": "A_SpireSoldier_Feed",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "HitReact",
+          "action": "A_SpireSoldier_HitReact",
+          "frames": 31,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Death",
+          "action": "A_SpireSoldier_Death",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Guard",
+          "action": "A_SpireSoldier_Guard",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "ChargeWindup",
+          "action": "A_SpireSoldier_ChargeWindup",
+          "frames": 46,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Charge",
+          "action": "A_SpireSoldier_Charge",
+          "frames": 13,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0,
+          "ground_speed_cm_s": 38.649
+        },
+        {
+          "name": "ClampHold",
+          "action": "A_SpireSoldier_ClampHold",
+          "frames": 61,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Stagger",
+          "action": "A_SpireSoldier_Stagger",
+          "frames": 49,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "Recover",
+          "action": "A_SpireSoldier_Recover",
+          "frames": 61,
+          "fps": 30,
+          "loop": false,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        },
+        {
+          "name": "FeedFromWorker",
+          "action": "A_SpireSoldier_FeedFromWorker",
+          "frames": 91,
+          "fps": 30,
+          "loop": true,
+          "events": [],
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.0
+        }
+      ],
+      "mesh_fbx": "SpireSoldier/SK_SpireSoldier.fbx",
+      "blend": "MoonCreaturesV3.blend",
+      "glb": "SpireSoldier/SpireSoldier.glb"
+    }
+  ]
+}

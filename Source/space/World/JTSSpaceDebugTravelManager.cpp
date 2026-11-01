@@ -68,7 +68,9 @@ void AJTSSpaceDebugTravelManager::Request(AJTSPlayerController* Controller, FNam
 	auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
 	auto* GameMode = GetWorld()->GetAuthGameMode<AJTSSpaceWorldGameMode>();
 	AJTSPlanetAnchor* Planet = Manager ? Manager->FindPlanetById(PlanetId) : nullptr;
-	if (!GameMode || !Planet || !Planet->HasGameplaySurface()) return;
+	// Distant planets temporarily disable terrain collision for presentation. The landing
+	// manager restores it before validating arrival; destination eligibility is configuration.
+	if (!GameMode || !Planet || !IsValid(Planet->GetGameplaySurfaceActor())) return;
 	if (bSetDefault)
 	{
 		if (GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>()->SetDebugDefaultPlanetId(PlanetId))

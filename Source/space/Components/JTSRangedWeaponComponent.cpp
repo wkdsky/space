@@ -44,7 +44,8 @@ namespace
 
 UJTSRangedWeaponComponent::UJTSRangedWeaponComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickInterval = 0.05f;
 	SetIsReplicatedByDefault(true);
 }
 
@@ -66,6 +67,75 @@ void UJTSRangedWeaponComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 	bFireHeld = false;
 	bIsAiming = false;
 	Super::EndPlay(EndPlayReason);
+}
+
+bool UJTSRangedWeaponComponent::GetCameraRay(FVector& Origin, FVector& Direction) const
+{
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	if (!Pawn || !GetWorld()) return false;
+	Origin = Pawn->GetPawnViewLocation();
+	Direction = Pawn->GetBaseAimRotation().Vector();
+	if (Pawn->IsLocallyControlled())
+	{
+		if (const APlayerController* PC = Cast<APlayerController>(Pawn->GetController()))
+		{
+			FRotator Rotation;
+			PC->GetPlayerViewPoint(Origin, Rotation);
+			Direction = Rotation.Vector();
+		}
+	}
+	else if (bHasViewRay)
+	{
+		Origin += AimCameraEyeOffset;
+		Direction = AimViewDirection;
+	}
+	return !Origin.ContainsNaN() && !Direction.ContainsNaN() && !Direction.IsNearlyZero();
+}
+
+bool UJTSRangedWeaponComponent::GetCameraAimPoint(FVector& OutPoint) const
+{
+	FVector Origin, Direction;
+	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
+	if (!Definition || !GetCameraRay(Origin, Direction)) return false;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSGunAimTarget), true, GetOwner());
+	TArray<AActor*> Attached;
+	GetOwner()->GetAttachedActors(Attached, true, true);
+	Params.AddIgnoredActors(Attached);
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	// A third-person camera cannot select targets through a wall separating it from the player.
+	FHitResult CameraBlock;
+	if (GetWorld()->LineTraceSingleByChannel(CameraBlock, Pawn->GetPawnViewLocation(), Origin, ECC_Visibility, Params))
+		Origin = CameraBlock.ImpactPoint + CameraBlock.ImpactNormal;
+	FHitResult Hit;
+	const FVector End = Origin + Direction.GetSafeNormal() * FMath::Max(100.0f, Definition->RangedRange);
+	OutPoint = GetWorld()->LineTraceSingleByChannel(Hit, Origin, End, ECC_Visibility, Params) ? Hit.ImpactPoint : End;
+	return true;
+}
+
+void UJTSRangedWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	if (!Pawn || !Pawn->IsLocallyControlled() || !HasActiveRangedWeapon()) return;
+	FVector Origin, Direction;
+	if (!GetCameraRay(Origin, Direction)) return;
+	if (GetWorld()->GetTimeSeconds() - LastViewRaySendTime < 0.049) return;
+	LastViewRaySendTime = GetWorld()->GetTimeSeconds();
+	const FVector Offset = Origin - Pawn->GetPawnViewLocation();
+	if (Pawn->HasAuthority()) ServerUpdateViewRay_Implementation(Offset, Direction);
+	else ServerUpdateViewRay(Offset, Direction);
+}
+
+void UJTSRangedWeaponComponent::ServerUpdateViewRay_Implementation(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction)
+{
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	const AJTSCharacter* Character = Cast<AJTSCharacter>(Pawn);
+	if (!Pawn || !HasActiveRangedWeapon() || EyeOffset.ContainsNaN() || Direction.ContainsNaN()) return;
+	const float Bound = Character ? Character->GetMaximumGameplayCameraOffset() : 600.0f;
+	if (EyeOffset.SizeSquared() > FMath::Square(Bound) || !FMath::IsNearlyEqual(Direction.SizeSquared(), 1.0, 0.05)) return;
+	AimCameraEyeOffset = EyeOffset;
+	AimViewDirection = FVector(Direction).GetSafeNormal();
+	bHasViewRay = true;
 }
 
 const UJTSItemDefinition* UJTSRangedWeaponComponent::GetActiveRangedDefinition() const
@@ -714,5 +784,8 @@ void UJTSRangedWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UJTSRangedWeaponComponent, bIsAiming);
+	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, AimCameraEyeOffset, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, AimViewDirection, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, bHasViewRay, COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, Runtime, COND_OwnerOnly);
 }

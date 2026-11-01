@@ -1228,4 +1228,69 @@ bool FJTSDualPistolsNoClimbCapabilityRegression::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSHandAnchoredGunAim, "JTS.Combat.HandAnchoredCameraAim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSHandAnchoredGunAim::RunTest(const FString& Parameters)
+{
+	UClass* PlayerClass = LoadClass<AJTSCharacter>(nullptr,
+		TEXT("/Game/Space/Blueprints/Player/BP_JTSPlayer_Casual_2.BP_JTSPlayer_Casual_2_C"));
+	if (!TestNotNull(TEXT("Current playable avatar loads"), PlayerClass)) return false;
+	FClimbTestWorld Fixture(PlayerClass);
+	Fixture.World->BeginPlay();
+	AJTSCharacter* Character = Fixture.Character;
+	if (!Character->HasActorBegunPlay()) Character->DispatchBeginPlay();
+	Character->GetCharacterMovement()->DisableMovement();
+	USkeletalMeshComponent* Mesh = Character->GetMesh();
+	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	UJTSInventoryComponent* Inventory = Character->GetInventoryComponent();
+	UJTSWeaponVisualComponent* Visual = Character->FindComponentByClass<UJTSWeaponVisualComponent>();
+	UJTSRangedWeaponComponent* Gun = Character->FindComponentByClass<UJTSRangedWeaponComponent>();
+	Inventory->TryAddItemById(EJTSItemId::RailPistol);
+	Inventory->SelectQuickbarSlot(0);
+	Visual->RefreshWeaponVisual();
+	USceneComponent* Anchor = nullptr;
+	TArray<USceneComponent*> Scenes;
+	Character->GetComponents(Scenes);
+	for (auto* Scene : Scenes) if (Scene->GetFName() == TEXT("WeaponHandAttachmentAnchor")) Anchor = Scene;
+	if (!TestNotNull(TEXT("Hand anchor exists"), Anchor)) return false;
+	TestTrue(TEXT("The current avatar's Wrist_R is attached to its mesh, without root fallback"), Anchor->GetAttachParent() == Mesh);
+	for (int32 Case = 0; Case < 3; ++Case)
+	{
+		const FQuat Frame = Case == 0 ? FQuat::Identity : FRotationMatrix::MakeFromXZ(FVector::YAxisVector, FVector::XAxisVector).ToQuat();
+		Character->SetActorRotation(Frame);
+		Character->SetActorLocation(Case == 0 ? FVector(0,0,110) : FVector(2700000,370000,210000));
+		const FVector Up = Character->GetActorUpVector();
+		const FVector Forward = FQuat(Up, FMath::DegreesToRadians(Case == 2 ? 25.0f : 0.0f)).RotateVector(Character->GetActorForwardVector());
+		const FVector Side = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+		const FVector Eye = Character->GetPawnViewLocation();
+		Fixture.Wall->SetActorLocation(Eye + Forward * 1000 + Side * 65);
+		Fixture.Wall->SetActorRotation(FRotationMatrix::MakeFromXZ(Forward, Up).Rotator());
+		FindFProperty<FStructProperty>(Gun->GetClass(), TEXT("AimCameraEyeOffset"))->ContainerPtrToValuePtr<FVector_NetQuantize10>(Gun)[0] = -Forward * 300 + Side * 65;
+		FindFProperty<FStructProperty>(Gun->GetClass(), TEXT("AimViewDirection"))->ContainerPtrToValuePtr<FVector_NetQuantizeNormal>(Gun)[0] = Forward;
+		FindFProperty<FBoolProperty>(Gun->GetClass(), TEXT("bHasViewRay"))->SetPropertyValue_InContainer(Gun, true);
+		for (int32 I = 0; I < 4; ++I)
+		{
+			Mesh->TickAnimation(0.05f, false);
+			Mesh->RefreshBoneTransforms();
+			static_cast<UActorComponent*>(Visual)->TickComponent(0.05f, LEVELTICK_All, nullptr);
+		}
+		const FVector Wrist = Mesh->GetBoneLocation(TEXT("Wrist_R"));
+		const FVector Palm = Wrist + (Mesh->GetBoneLocation(TEXT("Index1_R")) - Wrist) * 1.35f;
+		TestTrue(TEXT("Weapon grip remains on the animated palm"), FVector::Distance(Palm, Anchor->GetComponentLocation()) < 1);
+		FVector Target;
+		FTransform Muzzle;
+		if (!TestTrue(TEXT("Gun resolves camera target and physical muzzle"), Gun->GetCameraAimPoint(Target) && Visual->GetMuzzleWorldTransform(Muzzle))) return false;
+		const FVector Ray = Muzzle.GetUnitAxis(EAxis::X);
+		const float Error = FVector::CrossProduct(Target - Muzzle.GetLocation(), Ray).Size();
+		TestTrue(FString::Printf(TEXT("Case %d camera target is on the posed barrel ray, error %.3f cm"), Case, Error), Error < 2.0f);
+		Visual->PlayShotPresentation(nullptr, FLinearColor::White);
+		FTransform RecoilMuzzle;
+		Visual->GetMuzzleWorldTransform(RecoilMuzzle);
+		TestTrue(TEXT("Shot feedback does not rotate the barrel independently of the hand"),
+			FVector::DotProduct(RecoilMuzzle.GetUnitAxis(EAxis::X), Ray) > 0.99999f);
+	}
+	return true;
+}
+
 #endif

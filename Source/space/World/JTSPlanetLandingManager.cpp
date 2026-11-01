@@ -381,10 +381,15 @@ bool AJTSPlanetLandingManager::TransferExpedition(APlayerController* Requester, 
 {
 	AJTSSpacecraftActor* Ship = GetPlayerSpacecraft(Requester);
 	auto* Manager = AJTSSpaceWorldManager::FindSpaceWorldManager(this);
-	if (!HasAuthority() || !IsValid(Planet) || !Planet->HasGameplaySurface() || !Ship || !Manager) return false;
-	FTransform PlayerArrival, ShipArrival;
-	if (!ResolveArrivalTransforms(Requester, Planet, PlayerArrival, ShipArrival)) return false;
+	if (!HasAuthority() || !IsValid(Planet) || !Ship || !Manager) return false;
+	// Restore authored geometry/collision before querying a destination hidden in another system.
 	Manager->PrepareForPlanetArrival();
+	FTransform PlayerArrival, ShipArrival;
+	if (!Planet->HasGameplaySurface() || !ResolveArrivalTransforms(Requester, Planet, PlayerArrival, ShipArrival))
+	{
+		Manager->UpdateCelestialPresentation(Ship);
+		return false;
+	}
 	FJTSPlanetSurfaceFrame Frame;
 	if (!Planet->GetSurfaceFrameAlongGravity(ShipArrival.GetLocation(), InitialGroundProbeDistance,
 		ShipArrival.GetUnitAxis(EAxis::X), Frame))

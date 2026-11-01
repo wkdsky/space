@@ -5,6 +5,22 @@
 
 class AJTSPlanetAnchor;
 
+/** Map presentation tuning. Concrete system membership uses CompressedSpace.Bodies.PresentationGroup. */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSNavigationMapSettings
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.2", Units = "s")) float TransitionSeconds = 1.4f;
+	/** Radius of a system map relative to its outermost member's orbit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1.2")) float SystemExtentMultiplier = 1.8f;
+	/** Isolated bodies still have a local region outside the near-flight bubble. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "2")) float MinimumSystemRadii = 8.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "0.4")) float StageHysteresis = 0.12f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "500", Units = "cm")) float GroundMapHalfWidth = 6000.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "128", ClampMax = "1024")) int32 GroundMapResolution = 512;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1000", Units = "cm")) float GroundCaptureHeight = 20000.0f;
+};
+
 /** Level-authored navigation metadata for an existing visual-only local-sky member. */
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSCelestialBackgroundNavigation

@@ -9,6 +9,7 @@
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
+#include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Player/JTSCharacter.h"
@@ -565,6 +566,45 @@ void UJTSAnimInstance::ApplyFacingPose()
 		CurlChain(TEXT("Thumb"), 38.0f, 28.0f);
 	};
 
+	const AJTSCharacter* GunCharacter = Cast<AJTSCharacter>(Mesh->GetOwner());
+	const UJTSRangedWeaponComponent* Gun = GunCharacter ? GunCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
+	const UJTSWeaponVisualComponent* HeldVisual = GunCharacter ? GunCharacter->FindComponentByClass<UJTSWeaponVisualComponent>() : nullptr;
+	FVector CameraTarget = FVector::ZeroVector;
+	const bool bHasGunTarget = bActiveRangedWeapon && IsValid(Gun) && Gun->GetCameraAimPoint(CameraTarget);
+	auto AimGunArm = [&](bool bRightHand, const FVector& Fallback)
+	{
+		const FName Upper = bRightHand ? TEXT("UpperArm_R") : TEXT("UpperArm_L");
+		const FName Lower = bRightHand ? TEXT("LowerArm_R") : TEXT("LowerArm_L");
+		const FName Wrist = bRightHand ? TEXT("Wrist_R") : TEXT("Wrist_L");
+		const FName Index = bRightHand ? TEXT("Index1_R") : TEXT("Index1_L");
+		FVector Reach = Fallback;
+		const int32 ShoulderIndex = Mesh->GetBoneIndex(Upper);
+		const int32 WristIndex = Mesh->GetBoneIndex(Wrist);
+		const int32 FingerIndex = Mesh->GetBoneIndex(Index);
+		if (!Pose.IsValidIndex(ShoulderIndex) || !Pose.IsValidIndex(WristIndex) || !Pose.IsValidIndex(FingerIndex)) return;
+		const FVector Target = Mesh->GetComponentTransform().InverseTransformPosition(CameraTarget);
+		const FVector ToTarget = (Target - Pose[ShoulderIndex].GetLocation()).GetSafeNormal();
+		const float TargetYaw = FMath::RadiansToDegrees(FMath::Atan2(FVector::DotProduct(ToTarget, ActorRight), FVector::DotProduct(ToTarget, ActorForward)));
+		const bool bCanConverge = bHasGunTarget && FMath::Abs(TargetYaw) <= 48.0f;
+		const FVector MuzzleOffset = IsValid(HeldVisual) ? HeldVisual->GetMuzzleOffsetFromHand() : FVector::ZeroVector;
+		if (bCanConverge) Reach = ToTarget;
+		for (int32 Iteration = 0; Iteration < 6; ++Iteration)
+		{
+			const float Side = bRightHand ? 1.0f : -1.0f;
+			// Keep a relaxed elbow instead of locking both arm segments into a straight rod.
+			AimSegment(Upper, Lower, (Reach * 0.85f - ActorUp * 0.40f + ActorRight * Side * 0.06f).GetSafeNormal());
+			AimSegment(Lower, Wrist, Reach);
+			if (!bCanConverge) break;
+			const FVector Palm = Pose[WristIndex].GetLocation() + (Pose[FingerIndex].GetLocation() - Pose[WristIndex].GetLocation()) * 1.35f;
+			const FQuat PalmRotation = FRotationMatrix::MakeFromXZ(Reach, ActorUp).ToQuat();
+			const FVector Muzzle = Palm + PalmRotation.RotateVector(MuzzleOffset);
+			const FVector Desired = (Target - Muzzle).GetSafeNormal();
+			const float Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(FVector::DotProduct(Desired, ActorUp), -1.0, 1.0)));
+			if (FMath::Abs(Pitch) > 80.0f) break;
+			Reach = Desired;
+		}
+	};
+
 	// Places a root-parented foot under the knee. Foot_L/R are not children of the legs,
 	// so folding the shin leaves the skinned foot planted in the idle clip.
 	auto PlaceFoot = [&](const FName FootName, const FVector& WorldOffset)
@@ -866,10 +906,8 @@ void UJTSAnimInstance::ApplyFacingPose()
 			FQuat(PoseRight, FMath::DegreesToRadians(-Pitch)).RotateVector(PoseForward));
 		const FVector RightAim = (Aim + PoseRight * 0.10f).GetSafeNormal();
 		const FVector LeftAim = (Aim - PoseRight * 0.10f).GetSafeNormal();
-		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), LeftAim);
-		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), LeftAim);
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), RightAim);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), RightAim);
+		AimGunArm(false, LeftAim);
+		AimGunArm(true, RightAim);
 		CloseGrip(true);
 		CloseGrip(false);
 	}
@@ -895,8 +933,7 @@ void UJTSAnimInstance::ApplyFacingPose()
 		const float PitchDegrees = OwnerCharacter != nullptr ? OwnerCharacter->GetAimPitch() : 0.0f;
 		const FVector Pitched = FQuat(PoseRight, FMath::DegreesToRadians(-PitchDegrees)).RotateVector(PoseForward);
 		const FVector Reach = FQuat(PoseUp, FMath::DegreesToRadians(BodyYaw)).RotateVector(Pitched);
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), Reach);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), Reach);
+		AimGunArm(true, Reach);
 		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), -PoseUp);
 		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), -PoseUp);
 		CloseGrip(true);

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "TimerManager.h"
+#include "space/World/JTSCelestialNavigationTypes.h"
 
 #include "JTSSpaceWorldManager.generated.h"
 
@@ -44,6 +45,8 @@ public:
 	AJTSSpaceWorldManager();
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Space World|Navigation")
 	TObjectPtr<UJTSCompressedSpaceComponent> CompressedSpace;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Space World|Navigation")
+	FJTSNavigationMapSettings NavigationMapSettings;
 
 	/** Finds the single persistent-world manager using a small cache after its first lookup. */
 	static AJTSSpaceWorldManager* FindSpaceWorldManager(const UObject* WorldContextObject);

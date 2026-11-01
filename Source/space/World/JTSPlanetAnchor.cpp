@@ -6,6 +6,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "space/Components/JTSPlanetFragmentEnvelopeComponent.h"
+#include "space/Components/JTSPlanetSurfaceCutComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "Math/RotationMatrix.h"
@@ -29,6 +30,7 @@ AJTSPlanetAnchor::AJTSPlanetAnchor()
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
 	FragmentEnvelope = CreateDefaultSubobject<UJTSPlanetFragmentEnvelopeComponent>(TEXT("FragmentEnvelope"));
+	SurfaceCuts = CreateDefaultSubobject<UJTSPlanetSurfaceCutComponent>(TEXT("SurfaceCuts"));
 }
 
 void AJTSPlanetAnchor::BeginPlay()

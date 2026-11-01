@@ -439,7 +439,7 @@ private:
 	friend class FJTSSpaceFlightFrameRegression;
 	friend class FJTSInterplanetaryCruiseRegression;
 	friend class FJTSAutomaticLandingRegression;
-	friend class FJTSMarIILandingMapRegression;
+	friend class FJTSMarsLandingMapRegression;
 #endif
 
 	void InitializeFlightInput();
