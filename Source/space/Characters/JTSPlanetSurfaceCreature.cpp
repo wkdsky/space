@@ -2,6 +2,8 @@
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/BoxComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
@@ -36,6 +38,14 @@ AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCanEverAffectNavigation(false);
 	Mesh->AddTickPrerequisiteActor(this);
+	CombatBody = CreateDefaultSubobject<UBoxComponent>(TEXT("CombatBody"));
+	CombatBody->SetupAttachment(Mesh);
+	CombatBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CombatBody->SetCollisionObjectType(ECC_WorldDynamic);
+	CombatBody->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CombatBody->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	CombatBody->SetGenerateOverlapEvents(false);
+	CombatBody->SetCanEverAffectNavigation(false);
 	Health = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("Health"));
 	Steering = CreateDefaultSubobject<UJTSPlanetSurfaceSteeringComponent>(TEXT("SurfaceSteering"));
 	MirrorDefense = CreateDefaultSubobject<UJTSMirrorDefenseComponent>(TEXT("MirrorDefense"));
@@ -45,6 +55,24 @@ AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 void AJTSPlanetSurfaceCreature::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!CombatBodyBone.IsNone() && Mesh->GetSkeletalMeshAsset())
+	{
+		const FReferenceSkeleton& Skeleton = Mesh->GetSkeletalMeshAsset()->GetRefSkeleton();
+		const int32 Bone = Skeleton.FindBoneIndex(CombatBodyBone);
+		if (Bone != INDEX_NONE)
+		{
+			FTransform ReferenceBone = Skeleton.GetRefBonePose()[Bone];
+			for (int32 Parent = Skeleton.GetParentIndex(Bone); Parent != INDEX_NONE; Parent = Skeleton.GetParentIndex(Parent))
+				ReferenceBone *= Skeleton.GetRefBonePose()[Parent];
+			CombatBody->AttachToComponent(Mesh, FAttachmentTransformRules::KeepRelativeTransform, CombatBodyBone);
+			CombatBody->SetRelativeTransform(FTransform(CombatBodyCenter).GetRelativeTransform(ReferenceBone));
+			CombatBody->SetBoxExtent(CombatBodyHalfExtent);
+			Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+			// The authoritative body must follow the same pose even without a rendered viewport.
+			Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+			Mesh->bEnableUpdateRateOptimizations = false;
+		}
+	}
 	SetActorTickEnabled(!HasAuthority());
 	OnRep_State();
 	if (HasAuthority())
@@ -140,6 +168,8 @@ void AJTSPlanetSurfaceCreature::OnRep_State()
 	const bool bUnderground = State == EJTSForagerState::Hidden;
 	Mesh->SetVisibility(!bUnderground);
 	Body->SetCollisionEnabled(bUnderground || State == EJTSForagerState::Dead ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
+	CombatBody->SetCollisionEnabled(!CombatBodyBone.IsNone() && CombatBody->GetAttachSocketName() == CombatBodyBone
+		&& !bUnderground && State != EJTSForagerState::Dead ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 	const EJTSForagerState AnimationState = State == EJTSForagerState::MirrorRetract || State == EJTSForagerState::MirrorPause
 		? EJTSForagerState::Reflect : State;
 	if (const TObjectPtr<UAnimSequence>* Clip = Animations.Find(AnimationState); Clip && *Clip)
@@ -263,7 +293,7 @@ void AJTSPlanetSurfaceCreature::DefendEntrance(APawn* Target, const FVector& Ori
 		Aggressor.Reset();
 		EntranceDefenseForward = GetActorForwardVector();
 		MirrorGuardBlockedTime = 0;
-		bMirrorGuardFallback = false;
+		MirrorDefense->ReleaseGuardStation();
 		bEntranceDefense = true;
 		SetState(State == EJTSForagerState::Hidden || bTemporaryEntranceDefender ? EJTSForagerState::Emerge : EJTSForagerState::Walk, 0);
 	}
@@ -274,6 +304,7 @@ void AJTSPlanetSurfaceCreature::ReturnFromEntranceDefense(bool bEntranceDestroye
 	if (!HasAuthority() || !bEntranceDefense || !IsAlive()) return;
 	if (bReturningFromDefense) { bDestroyAfterDefense |= bEntranceDestroyed; return; }
 	MirrorDefense->StopReflection();
+	MirrorDefense->ReleaseGuardStation();
 	EntranceDefenseTarget.Reset(); Aggressor.Reset();
 	bReturningFromDefense = true;
 	bExitingEntrance = false;
@@ -375,24 +406,19 @@ bool AJTSPlanetSurfaceCreature::UpdateEntranceDefense(double Now, float Dt)
 	Target = EntranceDefenseTarget.Get();
 	if (MirrorDefense->bEnabled)
 	{
-		if (UpdateMirrorPosture(Now, Target)) return true;
-		// Fixed, mouth-relative guard lanes. Moving the player never drags the cohort away from its nest.
-		const FVector Up = ActivePlanet->GetRadialUpVector(EntranceDefenseOrigin);
-		const FVector Forward = FVector::VectorPlaneProject(EntranceDefenseForward, Up).GetSafeNormal();
-		const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
-		const int32 Column = DefenseSlot % 3, Row = DefenseSlot / 3;
-		const FVector GuardPoint = EntranceDefenseOrigin + Forward * (MirrorDefense->GuardRadius + Row * 70.f) + Right * ((Column-1)*105.f);
-		FJTSPlanetSurfaceHit GuardSurface;
-		if (!ActivePlanet->ProjectPointToSurface(GuardPoint, GuardSurface) || !Steering->IsWalkable(ActivePlanet.Get(), GuardSurface))
-			bMirrorGuardFallback = true;
-		const float Remaining = bMirrorGuardFallback ? 0.f : ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), GuardSurface.ImpactPoint);
-		if (Remaining > 30)
+		FVector GuardPoint;
+		if (!MirrorDefense->FindGuardStation(ActivePlanet.Get(), EntranceDefenseOrigin, EntranceDefenseForward, DefenseSlot, GuardPoint))
 		{
+			MirrorDefense->StopReflection();
+			return true;
+		}
+		if (ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), GuardPoint) > 20)
+		{
+			MirrorDefense->StopReflection();
 			if (State != EJTSForagerState::Flee) SetState(EJTSForagerState::Flee, 20);
-			MoveTowards(GuardSurface.ImpactPoint, FleeSpeed, Dt);
+			MoveTowards(GuardPoint, FleeSpeed, Dt);
 			MirrorGuardBlockedTime = bMovementBlocked ? MirrorGuardBlockedTime + Dt : 0.f;
-			// A rock beside the mouth must not leave a reflector running against it forever.
-			if (MirrorGuardBlockedTime > 1.5f) bMirrorGuardFallback = true;
+			if (MirrorGuardBlockedTime > 1.5f) { MirrorDefense->RejectGuardStation(); MirrorGuardBlockedTime = 0; }
 		}
 		else
 		{
@@ -458,6 +484,14 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 		if (Target)
 		{
 			if (State == EJTSForagerState::Hit && Now < StateEnd) return;
+			FVector Separate;
+			if (MirrorDefense->FindSeparationGoal(ActivePlanet.Get(), Separate))
+			{
+				MirrorDefense->StopReflection();
+				if (State != EJTSForagerState::Flee) SetState(EJTSForagerState::Flee, 20);
+				MoveTowards(Separate, WalkSpeed, Dt);
+				return;
+			}
 			if (State != EJTSForagerState::Reflect) SetState(EJTSForagerState::Reflect, 0);
 			MirrorDefense->AimAt(Target);
 			return;
@@ -633,6 +667,7 @@ void AJTSPlanetSurfaceCreature::OnDamaged(float Current, float Maximum, float Da
 			bMirrorRetaliation = true;
 			bEntranceDefense = false;
 			bReturningFromDefense = false;
+			MirrorDefense->ReleaseGuardStation();
 		}
 		if (State == EJTSForagerState::Reflect) return;
 	}
@@ -659,7 +694,10 @@ void AJTSPlanetSurfaceCreature::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTS
 }
 FText AJTSPlanetSurfaceCreature::GetMeleeTargetDisplayName_Implementation() const { return DisplayName; }
 FText AJTSPlanetSurfaceCreature::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("攻击")); }
-FVector AJTSPlanetSurfaceCreature::GetMeleeTargetAnchorWorldLocation_Implementation() const { return GetActorLocation() + GetActorUpVector() * 20; }
+FVector AJTSPlanetSurfaceCreature::GetMeleeTargetAnchorWorldLocation_Implementation() const
+{
+	return CombatBody->IsQueryCollisionEnabled() ? CombatBody->Bounds.Origin : GetActorLocation() + GetActorUpVector() * 20;
+}
 void AJTSPlanetSurfaceCreature::OnSettlementAttackStarted_Implementation() { if (HasAuthority() && !MirrorDefense->bEnabled) SetState(EJTSForagerState::Attack, 0); }
 void AJTSPlanetSurfaceCreature::OnSettlementForceImpact_Implementation(FVector Direction, float Speed) { if (HasAuthority() && !Health->IsDead()) SetState(EJTSForagerState::Hit, 0); }
 

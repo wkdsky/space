@@ -9,6 +9,7 @@ class APawn;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UTexture;
+class AJTSPlanetAnchor;
 
 USTRUCT(BlueprintType)
 struct FJTSMirrorLegChain
@@ -28,6 +29,7 @@ public:
 	UJTSMirrorDefenseComponent();
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Mirror") bool bEnabled = false;
 	UPROPERTY(EditDefaultsOnly, Category="Mirror", meta=(ClampMin="100")) float GuardRadius = 240;
+	UPROPERTY(EditDefaultsOnly, Category="Mirror", meta=(ClampMin="60")) float GuardSpacing = 130;
 	UPROPERTY(EditDefaultsOnly, Category="Mirror", meta=(ClampMin="100")) float GlareRange = 2200;
 	UPROPERTY(EditDefaultsOnly, Category="Mirror", meta=(ClampMin="1", ClampMax="89")) float GlareHalfAngle = 28;
 	UPROPERTY(EditDefaultsOnly, Category="Mirror|Timing", meta=(ClampMin="0.1")) float RetractSeconds = 1.5f;
@@ -53,6 +55,11 @@ public:
 	void SetNearbyReflection(UTexture* Texture, bool bVisible);
 	UFUNCTION(BlueprintPure, Category="Mirror") bool CanGlareAt(class APlayerController* Viewer) const;
 	static FQuat CalculateLean(const FVector& LocalDirection, float MaximumDegrees);
+	bool FindGuardStation(AJTSPlanetAnchor* Planet, const FVector& Origin, const FVector& Forward, int32 Slot, FVector& OutStation);
+	bool FindSeparationGoal(AJTSPlanetAnchor* Planet, FVector& OutGoal) const;
+	void ReleaseGuardStation();
+	void RejectGuardStation();
+	bool HasClearGlarePath(const FVector& Eye, const AActor* ViewerPawn) const;
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -72,6 +79,13 @@ private:
 	float GaitBlend = 0;
 	TWeakObjectPtr<USkeletalMesh> GaitSkeleton;
 	TArray<FVector> RestFeet;
+	TArray<FTransform> LastLivingPose;
+	double DeathBlendStart = -1;
+	FVector GuardStation = FVector::ZeroVector;
+	FVector GuardOrigin = FVector::ZeroVector;
+	FVector RejectedStation = FVector::ZeroVector;
+	bool bHasGuardStation = false;
+	bool bHasRejectedStation = false;
 };
 
 /** Publishes the optional procedural pose before sockets and rendering consume it. */

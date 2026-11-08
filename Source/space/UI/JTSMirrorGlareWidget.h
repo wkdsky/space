@@ -15,6 +15,7 @@ class SPACE_API UJTSMirrorGlareWidget : public UUserWidget
 public:
 	void InitializeMaterial(UMaterialInterface* Material);
 	UFUNCTION(BlueprintPure, Category="Mirror") int32 GetIlluminatingMirrorCount() const { return IlluminatingCount; }
+	UFUNCTION(BlueprintPure, Category="Mirror") float GetFullWhiteStrength() const { return FullOcclusion; }
 	static float FullOcclusionForCount(int32 Count) { return Count >= 3 ? .35f : 0.f; }
 protected:
 	virtual void NativeTick(const FGeometry& Geometry, float Dt) override;

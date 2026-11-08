@@ -230,7 +230,7 @@ void UJTSMeleeComponent::StartWorkAttack(AActor* Target)
 }
 bool UJTSMeleeComponent::CanApplyToolContact(AActor* Target) const
 {
-	return !HitActorsThisSwing.Contains(Target) && IsValidDamageTarget(Target,Cast<APawn>(GetOwner()));
+	return bIsAttacking && CurrentAttackType != EJTSAttackType::Punch && HitActorsThisSwing.IsEmpty() && IsValidDamageTarget(Target,Cast<APawn>(GetOwner()));
 }
 bool UJTSMeleeComponent::ApplyToolContact(AActor* Target)
 {
@@ -664,6 +664,13 @@ EJTSAttackType UJTSMeleeComponent::ResolveAttackType() const
 
 AActor* UJTSMeleeComponent::FindBestMeleeTarget(APawn* AttackingPawn) const
 {
+	if (const auto* Tool = IsValid(AttackingPawn) ? AttackingPawn->FindComponentByClass<UJTSMiningStrikeComponent>() : nullptr;
+		Tool && Tool->IsDirectedToolEquipped())
+	{
+		FHitResult Contact;
+		return Tool->AcquireContact(Contact) ? Contact.GetActor() : nullptr;
+	}
+
 	if (ResolveAttackType() == EJTSAttackType::Punch)
 	{
 		AActor* PunchTarget = nullptr;

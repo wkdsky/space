@@ -325,6 +325,8 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(25);
 	TestTrue(TEXT("Confirmed server strikes complete the marked entrance"), Blockable->IsEntranceBlocked());
 	TestTrue(TEXT("Completion requires multiple physical contacts"), Strike->GetConfirmedImpactCount() >= 2);
+	// The rubble follows the confirmed final strike, whose timing comes from the equipped tool.
+	TickFor(FMath::CeilToInt(Blockable->Blockade->RubbleDelay / .05f) + 1);
 	TestTrue(TEXT("Blocking shows the configured plug mesh"), Blockable->EntranceBlocker->IsVisible());
 	TestFalse(TEXT("A blocked entrance cannot be used again"), Blockable->CanInteract_Implementation(Collector));
 	TestFalse(TEXT("A blocked entrance stops being a refuge"), Blockable->IsRefugeAvailable());

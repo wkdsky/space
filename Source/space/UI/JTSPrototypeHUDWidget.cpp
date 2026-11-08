@@ -1875,11 +1875,15 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		const bool bEquippedRanged = IsValid(Ranged) && Ranged->HasActiveRangedWeapon();
 		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : FMath::Max(PunchHitFeedback,MiningFeedback);
 		const bool bCriticalHit = bEquippedRanged && Ranged->HasRecentConfirmedCriticalHit();
+		const bool bToolTargetReady = MiningStrike && MiningStrike->IsDirectedToolEquipped()
+			&& CrosshairMelee && IsValid(CrosshairMelee->GetCurrentMeleeTarget());
+		CrosshairText->SetText(FText::FromString(MiningFeedback > 0.f ? TEXT("\u00D7") : TEXT("+")));
 		CrosshairText->SetRenderScale(FVector2D(1.0f + 0.22f * ReticleKick + (bCriticalHit ? 0.20f : 0.0f)));
 		CrosshairText->SetColorAndOpacity(FSlateColor(bCriticalHit
 			? FLinearColor(1.0f, 0.78f, 0.20f)
 			: (bShowPunchHit || MiningFeedback > 0 || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
-				? FLinearColor(1.0f, 0.56f, 0.24f) : FLinearColor::White)));
+				? FLinearColor(1.0f, 0.56f, 0.24f)
+				: (bToolTargetReady ? FLinearColor(.45f, 1.f, .72f) : FLinearColor::White))));
 	}
 	// The quickbar and contextual interaction prompt already teach surface actions. A second
 	// persistent help line competes with the quickbar at narrower viewport sizes.

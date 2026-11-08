@@ -20,14 +20,28 @@ bool JTSMiningPose::Apply(const UJTSMiningStrikeComponent* Strike, USkeletalMesh
 		const FName Finger=bRight?TEXT("Index1_R"):TEXT("Index1_L");
 		const int32 A=Mesh->GetBoneIndex(Upper), B=Mesh->GetBoneIndex(Lower), C=Mesh->GetBoneIndex(Wrist), D=Mesh->GetBoneIndex(Finger);
 		if (!Pose.IsValidIndex(A)||!Pose.IsValidIndex(B)||!Pose.IsValidIndex(C)||!Pose.IsValidIndex(D)) return;
+		if (!bRight)
+		{
+			AimSegment(Upper,Lower,-Up+Forward*.12f-Right*.10f);
+			AimSegment(Lower,Wrist,-Up+Forward*.10f);
+			return;
+		}
 		const FVector Target=Frame.InverseTransformPosition(TargetWorld);
-		// Upper arms hang beside the torso. Only the forearm turns toward the working grip.
-		AimSegment(Upper,Lower,-Up+Forward*.08f+Right*(bRight?.025f:-.025f));
-		const FVector Elbow=Pose[B].GetLocation();
-		if (!bRight) { AimSegment(Lower,Wrist,-Up+Forward*.06f); return; }
-		const FVector Palm=Pose[C].GetLocation()+(Pose[D].GetLocation()-Pose[C].GetLocation())*1.35f;
-		const FQuat Turn=FQuat::FindBetweenNormals((Palm-Elbow).GetSafeNormal(),(Target-Elbow).GetSafeNormal());
-		AimSegment(Lower,Wrist,Turn.RotateVector(Pose[C].GetLocation()-Elbow));
+		const FVector FingerDirection=Frame.InverseTransformVectorNoScale(-ToolRotation.GetAxisZ()).GetSafeNormal();
+		const float PalmLength=FVector::Distance(Pose[C].GetLocation(),Pose[D].GetLocation())*1.35f;
+		const FVector WristTarget=Target-FingerDirection*PalmLength;
+		const FVector Shoulder=Pose[A].GetLocation();
+		const float UpperLength=FVector::Distance(Shoulder,Pose[B].GetLocation());
+		const float LowerLength=FVector::Distance(Pose[B].GetLocation(),Pose[C].GetLocation());
+		const FVector Along=(WristTarget-Shoulder).GetSafeNormal();
+		const float Distance=FMath::Clamp(float((WristTarget-Shoulder).Size()),FMath::Abs(UpperLength-LowerLength)+.1f,UpperLength+LowerLength-.1f);
+		const float ALong=(UpperLength*UpperLength-LowerLength*LowerLength+Distance*Distance)/(2*Distance);
+		const float Out=FMath::Sqrt(FMath::Max(0.f,UpperLength*UpperLength-ALong*ALong));
+		const FVector Pole=FVector::VectorPlaneProject(Right-Up*.25f,Along).GetSafeNormal(SMALL_NUMBER,Forward);
+		const FVector Elbow=Shoulder+Along*ALong+Pole*Out;
+		AimSegment(Upper,Lower,Elbow-Shoulder);
+		AimSegment(Lower,Wrist,Shoulder+Along*Distance-Pose[B].GetLocation());
+		AimSegment(Wrist,Finger,FingerDirection);
 	};
 	CloseGrip(true); CloseGrip(false);
 	Hand(true,Grip);

@@ -127,6 +127,7 @@ class Builder:
         mesh=bpy.context.object
         mesh.name="SK_"+self.kind
         mesh.data.name=mesh.name+"_Geometry"
+        if self.kind=="Riftlip":bind_riftlip_tail(mesh)
         # Flat broad faces, explicit triangulation, no subdivision dependency.
         tri=mesh.modifiers.new("ExportTriangles","TRIANGULATE")
         bpy.ops.object.modifier_apply(modifier=tri.name)
@@ -159,6 +160,15 @@ class Builder:
                            "Rigid exoskeleton plates, normalized deformation weights, articulated mouth and six legs.")
         return {"species":self.kind,"vertices":len(mesh.data.vertices),"triangles":len(mesh.data.polygons),
                 "bones":len(armdata.bones),"materials":len(mesh.data.materials)}
+
+
+def bind_riftlip_tail(mesh):
+    """Let the existing abdomen bone bend the spindle without changing its silhouette or skeleton."""
+    body=mesh.vertex_groups.get('body');abdomen=mesh.vertex_groups.get('abdomen')
+    for vertex in mesh.data.vertices:
+        if vertex.co.x>=-.04 or not any(g.group==body.index and g.weight>0 for g in vertex.groups):continue
+        t=max(0,min(1,(-vertex.co.x-.04)/.15));weight=t*t*(3-2*t)
+        body.add([vertex.index],1-weight,'REPLACE');abdomen.add([vertex.index],weight,'REPLACE')
 
 
 def rounded(hx,hy,power=4,n=20):

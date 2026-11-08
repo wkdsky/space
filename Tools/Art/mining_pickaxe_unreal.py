@@ -57,7 +57,7 @@ def configure():
             for h in sub.k2_gather_subobject_data_for_blueprint(bp)]
         strike=next(c for c in components if isinstance(c,unreal.JTSMiningStrikeComponent))
         strike.modify();strike.set_editor_property('elbow_reference_offset',unreal.Vector(3.2,16.1,27.6))
-        strike.set_editor_property('forearm_reach',27.3);strike.set_editor_property('grip_slide_distance',32.)
+        strike.set_editor_property('forearm_reach',27.3);strike.set_editor_property('upper_arm_reach',18.2)
         unreal.BlueprintEditorLibrary.compile_blueprint(bp)
         assert unreal.EditorAssetLibrary.save_loaded_asset(bp)
     for path in unreal.EditorAssetLibrary.list_assets(folder,False):

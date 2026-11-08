@@ -12,6 +12,7 @@ class AJTSPlanetEcologyHabitat;
 class UJTSHealthComponent;
 class UJTSPlanetSurfaceSteeringComponent;
 class USphereComponent;
+class UBoxComponent;
 class USkeletalMeshComponent;
 class UAnimSequence;
 class UJTSMirrorDefenseComponent;
@@ -53,6 +54,12 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<USphereComponent> Body;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<USkeletalMeshComponent> Mesh;
+	/** Optional bone-following damage body. Species dimensions remain Blueprint configuration. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature|Combat") TObjectPtr<UBoxComponent> CombatBody;
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Combat") FName CombatBodyBone;
+	/** Centre and half extents in the mesh reference pose, before the selected bone moves. */
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Combat") FVector CombatBodyCenter = FVector(0,0,10);
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Combat", meta=(ClampMin="1")) FVector CombatBodyHalfExtent = FVector(25,20,9);
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSHealthComponent> Health;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSPlanetSurfaceSteeringComponent> Steering;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSMirrorDefenseComponent> MirrorDefense;
@@ -99,7 +106,6 @@ private:
 	FVector EntranceDefenseOrigin = FVector::ZeroVector;
 	FVector EntranceDefenseForward = FVector::ForwardVector;
 	float MirrorGuardBlockedTime = 0;
-	bool bMirrorGuardFallback = false;
 	float EntranceDefenseLeash = 1800;
 	bool bEntranceDefense = false;
 	bool bReturningFromDefense = false;

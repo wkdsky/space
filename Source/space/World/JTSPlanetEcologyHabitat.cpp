@@ -33,6 +33,7 @@ AJTSPlanetEcologyHabitat::AJTSPlanetEcologyHabitat()
 	bReplicates = true;
 	EntranceHealth = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("EntranceHealth"));
 	EntranceTarget = CreateDefaultSubobject<UBoxComponent>(TEXT("EntranceTarget"));
+	EntranceTarget->ComponentTags.Add(TEXT("InteractionProxy"));
 	EntranceTarget->SetupAttachment(RefugeMesh);
 	EntranceTarget->SetCollisionObjectType(ECC_WorldDynamic);
 	EntranceTarget->SetCollisionResponseToAllChannels(ECR_Ignore);

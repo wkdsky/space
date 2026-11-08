@@ -8,7 +8,9 @@
 #include "space/Characters/JTSPlanetSurfaceCreature.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
 #include "space/Systems/JTSMirrorGlareSubsystem.h"
+#include "space/World/JTSPlanetAnchor.h"
 
 UJTSMirrorDefenseComponent::UJTSMirrorDefenseComponent()
 {
@@ -19,11 +21,12 @@ UJTSMirrorDefenseComponent::UJTSMirrorDefenseComponent()
 void UJTSMirrorDefenseComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	SetComponentTickEnabled(bEnabled && GetNetMode() != NM_DedicatedServer);
+	SetComponentTickEnabled(bEnabled);
 	CreatureMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
 	PreviousLocation = GetOwner()->GetActorLocation();
 	if (CreatureMesh.IsValid()) CreatureMesh->AddTickPrerequisiteComponent(this);
-	if (bEnabled && GetNetMode() != NM_DedicatedServer)
+	// The same source registry supplies server guard reservations and local presentation.
+	if (bEnabled)
 		GetWorld()->GetSubsystem<UJTSMirrorGlareSubsystem>()->RegisterSource(this);
 }
 
@@ -54,6 +57,99 @@ void UJTSMirrorDefenseComponent::AimAt(APawn* Target)
 void UJTSMirrorDefenseComponent::StopReflection()
 {
 	if (GetOwner()->HasAuthority()) bReflecting = false;
+}
+
+void UJTSMirrorDefenseComponent::ReleaseGuardStation()
+{
+	bHasGuardStation = false;
+	bHasRejectedStation = false;
+}
+
+void UJTSMirrorDefenseComponent::RejectGuardStation()
+{
+	RejectedStation = GuardStation;
+	bHasRejectedStation = bHasGuardStation;
+	bHasGuardStation = false;
+}
+
+bool UJTSMirrorDefenseComponent::FindGuardStation(AJTSPlanetAnchor* Planet, const FVector& Origin,
+	const FVector& Forward, int32 Slot, FVector& OutStation)
+{
+	if (!IsValid(Planet) || !GetOwner()->HasAuthority()) return false;
+	const auto* Steering = GetOwner()->FindComponentByClass<UJTSPlanetSurfaceSteeringComponent>();
+	if (!Steering) return false;
+	const FVector Up = Planet->GetRadialUpVector(Origin);
+	const FVector Ahead = FVector::VectorPlaneProject(Forward, Up).GetSafeNormal();
+	const FVector Right = FVector::CrossProduct(Up, Ahead).GetSafeNormal();
+	auto IsFree = [&](const FVector& Point)
+	{
+		for (auto Source : GetWorld()->GetSubsystem<UJTSMirrorGlareSubsystem>()->GetSources())
+		{
+			if (!Source.IsValid() || Source.Get() == this) continue;
+			const auto* Other = Cast<AJTSPlanetSurfaceCreature>(Source->GetOwner());
+			if (!Other || !Other->IsAlive() || !Other->CanReceiveMeleeHit_Implementation(nullptr)) continue;
+			const FVector OtherPoint = Source->bHasGuardStation ? Source->GuardStation : Other->GetActorLocation();
+			if (FVector::DistSquared(OtherPoint, Point) < FMath::Square(FMath::Max(GuardSpacing, Source->GuardSpacing)-2.f)) return false;
+		}
+		return true;
+	};
+	if (bHasGuardStation && GuardOrigin.Equals(Origin, 1.f) && IsFree(GuardStation))
+	{
+		OutStation = GuardStation;
+		return true;
+	}
+	bHasGuardStation = false;
+	const FVector Preferred = Origin + Ahead * (GuardRadius + (Slot / 3) * GuardSpacing)
+		+ Right * ((Slot % 3 - 1) * GuardSpacing);
+	for (const float Row : {0.f, 1.f, 2.f, -.6f})
+	for (const float Lane : {0.f, 1.f, -1.f, 2.f, -2.f})
+	{
+		FJTSPlanetSurfaceHit Hit;
+		if (!Planet->ProjectPointToSurface(Preferred + (Ahead * Row + Right * Lane) * GuardSpacing, Hit)
+			|| !Steering->IsWalkable(Planet, Hit) || !IsFree(Hit.ImpactPoint)
+			|| (bHasRejectedStation && FVector::DistSquared(Hit.ImpactPoint, RejectedStation) < FMath::Square(GuardSpacing * .4f))) continue;
+		GuardOrigin = Origin; GuardStation = Hit.ImpactPoint; bHasGuardStation = true;
+		OutStation = GuardStation;
+		return true;
+	}
+	return false;
+}
+
+bool UJTSMirrorDefenseComponent::FindSeparationGoal(AJTSPlanetAnchor* Planet, FVector& OutGoal) const
+{
+	if (!IsValid(Planet) || !GetOwner()->HasAuthority()) return false;
+	const FVector Position = GetOwner()->GetActorLocation(), Up = Planet->GetRadialUpVector(Position);
+	FVector Repulsion = FVector::ZeroVector;
+	for (auto Source : GetWorld()->GetSubsystem<UJTSMirrorGlareSubsystem>()->GetSources())
+	{
+		if (!Source.IsValid() || Source.Get() == this) continue;
+		const auto* Other = Cast<AJTSPlanetSurfaceCreature>(Source->GetOwner());
+		if (!Other || !Other->IsAlive() || !Other->CanReceiveMeleeHit_Implementation(nullptr)) continue;
+		FVector Delta = FVector::VectorPlaneProject(Position - Other->GetActorLocation(), Up);
+		const float Distance = Delta.Size();
+		const float Spacing = FMath::Max(GuardSpacing, Source->GuardSpacing);
+		if (Distance >= Spacing || FVector::DistSquared(Position, Other->GetActorLocation()) > FMath::Square(Spacing * 1.5f)) continue;
+		if (Distance < 1.f)
+		{
+			// Coincident animals need opposite, stable directions instead of a zero separation vector.
+			FVector A, B; Up.FindBestAxisVectors(A, B);
+			const uint32 Pair = HashCombineFast(FMath::Min(GetOwner()->GetUniqueID(), Other->GetUniqueID()),
+				FMath::Max(GetOwner()->GetUniqueID(), Other->GetUniqueID()));
+			const float Angle = (Pair % 360) * PI / 180.f;
+			Delta = (A * FMath::Cos(Angle) + B * FMath::Sin(Angle)) * (GetOwner()->GetUniqueID() < Other->GetUniqueID() ? 1.f : -1.f);
+		}
+		Repulsion += Delta.GetSafeNormal() * (1.f - Distance / Spacing);
+	}
+	if (Repulsion.IsNearlyZero(.02f)) return false;
+	const auto* Steering = GetOwner()->FindComponentByClass<UJTSPlanetSurfaceSteeringComponent>();
+	if (!Steering) return false;
+	for (const float Angle : {0.f, 35.f, -35.f, 70.f, -70.f})
+	{
+		FVector Heading;
+		const FVector Direction = FQuat(Up, FMath::DegreesToRadians(Angle)).RotateVector(Repulsion.GetSafeNormal());
+		if (Steering->ConstrainDisplacement(Planet, Position, Direction * GuardSpacing * .45f, OutGoal, Heading)) return true;
+	}
+	return false;
 }
 
 void UJTSMirrorDefenseComponent::TickComponent(float Dt, ELevelTick TickType, FActorComponentTickFunction* TickFunction)
@@ -124,18 +220,41 @@ bool UJTSMirrorDefenseComponent::CanGlareAt(APlayerController* Viewer) const
 	if (!Viewer->ProjectWorldLocationToScreen(GetMirrorLocation(), Screen, true)) return false;
 	int32 Width, Height; Viewer->GetViewportSize(Width, Height);
 	if (Screen.X < 0 || Screen.Y < 0 || Screen.X > Width || Screen.Y > Height) return false;
+	return HasClearGlarePath(Eye, Viewer->GetPawn());
+}
+
+bool UJTSMirrorDefenseComponent::HasClearGlarePath(const FVector& Eye, const AActor* ViewerPawn) const
+{
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(MirrorGlare), true, GetOwner());
-	Params.AddIgnoredActor(Viewer->GetPawn());
-	FHitResult Hit;
-	return !GetWorld()->LineTraceSingleByChannel(Hit, GetMirrorLocation(), Eye, ECC_Visibility, Params);
+	if (ViewerPawn) Params.AddIgnoredActor(ViewerPawn);
+	for (int32 Skip = 0; Skip < 16; ++Skip)
+	{
+		FHitResult Hit;
+		if (!GetWorld()->LineTraceSingleByChannel(Hit, GetMirrorLocation(), Eye, ECC_Visibility, Params)) return true;
+		if (!Hit.GetComponent() || !Hit.GetComponent()->ComponentHasTag(TEXT("InteractionProxy"))) return false;
+		Params.AddIgnoredComponent(Hit.GetComponent());
+	}
+	return false;
 }
 
 void UJTSMirrorDefenseComponent::ApplyPose(USkeletalMeshComponent* Mesh)
 {
 	if (!bEnabled || BodyBone.IsNone() || !Mesh->GetSkeletalMeshAsset()) return;
 	const auto* Creature = Cast<AJTSPlanetSurfaceCreature>(GetOwner());
-	if (!Creature || !Creature->IsAlive()) return;
+	if (!Creature) return;
 	TArray<FTransform>& Pose = Mesh->GetEditableComponentSpaceTransforms();
+	if (!Creature->IsAlive())
+	{
+		// A kill while guarding starts from the visible raised shell instead of snapping to idle.
+		if (LastLivingPose.Num() == Pose.Num())
+		{
+			const double Now = GetWorld()->GetTimeSeconds();
+			if (DeathBlendStart < 0) DeathBlendStart = Now;
+			const float Alpha = FMath::SmoothStep(0.f, .08f, float(Now - DeathBlendStart));
+			for (int32 I = 0; I < Pose.Num(); ++I) Pose[I].Blend(LastLivingPose[I], Pose[I], Alpha);
+		}
+		return;
+	}
 	const int32 Body = Mesh->GetBoneIndex(BodyBone);
 	if (!Pose.IsValidIndex(Body)) return;
 	const TArray<FTransform> Original = Pose;
@@ -196,6 +315,7 @@ void UJTSMirrorDefenseComponent::ApplyPose(USkeletalMeshComponent* Mesh)
 		Pose[B].SetScale3D(Original[B].GetScale3D() * LegLengthScale);
 		Pose[C].SetRotation(Original[C].GetRotation());
 	}
+	LastLivingPose = Pose;
 }
 
 void UJTSMirrorDefenseComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

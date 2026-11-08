@@ -5,6 +5,7 @@ import math
 from mathutils import Matrix, Vector, Euler
 
 TAU=2*math.pi
+DEATH_FRAMES={"MirrorSkimmer":31,"Riftlip":37,"SpireWorker":31,"SpireSoldier":37}
 
 
 def smooth(x):
@@ -96,7 +97,50 @@ def clip_list(kind):
                         ("ClampHold",61,True),("Stagger",49,False),("Recover",61,False),
                         ("FeedFromWorker",91,True)]
     }
-    return clips+extras[kind]
+    return [(name,DEATH_FRAMES[kind] if name=="Death" else count,loop)
+            for name,count,loop in clips+extras[kind]]
+
+
+def death_params(kind,t,p):
+    """Readable impact, species-specific loss of support, then a quiet held corpse."""
+    p["grounded_death"]=True
+    p["death_kick"]=.035*window(t,.44,.48,.64,.72)
+    p["abdomen"]=[0,0,0]
+    if kind=="MirrorSkimmer":
+        flight=max(0,min(1,(t-.065)/.38));land=max(0,t-.445)
+        p["death_air"]=.27*4*flight*(1-flight)
+        p["angles"]=[math.radians(175)*smooth((t-.08)/.31)+.13*math.sin(land*40)*math.exp(-land*19),0,-.18*smooth(t/.4)]
+        p["root"].x=-.055*smooth(t/.44)
+        p["dead"]=smooth(t/.08);p["death_curl"]=.96*smooth((t-.10)/.23)
+        p["open"]=.12*window(t,0,.08,.38,.5)
+    elif kind=="Riftlip":
+        flight=max(0,min(1,(t-.045)/.285));curl=smooth((t-.12)/.27)
+        p["death_air"]=.21*4*flight*(1-flight)
+        p["angles"]=[math.radians(160)*smooth((t-.07)/.26),-.12*curl,.28*curl]
+        p["head"]=[0,.18*curl,1.12*curl];p["abdomen"]=[0,-.12*curl,-1.25*curl]
+        p["root"].x=-.035*smooth(t/.33)
+        p["dead"]=smooth(t/.07);p["death_curl"]=.96*curl
+        p["open"]=.12*(1-curl);p["curl_sections"]=True
+    elif kind=="SpireWorker":
+        flight=max(0,min(1,(t-.045)/.32));land=max(0,t-.365);fall=smooth((t-.07)/.30)
+        p["death_air"]=.16*4*flight*(1-flight)
+        p["angles"]=[-math.radians(155)*fall-.11*math.sin(land*38)*math.exp(-land*18),.25*fall,-.55*fall]
+        p["head"]=[0,.38*fall,-.12*fall];p["abdomen"]=[.18*fall,-.20*fall,.30*fall]
+        p["root"].y=-.045*fall;p["dead"]=smooth(t/.08)
+        p["death_splay"]=.8*window(t,.02,.08,.19,.30)
+        p["death_curl"]=.90*smooth((t-.20)/.24);p["open"]=.20*smooth(t/.12)
+    else:
+        # The shield bearer loses its front supports, slams down, and loose plates follow.
+        slam=smooth((t-.035)/.16);rear=smooth((t-.13)/.19);settle=max(0,t-.24)
+        p["body"].z=-.10*slam
+        p["angles"]=[.38*slam*(1-rear)+.06*rear+.07*math.sin(settle*35)*math.exp(-settle*18),.08*slam*(1-rear),.13*slam]
+        p["head"]=[-.06*rear,-.03*slam,-.25*slam]
+        p["head_offset"]=Vector((.04*slam,-.04*slam,-.01*slam))
+        p["abdomen"]=[-.06*rear,0,.34*rear]
+        p["abdomen_offset"]=Vector((-.055*rear,.042*rear,0))
+        p["death_splay"]=1.0*slam;p["dead"]=.9*slam;p["death_curl"]=.62*rear
+        p["death_kick"]=.02*window(t,.24,.30,.46,.56);p["open"]=.44*slam
+    return p
 
 
 def params(kind,clip,t,spec):
@@ -221,11 +265,7 @@ def params(kind,clip,t,spec):
             p["angles"][0]+=.08*math.sin(3*TAU*t)*amount
             p["cycles"]=t; p["stride"]=spec["stride"]*.3*amount; p["lift"]=spec["lift"]*amount
     elif clip=="Death":
-        fall=smooth((t-.10)/.55)
-        p["body"].z=-.045*fall
-        p["angles"][0]=1.65*fall
-        p["open"]=.16*fall
-        p["dead"]=1
+        death_params(kind,t,p)
     elif clip=="FlipRecover":
         # Begin on the side, kick, roll upright, then settle onto all six feet.
         upright=smooth((t-.27)/.48)
@@ -279,8 +319,8 @@ def pose(rig, spec, p, t):
     rest=rig.data.bones
     root=Matrix.Translation(p["root"]) @ rot_at((0,0,0),(p["root_roll"],0,0))
     body=root @ Matrix.Translation(p["body"]) @ rot_at((0,0,spec["body_z"]),p["angles"])
-    head=body @ rot_at(rest["head"].head_local,p["head"])
-    abdomen=body @ rot_at(rest["abdomen"].head_local,p["abdomen"])
+    head=body @ Matrix.Translation(p.get("head_offset",Vector((0,0,0)))) @ rot_at(rest["head"].head_local,p["head"])
+    abdomen=body @ Matrix.Translation(p.get("abdomen_offset",Vector((0,0,0)))) @ rot_at(rest["abdomen"].head_local,p["abdomen"])
     desired={"root":root@rest["root"].matrix_local,"body":body@rest["body"].matrix_local,
              "head":head@rest["head"].matrix_local,"abdomen":abdomen@rest["abdomen"].matrix_local}
     for side,sign in (("L",1),("R",-1)):
@@ -297,10 +337,16 @@ def pose(rig, spec, p, t):
         if p["shovel"] and index==0:
             f+=Vector((p["fore"].x,sign*p["fore"].y,p["fore"].z))
         local_foot=f.copy()
+        if "death_splay" in p:local_foot.y*=1+.60*p["death_splay"]
+        if "death_curl" in p:
+            tucked=Vector((leg["h"][0]-.012,leg["h"][1]*.58,spec["body_z"]-.012))
+            curl=p["death_curl"]+p["death_kick"]*math.sin(t*30+index*1.7+sign)
+            local_foot=local_foot.lerp(tucked,max(0,min(1,curl)))
+        section=abdomen if p.get("curl_sections") and index==2 else body
         f=root@local_foot
         if p["dead"]:
-            f=f.lerp(body@local_foot,p["dead"])
-        h=body@Vector(leg["h"])
+            f=f.lerp(section@local_foot,p["dead"])
+        h=section@Vector(leg["h"])
         knee,foot,err=solve_leg(leg,h,f)
         error=max(error,err)
         desired[leg["upper"]]=orient(rest[leg["upper"]],h,knee-h)
@@ -308,8 +354,17 @@ def pose(rig, spec, p, t):
         toe=Vector(leg["toe"])-Vector(leg["f"])
         if index==0 and p["shovel"]:
             toe=Euler((0,p["toe_pitch"],0)).to_matrix()@toe
+        if "death_curl" in p:
+            toe=toe.lerp(section.to_3x3()@toe,p["dead"])
         desired[leg["tip"]]=orient(rest[leg["tip"]],foot,toe)
     set_matrices(rig,desired)
+    if p.get("grounded_death"):
+        bpy.context.view_layer.update()
+        mesh=bpy.data.objects["SK_"+rig["species"]].evaluated_get(bpy.context.evaluated_depsgraph_get())
+        lowest=min(v.co.z for v in mesh.data.vertices)
+        lift=Vector((0,0,.004+p.get("death_air",0)-lowest))
+        for transform in desired.values():transform.translation+=lift
+        set_matrices(rig,desired)
     return error
 
 

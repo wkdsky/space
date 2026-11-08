@@ -1,4 +1,4 @@
-#if WITH_DEV_AUTOMATION_TESTS
+﻿#if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 #include "Engine/Engine.h"
@@ -8,6 +8,9 @@
 #include "Engine/StaticMeshActor.h"
 #include "Math/RotationMatrix.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/BoxComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/DefaultPawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Characters/JTSPlanetSurfaceCreature.h"
@@ -18,6 +21,7 @@
 #include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
+#include "space/Components/JTSMirrorDefenseComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 
@@ -137,7 +141,7 @@ bool FJTSPickaxeCloseCreature::RunTest(const FString& Parameters)
 		const float Before=Health->GetHealth();
 		View->AcceptViewIntent(FVector(-300,60,0),FVector::ForwardVector);
 		Melee->StartAttack();
-		F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f);
+		++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f);
 		FVector Grip, Tip; FQuat Rotation; float Load;
 		TestTrue(TEXT("Tool provides a hand and head pose for the close strike"),Tool->GetGripPose(Grip,Rotation,Tip,Load));
 		TestTrue(TEXT("The visible pick head reaches the creature's collision surface"),FVector::Distance(Tip,Bug->GetActorLocation())<31.f);
@@ -149,15 +153,15 @@ bool FJTSPickaxeCloseCreature::RunTest(const FString& Parameters)
 		Melee->StopAttack();
 		Bug->Destroy();
 	}
-	auto* Distant=F.Mirror(FVector(160,0,30));
+	auto* Distant=F.Mirror(FVector(400,0,30));
 	const float DistantHealth=Distant->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
-	Melee->StartAttack(); Tool->ResolveContact(); Melee->StopAttack();
-	TestEqual(TEXT("Shortening the tool does not create an invisible extended hit"),Distant->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),DistantHealth);
+	Melee->StartAttack(); ++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f); Tool->ResolveContact(); Melee->StopAttack();
+	TestEqual(TEXT("A creature outside the configured reach is not hit"),Distant->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),DistantHealth);
 	Distant->Destroy();
 	// A nearby actor behind the player is never selected by the close-range assist.
 	auto* Behind=F.Mirror(FVector(-50,0,30));
 	const float BackHealth=Behind->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
-	Melee->StartAttack(); Tool->ResolveContact(); Melee->StopAttack();
+	Melee->StartAttack(); ++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f); Tool->ResolveContact(); Melee->StopAttack();
 	TestEqual(TEXT("The pickaxe cannot auto-hit a creature behind the body"),Behind->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),BackHealth);
 	Behind->Destroy();
 	auto* Bug=F.Mirror(FVector(75,0,30));
@@ -167,8 +171,151 @@ bool FJTSPickaxeCloseCreature::RunTest(const FString& Parameters)
 	Wall->SetActorLocation(FVector(40,0,75)); Wall->SetActorScale3D(FVector(.1f,2,2));
 	Wall->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
 	const float Before=Bug->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
-	Melee->StartAttack(); Tool->ResolveContact(); Melee->StopAttack();
+	Melee->StartAttack(); ++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f); Tool->ResolveContact(); Melee->StopAttack();
 	TestEqual(TEXT("A real wall prevents the close-range assisted strike"),Bug->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPickaxeMovingTargets, "JTS.Combat.PickaxeMovingTargets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSPickaxeMovingTargets::RunTest(const FString& Parameters)
+{
+	FCombatControlWorld F;
+	F.Equip(EJTSItemId::Pickaxe);
+	F.Player->GetCharacterMovement()->DisableMovement();
+	auto* Tool=F.Player->FindComponentByClass<UJTSMiningStrikeComponent>();
+	auto* Melee=F.Player->FindComponentByClass<UJTSMeleeComponent>();
+	auto* View=F.Player->FindComponentByClass<UJTSRangedWeaponComponent>();
+	const auto* Item=Tool->GetToolDefinition();
+	if (!TestNotNull(TEXT("Tool definition"),Item)) return false;
+	for (const TCHAR* Kind : {TEXT("MirrorSkimmer"),TEXT("Riftlip"),TEXT("SpireWorker"),TEXT("SpireSoldier")})
+	for (const FVector Up : {FVector::UpVector,FVector::RightVector})
+	{
+		const FVector Forward=Up.Equals(FVector::UpVector)?FVector::ForwardVector:FVector::UpVector;
+		F.Player->SetActorRotation(FRotationMatrix::MakeFromXZ(Forward,Up).ToQuat());
+		const FVector Base=F.Player->GetActorLocation();
+		const FVector Right=F.Player->GetActorRightVector();
+		const auto Class=LoadClass<AJTSPlanetSurfaceCreature>(nullptr,*FString::Printf(
+			TEXT("/Game/Space/Blueprints/Planets/Moon/EcologyV3/BP_%s.BP_%s_C"),Kind,Kind));
+		auto* Bug=F.World->SpawnActor<AJTSPlanetSurfaceCreature>(Class,Base+Forward*70-Up*55,F.Player->GetActorRotation());
+		if (!TestNotNull(TEXT("Creature Blueprint"),Bug)) return false;
+		if (!Bug->HasActorBegunPlay()) Bug->DispatchBeginPlay();
+		Bug->SetActorTickEnabled(false);
+		auto* Health=Bug->FindComponentByClass<UJTSHealthComponent>();
+		const float Before=Health->GetHealth();
+		// A real shoulder camera, aimed at the collision body, must drive the HUD and the hit alike.
+		const FVector Camera=Base-Forward*280+Right*55+Up*60;
+		View->AcceptViewIntent(Camera-F.Player->GetPawnViewLocation(),(Bug->GetActorLocation()-Camera).GetSafeNormal());
+		Melee->RefreshMeleeTarget();
+		TestEqual(TEXT("The aimed creature is the reticle target"),Melee->GetCurrentMeleeTarget(),static_cast<AActor*>(Bug));
+		Melee->StartAttack();
+		Tool->ResolveContact();
+		TestEqual(TEXT("Wind-up cannot apply damage"),Health->GetHealth(),Before);
+		// Move more than the old +/-5 cm surface recheck could tolerate during the wind-up.
+		Bug->SetActorLocation(Base+Forward*92+Right*15-Up*55);
+		View->AcceptViewIntent(Camera-F.Player->GetPawnViewLocation(),(Bug->GetActorLocation()-Camera).GetSafeNormal());
+		++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f);
+		TestTrue(FString::Printf(TEXT("%s moving across a spherical surface takes damage"),Kind),Health->GetHealth()<Before);
+		const float After=Health->GetHealth();
+		Tool->ResolveContact();
+		TestEqual(TEXT("Repeated contact requests cannot hit twice"),Health->GetHealth(),After);
+		Melee->StopAttack(); Bug->Destroy();
+	}
+	// No target at button-down: a creature entering the active window can still be struck.
+	F.Player->SetActorRotation(FRotator::ZeroRotator);
+	View->AcceptViewIntent(FVector(-280,55,0),FVector::ForwardVector);
+	Melee->StartAttack();
+	++GFrameCounter; F.World->Tick(LEVELTICK_All,Item->MiningSwingDuration*Item->MiningContactFraction+.005f);
+	auto* Entering=F.Mirror(F.Player->GetActorLocation()+FVector(65,0,-55));
+	const float Before=Entering->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
+	++GFrameCounter; F.World->Tick(LEVELTICK_All,.025f);
+	TestTrue(TEXT("An initially empty swing samples the rest of its contact window"),Entering->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<Before);
+	Melee->StopAttack();
+	Entering->Destroy();
+	for (const float Step : {1.f/120,1.f/30,.34f})
+	{
+		auto* Aimed=F.Mirror(F.Player->GetActorLocation()+FVector(95,0,-55));
+		auto* Nearer=F.Mirror(F.Player->GetActorLocation()+FVector(40,-55,-55));
+		const FVector Camera=F.Player->GetPawnViewLocation()+FVector(-280,55,0);
+		View->AcceptViewIntent(Camera-F.Player->GetPawnViewLocation(),(Aimed->GetActorLocation()-Camera).GetSafeNormal());
+		const float AimedHealth=Aimed->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
+		const float NearHealth=Nearer->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
+		Melee->StartAttack();
+		for (float Time=0;Time<Item->MiningSwingDuration*Item->MiningContactFraction+.005f;Time+=Step)
+		{
+			++GFrameCounter; F.World->Tick(LEVELTICK_All,Step);
+		}
+		TestTrue(TEXT("The crosshair target wins at 120 FPS, 30 FPS and across a contact-window hitch"),Aimed->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<AimedHealth);
+		TestEqual(TEXT("A nearby off-reticle creature does not steal the aimed hit"),Nearer->FindComponentByClass<UJTSHealthComponent>()->GetHealth(),NearHealth);
+		Melee->StopAttack();Aimed->Destroy();Nearer->Destroy();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPickaxeRaisedMirror, "JTS.Combat.PickaxeRaisedMirrorAtEntrance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSPickaxeRaisedMirror::RunTest(const FString& Parameters)
+{
+	FCombatControlWorld F; F.Equip(EJTSItemId::Pickaxe);
+	F.Player->GetCharacterMovement()->DisableMovement();
+	auto* View=F.Player->FindComponentByClass<UJTSRangedWeaponComponent>();
+	auto* Tool=F.Player->FindComponentByClass<UJTSMiningStrikeComponent>();
+	auto* Melee=F.Player->FindComponentByClass<UJTSMeleeComponent>();
+	for (const FVector Up : {FVector::UpVector,FVector::RightVector})
+	for (const float Lean : {0.f,45.f,78.f})
+	{
+		const FVector Forward=Up.Equals(FVector::UpVector)?FVector::ForwardVector:FVector::UpVector;
+		F.Player->SetActorRotation(FRotationMatrix::MakeFromXZ(Forward,Up).ToQuat());
+		auto* Bug=F.Mirror(F.Player->GetActorLocation()+Forward*80-Up*65);
+		Bug->SetActorRotation(F.Player->GetActorRotation());
+		auto* Mesh=Bug->FindComponentByClass<USkeletalMeshComponent>();
+		auto* Mirror=Bug->FindComponentByClass<UJTSMirrorDefenseComponent>();
+		auto* Hurtbox=Bug->FindComponentByClass<UBoxComponent>();
+		if (!TestNotNull(TEXT("Configured skeletal damage body"),Hurtbox)) return false;
+		TestTrue(TEXT("Mirror damage body is enabled"),Hurtbox->IsQueryCollisionEnabled());
+		auto* Threat=F.World->SpawnActor<ADefaultPawn>(); Threat->SetActorEnableCollision(false);
+		const FVector Aim=Bug->GetActorLocation()+Up*15+(Up*FMath::Cos(FMath::DegreesToRadians(Lean))
+			+Forward*FMath::Sin(FMath::DegreesToRadians(Lean)))*300;
+		Threat->SetActorLocation(Aim);
+		Threat->AddActorWorldOffset(Aim-Threat->GetPawnViewLocation());
+		Mirror->AimAt(Threat);
+		for (int32 Step=0;Step<6;++Step)
+		{
+			++GFrameCounter; F.World->Tick(LEVELTICK_All,.1f);
+			Mesh->TickAnimation(.1f,false); Mesh->RefreshBoneTransforms();
+		}
+		const FVector Target=Hurtbox->Bounds.Origin;
+		if (Lean > 0.f)
+			TestTrue(TEXT("The regression exercises an actually tilted shell"),FVector::DotProduct(Hurtbox->GetUpVector(),Up)<.9f);
+		TestTrue(TEXT("Damage body follows the posed shell instead of the feet"),
+			FVector::Distance(Target,Mesh->GetSocketLocation(Mirror->BodyBone))<15.f);
+		// Match a mouth interaction box enclosing its lip and the two visible guards.
+		auto* Proxy=F.World->SpawnActor<AActor>();
+		auto* Box=NewObject<UBoxComponent>(Proxy); Proxy->SetRootComponent(Box);
+		Box->SetBoxExtent(FVector(145,122,40));
+		Box->SetCollisionResponseToAllChannels(ECR_Ignore); Box->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
+		Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly); Box->ComponentTags.Add(TEXT("InteractionProxy"));
+		Box->RegisterComponent(); Proxy->SetActorLocation(Target); Proxy->SetActorRotation(F.Player->GetActorRotation());
+		const FVector Camera=F.Player->GetActorLocation()-Forward*280+F.Player->GetActorRightVector()*55+Up*60;
+		View->AcceptViewIntent(Camera-F.Player->GetPawnViewLocation(),(Target-Camera).GetSafeNormal());
+		FHitResult Hit;
+		TestTrue(TEXT("An entrance interaction box cannot hide a visible raised mirror"),Tool->AcquireContact(Hit));
+		TestEqual(TEXT("The aimed guard is selected instead of the entrance"),Hit.GetActor(),static_cast<AActor*>(Bug));
+		const float Before=Bug->FindComponentByClass<UJTSHealthComponent>()->GetHealth();
+		Melee->StartAttack(); ++GFrameCounter;
+		F.World->Tick(LEVELTICK_All,Tool->GetToolDefinition()->MiningSwingDuration*Tool->GetToolDefinition()->MiningContactFraction+.005f);
+		TestTrue(TEXT("The posed guard takes authoritative tool damage"),Bug->FindComponentByClass<UJTSHealthComponent>()->GetHealth()<Before);
+		Melee->StopAttack();
+		// Skipping an interaction proxy must still stop at a real wall behind it.
+		auto* Wall=F.World->SpawnActor<AActor>();
+		auto* Solid=NewObject<UBoxComponent>(Wall); Wall->SetRootComponent(Solid);
+		Solid->SetBoxExtent(FVector(2,150,150));
+		Solid->SetCollisionResponseToAllChannels(ECR_Block);Solid->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Solid->RegisterComponent();Wall->SetActorLocation(F.Player->GetActorLocation()+Forward*35);
+		Wall->SetActorRotation(F.Player->GetActorRotation());
+		TestFalse(TEXT("A physical wall still blocks the shell inside an interaction proxy"),Tool->AcquireContact(Hit));
+		Wall->Destroy(); Proxy->Destroy(); Threat->Destroy(); Bug->Destroy();
+	}
 	return true;
 }
 

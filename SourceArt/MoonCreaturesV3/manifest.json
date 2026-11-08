@@ -173,11 +173,11 @@
         {
           "name": "Death",
           "action": "A_MirrorSkimmer_Death",
-          "frames": 61,
+          "frames": 31,
           "fps": 30,
           "loop": false,
           "events": [],
-          "vertical_root_motion": false,
+          "vertical_root_motion": "Baked grounded support and species-specific impulse",
           "max_ik_reach_correction_m": 0.0
         },
         {
@@ -374,11 +374,11 @@
         {
           "name": "Death",
           "action": "A_Riftlip_Death",
-          "frames": 61,
+          "frames": 37,
           "fps": 30,
           "loop": false,
           "events": [],
-          "vertical_root_motion": false,
+          "vertical_root_motion": "Baked grounded support and species-specific impulse",
           "max_ik_reach_correction_m": 0.0
         },
         {
@@ -590,11 +590,11 @@
         {
           "name": "Death",
           "action": "A_SpireWorker_Death",
-          "frames": 61,
+          "frames": 31,
           "fps": 30,
           "loop": false,
           "events": [],
-          "vertical_root_motion": false,
+          "vertical_root_motion": "Baked grounded support and species-specific impulse",
           "max_ik_reach_correction_m": 0.0
         },
         {
@@ -827,11 +827,11 @@
         {
           "name": "Death",
           "action": "A_SpireSoldier_Death",
-          "frames": 61,
+          "frames": 37,
           "fps": 30,
           "loop": false,
           "events": [],
-          "vertical_root_motion": false,
+          "vertical_root_motion": "Baked grounded support and species-specific impulse",
           "max_ik_reach_correction_m": 0.0
         },
         {
