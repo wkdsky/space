@@ -1,0 +1,891 @@
+{
+  "palette": {
+    "Regolith": [
+      "#BFC0C4",
+      0.96,
+      0
+    ],
+    "Fresh": [
+      "#C3C5C9",
+      0.87,
+      0
+    ],
+    "Fracture": [
+      "#93969E",
+      0.95,
+      0
+    ],
+    "Metal": [
+      "#7E878E",
+      0.54,
+      0.48
+    ],
+    "Crystal": [
+      "#9ABFB8",
+      0.3,
+      0.06
+    ],
+    "CarbonCrust": [
+      "#AAB49F",
+      0.92,
+      0
+    ],
+    "CarbonNodule": [
+      "#B9C3AC",
+      0.68,
+      0
+    ],
+    "CarbonCore": [
+      "#94A28C",
+      0.79,
+      0
+    ],
+    "CarbonMargin": [
+      "#AAB49F",
+      0.98,
+      0
+    ]
+  },
+  "assets": [
+    {
+      "name": "SM_MR_Rock_Small_01",
+      "triangles": 82,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.30435213446617126,
+        0.056679677218198776
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Small_02",
+      "triangles": 78,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.2964169383049011,
+        0.1743839830160141
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Small_03",
+      "triangles": 76,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.2296161949634552,
+        0.11984257400035858
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Small_04",
+      "triangles": 240,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.31581252813339233,
+        0.11446890234947205
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Small_05",
+      "triangles": 76,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.34999996423721313,
+        0.16694161295890808,
+        0.07024744153022766
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Small_06",
+      "triangles": 312,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.31836122274398804,
+        0.16940324008464813
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_01",
+      "triangles": 78,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.149999976158142,
+        0.8881751894950867,
+        0.17241573333740234
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_02",
+      "triangles": 82,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        1.008893370628357,
+        0.5505713224411011
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_03",
+      "triangles": 70,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        0.7665715217590332,
+        0.3914317786693573
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_04",
+      "triangles": 236,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.149999976158142,
+        1.1471495628356934,
+        0.39711520075798035
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_05",
+      "triangles": 74,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        0.49118536710739136,
+        0.21655350923538208
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Medium_06",
+      "triangles": 316,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        1.122767448425293,
+        1.1500000953674316,
+        0.6220731735229492
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_01",
+      "triangles": 78,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8745297193527222,
+        0.3938440680503845
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_02",
+      "triangles": 78,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.6499998569488525,
+        2.4719831943511963,
+        1.3004486560821533
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_03",
+      "triangles": 72,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8221569061279297,
+        0.9163564443588257
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_04",
+      "triangles": 234,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        2.6388707160949707,
+        0.9267386794090271
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_05",
+      "triangles": 78,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.6499998569488525,
+        1.2832789421081543,
+        0.5188063383102417
+      ]
+    },
+    {
+      "name": "SM_MR_Rock_Large_06",
+      "triangles": 316,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture"
+      ],
+      "dimensions": [
+        2.3164186477661133,
+        2.6499998569488525,
+        1.4437520503997803
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_01",
+      "triangles": 290,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.3198010325431824,
+        0.08253052830696106
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_02",
+      "triangles": 286,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.3082393407821655,
+        0.1743839830160141
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_03",
+      "triangles": 284,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.2279454916715622,
+        0.1313229203224182
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_04",
+      "triangles": 448,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.3360676169395447,
+        0.13856634497642517
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_05",
+      "triangles": 284,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.34999996423721313,
+        0.16694161295890808,
+        0.08528923988342285
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Small_06",
+      "triangles": 520,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.31836122274398804,
+        0.16940324008464813
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_01",
+      "triangles": 286,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.149999976158142,
+        0.8884556889533997,
+        0.23454533517360687
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_02",
+      "triangles": 290,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        1.0406794548034668,
+        0.5505713224411011
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_03",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        0.7778211236000061,
+        0.3915998935699463
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_04",
+      "triangles": 444,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        1.0885562896728516,
+        0.393314927816391
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_05",
+      "triangles": 282,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        0.53961580991745,
+        0.2477019727230072
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Medium_06",
+      "triangles": 524,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        1.1114001274108887,
+        1.1500000953674316,
+        0.6138930916786194
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_01",
+      "triangles": 286,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8461344242095947,
+        0.615973949432373
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_02",
+      "triangles": 286,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.6499996185302734,
+        2.402794361114502,
+        1.286002278327942
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_03",
+      "triangles": 280,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8495724201202393,
+        0.9163564443588257
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_04",
+      "triangles": 442,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        2.549184799194336,
+        0.9850590229034424
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_05",
+      "triangles": 286,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.6499998569488525,
+        1.3414816856384277,
+        0.6328849792480469
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Large_06",
+      "triangles": 524,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        2.266237258911133,
+        2.6499996185302734,
+        1.4124757051467896
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_01",
+      "triangles": 282,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.3174039125442505,
+        0.0818018689751625
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_02",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.31444957852363586,
+        0.1852220594882965
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_03",
+      "triangles": 276,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.21865214407444,
+        0.1265241503715515
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_04",
+      "triangles": 440,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.3500000238418579,
+        0.3345223665237427,
+        0.13856634497642517
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_05",
+      "triangles": 276,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.34999996423721313,
+        0.16694161295890808,
+        0.08513732254505157
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Small_06",
+      "triangles": 512,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.3499999940395355,
+        0.31836122274398804,
+        0.16940324008464813
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_01",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.149999976158142,
+        0.8881751894950867,
+        0.2326435148715973
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_02",
+      "triangles": 282,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        1.0411759614944458,
+        0.604278564453125
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_03",
+      "triangles": 270,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.149999976158142,
+        0.7711677551269531,
+        0.39180395007133484
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_04",
+      "triangles": 436,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.1499998569488525,
+        1.0953779220581055,
+        0.393141508102417
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_05",
+      "triangles": 274,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.1500000953674316,
+        0.5409330725669861,
+        0.2561519742012024
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Medium_06",
+      "triangles": 516,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        1.1119897365570068,
+        1.1500000953674316,
+        0.6150888800621033
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_01",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8484885692596436,
+        0.6053168177604675
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_02",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.6499996185302734,
+        2.402794361114502,
+        1.2830554246902466
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_03",
+      "triangles": 272,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.8202892541885376,
+        0.9050578474998474
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_04",
+      "triangles": 434,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        2.5413057804107666,
+        0.9823272824287415
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_05",
+      "triangles": 278,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.6500000953674316,
+        1.343858242034912,
+        0.6406621336936951
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Large_06",
+      "triangles": 516,
+      "materials": [
+        "M_MR_Regolith",
+        "M_MR_Fresh",
+        "M_MR_Fracture",
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        2.4106101989746094,
+        2.6500000953674316,
+        1.4162819385528564
+      ]
+    },
+    {
+      "name": "SM_MR_Carbon_Accretion_01",
+      "triangles": 7236,
+      "materials": [
+        "M_MR_CarbonMargin",
+        "M_MR_CarbonCore",
+        "M_MR_Regolith",
+        "M_MR_CarbonCrust",
+        "M_MR_CarbonNodule"
+      ],
+      "dimensions": [
+        1.498787760734558,
+        0.8240966796875,
+        0.06472916156053543
+      ]
+    },
+    {
+      "name": "SM_MR_Carbon_Accretion_02",
+      "triangles": 7236,
+      "materials": [
+        "M_MR_CarbonMargin",
+        "M_MR_CarbonCore",
+        "M_MR_CarbonNodule",
+        "M_MR_Regolith",
+        "M_MR_CarbonCrust"
+      ],
+      "dimensions": [
+        1.7230663299560547,
+        0.6970284581184387,
+        0.06675123423337936
+      ]
+    },
+    {
+      "name": "SM_MR_Carbon_Accretion_03",
+      "triangles": 7236,
+      "materials": [
+        "M_MR_CarbonMargin",
+        "M_MR_CarbonCrust",
+        "M_MR_CarbonNodule",
+        "M_MR_CarbonCore",
+        "M_MR_Regolith"
+      ],
+      "dimensions": [
+        1.3056938648223877,
+        0.9317042827606201,
+        0.06348840892314911
+      ]
+    }
+  ]
+}

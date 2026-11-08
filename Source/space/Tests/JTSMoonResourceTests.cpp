@@ -53,6 +53,12 @@ bool FJTSMoonMixedResourceTest::RunTest(const FString& Parameters)
 		Node->InitializeMiningNode(EJTSResourceType::Rock, ExpectedRock, Sizes[Index], ExpectedMetal + ExpectedCrystal, 1);
 		TestEqual(TEXT("Node counts both payload types"), Node->GetTotalYieldUnits(), ExpectedRock + ExpectedMetal + ExpectedCrystal);
 		const float WorkBefore = Node->GetRemainingMiningWork();
+		TestTrue(TEXT("Solid resources remain available for name display"), IInteractable::Execute_CanInteract(Node,Miner));
+		TestFalse(TEXT("Solid resources reject E execution"), IInteractable::Execute_CanExecuteInteraction(Node,Miner));
+		TestFalse(TEXT("Solid resources retain their display name"), Node->GetInteractionDisplayName().IsEmpty());
+		TestTrue(TEXT("Solid resources have no E prompt"), IInteractable::Execute_GetInteractionPrompt(Node,Miner).IsEmpty());
+		IInteractable::Execute_Interact(Node,Miner);
+		TestEqual(TEXT("E cannot perform mining work"),Node->GetRemainingMiningWork(),WorkBefore);
 		TestFalse(TEXT("Wrong held item cannot mutate mining state"), Node->ApplyMiningWork(Miner, EJTSItemId::Knife, 1000));
 		TestEqual(TEXT("Rejected work leaves the node unchanged"), Node->GetRemainingMiningWork(), WorkBefore);
 		for (int32 Hit = 0; Hit < 100 && !Node->IsActorBeingDestroyed(); ++Hit)
@@ -87,7 +93,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMoonAuthoredResourceTest, "JTS.Moon.Resourc
 bool FJTSMoonAuthoredResourceTest::RunTest(const FString& Parameters)
 {
 	UClass* ResourceClass = LoadClass<AJTSMoonResourceActor>(nullptr,
-		TEXT("/Game/Space/Blueprints/Modes/BP_MoonResourceActor.BP_MoonResourceActor_C"));
+		TEXT("/Game/Space/Blueprints/Modes/Moon/BP_MoonResourceActor.BP_MoonResourceActor_C"));
 	if (!TestNotNull(TEXT("Configured Moon resource Blueprint loads"), ResourceClass)) return false;
 	const auto Values = UWorld::InitializationValues().AllowAudioPlayback(false).CreatePhysicsScene(true)
 		.CreateNavigation(false).CreateAISystem(false).ShouldSimulatePhysics(false);
@@ -102,15 +108,17 @@ bool FJTSMoonAuthoredResourceTest::RunTest(const FString& Parameters)
 		EJTSMoonResourceNodeSize::MediumCrystalRock, EJTSMoonResourceNodeSize::LargeCrystalRock};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Sizes); ++Index)
 	{
-		for (int32 Variant = 0; Variant < 2; ++Variant)
+		TSet<UStaticMesh*> AuthoredVariants;
+		for (int32 Variant = 0; Variant < 6; ++Variant)
 		{
 			AJTSMoonResourceActor* Node = World->SpawnActor<AJTSMoonResourceActor>(ResourceClass, FVector(Index * 1000, Variant * 1000, 500), Rotation);
 			Node->InitializeMiningNode(EJTSResourceType::Rock, 2, Sizes[Index], Index >= 2 ? 2 : 0, Variant);
 			UStaticMeshComponent* Mesh = Node->FindComponentByClass<UStaticMeshComponent>();
 			TestTrue(TEXT("Every node variant uses an authored mesh"), Mesh && Mesh->GetStaticMesh()
-				&& Mesh->GetStaticMesh()->GetPathName().StartsWith(TEXT("/Game/Space/Meshes/Resources/Moon/")));
+				&& Mesh->GetStaticMesh()->GetPathName().StartsWith(TEXT("/Game/Space/")));
 			if (Mesh && Mesh->GetStaticMesh())
 			{
+				AuthoredVariants.Add(Mesh->GetStaticMesh());
 				TestTrue(TEXT("Imported pivot is centred at the interaction origin"), Mesh->Bounds.Origin.Equals(Node->GetActorLocation(), 0.1));
 				TestTrue(TEXT("Authored variants have consistent unscaled size"), FMath::IsNearlyEqual(
 					Mesh->GetStaticMesh()->GetBoundingBox().GetSize().GetMax() * Mesh->GetRelativeScale3D().X, 100.0, 0.1));
@@ -134,6 +142,22 @@ bool FJTSMoonAuthoredResourceTest::RunTest(const FString& Parameters)
 			}
 			Node->Destroy();
 		}
+		TestEqual(TEXT("Every mining size and material family supplies six distinct authored forms"), AuthoredVariants.Num(), 6);
+	}
+	for (const auto Type : {EJTSWorldPickupItemType::Ore, EJTSWorldPickupItemType::Crystal})
+	{
+		auto* Mineral = World->SpawnActor<AJTSWorldPickupActor>(FVector(0, -2000, 500), Rotation);
+		Mineral->InitializeItem(Type);
+		TestEqual(TEXT("Loose minerals use the requested Chinese label"), Mineral->GetItemDisplayName().ToString(), FString(TEXT("矿物")));
+		const auto* Visual = Mineral->FindComponentByClass<UStaticMeshComponent>();
+		UStaticMesh* MineralMesh = Visual ? Visual->GetStaticMesh().Get() : nullptr;
+		if (TestNotNull(TEXT("Loose mineral visual exists"), MineralMesh))
+		{
+			TestTrue(TEXT("Loose minerals use independent fragments rather than small ore-bearing rocks"),
+				Visual->GetStaticMesh()->GetName().Contains(TEXT("_Loose_")));
+			TestEqual(TEXT("Mineral fragment has no rock matrix material"), Visual->GetStaticMesh()->GetStaticMaterials().Num(), 1);
+		}
+		Mineral->Destroy();
 	}
 	AJTSWorldPickupActor* Pickup = World->SpawnActor<AJTSWorldPickupActor>(FVector(0, -1000, 500), Rotation);
 	Pickup->InitializeItem(EJTSWorldPickupItemType::Rock);

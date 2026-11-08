@@ -311,6 +311,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSCircularProgressWidget> BoardingProgressWidget;
+	UPROPERTY(Transient) TObjectPtr<UJTSCircularProgressWidget> EntranceProgressWidget;
+	UPROPERTY(Transient) TObjectPtr<UCanvasPanelSlot> EntranceProgressSlot;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> BoardingRemainingText;

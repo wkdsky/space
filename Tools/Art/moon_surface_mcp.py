@@ -22,6 +22,24 @@ class MoonSurfaceV3Tools(unreal.ToolsetDefinition):
     """Import original Moon art, fit it to the existing mesh, and inspect the result."""
     @toolset_registry.tool_call
     @staticmethod
+    def configure_population() -> str:
+        """Configure patchy renewable Moon rocks and burrow populations without changing terrain or nest positions."""
+        import moon_population
+        return importlib.reload(moon_population).configure()
+    @toolset_registry.tool_call
+    @staticmethod
+    def inspect_population() -> str:
+        """Inspect resource capacities and renewable Mirror/Rift populations in the editor or active PIE world."""
+        import moon_population
+        return importlib.reload(moon_population).inspect()
+    @toolset_registry.tool_call
+    @staticmethod
+    def probe_population(stage: str) -> str:
+        """PIE-only accelerated recovery test: deplete renewable populations, then sample their recovery."""
+        import moon_population
+        return importlib.reload(moon_population).probe(stage)
+    @toolset_registry.tool_call
+    @staticmethod
     def import_species(species: str) -> str:
         """Import one of MirrorSkimmer, Riftlip, SpireWorker, SpireSoldier, its rig and all authored clips."""
         return _surface().import_species(species)

@@ -1,5 +1,9 @@
 #include "space/Components/JTSMeleeComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
+#include "space/Components/JTSCombatFacingComponent.h"
+#include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSWallClimbComponent.h"
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
@@ -65,7 +69,7 @@ void UJTSMeleeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		{
 			SweepHeldWeaponTip();
 		}
-		if (MeleeSwingClockElapsed >= FMath::Max(0.15f, HeldWeaponRecoveryDelay))
+		if (MeleeSwingClockElapsed >= GetHeldWeaponSwingDuration())
 		{
 			bMeleeSwingClockActive = false;
 			MeleeSwingClockElapsed = 0.0f;
@@ -158,7 +162,11 @@ void UJTSMeleeComponent::AttackPressed()
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		bAttackHeld = true;
-		ServerStartAttack();
+		FVector Offset, Direction;
+		const auto* View=GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>();
+		if (!View) return;
+		View->GetViewIntent(Offset, Direction);
+		ServerStartAttack(Offset, Direction);
 		return;
 	}
 	bAttackHeld = true;
@@ -192,7 +200,11 @@ void UJTSMeleeComponent::StartAttack()
 	if (Stellar && Stellar->HasActiveWeapon()) return;
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
-		ServerStartAttack();
+		FVector Offset, Direction;
+		const auto* View=GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>();
+		if (!View) return;
+		View->GetViewIntent(Offset, Direction);
+		ServerStartAttack(Offset, Direction);
 		return;
 	}
 	if (bIsAttacking || !IsValid(Cast<APawn>(GetOwner())))
@@ -207,6 +219,30 @@ void UJTSMeleeComponent::StartAttack()
 void UJTSMeleeComponent::StopAttack()
 {
 	EndAttackState();
+}
+
+void UJTSMeleeComponent::StartWorkAttack(AActor* Target)
+{
+	if (!GetOwner()->HasAuthority() || bIsAttacking) return;
+	PendingWorkTarget = Target;
+	StartAttack();
+	PendingWorkTarget.Reset();
+}
+bool UJTSMeleeComponent::CanApplyToolContact(AActor* Target) const
+{
+	return !HitActorsThisSwing.Contains(Target) && IsValidDamageTarget(Target,Cast<APawn>(GetOwner()));
+}
+bool UJTSMeleeComponent::ApplyToolContact(AActor* Target)
+{
+	if (!GetOwner()->HasAuthority() || !CanApplyToolContact(Target)) return false;
+	if (!ApplyAttackToTarget(Target,Cast<APawn>(GetOwner()),GetCurrentAttackType())) return false;
+	HitActorsThisSwing.Add(Target); return true;
+}
+float UJTSMeleeComponent::GetHeldWeaponSwingDuration() const
+{
+	if (const auto* Mining = GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>())
+		if (const auto* Item = Mining->GetToolDefinition()) return FMath::Max(.25f,Item->MiningSwingDuration);
+	return FMath::Max(.15f,HeldWeaponRecoveryDelay/HeldWeaponSwingPlayRate);
 }
 
 void UJTSMeleeComponent::TryChainAttack()
@@ -258,6 +294,11 @@ void UJTSMeleeComponent::FinishCurrentAttack()
 
 void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 {
+	const auto* Character=Cast<AJTSCharacter>(GetOwner());
+	const auto* Health=GetOwner()?GetOwner()->FindComponentByClass<UJTSHealthComponent>():nullptr;
+	const auto* Climb=GetOwner()?GetOwner()->FindComponentByClass<UJTSWallClimbComponent>():nullptr;
+	if ((Character && Character->IsBoarded()) || (Health && Health->IsDead()) || (Climb && Climb->IsClimbing()))
+	{ EndAttackState(); return; }
 	const auto* Stellar = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
 	if (Stellar && Stellar->HasActiveWeapon()) { EndAttackState(); return; }
 	if (!IsValid(Cast<APawn>(GetOwner())))
@@ -267,6 +308,12 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 	}
 
 	const bool bIsComboContinuation = bIsAttacking && AttackType == EJTSAttackType::Punch;
+	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>())
+	{
+		FVector Origin, Direction;
+		if (const auto* View = GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>();
+			View && View->GetCameraRay(Origin, Direction)) Facing->BeginMeleeSwing(Direction);
+	}
 
 	// Every montage segment is one new swing. Repeated hit requests can never re-hit this set.
 	HitActorsThisSwing.Reset();
@@ -287,11 +334,17 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 	{
 		// Weapon/tool montages are optional project presentation. Gameplay must still swing,
 		// hit, and chain while held when no Blueprint notify graph has been configured.
+		const auto* Inventory = GetOwner()->FindComponentByClass<UJTSInventoryComponent>();
+		const auto* Definition = Inventory ? UJTSItemDefinitionLibrary::GetItemDefinition(this, Inventory->GetActiveItemId()) : nullptr;
+		HeldWeaponSwingPlayRate = Definition ? FMath::Clamp(Definition->MeleeSwingPlayRate, 0.25f, 4.0f) : 1.0f;
+		if (Definition && Definition->bDirectedMiningSwing)
+			if (auto* Mining = GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>()) Mining->BeginSwing(PendingWorkTarget.Get());
 		ClearAttackFailSafeTimer();
 		ScheduleHeldWeaponEvents();
 	}
 
-	MulticastBeginAttackPresentation(CurrentAttackType, bCurrentPunchUsesLeft, bCurrentPunchIsComboContinuation);
+	MulticastBeginAttackPresentation(CurrentAttackType, bCurrentPunchUsesLeft, bCurrentPunchIsComboContinuation,
+		HeldWeaponSwingPlayRate, GetOwner()->GetActorForwardVector());
 }
 
 void UJTSMeleeComponent::ResetAttackFailSafeTimer()
@@ -387,9 +440,11 @@ void UJTSMeleeComponent::ScheduleHeldWeaponEvents()
 	}
 
 	ClearHeldWeaponTimers();
-	const float HitDelay = FMath::Max(0.01f, HeldWeaponHitDelay);
-	const float ChainDelay = FMath::Max(HitDelay, HeldWeaponChainDelay);
-	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, HeldWeaponRecoveryDelay);
+	const auto* Mining = GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>();
+	const auto* Tool = Mining ? Mining->GetToolDefinition() : nullptr;
+	const float HitDelay = Tool ? Tool->MiningSwingDuration*Tool->MiningContactFraction : FMath::Max(0.01f, HeldWeaponHitDelay / HeldWeaponSwingPlayRate);
+	const float ChainDelay = Tool ? Tool->MiningSwingDuration : FMath::Max(HitDelay, HeldWeaponChainDelay / HeldWeaponSwingPlayRate);
+	const float RecoveryDelay = FMath::Max(ChainDelay + 0.01f, GetHeldWeaponSwingDuration());
 	FTimerManager& TimerManager = World->GetTimerManager();
 	TimerManager.SetTimer(HeldWeaponHitTimerHandle, this, &UJTSMeleeComponent::HandleHeldWeaponHit, HitDelay, false);
 	// A held button, or a click that landed during this chop, starts the next one as
@@ -414,6 +469,10 @@ void UJTSMeleeComponent::ClearHeldWeaponTimers()
 
 void UJTSMeleeComponent::HandleHeldWeaponHit()
 {
+	if (auto* Mining=GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>(); Mining && Mining->IsDirectedToolEquipped())
+	{
+		Mining->ResolveContact(); return;
+	}
 	if (CurrentAttackType != EJTSAttackType::Punch)
 	{
 		PerformHitCheck();
@@ -438,6 +497,7 @@ void UJTSMeleeComponent::HandleHeldWeaponRecovery()
 
 void UJTSMeleeComponent::EndAttackState()
 {
+	if (auto* Mining=GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>()) Mining->CancelSwing();
 	const bool bWasAttacking = bIsAttacking;
 	const EJTSAttackType FinishedAttackType = CurrentAttackType;
 	ClearAttackFailSafeTimer();
@@ -526,7 +586,7 @@ float UJTSMeleeComponent::GetMeleeSwingPhase() const
 	{
 		return 0.0f;
 	}
-	const float Duration = FMath::Max(0.15f, HeldWeaponRecoveryDelay);
+	const float Duration = GetHeldWeaponSwingDuration();
 	return FMath::Clamp(MeleeSwingClockElapsed / Duration, 0.0f, 1.0f);
 }
 
@@ -915,6 +975,7 @@ void UJTSMeleeComponent::SweepPunchFist()
 
 void UJTSMeleeComponent::SweepHeldWeaponTip()
 {
+	if (const auto* Mining=GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>(); Mining && Mining->IsDirectedToolEquipped()) return;
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !bIsAttacking
 		|| CurrentAttackType == EJTSAttackType::Punch || HitActorsThisSwing.Num() >= PunchMaxTargets)
 	{
@@ -934,8 +995,9 @@ void UJTSMeleeComponent::SweepHeldWeaponTip()
 	const FVector SweepStart = bHasPreviousWeaponTip ? PreviousWeaponTip : Tip;
 	PreviousWeaponTip = Tip;
 	bHasPreviousWeaponTip = true;
-	if (MeleeSwingClockElapsed < FMath::Max(0.0f, HeldWeaponHitDelay - 0.14f)
-		|| MeleeSwingClockElapsed > HeldWeaponHitDelay + 0.08f)
+	const float ContactClock = MeleeSwingClockElapsed * HeldWeaponSwingPlayRate;
+	if (ContactClock < FMath::Max(0.0f, HeldWeaponHitDelay - 0.14f)
+		|| ContactClock > HeldWeaponHitDelay + 0.08f)
 	{
 		return;
 	}
@@ -1034,6 +1096,8 @@ bool UJTSMeleeComponent::GetPlayerAimView(APawn* AttackingPawn, FVector& OutCame
 		return false;
 	}
 
+	if (const auto* View = AttackingPawn->FindComponentByClass<UJTSRangedWeaponComponent>())
+		return View->GetCameraRay(OutCameraLocation, OutAimDirection);
 	FRotator CameraRotation;
 	if (APlayerController* const PlayerController = Cast<APlayerController>(AttackingPawn->GetController()))
 	{
@@ -1134,8 +1198,10 @@ bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPaw
 	return false;
 }
 
-void UJTSMeleeComponent::ServerStartAttack_Implementation()
+void UJTSMeleeComponent::ServerStartAttack_Implementation(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction)
 {
+	auto* View = GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>();
+	if (!View || !View->AcceptViewIntent(EyeOffset, Direction)) return;
 	bAttackHeld = true;
 	if (bIsAttacking)
 	{
@@ -1189,8 +1255,11 @@ void UJTSMeleeComponent::MulticastPunchImpact_Implementation(FVector_NetQuantize
 void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 	EJTSAttackType AttackType,
 	bool bUseLeftPunch,
-	bool bIsComboContinuation)
+	bool bIsComboContinuation,
+	float SwingPlayRate, FVector_NetQuantizeNormal Forward)
 {
+	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->BeginMeleeSwing(Forward);
+	HeldWeaponSwingPlayRate = FMath::Clamp(SwingPlayRate, 0.25f, 4.0f);
 	CurrentAttackType = AttackType;
 	bCurrentPunchUsesLeft = bUseLeftPunch;
 	bCurrentPunchIsComboContinuation = bIsComboContinuation;
@@ -1208,6 +1277,7 @@ void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 	}
 	else
 	{
+		++HeldWeaponSwingSequence;
 		bMeleeSwingClockActive = true;
 		MeleeSwingClockElapsed = 0.0f;
 		SetComponentTickEnabled(true);
@@ -1217,6 +1287,7 @@ void UJTSMeleeComponent::MulticastBeginAttackPresentation_Implementation(
 
 void UJTSMeleeComponent::MulticastEndAttackPresentation_Implementation(EJTSAttackType AttackType)
 {
+	if (auto* Mining=GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>()) Mining->CancelSwing();
 	bIsAttacking = false;
 	bAttackBuffered = false;
 	bCurrentPunchIsComboContinuation = false;

@@ -1,4 +1,5 @@
 #include "space/Components/JTSWeaponVisualComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
@@ -53,6 +54,19 @@ void UJTSWeaponVisualComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 	}
 	bMeleeSwingPresentationActive = false;
 	Super::EndPlay(EndPlayReason);
+}
+
+void UJTSWeaponVisualComponent::RefreshForAttack()
+{
+	if (auto* Mesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+		Mesh && Mesh->GetAnimInstance())
+	{
+		Mesh->TickAnimation(0.0f, false);
+		Mesh->RefreshBoneTransforms();
+	}
+	UpdatePalmAnchor();
+	UpdateLeftPistolAnchor();
+	ApplyPresentationTransform();
 }
 
 void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickType,
@@ -512,6 +526,11 @@ void UJTSWeaponVisualComponent::UpdateHandAnchor(
 		{
 			PalmRotation = FRotationMatrix::MakeFromXZ(Shaft, Forward).ToQuat();
 		}
+		if (const auto* Mining=Owner->FindComponentByClass<UJTSMiningStrikeComponent>())
+		{
+			FVector Grip,Tip; FQuat Rotation; float Load;
+			if (Mining->GetGripPose(Grip,Rotation,Tip,Load)) PalmRotation=Rotation;
+		}
 	}
 
 	Anchor->SetAbsolute(true, true, true);
@@ -660,12 +679,12 @@ void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
 	{
 		WeaponSight->SetHiddenInGame(false);
 	}
-	WeaponGrip->SetVisibility(true);
+	WeaponGrip->SetVisibility(!bAuthoredHeldMesh);
 	WeaponBody->SetVisibility(true);
-	WeaponBarrel->SetVisibility(true);
+	WeaponBarrel->SetVisibility(!bAuthoredHeldMesh);
 	if (IsValid(WeaponSight))
 	{
-		WeaponSight->SetVisibility(WeaponSight->GetStaticMesh() != nullptr);
+		WeaponSight->SetVisibility(!bAuthoredHeldMesh && WeaponSight->GetStaticMesh() != nullptr);
 	}
 
 	SetComponentTickEnabled(true);
@@ -836,10 +855,17 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		SightScale = FVector::ZeroVector;
 	}
 
-	WeaponGrip->SetVisibility(true);
+	bAuthoredHeldMesh = IsValid(Definition->HeldPresentation.Mesh);
+	WeaponBody->SetStaticMesh(bAuthoredHeldMesh ? Definition->HeldPresentation.Mesh.Get() : CubeMesh.Get());
+	if (bAuthoredHeldMesh)
+	{
+		WeaponBody->EmptyOverrideMaterials(); BodyScale=FVector(FMath::Max(0.01f, Definition->HeldPresentation.MeshScale)); DefaultBodyLocation=FVector::ZeroVector;
+	}
+	else WeaponBody->SetMaterial(0,WeaponBodyMaterial);
+	WeaponGrip->SetVisibility(!bAuthoredHeldMesh);
 	WeaponBody->SetVisibility(true);
-	WeaponBarrel->SetVisibility(true);
-	WeaponSight->SetVisibility(SightScale.X > 0.0f);
+	WeaponBarrel->SetVisibility(!bAuthoredHeldMesh);
+	WeaponSight->SetVisibility(!bAuthoredHeldMesh && SightScale.X > 0.0f);
 	WeaponGrip->SetHiddenInGame(false);
 	WeaponBody->SetHiddenInGame(false);
 	WeaponBarrel->SetHiddenInGame(false);
@@ -1102,6 +1128,8 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	if (IsValid(WeaponModelRoot))
 	{
 		FTransform GripInverse = DefaultGripTransform;
+		if (const auto* Mining=GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>(); Mining && Mining->IsDirectedToolEquipped())
+			GripInverse=Mining->GetModelGripTransform();
 		GripInverse.SetScale3D(FVector::OneVector);
 		WeaponModelRoot->SetRelativeTransform(GripInverse.Inverse());
 		WeaponModelRoot->SetAbsolute(false, false, true);
@@ -1159,10 +1187,10 @@ void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 			World->GetTimerManager().ClearTimer(MuzzleFlashTimerHandle);
 		}
 	}
-	if (IsValid(WeaponGrip)) WeaponGrip->SetVisibility(bVisible);
+	if (IsValid(WeaponGrip)) WeaponGrip->SetVisibility(bVisible && !bAuthoredHeldMesh);
 	if (IsValid(WeaponBody)) WeaponBody->SetVisibility(bVisible);
-	if (IsValid(WeaponBarrel)) WeaponBarrel->SetVisibility(bVisible);
-	if (IsValid(WeaponSight)) WeaponSight->SetVisibility(bVisible && WeaponSight->GetStaticMesh() != nullptr);
+	if (IsValid(WeaponBarrel)) WeaponBarrel->SetVisibility(bVisible && !bAuthoredHeldMesh);
+	if (IsValid(WeaponSight)) WeaponSight->SetVisibility(bVisible && !bAuthoredHeldMesh && WeaponSight->GetStaticMesh() != nullptr);
 	if (IsValid(WeaponGrip)) WeaponGrip->SetHiddenInGame(!bVisible);
 	if (IsValid(WeaponBody)) WeaponBody->SetHiddenInGame(!bVisible);
 	if (IsValid(WeaponBarrel)) WeaponBarrel->SetHiddenInGame(!bVisible);

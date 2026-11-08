@@ -111,7 +111,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	int32 GetItemCount(EJTSItemId ItemId) const;
 
-	/** The current progression cap for a stackable item; non-stackable items always return one. */
+	/** Stackable items use a fixed cap of 99; unique equipment always occupies one slot. */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	int32 GetEffectiveStackLimit(EJTSItemId ItemId) const;
 

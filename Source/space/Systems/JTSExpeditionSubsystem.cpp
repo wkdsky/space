@@ -339,10 +339,11 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 			PlayerSnapshot.ExperienceInCurrentLevel = PlayerState->GetExperienceInCurrentLevel();
 			PlayerSnapshot.UnspentAbilityPoints = PlayerState->GetUnspentAbilityPoints();
 			PlayerSnapshot.InventorySlotAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::InventorySlots);
-			PlayerSnapshot.StackLimitAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::StackLimit);
 			PlayerSnapshot.RunSpeedAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::RunSpeed);
 			PlayerSnapshot.StaminaAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Stamina);
 			PlayerSnapshot.CriticalChanceAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::CriticalChance);
+			PlayerSnapshot.HealthAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Health);
+			PlayerSnapshot.DefenseAbilityRank = PlayerState->GetAbilityRank(EJTSPlayerAbility::Defense);
 			PlayerSnapshot.ShipLockerSlots = PlayerState->GetShipLockerSlots();
 			PlayerSnapshot.DiscoveredStellarCoreIds = PlayerState->GetDiscoveredStellarCoreIds();
 			PlayerSnapshot.StellarFirmwareUnits = PlayerState->GetStellarFirmwareUnits();
@@ -399,9 +400,11 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 		SavedPlayer->UnspentAbilityPoints,
 		SavedPlayer->InventorySlotAbilityRank,
 		SavedPlayer->StackLimitAbilityRank,
-			SavedPlayer->RunSpeedAbilityRank,
-			SavedPlayer->StaminaAbilityRank,
-			SavedPlayer->CriticalChanceAbilityRank);
+		SavedPlayer->RunSpeedAbilityRank,
+		SavedPlayer->StaminaAbilityRank,
+		SavedPlayer->CriticalChanceAbilityRank,
+		SavedPlayer->HealthAbilityRank,
+		SavedPlayer->DefenseAbilityRank);
 	if (UJTSHealthComponent* const Health = Character->GetHealthComponent())
 	{
 		Health->RestoreAuthoritativeHealth(SavedPlayer->Health);
@@ -457,6 +460,19 @@ void UJTSExpeditionSubsystem::SetCurrentPlanetId(const FString& PlanetId)
 void UJTSExpeditionSubsystem::SetCurrentCheckpoint(const FString& Checkpoint)
 {
 	Snapshot.CurrentCheckpoint = Checkpoint;
+}
+
+bool UJTSExpeditionSubsystem::IsEntranceBlocked(FName EntranceId) const
+{
+	return !EntranceId.IsNone() && Snapshot.BlockedEntranceIds.Contains(EntranceId);
+}
+void UJTSExpeditionSubsystem::MarkEntranceBlocked(FName EntranceId)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || EntranceId.IsNone()) return;
+	if (Snapshot.BlockedEntranceIds.Contains(EntranceId)) return;
+	Snapshot.BlockedEntranceIds.Add(EntranceId);
+	Snapshot.SaveVersion = FMath::Max(7, Snapshot.SaveVersion);
+	if (HasActiveExpedition() && !SaveNow()) RequestSave();
 }
 
 void UJTSExpeditionSubsystem::RequestSave()

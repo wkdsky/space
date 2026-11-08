@@ -479,10 +479,11 @@ int32 AJTSPlayerState::GetAbilityRank(const EJTSPlayerAbility Ability) const
 	switch (Ability)
 	{
 	case EJTSPlayerAbility::InventorySlots: return InventorySlotAbilityRank;
-	case EJTSPlayerAbility::StackLimit: return StackLimitAbilityRank;
 	case EJTSPlayerAbility::RunSpeed: return RunSpeedAbilityRank;
 	case EJTSPlayerAbility::Stamina: return StaminaAbilityRank;
 	case EJTSPlayerAbility::CriticalChance: return CriticalChanceAbilityRank;
+	case EJTSPlayerAbility::Health: return HealthAbilityRank;
+	case EJTSPlayerAbility::Defense: return DefenseAbilityRank;
 	default: return 0;
 	}
 }
@@ -494,12 +495,12 @@ int32 AJTSPlayerState::GetInventorySlotCapacityBonus() const
 
 int32 AJTSPlayerState::GetItemStackLimit() const
 {
-	return FJTSPlayerProgressionRules::GetStackLimit(StackLimitAbilityRank);
+	return FJTSPlayerProgressionRules::ItemStackLimit;
 }
 
-float AJTSPlayerState::GetRunSpeedMultiplier() const
+float AJTSPlayerState::GetRunSpeedBonus() const
 {
-	return FJTSPlayerProgressionRules::GetRunSpeedMultiplier(RunSpeedAbilityRank);
+	return FJTSPlayerProgressionRules::GetRunSpeedBonus(RunSpeedAbilityRank);
 }
 
 int32 AJTSPlayerState::GetCriticalChancePercent() const
@@ -634,32 +635,34 @@ bool AJTSPlayerState::GrantDebugLevels()
 
 bool AJTSPlayerState::CommitAbilityAllocation(const FJTSAbilityAllocation& Allocation)
 {
-	if (!HasAuthority()
-		|| Allocation.InventorySlotRanks < 0
-		|| Allocation.StackLimitRanks < 0
-		|| Allocation.RunSpeedRanks < 0
-		|| Allocation.StaminaRanks < 0
-		|| Allocation.CriticalChanceRanks < 0)
+	// Bound each client-supplied value before adding costs/ranks, including malicious int32 values.
+	auto IsValidIncrease = [](const int32 CurrentRank, const int32 Increase)
+	{
+		return Increase >= 0 && Increase <= FJTSPlayerProgressionRules::MaximumAbilityRank - CurrentRank;
+	};
+	if (!HasAuthority() || Allocation.StackLimitRanks != 0
+		|| !IsValidIncrease(InventorySlotAbilityRank, Allocation.InventorySlotRanks)
+		|| !IsValidIncrease(RunSpeedAbilityRank, Allocation.RunSpeedRanks)
+		|| !IsValidIncrease(StaminaAbilityRank, Allocation.StaminaRanks)
+		|| !IsValidIncrease(CriticalChanceAbilityRank, Allocation.CriticalChanceRanks)
+		|| !IsValidIncrease(HealthAbilityRank, Allocation.HealthRanks)
+		|| !IsValidIncrease(DefenseAbilityRank, Allocation.DefenseRanks))
 	{
 		return false;
 	}
 
 	const int32 TotalCost = Allocation.GetTotalPointCost();
-	if (TotalCost <= 0 || TotalCost > UnspentAbilityPoints
-		|| InventorySlotAbilityRank + Allocation.InventorySlotRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| StackLimitAbilityRank + Allocation.StackLimitRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| RunSpeedAbilityRank + Allocation.RunSpeedRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| StaminaAbilityRank + Allocation.StaminaRanks > FJTSPlayerProgressionRules::MaximumAbilityRank
-		|| CriticalChanceAbilityRank + Allocation.CriticalChanceRanks > FJTSPlayerProgressionRules::MaximumAbilityRank)
+	if (TotalCost <= 0 || TotalCost > UnspentAbilityPoints)
 	{
 		return false;
 	}
 
 	InventorySlotAbilityRank += Allocation.InventorySlotRanks;
-	StackLimitAbilityRank += Allocation.StackLimitRanks;
 	RunSpeedAbilityRank += Allocation.RunSpeedRanks;
 	StaminaAbilityRank += Allocation.StaminaRanks;
 	CriticalChanceAbilityRank += Allocation.CriticalChanceRanks;
+	HealthAbilityRank += Allocation.HealthRanks;
+	DefenseAbilityRank += Allocation.DefenseRanks;
 	UnspentAbilityPoints -= TotalCost;
 	++ProgressionRevision;
 	NotifyProgressionChanged();
@@ -674,7 +677,9 @@ void AJTSPlayerState::RestoreProgression(
 	const int32 NewStackLimitRank,
 	const int32 NewRunSpeedRank,
 	const int32 NewStaminaRank,
-	const int32 NewCriticalChanceRank)
+	const int32 NewCriticalChanceRank,
+	const int32 NewHealthRank,
+	const int32 NewDefenseRank)
 {
 	if (!HasAuthority())
 	{
@@ -685,12 +690,15 @@ void AJTSPlayerState::RestoreProgression(
 	ExperienceInCurrentLevel = ProgressionLevel >= FJTSPlayerProgressionRules::MaximumLevel
 		? 0
 		: FMath::Clamp(NewExperienceInCurrentLevel, 0, FMath::Max(0, GetExperienceRequiredForNextLevel() - 1));
-	UnspentAbilityPoints = FMath::Max(0, NewUnspentAbilityPoints);
+	// Old snapshots keep the retired stack rank solely so its points can be refunded once.
+	const int32 RefundedStackPoints = FMath::Clamp(NewStackLimitRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
+	UnspentAbilityPoints = FMath::Min(MAX_int32 - RefundedStackPoints, FMath::Max(0, NewUnspentAbilityPoints)) + RefundedStackPoints;
 	InventorySlotAbilityRank = FMath::Clamp(NewInventorySlotRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
-	StackLimitAbilityRank = FMath::Clamp(NewStackLimitRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	RunSpeedAbilityRank = FMath::Clamp(NewRunSpeedRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	StaminaAbilityRank = FMath::Clamp(NewStaminaRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	CriticalChanceAbilityRank = FMath::Clamp(NewCriticalChanceRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
+	HealthAbilityRank = FMath::Clamp(NewHealthRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
+	DefenseAbilityRank = FMath::Clamp(NewDefenseRank, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
 	++ProgressionRevision;
 	NotifyProgressionChanged();
 }
@@ -736,10 +744,11 @@ void AJTSPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AJTSPlayerState, ExperienceInCurrentLevel);
 	DOREPLIFETIME(AJTSPlayerState, UnspentAbilityPoints);
 	DOREPLIFETIME(AJTSPlayerState, InventorySlotAbilityRank);
-	DOREPLIFETIME(AJTSPlayerState, StackLimitAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, RunSpeedAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, StaminaAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, CriticalChanceAbilityRank);
+	DOREPLIFETIME(AJTSPlayerState, HealthAbilityRank);
+	DOREPLIFETIME(AJTSPlayerState, DefenseAbilityRank);
 	DOREPLIFETIME(AJTSPlayerState, ProgressionRevision);
 	DOREPLIFETIME_CONDITION(AJTSPlayerState, ShipLockerSlots, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(AJTSPlayerState, DiscoveredStellarCoreIds, COND_OwnerOnly);
@@ -761,10 +770,11 @@ void AJTSPlayerState::CopyProperties(APlayerState* PlayerState)
 		Target->ExperienceInCurrentLevel = ExperienceInCurrentLevel;
 		Target->UnspentAbilityPoints = UnspentAbilityPoints;
 		Target->InventorySlotAbilityRank = InventorySlotAbilityRank;
-		Target->StackLimitAbilityRank = StackLimitAbilityRank;
 		Target->RunSpeedAbilityRank = RunSpeedAbilityRank;
 		Target->StaminaAbilityRank = StaminaAbilityRank;
 		Target->CriticalChanceAbilityRank = CriticalChanceAbilityRank;
+		Target->HealthAbilityRank = HealthAbilityRank;
+		Target->DefenseAbilityRank = DefenseAbilityRank;
 		Target->ProgressionRevision = ProgressionRevision;
 		Target->ShipLockerSlots = ShipLockerSlots;
 		Target->DiscoveredStellarCoreIds = DiscoveredStellarCoreIds;
@@ -790,10 +800,11 @@ void AJTSPlayerState::OverrideWith(APlayerState* PlayerState)
 		ExperienceInCurrentLevel = Source->ExperienceInCurrentLevel;
 		UnspentAbilityPoints = Source->UnspentAbilityPoints;
 		InventorySlotAbilityRank = Source->InventorySlotAbilityRank;
-		StackLimitAbilityRank = Source->StackLimitAbilityRank;
 		RunSpeedAbilityRank = Source->RunSpeedAbilityRank;
 		StaminaAbilityRank = Source->StaminaAbilityRank;
 		CriticalChanceAbilityRank = Source->CriticalChanceAbilityRank;
+		HealthAbilityRank = Source->HealthAbilityRank;
+		DefenseAbilityRank = Source->DefenseAbilityRank;
 		ProgressionRevision = Source->ProgressionRevision;
 		ShipLockerSlots = Source->ShipLockerSlots;
 		StellarLoadout->RestoreState(Source->StellarLoadout->GetSlots(), Source->StellarLoadout->GetEnergy());

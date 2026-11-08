@@ -1,0 +1,148 @@
+{
+  "assets": [
+    {
+      "name": "SM_MR_Metal_Loose_01",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.2646086513996124,
+        0.20887544751167297,
+        0.18188011646270752
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Loose_02",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.2363012135028839,
+        0.17613019049167633,
+        0.16682392358779907
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Loose_03",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.2642028033733368,
+        0.21872687339782715,
+        0.185313418507576
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Loose_04",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.2211056351661682,
+        0.1990378499031067,
+        0.16102848947048187
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Loose_05",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.24855481088161469,
+        0.21354816854000092,
+        0.18092624843120575
+      ]
+    },
+    {
+      "name": "SM_MR_Metal_Loose_06",
+      "triangles": 36,
+      "materials": [
+        "M_MR_Metal"
+      ],
+      "dimensions": [
+        0.272368460893631,
+        0.21137580275535583,
+        0.1620156317949295
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_01",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.2837870121002197,
+        0.19014453887939453,
+        0.26832008361816406
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_02",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.24478459358215332,
+        0.1970435082912445,
+        0.2536131739616394
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_03",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.2566421926021576,
+        0.2129090130329132,
+        0.2624415457248688
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_04",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.2564055025577545,
+        0.243345707654953,
+        0.26218971610069275
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_05",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.2577698528766632,
+        0.21117976307868958,
+        0.24237307906150818
+      ]
+    },
+    {
+      "name": "SM_MR_Crystal_Loose_06",
+      "triangles": 44,
+      "materials": [
+        "M_MR_Crystal"
+      ],
+      "dimensions": [
+        0.24287082254886627,
+        0.24124713242053986,
+        0.2562149167060852
+      ]
+    }
+  ]
+}

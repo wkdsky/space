@@ -101,6 +101,9 @@ namespace
 		case EJTSWorldPickupItemType::Crystal:
 			OutResourceType = EJTSResourceType::Crystal;
 			return true;
+		case EJTSWorldPickupItemType::InorganicCarbon:
+			OutResourceType = EJTSResourceType::InorganicCarbon;
+			return true;
 
 		case EJTSWorldPickupItemType::MoonAntCorpse:
 			OutResourceType = EJTSResourceType::MoonAntCorpse;
@@ -151,7 +154,9 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 	UWorld* World,
 	EJTSWorldPickupItemType NewItemType,
 	const FVector& GroundLocation,
-	AActor* SourceActor)
+	AActor* SourceActor,
+	const FTransform* AuthoredPose,
+	int32 VisualVariant)
 {
 	if (World == nullptr || World->GetNetMode() == NM_Client)
 	{
@@ -159,8 +164,8 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 	}
 
 	AJTSPlanetAnchor* const Planet = FindRealSurfacePlanet(SourceActor);
-	FRotator SpawnRotation(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f);
-	if (IsValid(Planet))
+	FRotator SpawnRotation = AuthoredPose ? AuthoredPose->Rotator() : FRotator(0.0f, FMath::FRandRange(0.0f, 360.0f), 0.0f);
+	if (IsValid(Planet) && !AuthoredPose)
 	{
 		FJTSPlanetSurfaceFrame SurfaceFrame;
 		if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
@@ -185,6 +190,7 @@ AJTSWorldPickupActor* AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 		return nullptr;
 	}
 
+	Pickup->SurfaceVisualVariant = VisualVariant;
 	Pickup->InitializeItem(NewItemType);
 	Pickup->FinishSpawning(SpawnTransform);
 	if (IsValid(Planet))
@@ -590,7 +596,7 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::GetItemType() const
 FText AJTSWorldPickupActor::GetItemDisplayName() const
 {
 	return ItemInstance.IsEmpty()
-		? FText::FromString(ItemTypeToString(ItemType))
+		? UJTSItemDefinitionLibrary::GetItemDisplayName(ItemTypeToItemId(ItemType))
 		: ItemInstance.CustomDisplayName.IsEmpty()
 			? UJTSItemDefinitionLibrary::GetItemDisplayName(ItemInstance.ItemId)
 			: ItemInstance.CustomDisplayName;
@@ -819,16 +825,7 @@ FText AJTSWorldPickupActor::GetInteractionPrompt_Implementation(APawn* Interacti
 	{
 		return FailureFeedback;
 	}
-	if (ItemInstance.ItemId == EJTSItemId::Rock)
-	{
-		return FText::FromString(TEXT("[E] Rocks"));
-	}
-	if (ItemInstance.ItemId == EJTSItemId::Ore)
-	{
-		return FText::FromString(TEXT("[E] Metal"));
-	}
-	if (ItemInstance.ItemId == EJTSItemId::Crystal) return FText::FromString(TEXT("[E] Crystal"));
-	return FText::FromString(TEXT("[E] PICK UP"));
+	return FText::FromString(TEXT("[E] 拾取"));
 }
 
 void AJTSWorldPickupActor::Interact_Implementation(APawn* InteractingPawn)
@@ -962,6 +959,7 @@ void AJTSWorldPickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(AJTSWorldPickupActor, ItemType);
 	DOREPLIFETIME(AJTSWorldPickupActor, ItemInstance);
 	DOREPLIFETIME(AJTSWorldPickupActor, SurfaceUp);
+	DOREPLIFETIME(AJTSWorldPickupActor, SurfaceVisualVariant);
 	DOREPLIFETIME(AJTSWorldPickupActor, bIsDropping);
 	DOREPLIFETIME(AJTSWorldPickupActor, bPickupConsumed);
 	DOREPLIFETIME(AJTSWorldPickupActor, bUsesRealPlanetSurface);
@@ -1168,7 +1166,13 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId);
 	if (Definition && IsValid(Definition->WorldPickupMesh))
 	{
-		UStaticMesh* const Mesh = Definition->WorldPickupMesh.Get();
+		UStaticMesh* Mesh = Definition->WorldPickupMesh.Get();
+		if (!Definition->WorldPickupMeshVariants.IsEmpty())
+		{
+			const uint32 Index = (SurfaceVisualVariant >= 0 ? uint32(SurfaceVisualVariant) : GetTypeHash(ItemInstance.InstanceId))
+				% Definition->WorldPickupMeshVariants.Num();
+			if (IsValid(Definition->WorldPickupMeshVariants[Index])) Mesh = Definition->WorldPickupMeshVariants[Index];
+		}
 		if (PickupMesh->GetStaticMesh() != Mesh)
 		{
 			PickupMesh->SetStaticMesh(Mesh);
@@ -1412,6 +1416,8 @@ FString AJTSWorldPickupActor::ItemTypeToString(EJTSWorldPickupItemType InItemTyp
 
 	case EJTSWorldPickupItemType::Ore:
 		return TEXT("ORE");
+	case EJTSWorldPickupItemType::InorganicCarbon:
+		return TEXT("INORGANIC CARBON");
 
 	case EJTSWorldPickupItemType::MoonAntCorpse:
 		return TEXT("MOON ANT CORPSE");
@@ -1455,6 +1461,7 @@ EJTSItemId AJTSWorldPickupActor::ItemTypeToItemId(EJTSWorldPickupItemType InItem
 	case EJTSWorldPickupItemType::Rock: return EJTSItemId::Rock;
 	case EJTSWorldPickupItemType::Ore: return EJTSItemId::Ore;
 	case EJTSWorldPickupItemType::Crystal: return EJTSItemId::Crystal;
+	case EJTSWorldPickupItemType::InorganicCarbon: return EJTSItemId::InorganicCarbon;
 	case EJTSWorldPickupItemType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
 	case EJTSWorldPickupItemType::Pickaxe: return EJTSItemId::Pickaxe;
 	case EJTSWorldPickupItemType::Backpack: return EJTSItemId::Backpack;
@@ -1478,6 +1485,7 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::ItemIdToItemType(EJTSItemId ItemId
 	case EJTSItemId::Rock: return EJTSWorldPickupItemType::Rock;
 	case EJTSItemId::Ore: return EJTSWorldPickupItemType::Ore;
 	case EJTSItemId::Crystal: return EJTSWorldPickupItemType::Crystal;
+	case EJTSItemId::InorganicCarbon: return EJTSWorldPickupItemType::InorganicCarbon;
 	case EJTSItemId::MoonAntCorpse: return EJTSWorldPickupItemType::MoonAntCorpse;
 	case EJTSItemId::Backpack: return EJTSWorldPickupItemType::Backpack;
 	case EJTSItemId::WaistLamp: return EJTSWorldPickupItemType::WaistLamp;

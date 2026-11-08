@@ -85,6 +85,14 @@ class SPACE_API AJTSPlanetAnchor : public AActor
 
 public:
 	AJTSPlanetAnchor();
+	/** Placement limit relative to the local radial up vector; each planet authors its own limit. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planet|Surface", meta=(ClampMin="0", ClampMax="90"))
+	float MaximumPlacementSlopeDegrees = 90;
+	UFUNCTION(BlueprintPure, Category="Planet|Surface")
+	bool IsSurfacePlacementAllowed(const FJTSPlanetSurfaceHit& Hit) const;
+	/** Find nearby supported ground at a slope-foot transition without accepting the steep face. */
+	UFUNCTION(BlueprintCallable, Category="Planet|Surface")
+	bool FindSurfacePlacementSupport(const FVector& WorldPoint, float SearchRadius, FJTSPlanetSurfaceHit& OutHit) const;
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

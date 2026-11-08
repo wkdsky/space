@@ -14,6 +14,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSMiningImpactComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWeaponProgression.h"
@@ -64,6 +65,8 @@ AJTSMoonResourceActor::AJTSMoonResourceActor()
 	SetRootComponent(SceneRoot);
 
 	ResourceMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ResourceMesh"));
+	ResourceMesh->ComponentTags.Add(TEXT("MiningSurface"));
+	MiningImpact = CreateDefaultSubobject<UJTSMiningImpactComponent>(TEXT("MiningImpact"));
 	ResourceMesh->SetupAttachment(SceneRoot);
 	ResourceMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ResourceMesh->SetCollisionObjectType(ECC_WorldDynamic);
@@ -139,7 +142,7 @@ int32 AJTSMoonResourceActor::GetCrystalYieldUnits() const
 
 FText AJTSMoonResourceActor::GetInteractionDisplayName() const
 {
-	return FText::FromString(TEXT("Rocks"));
+	return FText::FromString(TEXT("石头"));
 }
 
 FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
@@ -316,32 +319,21 @@ void AJTSMoonResourceActor::InitializeMiningNode(
 
 bool AJTSMoonResourceActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
-	return IsValid(InteractingPawn)
-		&& !IsPendingKillPending()
-		&& GetRemainingMiningWork() > KINDA_SMALL_NUMBER;
+	// Keep the resource available to the shared focus/name detector, even without a tool.
+	return IsValid(InteractingPawn) && InteractingPawn->GetWorld() == GetWorld()
+		&& !IsActorBeingDestroyed() && RemainingMiningWork > 0;
 }
+
+bool AJTSMoonResourceActor::CanExecuteInteraction_Implementation(APawn* InteractingPawn) const { return false; }
 
 FText AJTSMoonResourceActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
-	return CanInteract_Implementation(InteractingPawn)
-		? FText::FromString(TEXT("[E] Rocks")) : FText::GetEmpty();
+	return FText::GetEmpty();
 }
 
 void AJTSMoonResourceActor::Interact_Implementation(APawn* InteractingPawn)
 {
-	if (!HasAuthority() || !CanInteract_Implementation(InteractingPawn))
-	{
-		return;
-	}
-
-	EJTSItemId ItemId = EJTSItemId::None;
-	float Work = 0.0f;
-	if (!ResolveHeldMiningWork(InteractingPawn, ItemId, Work))
-	{
-		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Mining: Node=%s Success=false Reason=NeedHeldMiningItem"), *GetName());
-		return;
-	}
-	ApplyMiningWork(InteractingPawn, ItemId, Work);
+	// Solid nodes are only mined by confirmed weapon contacts. E is reserved for pickups.
 }
 
 bool AJTSMoonResourceActor::ResolveHeldMiningWork(APawn* Miner, EJTSItemId& OutItemId, float& OutWork) const
@@ -409,7 +401,7 @@ bool AJTSMoonResourceActor::SpawnAllResourceDrops(APawn* Miner)
 
 bool AJTSMoonResourceActor::ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemId, float WorkAmount)
 {
-	if (!HasAuthority() || !CanInteract_Implementation(Miner) || WorkAmount <= KINDA_SMALL_NUMBER)
+	if (!HasAuthority() || !IsValid(Miner) || IsActorBeingDestroyed() || RemainingMiningWork <= 0 || WorkAmount <= KINDA_SMALL_NUMBER)
 	{
 		return false;
 	}
@@ -432,6 +424,7 @@ bool AJTSMoonResourceActor::ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemI
 	if (RemainingMiningWork <= KINDA_SMALL_NUMBER)
 	{
 		RemainingYieldUnits = 0;
+		MiningImpact->ConfirmBreak();
 		UE_LOG(LogTemp, Log, TEXT("JumpToSpace Mining: Node=%s Item=%d Work=%.2f Destroyed=true Drops=%d"), *GetName(), static_cast<int32>(SourceItemId), AppliedWork, TotalYieldUnits);
 		Destroy();
 		return true;
@@ -443,7 +436,9 @@ bool AJTSMoonResourceActor::ApplyMiningWork(APawn* Miner, EJTSItemId SourceItemI
 
 bool AJTSMoonResourceActor::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const
 {
-	return CanInteract_Implementation(AttackingPawn);
+	EJTSItemId ItemId; float Work = 0;
+	return IsValid(AttackingPawn) && !IsActorBeingDestroyed() && RemainingMiningWork > 0
+		&& ResolveHeldMiningWork(AttackingPawn, ItemId, Work);
 }
 
 void AJTSMoonResourceActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType)

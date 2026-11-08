@@ -88,7 +88,6 @@ def environment():
         if old:bpy.data.objects.remove(old,do_unlink=True)
         g.refuge(name,True,1600+i);names.append(name)
     names += [f'SM_MS3_Tower_{i}_{stage}' for i in range(4) for stage in range(3)]
-    names += [f'SM_MS3_Rock_{i}' for i in range(3)]
     for name in names:
         obj=bpy.data.objects[name];planar_uv(obj);g.export(obj)
     rows=crusts()

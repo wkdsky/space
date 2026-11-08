@@ -32,9 +32,11 @@
 #include "Math/RotationMatrix.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSCombatFacingComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
@@ -91,6 +93,8 @@ AJTSCharacter::AJTSCharacter()
 	HealthComponent = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("HealthComponent"));
 	StaminaComponent = CreateDefaultSubobject<UJTSStaminaComponent>(TEXT("StaminaComponent"));
 	MeleeComponent = CreateDefaultSubobject<UJTSMeleeComponent>(TEXT("MeleeComponent"));
+	CreateDefaultSubobject<UJTSCombatFacingComponent>(TEXT("CombatFacing"));
+	MiningStrikeComponent = CreateDefaultSubobject<UJTSMiningStrikeComponent>(TEXT("MiningStrike"));
 	RangedWeaponComponent = CreateDefaultSubobject<UJTSRangedWeaponComponent>(TEXT("RangedWeaponComponent"));
 	StellarWeaponComponent = CreateDefaultSubobject<UJTSStellarWeaponComponent>(TEXT("StellarWeaponComponent"));
 	CreateDefaultSubobject<UJTSStellarAbilityComponent>(TEXT("StellarAbilities"));
@@ -194,9 +198,6 @@ void AJTSCharacter::RefreshClimbEquipmentPresentation()
 	const bool bStowForPose = bClimbing || (IsValid(Pose) && Pose->IsClimbPoseActive());
 	if (bClimbing)
 	{
-		bWantsViewFacing = false;
-		bFinishingViewTurn = false;
-		PendingViewFacingForward = FVector::ZeroVector;
 		TurnShuffleAlpha = 0.0f;
 		TurnVelocityDegreesPerSecond = 0.0f;
 		AimCameraAlpha = 0.0f;
@@ -269,12 +270,12 @@ void AJTSCharacter::ApplyProgressionMovementSpeed()
 	if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
 		const AJTSPlayerState* const ProgressionPlayerState = GetPlayerState<AJTSPlayerState>();
-		const float ProgressionMultiplier = ProgressionPlayerState != nullptr ? ProgressionPlayerState->GetRunSpeedMultiplier() : 1.0f;
+		const float SpeedBonus = ProgressionPlayerState != nullptr ? ProgressionPlayerState->GetRunSpeedBonus() : 0.0f;
 		const bool bMaySprint = bSprintInputActive && !IsBoarded()
 			&& IsValid(StaminaComponent) && StaminaComponent->CanSprint()
 			&& !(IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing());
 		const float BaseSpeed = bMaySprint ? SprintingSpeed : WalkingSpeed;
-		const float NewSpeed = BaseSpeed * FMath::Max(0.1f, ProgressionMultiplier);
+		const float NewSpeed = BaseSpeed + SpeedBonus;
 		if (!FMath::IsNearlyEqual(MovementComponent->MaxWalkSpeed, NewSpeed)) MovementComponent->MaxWalkSpeed = NewSpeed;
 	}
 }
@@ -462,32 +463,10 @@ float AJTSCharacter::GetCapsuleSupportDistanceAlongDirection(const FVector& Supp
 	return CapsuleRadius + CapsuleCylinderHalfHeight * FMath::Abs(FVector::DotProduct(CapsuleRotation.GetAxisZ(), SafeSupportDirection));
 }
 
-float AJTSCharacter::GetRawViewYawDelta() const
-{
-	if (Controller == nullptr)
-	{
-		return 0.0f;
-	}
-
-	const FVector ViewForward = FVector::VectorPlaneProject(Controller->GetControlRotation().Vector(), GetActorUpVector()).GetSafeNormal();
-	return ViewForward.IsNearlyZero() ? 0.0f : GetViewBodyYawDeltaDegrees(ViewForward);
-}
-
 float AJTSCharacter::GetPresentationAimYaw() const
 {
-	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()) return 0.0f;
-	// The chest follows the camera only while the camera is still behind it.
-	// Past the comfortable cone the chest returns forward. It does not keep
-	// twisting to meet a camera that has already swung around to the front.
-	const float Limit = FMath::Max(10.0f, UpperBodyYawLimitDegrees);
-	const float AbsYaw = FMath::Abs(GetRawViewYawDelta());
-	if (AbsYaw <= Limit)
-	{
-		return GetRawViewYawDelta();
-	}
-
-	const float Release = FMath::Clamp((AbsYaw - Limit) / Limit, 0.0f, 1.0f);
-	return GetRawViewYawDelta() * (1.0f - Release);
+	// Free look only orbits the camera. Combat turns the body before posing the arms.
+	return 0.0f;
 }
 
 float AJTSCharacter::GetAimPitch() const
@@ -943,6 +922,8 @@ void AJTSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AJTSCharacter::StopSprint);
 	EnhancedInputComponent->BindAction(ClimbAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleClimbStarted);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleInteractStarted);
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleInteractReleased);
+	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Canceled, this, &AJTSCharacter::HandleInteractReleased);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Started, this, &AJTSCharacter::HandleBoardStarted);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Triggered, this, &AJTSCharacter::HandleBoardTriggered);
 	EnhancedInputComponent->BindAction(BoardAction, ETriggerEvent::Completed, this, &AJTSCharacter::HandleBoardCompleted);
@@ -1177,6 +1158,7 @@ void AJTSCharacter::BindPlayerState()
 		ApplyAvatarColor();
 		ApplyProgressionMovementSpeed();
 		if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
+		ApplyProgressionSurvivability();
 		if (IsValid(InventoryComponent))
 		{
 			InventoryComponent->RefreshCapacityFromProgression();
@@ -1197,6 +1179,7 @@ void AJTSCharacter::BindPlayerState()
 	ApplyAvatarColor();
 	ApplyProgressionMovementSpeed();
 	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
+	ApplyProgressionSurvivability();
 	if (IsValid(InventoryComponent))
 	{
 		InventoryComponent->RefreshCapacityFromProgression();
@@ -1465,6 +1448,11 @@ void AJTSCharacter::HandleInteractStarted(const FInputActionValue& Value)
 	}
 }
 
+void AJTSCharacter::HandleInteractReleased(const FInputActionValue& Value)
+{
+	if (InteractionComponent) InteractionComponent->CancelInteraction();
+}
+
 void AJTSCharacter::HandleBoardStarted(const FInputActionValue& Value)
 {
 	static_cast<void>(Value);
@@ -1549,8 +1537,6 @@ void AJTSCharacter::HandleAttackStarted(const FInputActionValue& Value)
 		return;
 	}
 
-	// Ordinary standing third person keeps the body where the player put it.
-	// Aim and first person already face the camera, so a gun click does not add a snap.
 	AlignBodyToViewOnAttack();
 	if (StellarWeaponComponent && StellarWeaponComponent->HasActiveWeapon())
 	{
@@ -1621,33 +1607,8 @@ bool AJTSCharacter::IsMovingOnFoot() const
 
 bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 {
-	// First person and aim follow the camera. A grounded click keeps its captured
-	// heading until the short body turn finishes; ordinary third person follows walk
-	// direction. In the air it keeps following travel velocity, not camera yaw.
-	if (bWantsViewFacing || bFinishingViewTurn || WantsContinuousViewFacing())
-	{
-		if (WantsContinuousViewFacing() && IsLocallyControlled() && GetViewTangentForward(OutForward))
-		{
-			return true;
-		}
-		if ((bWantsViewFacing || bFinishingViewTurn) && !PendingViewFacingForward.IsNearlyZero())
-		{
-			OutForward = PendingViewFacingForward.GetSafeNormal();
-			return true;
-		}
-		if (WantsContinuousViewFacing() && Controller != nullptr)
-		{
-			const FVector Up = IsRealPlanetGameplayActive()
-				? (bPlanetFrameInitialized ? LastPlanetUp : GetDesiredPlanetUp())
-				: FVector::UpVector;
-			const FVector View = FVector::VectorPlaneProject(Controller->GetControlRotation().Vector(), Up);
-			if (!View.IsNearlyZero())
-			{
-				OutForward = View.GetSafeNormal();
-				return true;
-			}
-		}
-	}
+	if (const auto* Facing = FindComponentByClass<UJTSCombatFacingComponent>();
+		Facing && Facing->GetDesiredFacing(OutForward)) return true;
 
 	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
 	if (!IsValid(Movement))
@@ -1694,12 +1655,8 @@ bool AJTSCharacter::GetDesiredFeetForward(FVector& OutForward) const
 
 bool AJTSCharacter::WantsContinuousViewFacing() const
 {
-	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()) return false;
-	// Jumping does not change the facing mode. Aim and first person keep their
-	// existing view-facing behavior on the ground and in the air.
-	return bFirstPersonView
-		|| (IsValid(RangedWeaponComponent) && RangedWeaponComponent->IsAiming())
-		|| (StellarWeaponComponent && StellarWeaponComponent->IsAiming());
+	const auto* Facing = FindComponentByClass<UJTSCombatFacingComponent>();
+	return Facing && Facing->UsesViewFacing();
 }
 
 void AJTSCharacter::HandleClimbStarted(const FInputActionValue& Value)
@@ -1716,23 +1673,9 @@ void AJTSCharacter::HandleClimbStarted(const FInputActionValue& Value)
 
 void AJTSCharacter::AlignBodyToViewOnAttack()
 {
-	// Standing ordinary third person leaves facing to the player. The gun arm covers
-	// the view while it is close, and a large orbit stays an orbit.
-	// Aim and first person already keep the whole body on the camera, so a
-	// click there must not leave a follow that survives after the player lets go.
-	bWantsViewFacing = false;
-}
-
-void AJTSCharacter::ServerRequestViewFacing_Implementation(FVector_NetQuantizeNormal ViewForward)
-{
-	if (ViewForward.IsNearlyZero() || bFirstPersonView)
-	{
-		return;
-	}
-
-	bWantsViewFacing = true;
-	bFinishingViewTurn = true;
-	PendingViewFacingForward = ViewForward.GetSafeNormal();
+	if (auto* Facing = FindComponentByClass<UJTSCombatFacingComponent>())
+		Facing->PrepareAttack(!(RangedWeaponComponent && RangedWeaponComponent->HasActiveRangedWeapon())
+			&& !(StellarWeaponComponent && StellarWeaponComponent->HasActiveWeapon()));
 }
 
 void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSeconds, bool bUsePlanetFrame)
@@ -1742,14 +1685,21 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	const UCharacterMovementComponent* const Movement = GetCharacterMovement();
 	const bool bAirborne = bPressedJump || (IsValid(Movement) && Movement->IsFalling() && !IsSupportedByFloor());
 	const bool bLockedToView = WantsContinuousViewFacing();
-	// The click input is consumed here; the saved heading lasts until the turn settles.
-	const bool bClickAlign = bWantsViewFacing || bFinishingViewTurn;
-	bWantsViewFacing = false;
+	FVector CombatForward;
+	const auto* Facing = FindComponentByClass<UJTSCombatFacingComponent>();
+	const bool bCombatFacing = Facing && Facing->GetDesiredFacing(CombatForward);
+	// During combat the body and weapon share one heading, including strafing and backpedalling.
+	if (bCombatFacing)
+	{
+		AlignBodyForAction(ViewForward);
+		TurnShuffleAlpha = 0.0f;
+		return;
+	}
 	// Ordinary third person uses travel velocity in the air and never shuffles
 	// while airborne. Aim and first person continue to follow the camera.
 	const bool bHasMoveIntent = FMath::Square(ClimbForwardInput) + FMath::Square(ClimbRightInput) > 0.01f
 		|| (IsValid(Movement) && Movement->GetCurrentAcceleration().SizeSquared() > FMath::Square(1.0f));
-	const bool bPlayShuffle = !bAirborne && (IsMovingOnFoot() || bHasMoveIntent || bClickAlign
+	const bool bPlayShuffle = !bAirborne && (IsMovingOnFoot() || bHasMoveIntent
 		|| (bLockedToView && AbsYaw > 24.0f));
 	const bool bTurnBody = bPlayShuffle || bAirborne || bLockedToView;
 	const float TargetShuffle = bPlayShuffle && AbsYaw > 6.0f
@@ -1778,7 +1728,6 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	if (AbsYaw < 0.75f)
 	{
 		TurnVelocityDegreesPerSecond = 0.0f;
-		bFinishingViewTurn = false;
 		return;
 	}
 	if (FMath::IsNearlyZero(StepDegrees))
@@ -1789,7 +1738,6 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 	if (FMath::Abs(StepDegrees) >= AbsYaw - KINDA_SMALL_NUMBER)
 	{
 		TurnVelocityDegreesPerSecond = 0.0f;
-		bFinishingViewTurn = false;
 	}
 
 	const FVector Up = bUsePlanetFrame
@@ -1809,32 +1757,22 @@ void AJTSCharacter::StepBodyTowardView(const FVector& ViewForward, float DeltaSe
 
 void AJTSCharacter::UpdateFacingPresentation(float DeltaSeconds)
 {
+	if (!HasAuthority() && !IsLocallyControlled()) return; // Simulated proxies follow server movement rotation.
 	if (IsBoarded() || (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing()))
 	{
 		TurnShuffleAlpha = FMath::FInterpTo(TurnShuffleAlpha, 0.0f, DeltaSeconds, 8.0f);
 		TurnVelocityDegreesPerSecond = 0.0f;
-		bFinishingViewTurn = false;
 		return;
 	}
 
-	// A click captures one heading. Later camera motion cannot retarget that swing.
-	if (WantsContinuousViewFacing())
-	{
-		bWantsViewFacing = false;
-		bFinishingViewTurn = false;
-	}
 	// Keep CharacterMovement from turning toward camera-relative input during a
 	// jump. The presentation turn below follows planar velocity at a limited rate.
 	bUseControllerRotationYaw = false;
 	if (UCharacterMovementComponent* const Movement = GetCharacterMovement())
 	{
-		const bool bAirborne = bPressedJump || (Movement->IsFalling() && !IsSupportedByFloor());
-		const bool bHasMoveIntent = FMath::Square(ClimbForwardInput) + FMath::Square(ClimbRightInput) > 0.01f
-			|| Movement->GetCurrentAcceleration().SizeSquared() > FMath::Square(1.0f);
-		if (bHasMoveIntent) bFinishingViewTurn = false;
-		const bool bFeetCatching = IsMovingOnFoot() || bHasMoveIntent || bWantsViewFacing
-			|| bFinishingViewTurn || WantsContinuousViewFacing() || bAirborne;
-		Movement->bOrientRotationToMovement = !bFeetCatching;
+		// Body yaw has one writer. CharacterMovement must not apply a second turn afterward.
+		Movement->bOrientRotationToMovement = false;
+		Movement->bUseControllerDesiredRotation = false;
 	}
 
 	FVector FeetForward = FVector::ZeroVector;
@@ -2264,6 +2202,16 @@ void AJTSCharacter::UpdatePlanetGameplayFrame(float DeltaSeconds)
 	}
 }
 
+void AJTSCharacter::AlignBodyForAction(const FVector& Forward)
+{
+	const FVector Up = GetActorUpVector();
+	const FVector Heading = FVector::VectorPlaneProject(Forward, Up).GetSafeNormal();
+	if (Heading.IsNearlyZero()) return;
+	PlanetBodyForward = Heading;
+	TurnVelocityDegreesPerSecond = 0;
+	SetActorRotation(FRotationMatrix::MakeFromXZ(Heading, Up).ToQuat());
+}
+
 void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float DeltaSeconds)
 {
 	if (IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing())
@@ -2285,7 +2233,14 @@ void AJTSCharacter::UpdatePlanetBodyOrientation(const FVector& DesiredUp, float 
 		LastPlanetUp = TargetUp;
 	}
 
-	if (PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
+	FVector CombatForward;
+	const auto* CombatFacing = FindComponentByClass<UJTSCombatFacingComponent>();
+	if (CombatFacing && CombatFacing->GetDesiredFacing(CombatForward))
+	{
+		PlanetBodyForward = GetStablePlanetTangent(LastPlanetUp, CombatForward);
+		TurnShuffleAlpha = 0.0f;
+	}
+	else if (PlanetBodyFacingMode == EJTSPlanetBodyFacingMode::FaceCamera)
 	{
 		// Do not enable bUseControllerRotationYaw here: controller rotation also contains the
 		// gravity-relative pitch/roll used by the absolute camera. Only the local tangent yaw belongs
@@ -2434,11 +2389,8 @@ void AJTSCharacter::ApplyCameraView()
 	}
 	else if (UCharacterMovementComponent* const MovementComponent = GetCharacterMovement())
 	{
-		const bool bClimbing = IsValid(WallClimbComponent) && WallClimbComponent->IsClimbing();
-		// A click is one frame. It must not flip movement orientation onto the camera.
-		// Ice axes keep the body where the player put it, including while the feet are moving.
-		const bool bAirborne = bPressedJump || (MovementComponent->IsFalling() && !IsSupportedByFloor());
-		MovementComponent->bOrientRotationToMovement = !WantsContinuousViewFacing() && !bAirborne && !bClimbing;
+		MovementComponent->bOrientRotationToMovement = false;
+		MovementComponent->bUseControllerDesiredRotation = false;
 		bUseControllerRotationYaw = false;
 	}
 	FollowCamera->SetFieldOfView(bFirstPersonView ? FirstPersonFOV : ThirdPersonFOV);
@@ -2772,11 +2724,26 @@ void AJTSCharacter::HandlePlayerStateNetworkChanged()
 {
 	ApplyAvatarColor();
 	ApplyProgressionMovementSpeed();
+	ApplyProgressionSurvivability();
 	if (IsValid(StaminaComponent)) StaminaComponent->RefreshCapacity();
 	if (IsValid(InventoryComponent))
 	{
 		InventoryComponent->RefreshCapacityFromProgression();
 	}
+}
+
+void AJTSCharacter::ApplyProgressionSurvivability()
+{
+	if (!HasAuthority() || !IsValid(HealthComponent)) return;
+	const AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
+	const int32 HealthRank = State ? State->GetAbilityRank(EJTSPlayerAbility::Health) : 0;
+	const int32 DefenseRank = State ? State->GetAbilityRank(EJTSPlayerAbility::Defense) : 0;
+	const float PreviousMaxHealth = HealthComponent->GetMaxHealth();
+	const float NewMaxHealth = PlayerMaxHealth + FJTSPlayerProgressionRules::GetHealthBonus(HealthRank);
+	HealthComponent->SetMaxHealth(NewMaxHealth, false);
+	// Grant only the newly gained capacity. Other state notifications never refill missing health.
+	if (NewMaxHealth > PreviousMaxHealth) HealthComponent->Heal(NewMaxHealth - PreviousMaxHealth);
+	HealthComponent->SetAbilityDefense(FJTSPlayerProgressionRules::GetDefense(DefenseRank));
 }
 
 void AJTSCharacter::ApplyAvatarColor()

@@ -92,6 +92,7 @@ private:
 
 	UFUNCTION() void HandleShortBladeBuy();
 	UFUNCTION() void HandleShockPoleBuy();
+	UFUNCTION() void HandlePickaxeBuy();
 	UFUNCTION() void HandlePowerHammerBuy();
 	UFUNCTION() void HandleRailPistolBuy();
 	UFUNCTION() void HandleAssaultRifleBuy();
@@ -113,14 +114,16 @@ private:
 	UFUNCTION() void HandleCombineStellarWeaponClicked();
 	UFUNCTION() void HandleInventorySlotsDecrease();
 	UFUNCTION() void HandleInventorySlotsIncrease();
-	UFUNCTION() void HandleStackLimitDecrease();
-	UFUNCTION() void HandleStackLimitIncrease();
 	UFUNCTION() void HandleRunSpeedDecrease();
 	UFUNCTION() void HandleRunSpeedIncrease();
 	UFUNCTION() void HandleStaminaDecrease();
 	UFUNCTION() void HandleStaminaIncrease();
 	UFUNCTION() void HandleCriticalChanceDecrease();
 	UFUNCTION() void HandleCriticalChanceIncrease();
+	UFUNCTION() void HandleHealthDecrease();
+	UFUNCTION() void HandleHealthIncrease();
+	UFUNCTION() void HandleDefenseDecrease();
+	UFUNCTION() void HandleDefenseIncrease();
 	UFUNCTION() void HandleConfirmAbilitiesClicked();
 	UFUNCTION() void HandleResetAbilitiesClicked();
 	UFUNCTION() void HandleCloseClicked();

@@ -5,10 +5,12 @@
 #include "space/Items/JTSResourceType.h"
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSMoonResourceDistribution.h"
+#include "space/World/JTSPopulationRecovery.h"
 
 #include "JTSMoonResourceSpawner.generated.h"
 
 class USceneComponent;
+class UJTSPlanetDistributionData;
 class ULineBatchComponent;
 class FJTSMoonResourceCoverage;
 class UJTSMoonSurfaceGameplayData;
@@ -86,6 +88,8 @@ class SPACE_API AJTSMoonResourceSpawner : public AActor
 
 public:
 	AJTSMoonResourceSpawner();
+	UPROPERTY(EditAnywhere, Category="Moon|Resources|Distribution") TObjectPtr<UJTSPlanetDistributionData> DistributionData;
+	void ClearGeneratedResources();
 
 	/** Refreshes content availability and the editor-only surface ring without replacing instance abundance. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Moon|Resources")
@@ -110,6 +114,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Distribution")
 	FJTSMoonResourceDistribution ResourceRatios;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Moon|Resources|Distribution")
+	FJTSMoonResourcePatchSettings Patches;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Moon|Resources|Recovery")
+	FJTSPopulationRecoverySettings Recovery;
+	/** Zero generates synchronously; positive values spread initial Actor creation across timer batches. */
+	UPROPERTY(EditAnywhere, Category="Moon|Resources|Performance", meta=(ClampMin="0", ClampMax="64"))
+	int32 InitialSpawnBatchSize = 0;
+	UFUNCTION(BlueprintPure, Category="Moon|Resources") int32 GetLiveResourceCount() const;
+
 	/** Compare priority whenever ratios or density differ; lower numbers cover higher numbers. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Moon|Resources|Distribution")
 	int32 OverlapPriority = 0;
@@ -124,6 +137,12 @@ public:
 	/** Level-authored planet used to project the editor coverage circle onto real mesh collision. */
 	UPROPERTY(EditInstanceOnly, Category = "Moon|Resources|Coverage")
 	TObjectPtr<AJTSPlanetAnchor> CoveragePlanet;
+
+	/** Level-authored protected surface regions, shared with ecology attachment scatter. */
+	UPROPERTY(EditInstanceOnly, Category = "Moon|Resources|Coverage")
+	TArray<TObjectPtr<AActor>> ExclusionActors;
+	UPROPERTY(EditAnywhere, Category = "Moon|Resources|Coverage", meta=(ClampMin="0"))
+	float ExclusionRadius = 0;
 
 
 	UFUNCTION(BlueprintCallable, Category = "Moon|Resources")
@@ -153,6 +172,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
@@ -160,8 +180,9 @@ protected:
 #endif
 
 private:
-	int32 GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage);
-	void ClearGeneratedResources();
+	int32 GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage, int32 Budget, bool bReplenishing = false);
+	void ServicePopulation();
+	void FinishInitialPopulation();
 	AJTSMoonResourceActor* SpawnMiningNode(
 		EJTSResourceType ResourceType,
 		int32 TotalYieldUnits,
@@ -171,7 +192,7 @@ private:
 		const FVector& ResourceScale,
 		const FRotator& ResourceRotation,
 		const FVector& GroundLocation);
-	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation);
+	AJTSWorldPickupActor* SpawnInitialPickup(const FVector& GroundLocation, const FTransform* AuthoredPose = nullptr, int32 VisualVariant = INDEX_NONE);
 	bool ResolveGroundLocation(const FVector& CandidateLocation, FVector& OutGroundLocation) const;
 	bool IsCandidateExcludedByLandmarks(const FVector& CandidateLocation) const;
 	bool IsUsingRealPlanetSurface() const;
@@ -233,4 +254,11 @@ private:
 	TWeakObjectPtr<AJTSMoonSurfaceController> SurfaceGameplayController;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
 	TArray<TWeakObjectPtr<AJTSMoonAntNestActor>> MoonAntNestLandmarks;
+	TSharedPtr<FJTSMoonResourceCoverage> RuntimeCoverage;
+	FRandomStream RuntimeRandom;
+	FJTSPopulationRecovery RecoveryState;
+	FTimerHandle PopulationTimer;
+	int32 PatchSeed = 0;
+	bool bInitializingPopulation = false;
+	TArray<TWeakObjectPtr<AActor>> FrozenOccupants;
 };

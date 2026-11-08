@@ -61,6 +61,11 @@ public:
 	/** Camera selects a target; the posed hand and physical muzzle still determine the shot. */
 	UFUNCTION(BlueprintPure, Category = "Ranged|Aim")
 	bool GetCameraAimPoint(FVector& OutPoint) const;
+	/** Validated owner view intent, also shared by directed hand tools. */
+	bool GetCameraRay(FVector& Origin, FVector& Direction) const;
+	/** Current view travels with a reliable attack intent; the server validates the camera offset. */
+	bool AcceptViewIntent(const FVector& EyeOffset, const FVector& Direction);
+	void GetViewIntent(FVector& EyeOffset, FVector& Direction) const;
 
 	UFUNCTION(BlueprintPure, Category = "Ranged")
 	bool HasActiveRangedWeapon() const;
@@ -90,13 +95,13 @@ public:
 	void StopFire();
 
 	UFUNCTION(Server, Reliable)
-	void ServerStartFire();
+	void ServerStartFire(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction);
 
 	UFUNCTION(Server, Reliable)
 	void ServerStopFire();
 
 	UFUNCTION(Server, Reliable)
-	void ServerStartAim();
+	void ServerStartAim(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction);
 
 	UFUNCTION(Server, Reliable)
 	void ServerStopAim();
@@ -153,7 +158,6 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
-	bool GetCameraRay(FVector& Origin, FVector& Direction) const;
 	UFUNCTION(Server, Unreliable)
 	void ServerUpdateViewRay(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction);
 	UPROPERTY(Replicated) FVector_NetQuantize10 AimCameraEyeOffset;
@@ -196,6 +200,7 @@ private:
 	FGuid TrackedInstanceId;
 	TMap<FGuid, FJTSStoredWeaponState> ParkedStates;
 	int32 PredictedAmmo = 0;
+	UPROPERTY(Replicated)
 	bool bFireHeld = false;
 	bool bNextLeftServerShot = false;
 	bool bNextLeftFeedbackShot = false;

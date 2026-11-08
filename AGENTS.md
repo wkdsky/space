@@ -8,7 +8,7 @@
 - C++负责通用规则和系统能力。
 - Blueprint负责具体项目配置、资产选择和关卡实例设置。
 - 不要将关卡配置、资源配置、具体Actor引用硬编码到C++。
-- 优先使用unreal mcp和blender mcp等工具，如果用不了要告诉用户，等用户决定是否绕过，此外不要默认使用computer use
+- 优先使用unreal mcp和blender mcp等工具，如果用不了你自己尝试打开对应的软件，我已设置开软件自动启动mcp服务了，此外不要默认使用computer use
 - 优先使用 Composition、Component、Subsystem、Interface。
 - 游戏怪物如果是以聚居地为主的随机分布，那么已有通用模板，请复用该模板
 - 游戏资源如果是以范围为划定的随机分布，那也有一个模板了，可以复用该模板
@@ -179,27 +179,6 @@ Surface逻辑基于真实Mesh Surface。
 # World Structure
 
 SpaceWorld是长期存在的通用宇宙玩法空间。
-
-不要设计：
-
-Earth地图 → Moon地图 → Mars地图
-
-
-正确：
-
-Earth
-
-↓
-
-SpaceWorld
-
-↓
-
-Current Planet
-
-↓
-
-Planet Gameplay
 
 
 # Project Structure

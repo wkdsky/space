@@ -1,5 +1,8 @@
 #include "space/World/JTSPlanetEcologyHabitat.h"
 #include "Components/StaticMeshComponent.h"
+#include "space/Components/JTSNestBlockadeComponent.h"
+#include "space/Components/JTSMiningImpactComponent.h"
+#include "Math/RotationMatrix.h"
 #include "Components/BoxComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
@@ -13,11 +16,19 @@
 
 AJTSPlanetEcologyHabitat::AJTSPlanetEcologyHabitat()
 {
+	Blockade = CreateDefaultSubobject<UJTSNestBlockadeComponent>(TEXT("Blockade"));
 	SurfaceScatter = CreateDefaultSubobject<UJTSPlanetSurfaceScatterComponent>(TEXT("SurfaceScatter"));
 	RefugeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RefugeMesh"));
+	RefugeMesh->ComponentTags.Add(TEXT("MiningSurface"));
+	MiningImpact = CreateDefaultSubobject<UJTSMiningImpactComponent>(TEXT("MiningImpact"));
 	RefugeMesh->SetupAttachment(GetRootComponent());
 	RefugeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RefugeMesh->SetCanEverAffectNavigation(false);
+	EntranceBlocker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EntranceBlocker"));
+	EntranceBlocker->SetupAttachment(RefugeMesh);
+	EntranceBlocker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	EntranceBlocker->SetCanEverAffectNavigation(false);
+	EntranceBlocker->SetVisibility(false);
 	bMaintainPopulation = false;
 	bReplicates = true;
 	EntranceHealth = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("EntranceHealth"));
@@ -39,37 +50,134 @@ void AJTSPlanetEcologyHabitat::BeginPlay()
 	RefugeMesh->SetCollisionObjectType(ECC_WorldDynamic);
 	RefugeMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	RefugeMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	RefugeMesh->SetCollisionResponseToChannel(ECC_Pawn, bCanBlockEntrance ? ECR_Block : ECR_Ignore);
 	RefugeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (bDestructibleEntrance && RefugeMesh->GetStaticMesh())
+	if ((bDestructibleEntrance || bCanBlockEntrance) && RefugeMesh->GetStaticMesh())
 	{
-		FBox Bounds = RefugeMesh->CalcBounds(FTransform::Identity).GetBox();
+		FBox Bounds = RefugeMesh->GetStaticMesh()->GetBounds().GetBox();
 		if (RefugeCutVolume) Bounds += RefugeCutVolume->GetBounds().GetBox();
 		EntranceTarget->SetRelativeLocation(Bounds.GetCenter());
 		EntranceTarget->SetBoxExtent(Bounds.GetExtent().ComponentMax(FVector(10)));
 		EntranceTarget->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	}
 	if (HasAuthority()) EntranceHealth->OnDeath.AddDynamic(this, &ThisClass::OnEntranceDestroyed);
+	if (HasAuthority()) Blockade->RestorePersistentState();
 	ApplyCollapsed();
 }
 
 void AJTSPlanetEcologyHabitat::ApplyCollapsed()
 {
-	RefugeMesh->SetVisibility(!bCollapsed && !RefugeCutVolume);
-	if (bCollapsed) EntranceTarget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RefugeMesh->SetVisibility(!bCollapsed && !bEntranceManaged && !bEntrancePlacementRejected);
+	EntranceBlocker->SetVisibility(bCollapsed && bCanBlockEntrance && bRubbleVisible);
+	// The private presentation mesh also supplies the authored small entrance's pawn collision.
+	RefugeMesh->SetCollisionResponseToChannel(ECC_Pawn, bCanBlockEntrance ? ECR_Block : ECR_Ignore);
+	RefugeMesh->SetCollisionEnabled(bCanBlockEntrance && !bCollapsed && !bEntrancePlacementRejected
+		? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	EntranceBlocker->SetCollisionObjectType(ECC_WorldDynamic);
+	EntranceBlocker->SetCollisionResponseToAllChannels(ECR_Ignore);
+	EntranceBlocker->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	EntranceBlocker->SetCollisionEnabled(bCollapsed && bCanBlockEntrance && bRubbleVisible
+		? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	if (bCollapsed || bEntrancePlacementRejected) EntranceTarget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (bCollapsed && HasAuthority() && IsValid(EntranceAttachment)) EntranceAttachment->Destroy();
+}
+
+bool AJTSPlanetEcologyHabitat::CanInteract_Implementation(APawn* Pawn) const
+{
+	const auto* Health = IsValid(Pawn) ? Pawn->FindComponentByClass<UJTSHealthComponent>() : nullptr;
+	return IsValid(Pawn) && Pawn->GetWorld() == GetWorld() && (!Health || !Health->IsDead())
+		&& bCanBlockEntrance && !bCollapsed && !bEntrancePlacementRejected && RefugeMesh->GetStaticMesh();
+}
+
+FVector AJTSPlanetEcologyHabitat::GetInteractionAnchorWorldLocation() const
+{
+	return RefugeMesh->GetComponentTransform().TransformPosition(EntranceInteractionOffset);
+}
+
+FText AJTSPlanetEcologyHabitat::GetInteractionPrompt_Implementation(APawn* Pawn) const
+{
+	return !CanInteract_Implementation(Pawn) ? FText::GetEmpty() : FText::FromString(Blockade->HasRequiredTool(Pawn)
+		? TEXT("[E] 破坏洞口") : TEXT("[E] 破坏洞口（需要镐子）"));
+}
+
+float AJTSPlanetEcologyHabitat::GetInteractionHoldDuration_Implementation(APawn* Pawn) const { return FMath::Max(0.5f, BlockHoldDuration); }
+
+bool AJTSPlanetEcologyHabitat::CanExecuteInteraction_Implementation(APawn* Pawn) const { return Blockade->CanWork(Pawn); }
+float AJTSPlanetEcologyHabitat::GetSharedInteractionProgress_Implementation() const { return Blockade->GetProgress(); }
+void AJTSPlanetEcologyHabitat::SetInteractionHeld_Implementation(APawn* Pawn, bool bHeld) { Blockade->SetWorking(Pawn, bHeld); }
+void AJTSPlanetEcologyHabitat::Interact_Implementation(APawn* Pawn) { /* Completion is committed by the server work component. */ }
+AActor* AJTSPlanetEcologyHabitat::GetEntranceAttachment() const { return EntranceAttachment; }
+void AJTSPlanetEcologyHabitat::ReleaseEntranceAttachment()
+{
+	if (IsValid(EntranceAttachment)) EntranceAttachment->Destroy();
+	EntranceAttachment = nullptr; bEntranceManaged = false; bEntrancePlacementRejected = false;
+	ApplyCollapsed();
+}
+void AJTSPlanetEcologyHabitat::CommitEntranceBlockade(bool bAnimate)
+{
+	if (!HasAuthority() || !bCanBlockEntrance || bCollapsed) return;
+	bCollapsed = true; bRubbleVisible = !bAnimate;
+	SetInitialPopulation(0); ApplyCollapsed(); ForceNetUpdate();
+}
+void AJTSPlanetEcologyHabitat::ShowBlockedRubble()
+{
+	if (!HasAuthority()) return;
+	bRubbleVisible = true; ApplyCollapsed(); ForceNetUpdate();
+}
+void AJTSPlanetEcologyHabitat::Deactivate()
+{
+	Blockade->ResetTransientState();
+	Super::Deactivate();
+}
+AActor* AJTSPlanetEcologyHabitat::SpawnSettlementEnemy(const FTransform& Pose, const FVector& Ground)
+{
+	if (auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(FindRefugeActor(Ground)); Mouth && !Mouth->Blockade->CanReleaseResident()) return nullptr;
+	return Super::SpawnSettlementEnemy(Pose, Ground);
+}
+
+AJTSPlanetSurfaceCreature* AJTSPlanetEcologyHabitat::SpawnEntranceDefender(int32 Index)
+{
+	if (!HasAuthority() || bCollapsed || !EcologyPlanet.IsValid()) return nullptr;
+	const FTransform MouthPose = RefugeMesh->GetComponentTransform();
+	const FVector Heading = MouthPose.TransformVectorNoScale(EntranceExitOffset - EntranceEmergenceOffset).GetSafeNormal();
+	// Small alternate lanes share one opening. The cohort is released over time, not stacked at its centre.
+	const FVector Lane(0, ((Index % 3) - 1) * 9.0f, 0);
+	FJTSPlanetSurfaceFrame Frame;
+	FJTSPlanetSurfaceFrame Exit;
+	if (!EcologyPlanet->GetSurfaceFrameAt(MouthPose.TransformPosition(EntranceEmergenceOffset + Lane), Heading, Frame)
+		|| !EcologyPlanet->GetSurfaceFrameAt(MouthPose.TransformPosition(EntranceExitOffset + Lane), Heading, Exit)) return nullptr;
+	if (auto* Creature = Cast<AJTSPlanetSurfaceCreature>(SpawnSettlementEnemy(Frame.Transform, Frame.Location)))
+	{
+		// ConfigureSpawnedEnemy assigns the refuge and can move ordinary residents. Set the actual mouth pose afterwards.
+		Creature->BeginEntranceEmergence(Frame.Transform, Exit.Location);
+		return Creature;
+	}
+	return nullptr;
 }
 
 AJTSPlanetSurfaceAttachment* AJTSPlanetEcologyHabitat::CreateEntranceAttachment(AJTSPlanetAnchor* Planet)
 {
-	if (!HasAuthority() || bCollapsed || !Planet || !RefugeCutVolume || !RefugeMesh->GetStaticMesh() || IsValid(EntranceAttachment)) return nullptr;
+	if (!HasAuthority() || bCollapsed || !Planet || !RefugeMesh->GetStaticMesh() || IsValid(EntranceAttachment)) return nullptr;
+	bEntrancePlacementRejected = false;
+	FJTSPlanetSurfaceHit Hit;
+	if (!Planet->ProjectPointToSurface(RefugeMesh->GetComponentLocation(), Hit) || !Planet->IsSurfacePlacementAllowed(Hit))
+	{
+		bEntrancePlacementRejected = true;
+		ApplyCollapsed();
+		ForceNetUpdate();
+		return nullptr;
+	}
 	FActorSpawnParameters Params; Params.Owner = Planet; Params.OverrideLevel = GetLevel();
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	const FTransform Pose = RefugeMesh->GetComponentTransform();
 	EntranceAttachment = GetWorld()->SpawnActor<AJTSPlanetSurfaceAttachment>(AJTSPlanetSurfaceAttachment::StaticClass(), Pose, Params);
 	if (!EntranceAttachment) return nullptr;
-	EntranceAttachment->Initialize(RefugeMesh->GetStaticMesh(), Planet, Pose, true, true, 0, false, RefugeCutVolume);
+	bEntranceManaged = true;
+	// A sealed, above-ground tunnel keeps its volume; only cut-backed legacy patches are warped per vertex.
+	EntranceAttachment->Initialize(RefugeMesh->GetStaticMesh(), Planet, Pose, RefugeCutVolume != nullptr, true, 0, false, RefugeCutVolume);
 	EntranceAttachment->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
 	RefugeMesh->SetVisibility(false);
+	ForceNetUpdate();
 	return EntranceAttachment;
 }
 
@@ -77,6 +185,7 @@ void AJTSPlanetEcologyHabitat::OnEntranceDestroyed(AController* InstigatorContro
 {
 	if (!HasAuthority() || !bDestructibleEntrance) return;
 	bCollapsed = true;
+	SetInitialPopulation(0);
 	ApplyCollapsed();
 	ForceNetUpdate();
 }
@@ -93,7 +202,10 @@ FVector AJTSPlanetEcologyHabitat::GetMeleeTargetAnchorWorldLocation_Implementati
 void AJTSPlanetEcologyHabitat::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSPlanetEcologyHabitat, bEntranceManaged);
+	DOREPLIFETIME(AJTSPlanetEcologyHabitat, bEntrancePlacementRejected);
 	DOREPLIFETIME(AJTSPlanetEcologyHabitat, bCollapsed);
+	DOREPLIFETIME(AJTSPlanetEcologyHabitat, bRubbleVisible);
 }
 
 float AJTSPlanetEcologyHabitat::NormalizedDistance(FVector Point, const AJTSPlanetAnchor* Planet) const
@@ -125,7 +237,11 @@ bool AJTSPlanetEcologyHabitat::ContainsPoint(FVector Point, const AJTSPlanetAnch
 
 bool AJTSPlanetEcologyHabitat::AcceptSpawnPoint_Implementation(FVector Point, AJTSPlanetAnchor* Planet) const
 {
+	if (bCollapsed || (bStationaryFeeding && !FoodPoints.ContainsByPredicate(
+		[](const auto& Food) { return IsValid(Food) && !Food->IsActorBeingDestroyed(); }))) return false;
 	if (!ContainsPoint(Point, Planet)) return false;
+	FJTSPlanetSurfaceHit Hit;
+	if (!Planet->ProjectPointToSurface(Point, Hit) || !Planet->IsSurfacePlacementAllowed(Hit)) return false;
 	if (bRequireRefuge && !FindRefugeActor(Point)) return false;
 	const float Distance = NormalizedDistance(Point, Planet);
 	// The shared template also validates its marker: this exact point is not a fringe sample.
@@ -135,7 +251,9 @@ bool AJTSPlanetEcologyHabitat::AcceptSpawnPoint_Implementation(FVector Point, AJ
 
 void AJTSPlanetEcologyHabitat::ActivateEcology(AJTSPlanetAnchor* Planet, AActor* Controller)
 {
-	if (!HasAuthority() || !Planet || bCollapsed || FMath::FRand() >= ExpeditionChance) return;
+	if (!HasAuthority() || !Planet) return;
+	Blockade->RestorePersistentState();
+	if (bCollapsed || FMath::FRand() >= ExpeditionChance) return;
 	EcologyPlanet = Planet;
 	Activate(Planet, Controller);
 }
@@ -143,7 +261,15 @@ void AJTSPlanetEcologyHabitat::ActivateEcology(AJTSPlanetAnchor* Planet, AActor*
 FVector AJTSPlanetEcologyHabitat::FindRefuge(FVector Point) const
 {
 	const AActor* Refuge = FindRefugeActor(Point);
-	return Refuge ? Refuge->GetActorLocation() : GetActorLocation();
+	return Refuge ? GetRefugeSurfaceLocation(Refuge) : GetSettlementLocation();
+}
+
+FVector AJTSPlanetEcologyHabitat::GetSettlementLocation() const { return RefugeMesh->GetStaticMesh() ? RefugeMesh->GetComponentLocation() : GetActorLocation(); }
+
+FVector AJTSPlanetEcologyHabitat::GetRefugeSurfaceLocation(const AActor* Refuge)
+{
+	if (const auto* Habitat = Cast<AJTSPlanetEcologyHabitat>(Refuge)) return Habitat->GetSettlementLocation();
+	return IsValid(Refuge) ? Refuge->GetActorLocation() : FVector::ZeroVector;
 }
 
 AActor* AJTSPlanetEcologyHabitat::FindRefugeActor(FVector Point) const
@@ -158,8 +284,13 @@ AActor* AJTSPlanetEcologyHabitat::FindRefugeActor(FVector Point) const
 				|| (Mouth->RefugeCutVolume && (!IsValid(Mouth->EntranceAttachment) || !Mouth->EntranceAttachment->IsRefugeUsable()))) return;
 		if (const auto* Attachment = Cast<AJTSPlanetSurfaceAttachment>(Refuge); Attachment && !Attachment->IsRefugeUsable()) return;
 		if (const auto* Health = Refuge->FindComponentByClass<UJTSHealthComponent>(); Health && Health->IsDead()) return;
-		if (EcologyPlanet.IsValid() && !ContainsPoint(Refuge->GetActorLocation(), EcologyPlanet.Get())) return;
-		const double Distance = FVector::DistSquared(Point, Refuge->GetActorLocation());
+		if (EcologyPlanet.IsValid())
+		{
+			FJTSPlanetSurfaceHit Hit;
+			if (!EcologyPlanet->ProjectPointToSurface(GetRefugeSurfaceLocation(Refuge), Hit) || !EcologyPlanet->IsSurfacePlacementAllowed(Hit)) return;
+		}
+		if (!bStationaryFeeding && EcologyPlanet.IsValid() && !ContainsPoint(GetRefugeSurfaceLocation(Refuge), EcologyPlanet.Get())) return;
+		const double Distance = FVector::DistSquared(Point, GetRefugeSurfaceLocation(Refuge));
 		if (Distance < Best) { Best = Distance; Result = Refuge; }
 	};
 	TSet<const AJTSPlanetEcologyHabitat*> Visited;
@@ -178,5 +309,10 @@ AActor* AJTSPlanetEcologyHabitat::FindRefugeActor(FVector Point) const
 
 void AJTSPlanetEcologyHabitat::ConfigureSpawnedEnemy_Implementation(AActor* Enemy)
 {
-	if (auto* Creature = Cast<AJTSPlanetSurfaceCreature>(Enemy)) Creature->SetHabitat(this, FindRefuge(Creature->GetActorLocation()));
+	if (auto* Creature = Cast<AJTSPlanetSurfaceCreature>(Enemy))
+	{
+		Creature->SetHabitat(this, FindRefuge(Creature->GetActorLocation()));
+		if (Creature->IsActorBeingDestroyed()) return;
+		if (bStationaryFeeding && !FoodPoints.IsEmpty()) Creature->SetFeedingTarget(FoodPoints[0]);
+	}
 }

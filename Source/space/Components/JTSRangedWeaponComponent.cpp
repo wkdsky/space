@@ -16,9 +16,11 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSCombatFacingComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSCriticalDamageType.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSWeaponVisualComponent.h"
 #include "space/Items/JTSItemDefinition.h"
@@ -116,7 +118,7 @@ void UJTSRangedWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	const APawn* Pawn = Cast<APawn>(GetOwner());
-	if (!Pawn || !Pawn->IsLocallyControlled() || !HasActiveRangedWeapon()) return;
+	if (!Pawn || !Pawn->IsLocallyControlled()) return;
 	FVector Origin, Direction;
 	if (!GetCameraRay(Origin, Direction)) return;
 	if (GetWorld()->GetTimeSeconds() - LastViewRaySendTime < 0.049) return;
@@ -128,14 +130,28 @@ void UJTSRangedWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 void UJTSRangedWeaponComponent::ServerUpdateViewRay_Implementation(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction)
 {
+	AcceptViewIntent(EyeOffset, Direction);
+}
+
+void UJTSRangedWeaponComponent::GetViewIntent(FVector& EyeOffset, FVector& Direction) const
+{
+	FVector Origin;
+	const auto* Pawn = Cast<APawn>(GetOwner());
+	GetCameraRay(Origin, Direction);
+	EyeOffset = Pawn ? Origin - Pawn->GetPawnViewLocation() : FVector::ZeroVector;
+}
+
+bool UJTSRangedWeaponComponent::AcceptViewIntent(const FVector& EyeOffset, const FVector& Direction)
+{
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	const AJTSCharacter* Character = Cast<AJTSCharacter>(Pawn);
-	if (!Pawn || !HasActiveRangedWeapon() || EyeOffset.ContainsNaN() || Direction.ContainsNaN()) return;
+	if (!Pawn || !Pawn->HasAuthority() || EyeOffset.ContainsNaN() || Direction.ContainsNaN()) return false;
 	const float Bound = Character ? Character->GetMaximumGameplayCameraOffset() : 600.0f;
-	if (EyeOffset.SizeSquared() > FMath::Square(Bound) || !FMath::IsNearlyEqual(Direction.SizeSquared(), 1.0, 0.05)) return;
+	if (EyeOffset.SizeSquared() > FMath::Square(Bound) || !FMath::IsNearlyEqual(Direction.SizeSquared(), 1.0, 0.05)) return false;
 	AimCameraEyeOffset = EyeOffset;
 	AimViewDirection = FVector(Direction).GetSafeNormal();
 	bHasViewRay = true;
+	return true;
 }
 
 const UJTSItemDefinition* UJTSRangedWeaponComponent::GetActiveRangedDefinition() const
@@ -188,16 +204,21 @@ float UJTSRangedWeaponComponent::GetActiveAimFOV() const
 void UJTSRangedWeaponComponent::StartAim()
 {
 	if (!CanUseWeapon()) return;
+	FVector Offset, Direction;
+	GetViewIntent(Offset, Direction);
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		if (HasActiveRangedWeapon() || IsEmptyHanded())
 		{
 			bIsAiming = true;
-			ServerStartAim();
+			if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
+			ServerStartAim(Offset, Direction);
 		}
 		return;
 	}
 	bIsAiming = HasActiveRangedWeapon() || IsEmptyHanded();
+	if (bIsAiming)
+		if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
 }
 
 void UJTSRangedWeaponComponent::StopAim()
@@ -220,10 +241,13 @@ void UJTSRangedWeaponComponent::StartFire()
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
 	if (!IsValid(Definition)) return;
 	bFireHeld = true;
+	FVector Offset, Direction;
+	GetViewIntent(Offset, Direction);
+	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
 	{
 		TryLocalShot(Definition);
-		ServerStartFire();
+		ServerStartFire(Offset, Direction);
 	}
 	else
 	{
@@ -240,9 +264,9 @@ void UJTSRangedWeaponComponent::StopFire()
 	if (GetOwner() != nullptr && !GetOwner()->HasAuthority()) ServerStopFire();
 }
 
-void UJTSRangedWeaponComponent::ServerStartFire_Implementation()
+void UJTSRangedWeaponComponent::ServerStartFire_Implementation(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction)
 {
-	StartFire();
+	if (AcceptViewIntent(EyeOffset, Direction)) StartFire();
 }
 
 void UJTSRangedWeaponComponent::ServerStopFire_Implementation()
@@ -251,9 +275,9 @@ void UJTSRangedWeaponComponent::ServerStopFire_Implementation()
 	ClearFireTimer();
 }
 
-void UJTSRangedWeaponComponent::ServerStartAim_Implementation()
+void UJTSRangedWeaponComponent::ServerStartAim_Implementation(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction)
 {
-	StartAim();
+	if (AcceptViewIntent(EyeOffset, Direction)) StartAim();
 }
 
 void UJTSRangedWeaponComponent::ServerStopAim_Implementation()
@@ -551,7 +575,7 @@ bool UJTSRangedWeaponComponent::FireOnce()
 	const UJTSInventoryComponent* Inventory = GetOwner()->FindComponentByClass<UJTSInventoryComponent>();
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
 	APawn* Pawn = Cast<APawn>(GetOwner());
-	const UJTSWeaponVisualComponent* Visual = IsValid(Pawn)
+	UJTSWeaponVisualComponent* Visual = IsValid(Pawn)
 		? Pawn->FindComponentByClass<UJTSWeaponVisualComponent>() : nullptr;
 	if (!IsValid(Inventory) || !IsValid(Definition) || !IsValid(Pawn) || !IsValid(Visual)) return false;
 
@@ -568,6 +592,8 @@ bool UJTSRangedWeaponComponent::FireOnce()
 		return false;
 	}
 	if (!CanShootNow(Stats)) return false;
+	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
+	Visual->RefreshForAttack();
 
 	const bool bLeftShot = Definition->HeldPresentation.bDualWield && bNextLeftServerShot;
 	FTransform MuzzleTransform;
@@ -676,6 +702,8 @@ bool UJTSRangedWeaponComponent::PlayLocalShotFeedback(const UJTSItemDefinition* 
 	if (!IsValid(Definition) || GetWorld() == nullptr) return false;
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Now + KINDA_SMALL_NUMBER < NextLocalFeedbackTimeSeconds) return false;
+	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
+	if (auto* Visual = GetOwner()->FindComponentByClass<UJTSWeaponVisualComponent>()) Visual->RefreshForAttack();
 	const FJTSResolvedWeaponStats HeldStats = ResolveHeldStats(GetOwner());
 	NextLocalFeedbackTimeSeconds = Now + FMath::Max(0.05f, ResolveActiveStats().FireInterval > 0.0f ? ResolveActiveStats().FireInterval : HeldStats.ScaleInterval(Definition->RangedFireInterval));
 	LastLocalShotSeconds = Now;
@@ -784,6 +812,7 @@ void UJTSRangedWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UJTSRangedWeaponComponent, bIsAiming);
+	DOREPLIFETIME(UJTSRangedWeaponComponent, bFireHeld);
 	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, AimCameraEyeOffset, COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, AimViewDirection, COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(UJTSRangedWeaponComponent, bHasViewRay, COND_SkipOwner);

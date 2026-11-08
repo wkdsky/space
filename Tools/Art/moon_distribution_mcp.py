@@ -5,6 +5,7 @@ The authoring tool preserves existing instance settings after the first migratio
 """
 import json
 import math
+import sys
 from pathlib import Path
 import unreal
 import toolset_registry
@@ -13,8 +14,6 @@ from toolset_registry.registration import Registration
 DATA = '/Game/Space/Data/Planets/Moon/PDA_MoonSurfaceGameplay'
 SPAWNER = '/Game/Space/Blueprints/Planets/Moon/BP_MoonResourceSpawner'
 ACTOR = '/Game/Space/Blueprints/Modes/Moon/BP_MoonResourceActor'
-SOURCE = '/Game/ThirdParty/Moon/Resources/Rock(Kenney)'
-MESH_ROOT = '/Game/Space/Meshes/Resources/Moon'
 FIELDS = ['small_rock', 'medium_rock', 'large_rock', 'medium_metal_rock',
           'large_metal_rock', 'medium_crystal_rock', 'large_crystal_rock']
 EA = unreal.EditorAssetLibrary
@@ -61,44 +60,12 @@ class MoonDistributionTools(unreal.ToolsetDefinition):
         data.set_editor_property('moon_resource_spawn_settings', settings,
                                  notify_mode=unreal.PropertyAccessChangeNotifyMode.ALWAYS)
         save(data)
-        sm = unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
-        crystal_meshes = []
-        for name in ['rock_crystals', 'rock_crystalsLargeA', 'rock_crystalsLargeB']:
-            path = MESH_ROOT + '/SM_Moon_' + name + '_Crystal'
-            mesh = unreal.load_asset(path) if EA.does_asset_exist(path) else EA.duplicate_asset(SOURCE + '/' + name, path)
-            assert mesh
-            # Source slots retain the crystal material. Metal variants remain separate existing assets.
-            sm.remove_collisions(mesh)
-            assert sm.set_convex_decomposition_collisions(mesh, 1, 16, 100000)
-            save(mesh)
-            crystal_meshes.append(mesh)
+        art_path = str(Path(unreal.Paths.project_dir()).resolve() / 'Tools/Art')
+        if art_path not in sys.path:
+            sys.path.insert(0, art_path)
+        import moon_surface_refinement
+        moon_surface_refinement.configure_rock_art()
         blueprint = unreal.load_asset(ACTOR)
-        defaults = unreal.get_default_object(blueprint.generated_class())
-        defaults.set_editor_property('medium_crystal_rock_meshes', crystal_meshes[:1])
-        defaults.set_editor_property('large_crystal_rock_meshes', crystal_meshes[1:])
-        unreal.BlueprintEditorLibrary.compile_blueprint(blueprint)
-        save(blueprint)
-        # Both paths exist in this project; configure each resource Blueprint used by existing levels/tests.
-        parent = unreal.load_asset('/Game/Space/Blueprints/Modes/BP_MoonResourceActor')
-        parent_defaults = unreal.get_default_object(parent.generated_class())
-        parent_defaults.set_editor_property('medium_crystal_rock_meshes', crystal_meshes[:1])
-        parent_defaults.set_editor_property('large_crystal_rock_meshes', crystal_meshes[1:])
-        unreal.BlueprintEditorLibrary.compile_blueprint(parent)
-        save(parent)
-        crystal_path = '/Game/Space/Data/Items/DA_Item_Crystal'
-        crystal = unreal.load_asset(crystal_path) if EA.does_asset_exist(crystal_path) else EA.duplicate_asset('/Game/Space/Data/Items/DA_Item_Ore', crystal_path)
-        crystal.set_editor_property('item_id', unreal.JTSItemId.CRYSTAL)
-        crystal.set_editor_property('display_name', 'Crystal')
-        crystal.set_editor_property('description', 'Crystal recovered from crystal-bearing Moon rocks.')
-        pickup_path = MESH_ROOT + '/SM_Moon_CrystalPickup'
-        pickup = unreal.load_asset(pickup_path) if EA.does_asset_exist(pickup_path) else EA.duplicate_asset('/Engine/BasicShapes/Cone', pickup_path)
-        assert pickup
-        pickup.set_material(0, unreal.load_asset(SOURCE + '/crystal'))
-        save(pickup)
-        crystal.set_editor_property('world_pickup_mesh', pickup)
-        crystal.set_editor_property('accent_color', unreal.LinearColor(0.45, 0.25, 1, 1))
-        crystal.set_editor_property('world_pickup_width', 24.0)
-        save(crystal)
         spawner_bp = unreal.load_asset(SPAWNER)
         spawner_defaults = unreal.get_default_object(spawner_bp.generated_class())
         spawner_defaults.set_editor_property('resource_gameplay_data', data)

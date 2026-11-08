@@ -87,6 +87,30 @@ bool FJTSSettlementPopulationTest::RunTest(const FString&)
 	Settlement->Deactivate();
 	Advance(2.0f);
 	TestEqual(TEXT("Deactivation clears enemies and cancels replenishment"), Settlement->GetSpawnedEnemyCount(), 0);
+	auto* Recovery = FindFProperty<FStructProperty>(Settlement->GetClass(), TEXT("Recovery"))
+		->ContainerPtrToValuePtr<FJTSPopulationRecoverySettings>(Settlement);
+	Recovery->bEnabled = true;
+	Recovery->Delay = 1;
+	Recovery->Duration = 8;
+	Recovery->CheckInterval = 0.25f;
+	Recovery->BatchSize = 3;
+	Recovery->MinimumPlayerDistance = 0;
+	FindFProperty<FIntProperty>(Settlement->GetClass(), TEXT("EnemyCount"))->SetPropertyValue_InContainer(Settlement, 20);
+	Settlement->Activate(Planet, nullptr);
+	for (TActorIterator<AJTSMoonCubeEnemy> It(Scope.World); It; ++It)
+		if (!It->GetHealthComponent()->IsDead()) It->GetHealthComponent()->ApplyDamage(2000, nullptr, nullptr);
+	Advance(0.7f);
+	TestEqual(TEXT("Recovery policy allows a settlement to stay completely depleted during cooldown"), Settlement->GetSpawnedEnemyCount(), 0);
+	Advance(3);
+	TestTrue(TEXT("Settlement recovery gradually returns part of the population"), Settlement->GetSpawnedEnemyCount() > 0 && Settlement->GetSpawnedEnemyCount() < 20);
+	Advance(10);
+	TestEqual(TEXT("Settlement recovery reaches its original capacity within the period"), Settlement->GetSpawnedEnemyCount(), 20);
+	Settlement->SetInitialPopulation(0);
+	for (TActorIterator<AJTSMoonCubeEnemy> It(Scope.World); It; ++It)
+		if (!It->GetHealthComponent()->IsDead()) It->GetHealthComponent()->ApplyDamage(2000, nullptr, nullptr);
+	Advance(12);
+	TestEqual(TEXT("A disabled entrance cannot replenish its previous residents"), Settlement->GetSpawnedEnemyCount(), 0);
+	Settlement->Deactivate();
 	Settlement->SetRole(ROLE_SimulatedProxy);
 	Settlement->Activate(Planet, nullptr);
 	Advance(2.0f);

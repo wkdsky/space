@@ -1,7 +1,11 @@
 #include "space/World/JTSMoonResourceSpawner.h"
 
 #include "Engine/World.h"
+#include "space/World/JTSPlanetDistributionData.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 #include "Components/SceneComponent.h"
 #include "Components/LineBatchComponent.h"
 #include "Components/SplineComponent.h"
@@ -142,7 +146,7 @@ void AJTSMoonResourceSpawner::UpdateCoveragePreview()
 	const FVector Up = IsValid(Planet) ? Planet->GetRadialUpVector(Origin) : GetActorUpVector();
 	FVector TangentX, TangentY;
 	Up.FindBestAxisVectors(TangentX, TangentY);
-	constexpr int32 SegmentCount = 192;
+	constexpr int32 SegmentCount = 64;
 	TArray<FVector, TInlineAllocator<SegmentCount>> Points;
 	for (int32 Index = 0; Index < SegmentCount; ++Index)
 	{
@@ -259,13 +263,95 @@ int32 AJTSMoonResourceSpawner::GenerateResourceGroup(const TArray<AJTSMoonResour
 		bRandomTieSeed |= Spawner->bUseRandomSeed;
 	}
 	if (bRandomTieSeed) TieSeed ^= static_cast<uint32>(FPlatformTime::Cycles64());
-	FJTSMoonResourceCoverage Coverage(Planet, Ordered, static_cast<int32>(TieSeed));
+	const auto Coverage = MakeShared<FJTSMoonResourceCoverage>(Planet, Ordered, static_cast<int32>(TieSeed));
 	int32 Total = 0;
-	for (AJTSMoonResourceSpawner* Spawner : Ordered) Total += Spawner->GenerateResourcesInCoverage(Coverage);
+	for (int32 Index = 0; Index < Ordered.Num(); ++Index)
+	{
+		AJTSMoonResourceSpawner* Spawner = Ordered[Index];
+		Spawner->RuntimeCoverage = Coverage;
+		Spawner->PatchSeed = static_cast<int32>(TieSeed);
+		// Distinct region positions avoid repeating the same candidate sequence in every cap.
+		Spawner->RuntimeRandom.Initialize(static_cast<int32>(HashCombineFast(TieSeed, GetTypeHash(Spawner->GetActorLocation()))));
+		Spawner->ResourceCount = FMath::RoundToInt(FMath::Clamp(
+			static_cast<double>(Coverage->GetOwnedAreaSquareMeters(Spawner)) * Spawner->ResourceDensity / 100.0, 0.0, 100000.0));
+		if (Spawner->DistributionData && !Spawner->DistributionData->IsCapturing())
+		{
+			const auto* Frozen = Spawner->DistributionData->FindResources(Spawner->GetFName());
+			Spawner->ResourceCount = Frozen ? Frozen->Resources.Num() : 0;
+			Spawner->FrozenOccupants.SetNum(Spawner->ResourceCount);
+		}
+		if (Spawner->InitialSpawnBatchSize > 0 && Spawner->ResourceCount > 0)
+		{
+			Spawner->bInitializingPopulation = true;
+			FTimerManagerTimerParameters TimerParameters;
+			TimerParameters.bLoop = true;
+			TimerParameters.bMaxOncePerFrame = true;
+			TimerParameters.FirstDelay = 0.02f + 0.015f * Index;
+			Spawner->GetWorldTimerManager().SetTimer(Spawner->PopulationTimer, Spawner, &ThisClass::ServicePopulation,
+				0.25f, TimerParameters);
+		}
+		else
+		{
+			Total += Spawner->GenerateResourcesInCoverage(*Coverage, Spawner->ResourceCount);
+			Spawner->FinishInitialPopulation();
+		}
+	}
 	return Total;
 }
 
-int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage)
+int32 AJTSMoonResourceSpawner::GetLiveResourceCount() const
+{
+	int32 Count = 0;
+	for (const auto& Resource : GeneratedResources) if (IsValid(Resource) && !Resource->IsActorBeingDestroyed()) ++Count;
+	for (const auto& Pickup : GeneratedPickups) if (Pickup.IsValid() && !Pickup->IsActorBeingDestroyed()) ++Count;
+	return Count;
+}
+
+void AJTSMoonResourceSpawner::FinishInitialPopulation()
+{
+	bInitializingPopulation = false;
+	ResourceCount = GetLiveResourceCount(); // Real placement capacity, rather than an unreachable density target.
+	UE_LOG(LogTemp, Log, TEXT("Moon resource population %s initialized: %d nodes; recovery=%d."),
+		*GetName(), ResourceCount, Recovery.bEnabled);
+	RecoveryState.Reset(ResourceCount, static_cast<int32>(RuntimeRandom.GetUnsignedInt()));
+	GetWorldTimerManager().ClearTimer(PopulationTimer);
+	if (Recovery.bEnabled && ResourceCount > 0)
+	{
+		FTimerManagerTimerParameters TimerParameters;
+		TimerParameters.bLoop = true;
+		TimerParameters.bMaxOncePerFrame = true;
+		TimerParameters.FirstDelay = FMath::Max(0.25f, Recovery.CheckInterval) * RuntimeRandom.FRandRange(0.8f, 1.2f);
+		GetWorldTimerManager().SetTimer(PopulationTimer, this, &ThisClass::ServicePopulation,
+			FMath::Max(0.25f, Recovery.CheckInterval), TimerParameters);
+	}
+}
+
+void AJTSMoonResourceSpawner::ServicePopulation()
+{
+	if (!HasAuthority() || !OwningPlanet.IsValid() || !RuntimeCoverage.IsValid()) return;
+	GeneratedResources.RemoveAll([](const auto& Resource) { return !IsValid(Resource) || Resource->IsActorBeingDestroyed(); });
+	GeneratedPickups.RemoveAll([](const auto& Pickup) { return !Pickup.IsValid() || Pickup->IsActorBeingDestroyed(); });
+	RuntimeCoverage->RemoveInvalidPlacements();
+	const int32 Live = GetLiveResourceCount();
+	if (bInitializingPopulation)
+	{
+		const int32 Budget = FMath::Min(FMath::Max(1, InitialSpawnBatchSize), ResourceCount - Live);
+		const int32 Added = GenerateResourcesInCoverage(*RuntimeCoverage, Budget);
+		if (GetLiveResourceCount() >= ResourceCount || Added == 0) FinishInitialPopulation();
+		return;
+	}
+	if (!Recovery.bEnabled) { GetWorldTimerManager().ClearTimer(PopulationTimer); return; }
+	const int32 Budget = RecoveryState.Update(Live, ResourceCount, GetWorld()->GetTimeSeconds(), Recovery);
+	if (Budget > 0) RecoveryState.Commit(GenerateResourcesInCoverage(*RuntimeCoverage, Budget, true));
+}
+
+void AJTSMoonResourceSpawner::EndPlay(const EEndPlayReason::Type Reason)
+{
+	ClearGeneratedResources();
+	Super::EndPlay(Reason);
+}
+
+int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCoverage& Coverage, int32 Budget, bool bReplenishing)
 {
 	UWorld* const World = GetWorld();
 	if (!HasAuthority() || World == nullptr)
@@ -280,22 +366,45 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 		return 0;
 	}
 
-	const int32 SafeResourceCount = FMath::RoundToInt(FMath::Clamp(
-		static_cast<double>(Coverage.GetOwnedAreaSquareMeters(this)) * ResourceDensity / 100.0, 0.0, 100000.0));
-	ResourceCount = SafeResourceCount;
+	const int32 SafeResourceCount = FMath::Clamp(Budget, 0, 100000);
 	if (SafeResourceCount <= 0)
 	{
 		return 0;
 	}
 
+	if (DistributionData && !DistributionData->IsCapturing())
+	{
+		const auto* Layout = DistributionData->FindResources(GetFName());
+		if (!Layout) return 0;
+		FrozenOccupants.SetNum(Layout->Resources.Num());
+		int32 Added = 0;
+		for (int32 Index = 0; Index < Layout->Resources.Num() && Added < SafeResourceCount; ++Index)
+		{
+			if (FrozenOccupants[Index].IsValid() && !FrozenOccupants[Index]->IsActorBeingDestroyed()) continue;
+			const auto& Node = Layout->Resources[Index];
+			if (bReplenishing && Recovery.MinimumPlayerDistance > 0)
+			{
+				bool bNearPlayer = false;
+				for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+					if (It->Get()->GetPawn() && Planet->ApproximateSurfaceArcDistance(It->Get()->GetPawn()->GetActorLocation(), Node.Pose.GetLocation()) < Recovery.MinimumPlayerDistance)
+						bNearPlayer = true;
+				if (bNearPlayer) continue;
+			}
+			AActor* Spawned = Node.bPickup ? static_cast<AActor*>(SpawnInitialPickup(Node.Pose.GetLocation(), &Node.Pose, Node.Variant))
+				: SpawnMiningNode(Node.ResourceType, Node.Yield, Node.Size, Node.MetalYield, Node.Variant,
+					Node.Pose.GetScale3D(), Node.Pose.Rotator(), Node.Pose.GetLocation());
+			if (Spawned)
+			{
+				FrozenOccupants[Index] = Spawned; ++Added;
+				Coverage.RecordPlacement(Node.Pose.GetLocation(), MinimumResourceSpacing, Spawned);
+			}
+		}
+		return Added;
+	}
 	const float TotalResourceWeight = ResourceRatios.GetTotalPercentage();
 	if (TotalResourceWeight <= 0) return 0;
 
-	uint64 SeedEntropy = FPlatformTime::Cycles64() ^ static_cast<uint64>(GetUniqueID());
-	const int32 Seed = bUseRandomSeed
-		? static_cast<int32>(SeedEntropy ^ (SeedEntropy >> 32))
-		: RandomSeed;
-	FRandomStream RandomStream(Seed);
+	FRandomStream& RandomStream = RuntimeRandom;
 
 	const float SafeRadius = FMath::Max(0.0f, Radius);
 	const float SafeMinimumSpacing = FMath::Max(0.0f, MinimumResourceSpacing);
@@ -310,7 +419,12 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 	int32 RejectedLandmarkCount = 0;
 	int32 RejectedSpacingCount = 0;
 	int32 CandidateAttemptCount = 0;
-	const int32 MaxCandidateAttempts = FMath::Max(64, GetTargetResourceCount() * 32);
+	const int32 MaxCandidateAttempts = FMath::Max(64, SafeResourceCount * 32);
+	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
+	if (bReplenishing && Recovery.MinimumPlayerDistance > 0)
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (const APlayerController* PC = It->Get(); IsValid(PC) && IsValid(PC->GetPawn()))
+				PlayerLocations.Add(PC->GetPawn()->GetActorLocation());
 
 	const auto FindRealSurfaceCandidate = [Planet, Origin, SafeRadius, &RandomStream](FVector& OutCandidateLocation)
 	{
@@ -331,13 +445,7 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			CapCenterDirection * CosineOfAngle
 			+ (TangentX * FMath::Cos(Azimuth) + TangentY * FMath::Sin(Azimuth)) * SineOfAngle).GetSafeNormal();
 
-		FJTSPlanetSurfaceHit SurfaceHit;
-		if (!Planet->ProjectPointToSurface(Planet->GetPlanetCenter() + CandidateDirection * Planet->GetApproximateRadius(), SurfaceHit))
-		{
-			return false;
-		}
-
-		OutCandidateLocation = SurfaceHit.ImpactPoint;
+		OutCandidateLocation = Planet->GetPlanetCenter() + CandidateDirection * Planet->GetApproximateRadius();
 		return true;
 	};
 
@@ -350,6 +458,12 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			continue;
 		}
 		if (Coverage.ResolveOwner(CandidateLocation) != this) continue;
+		const FVector PatchPoint = Planet->GetActorTransform().InverseTransformVectorNoScale(
+			CandidateLocation - Planet->GetPlanetCenter());
+		if (RandomStream.FRand() > Patches.Acceptance(PatchPoint, PatchSeed)) continue;
+		if (!Coverage.CanPlace(CandidateLocation, SafeMinimumSpacing)) { ++RejectedSpacingCount; continue; }
+		if (PlayerLocations.ContainsByPredicate([&](const FVector& Point)
+			{ return Planet->ApproximateSurfaceArcDistance(Point, CandidateLocation) < Recovery.MinimumPlayerDistance; })) continue;
 		if (IsCandidateExcludedByLandmarks(CandidateLocation))
 		{
 			++RejectedLandmarkCount;
@@ -369,13 +483,21 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			continue;
 		}
 
-		const float ResourceRoll = RandomStream.FRand() * TotalResourceWeight;
+		float LocalWeights[static_cast<int32>(EJTSMoonResourceKind::Count)];
+		float LocalTotal = 0;
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(LocalWeights); ++Index)
+		{
+			const auto CandidateKind = static_cast<EJTSMoonResourceKind>(Index);
+			LocalWeights[Index] = ResourceRatios.GetPercentage(CandidateKind) * Patches.KindWeight(CandidateKind, PatchPoint, PatchSeed);
+			LocalTotal += LocalWeights[Index];
+		}
+		const float ResourceRoll = RandomStream.FRand() * LocalTotal;
 		float Threshold = 0;
 		EJTSMoonResourceKind Kind = EJTSMoonResourceKind::SmallRock;
 		for (int32 Index = 0; Index < static_cast<int32>(EJTSMoonResourceKind::Count); ++Index)
 		{
 			const auto CandidateKind = static_cast<EJTSMoonResourceKind>(Index);
-			const float Percentage = ResourceRatios.GetPercentage(CandidateKind);
+			const float Percentage = LocalWeights[Index];
 			if (Percentage <= 0) continue;
 			Kind = CandidateKind;
 			Threshold += Percentage;
@@ -414,7 +536,9 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			const FVector SurfaceForward = FQuat(SurfaceFrame.Up, YawRadians).RotateVector(SurfaceFrame.Forward);
 			ResourceRotation = FRotationMatrix::MakeFromXZ(SurfaceForward, SurfaceFrame.Up).Rotator();
 		}
+		const int32 Variant = RandomStream.RandRange(0, 255);
 		bool bSpawnedResourceAtCandidate = false;
+		AActor* SpawnedActor = nullptr;
 		if (bMiningNode)
 		{
 			if (AJTSMoonResourceActor* const Resource = SpawnMiningNode(
@@ -422,20 +546,23 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 				TotalYieldUnits,
 				NodeSize,
 				MetalYieldUnits,
-				RandomStream.RandRange(0, 255),
+				Variant,
 				ResourceScale,
 				ResourceRotation,
 				GroundLocation))
 			{
 				++SpawnedCount;
+				SpawnedActor = Resource;
 				bSpawnedResourceAtCandidate = true;
 			}
 		}
 		else
 		{
 			// Small rocks are intentionally loose world pickups: no mining tool is required.
-			if (SpawnInitialPickup(GroundLocation) != nullptr)
+			const FTransform PickupPose(ResourceRotation, GroundLocation, ResourceScale);
+			if (AJTSWorldPickupActor* Pickup = SpawnInitialPickup(GroundLocation, &PickupPose, Variant))
 			{
+				SpawnedActor = Pickup;
 				++SpawnedCount;
 				bSpawnedResourceAtCandidate = true;
 			}
@@ -443,24 +570,35 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 
 		if (bSpawnedResourceAtCandidate)
 		{
-			Coverage.RecordPlacement(GroundLocation, SafeMinimumSpacing);
+			Coverage.RecordPlacement(GroundLocation, SafeMinimumSpacing, SpawnedActor);
+			if (DistributionData)
+			{
+				FJTSFrozenResource Node; Node.Pose = FTransform(ResourceRotation, GroundLocation, ResourceScale);
+				Node.bPickup = !bMiningNode; Node.ResourceType = ResourceType; Node.Size = NodeSize;
+				Node.Yield = TotalYieldUnits; Node.MetalYield = MetalYieldUnits; Node.Variant = Variant;
+				DistributionData->RecordResource(GetFName(), Node);
+			}
 		}
 	}
 
 	UE_LOG(
 		LogTemp,
-		Log,
+		VeryVerbose,
 		TEXT("JumpToSpace Moon Spawn: Total=%d RejectedLandmarks=%d RejectedSpacing=%d Seed=%d"),
 		SpawnedCount,
 		RejectedLandmarkCount,
 		RejectedSpacingCount,
-		Seed);
+		PatchSeed);
 
 	return SpawnedCount;
 }
 
 void AJTSMoonResourceSpawner::ClearGeneratedResources()
 {
+	if (GetWorld()) GetWorldTimerManager().ClearTimer(PopulationTimer);
+	bInitializingPopulation = false;
+	RuntimeCoverage.Reset();
+	RecoveryState.Reset(0);
 	for (TObjectPtr<AJTSMoonResourceActor>& Resource : GeneratedResources)
 	{
 		if (IsValid(Resource))
@@ -469,6 +607,7 @@ void AJTSMoonResourceSpawner::ClearGeneratedResources()
 		}
 	}
 	GeneratedResources.Reset();
+	FrozenOccupants.Reset();
 
 	for (TWeakObjectPtr<AJTSWorldPickupActor>& Pickup : GeneratedPickups)
 	{
@@ -532,13 +671,13 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	return Resource;
 }
 
-AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector& GroundLocation)
+AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector& GroundLocation, const FTransform* AuthoredPose, int32 VisualVariant)
 {
 	AJTSWorldPickupActor* const Pickup = AJTSWorldPickupActor::SpawnInitialGroundedPickup(
 		GetWorld(),
 		EJTSWorldPickupItemType::Rock,
 		GroundLocation,
-		this);
+		this, AuthoredPose, VisualVariant);
 	if (IsValid(Pickup))
 	{
 		if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
@@ -564,7 +703,7 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateLoca
 			|| Planet->ProjectPointToSurface(CandidateLocation, SurfaceHit))
 		{
 			OutGroundLocation = SurfaceHit.ImpactPoint;
-			return true;
+			return Planet->IsSurfacePlacementAllowed(SurfaceHit);
 		}
 		return false;
 	}
@@ -575,6 +714,8 @@ bool AJTSMoonResourceSpawner::IsCandidateExcludedByLandmarks(const FVector& Cand
 {
 	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
 	{
+		for (const AActor* Region : ExclusionActors)
+			if (IsValid(Region) && Planet->ApproximateSurfaceArcDistance(Region->GetActorLocation(), CandidateLocation) < ExclusionRadius) return true;
 		auto IsWithinSurfaceClearance = [Planet, &CandidateLocation](const AActor* Landmark, const float Padding)
 		{
 			if (!IsValid(Landmark))

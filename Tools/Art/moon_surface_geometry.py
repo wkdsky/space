@@ -257,14 +257,6 @@ def tower(name,seed,stage):
             b.add([(x-.18,y-.12,-.03),(x+.25,y-.15,-.03),(x+.08,y+.22,-.03),(x,y,.23)],[(0,1,3),(1,2,3),(2,0,3),(0,2,1)],1)
     return b.object(name,('Tower','TowerLight','Void'))
 
-def rock(name,kind):
-    b=Builder()
-    outlines=[([(-.8,-.4),(.65,-.5),(.9,.1),(.25,.6),(-.75,.3)],.22),
-              ([(-.6,-.4),(.6,-.35),(.4,.45),(-.7,.3)],.5),
-              ([(-.6,-.4),(.8,-.2),(-.15,.65)],.65)]
-    outline,h=outlines[kind];b.prism(outline,h,-.12)
-    return b.object(name,('Moon',))
-
 def export(obj):
     bpy.ops.object.select_all(action='DESELECT')
     obj.hide_set(False);obj.select_set(True);bpy.context.view_layer.objects.active=obj
@@ -333,7 +325,6 @@ def build():
         assets.append(export(obj))
         if point is not None:obj.location=shift
         return obj.name
-    for i in range(3):asset(rock('SM_MS3_Rock_'+str(i),i))
     for i in range(4):
         for stage in range(3):asset(tower(f'SM_MS3_Tower_{i}_{stage}',900+i,stage))
     for i in range(4):
@@ -367,12 +358,6 @@ def build():
                 row=dict(id='Feed_'+str(len(foods)),mesh=name,region=region['id'],**frame)
                 foods.append(row);regionfoods.append(row['id'])
         region['food_ids']=regionfoods;region['crack_ids']=regioncracks
-        # Three quiet rock shapes, scattered singly with wide gaps.
-        for j in range(rng.randint(1,3)):
-            a=rng.uniform(0,6.28);distance=rng.uniform(4,region['core_radius_m']*.7)
-            d=(up*150+(forward*math.cos(a)+right*math.sin(a))*distance).normalized()
-            p,f,r,u=surface.frame(d,rng.uniform(0,6.28))
-            placements.append(dict(id=f'Rock_{len(placements)}',mesh='SM_MS3_Rock_'+str(rng.randrange(3)),point=list(p),forward=list(f),up=list(u),scale=rng.uniform(.5,1.25)))
         if up.y<-.32 and len(towers)<5:
             p,f,r,u=surface.frame(up,rng.uniform(0,6.28))
             towers.append(dict(id=f'Tower_{len(towers):02d}',variant=len(towers)%4,region=region['id'],point=list(p),forward=list(f),up=list(u)))

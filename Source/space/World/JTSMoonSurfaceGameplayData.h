@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
+#include "space/World/JTSPlanetDistributionData.h"
 
 #include "JTSMoonSurfaceGameplayData.generated.h"
 
@@ -18,7 +19,7 @@ class AJTSMoonAntNestActor;
  * references; Moon Controller and Level Blueprints provide those instances at runtime.
  */
 UCLASS(BlueprintType)
-class SPACE_API UJTSMoonSurfaceGameplayData : public UPrimaryDataAsset, public IJTSMoonSurfaceGameplaySettings
+class SPACE_API UJTSMoonSurfaceGameplayData : public UJTSPlanetDistributionData, public IJTSMoonSurfaceGameplaySettings
 {
 	GENERATED_BODY()
 

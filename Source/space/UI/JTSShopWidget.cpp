@@ -134,14 +134,15 @@ namespace
 	{
 		switch (ResourceType)
 		{
-		case EJTSResourceType::Rock: return TEXT("ROCK");
-		case EJTSResourceType::Ore: return TEXT("ORE");
-		case EJTSResourceType::Crystal: return TEXT("CRYSTAL");
-		case EJTSResourceType::Fuel: return TEXT("FUEL");
-		case EJTSResourceType::Water: return TEXT("WATER");
-		case EJTSResourceType::Food: return TEXT("FOOD");
-		case EJTSResourceType::Organic: return TEXT("ORGANIC");
-		default: return TEXT("MATERIAL");
+		case EJTSResourceType::Rock: return TEXT("石头");
+		case EJTSResourceType::Ore: return TEXT("矿物");
+		case EJTSResourceType::Crystal: return TEXT("矿物");
+		case EJTSResourceType::InorganicCarbon: return TEXT("无机碳");
+		case EJTSResourceType::Fuel: return TEXT("燃料");
+		case EJTSResourceType::Water: return TEXT("水");
+		case EJTSResourceType::Food: return TEXT("食物");
+		case EJTSResourceType::Organic: return TEXT("有机质");
+		default: return TEXT("材料");
 		}
 	}
 
@@ -149,17 +150,17 @@ namespace
 	{
 		if (!IsValid(Definition))
 		{
-			return TEXT("SUPPLY");
+			return TEXT("补给用品");
 		}
 		if (Definition->IsRangedWeapon())
 		{
-			return TEXT("RANGED");
+			return TEXT("远程武器");
 		}
 		if (Definition->PrimaryCategory == EJTSItemCategory::Mining)
 		{
-			return TEXT("MINING");
+			return TEXT("采矿工具");
 		}
-		return TEXT("FIELD GEAR");
+		return TEXT("野外装备");
 	}
 
 	FLinearColor ItemCardColor(const UJTSItemDefinition* Definition)
@@ -294,11 +295,11 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 		SetStatus(TEXT("已放入飞船物品栏"), false);
 		break;
 	case EJTSShopPurchaseResult::InsufficientResources:
-		StatusText->SetText(FText::FromString(FString::Printf(TEXT("MISSING %s"), *FormatMissingCosts(LastRequestedItem))));
+		StatusText->SetText(FText::FromString(FString::Printf(TEXT("缺少：%s"), *FormatMissingCosts(LastRequestedItem))));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::InvalidItem:
-		StatusText->SetText(FText::FromString(TEXT("ITEM UNAVAILABLE")));
+		StatusText->SetText(FText::FromString(TEXT("物品暂不可购买")));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	case EJTSShopPurchaseResult::InventoryFull:
@@ -306,7 +307,7 @@ void UJTSShopWidget::NotifyPurchaseResult(EJTSShopPurchaseResult Result)
 		break;
 	case EJTSShopPurchaseResult::DeliveryFailed:
 	default:
-		StatusText->SetText(FText::FromString(TEXT("DELIVERY FAILED / MATERIALS RESTORED")));
+		StatusText->SetText(FText::FromString(TEXT("发放失败，材料已退还")));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
 		break;
 	}
@@ -359,16 +360,16 @@ void UJTSShopWidget::NotifyDebugStellarItemsResult(bool bAvailable, int32 AddedC
 	bDebugStellarGrantPending = false;
 	if (!bAvailable)
 	{
-		SetStatus(TEXT("DEBUG 发放不可用，请靠近当前飞船并检查星际物品表"), true);
+		SetStatus(TEXT("测试 发放不可用，请靠近当前飞船并检查星际物品表"), true);
 	}
 	else if (AddedCount < RequestedCount)
 	{
-		SetStatus(FString::Printf(TEXT("DEBUG：已加入 %d / %d 件；商店物品栏空间不足，%d 件未加入"),
+		SetStatus(FString::Printf(TEXT("测试：已加入 %d / %d 件；商店物品栏空间不足，%d 件未加入"),
 			AddedCount, RequestedCount, RequestedCount - AddedCount), true);
 	}
 	else
 	{
-		SetStatus(FString::Printf(TEXT("DEBUG：已加入 %d 件核心与配件各一个（不含升级固件）"), AddedCount), false);
+		SetStatus(FString::Printf(TEXT("测试：已加入 %d 件核心与配件各一个（不含升级固件）"), AddedCount), false);
 	}
 	RefreshShipLocker();
 	RefreshStellarReel();
@@ -478,8 +479,8 @@ void UJTSShopWidget::NotifyAbilityAllocationResult(bool bSucceeded)
 	if (AbilityStatusText != nullptr)
 	{
 		AbilityStatusText->SetText(FText::FromString(bSucceeded
-			? TEXT("UPGRADES APPLIED")
-			: TEXT("COULD NOT APPLY UPGRADES")));
+			? TEXT("能力已提升")
+			: TEXT("加点失败，请重试")));
 		AbilityStatusText->SetColorAndOpacity(FSlateColor(bSucceeded
 			? FLinearColor(0.38f, 1.0f, 0.70f, 1.0f)
 			: FLinearColor(1.0f, 0.46f, 0.34f, 1.0f)));
@@ -743,12 +744,11 @@ void UJTSShopWidget::BuildWidgetTree()
 	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyFrameCanvas"));
 	ShopFrame->SetContent(FrameCanvas);
 
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端  /  SHIP TERMINAL"), 32.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(880.0f, 46.0f));
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipTabHint"), TEXT("TAB  SWITCH"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f), ETextJustify::Right), FAnchors(1.0f, 0.0f), FVector2D(-164.0f, 93.0f), FVector2D(150.0f, 20.0f), FVector2D(1.0f, 0.0f));
+	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端"), 32.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(360.0f, 46.0f));
 
 	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
 	CloseButton->SetBackgroundColor(FLinearColor(0.16f, 0.22f, 0.30f, 1.0f));
-	CloseButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("关闭 [E]"), 13.0f));
+	CloseButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("关闭"), 13.0f));
 	CloseButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCloseClicked);
 	AddCanvas(FrameCanvas, CloseButton, FAnchors(1.0f, 0.0f), FVector2D(-30.0f, 25.0f), FVector2D(120.0f, 36.0f), FVector2D(1.0f, 0.0f));
 
@@ -781,13 +781,13 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
 	UCanvasPanel* const CatalogCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyCatalogCanvas"));
 	CatalogPanel->SetContent(CatalogCanvas);
-	AddCanvas(CatalogCanvas, MakeText(WidgetTree, TEXT("ShipResourcesLabel"), TEXT("SHIP RESOURCES"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(20.0f, 19.0f), FVector2D(160.0f, 22.0f));
-	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("ROCK 0   ORE 0"), 17.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f));
+	AddCanvas(CatalogCanvas, MakeText(WidgetTree, TEXT("ShipResourcesLabel"), TEXT("飞船资源"), 12.0f, FLinearColor(0.55f, 0.69f, 0.82f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(20.0f, 19.0f), FVector2D(160.0f, 22.0f));
+	WalletText = MakeText(WidgetTree, TEXT("ShipSupplyWallet"), TEXT("石头 0   矿物 0"), 17.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f));
 	AddCanvas(CatalogCanvas, WalletText, FAnchors(0.0f, 0.0f), FVector2D(16.0f, 42.0f), FVector2D(585.0f, 28.0f));
 	DebugResourcesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugResources"));
 	DebugResourcesButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
-	DebugResourcesButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugResourcesLabel"), TEXT("DEBUG +100"), 18.0f));
-	DebugResourcesButton->SetToolTipText(FText::FromString(TEXT("Add 100 of every ship resource")));
+	DebugResourcesButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugResourcesLabel"), TEXT("测试补给"), 18.0f));
+	DebugResourcesButton->SetToolTipText(FText::FromString(TEXT("为每种飞船资源增加100")));
 	DebugResourcesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugResourcesClicked);
 	AddCanvas(CatalogCanvas, DebugResourcesButton, FAnchors(1.0f, 0.0f), FVector2D(-18.0f, 10.0f), FVector2D(174.0f, 34.0f), FVector2D(1.0f, 0.0f));
 	UScrollBox* const CatalogScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ShipSupplyCatalogScroll"));
@@ -802,7 +802,7 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarTitle"), TEXT("星际联盟遥感"), 23.0f, FLinearColor(0.83f, 0.92f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 25.0f), FVector2D(270.0f, 35.0f));
 	DebugStellarItemsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugStellarItems"));
 	DebugStellarItemsButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
-	DebugStellarItemsButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugStellarItemsLabel"), TEXT("DEBUG 全套物品"), 16.0f));
+	DebugStellarItemsButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipDebugStellarItemsLabel"), TEXT("测试物品"), 16.0f));
 	DebugStellarItemsButton->SetToolTipText(FText::FromString(TEXT("向商店物品栏的空格加入每种核心、配件各一个；不含升级固件，不消耗资源。")));
 	DebugStellarItemsButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugStellarItemsClicked);
 	AddCanvas(StellarCanvas, DebugStellarItemsButton, FAnchors(1.0f, 0.0f), FVector2D(-28.0f, 23.0f), FVector2D(220.0f, 36.0f), FVector2D(1.0f, 0.0f));
@@ -826,7 +826,7 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(StellarCanvas, LeverKnob, FAnchors(0.0f, 0.0f), FVector2D(521.0f, 160.0f), FVector2D(48.0f, 48.0f));
 	StellarRollButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipStellarRoll"));
 	StellarRollButton->SetBackgroundColor(FLinearColor(0.08f, 0.40f, 0.34f, 1.0f));
-	StellarRollButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarRollLabel"), TEXT("拉动摇杆  /  ROLL"), 17.0f));
+	StellarRollButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarRollLabel"), TEXT("拉动摇杆"), 17.0f));
 	StellarRollButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStellarRollClicked);
 	AddCanvas(StellarCanvas, StellarRollButton, FAnchors(0.0f, 0.0f), FVector2D(28.0f, 411.0f), FVector2D(552.0f, 50.0f));
 	ReelCostText = MakeText(WidgetTree, TEXT("ShipStellarCost"), TEXT(""), 13.0f, FLinearColor(0.66f, 0.81f, 0.90f, 1.0f), ETextJustify::Center);
@@ -912,44 +912,40 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, AbilityPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1260.0f, 520.0f));
 	UCanvasPanel* const AbilityCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipAbilityCanvas"));
 	AbilityPanel->SetContent(AbilityCanvas);
-	AbilityProgressText = MakeText(WidgetTree, TEXT("ShipAbilityProgress"), TEXT("LEVEL 1  ·  XP 0 / 100"), 20.0f, FLinearColor(0.55f, 0.88f, 1.0f, 1.0f));
+	AbilityProgressText = MakeText(WidgetTree, TEXT("ShipAbilityProgress"), TEXT("等级 1 · 经验 0 / 100"), 20.0f, FLinearColor(0.55f, 0.88f, 1.0f, 1.0f));
 	AddCanvas(AbilityCanvas, AbilityProgressText, FAnchors(0.0f, 0.0f), FVector2D(22.0f, 16.0f), FVector2D(600.0f, 32.0f));
-	AbilityPointsText = MakeText(WidgetTree, TEXT("ShipAbilityPoints"), TEXT("POINTS 0"), 20.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
+	AbilityPointsText = MakeText(WidgetTree, TEXT("ShipAbilityPoints"), TEXT("可用点数 0"), 20.0f, FLinearColor(0.38f, 1.0f, 0.72f, 1.0f), ETextJustify::Right);
 	AddCanvas(AbilityCanvas, AbilityPointsText, FAnchors(1.0f, 0.0f), FVector2D(-22.0f, 16.0f), FVector2D(420.0f, 32.0f), FVector2D(1.0f, 0.0f));
 
 	AbilityDetailTexts.Reset();
 	AbilityRankTexts.Reset();
 	AbilityDecreaseButtons.Reset();
 	AbilityIncreaseButtons.Reset();
-	auto AddAbilityCard = [this, AbilityCanvas](const EJTSPlayerAbility Ability, const FString& Title, const FName Name, const float Y)
+	auto AddAbilityCard = [this, AbilityCanvas](const EJTSPlayerAbility Ability, const FString& Title, const FName Name, const float X, const float Y)
 	{
 		UBorder* const Card = MakeBorder(WidgetTree, Name, FLinearColor(0.045f, 0.105f, 0.165f, 1.0f));
-		AddCanvas(AbilityCanvas, Card, FAnchors(0.0f, 0.0f), FVector2D(20.0f, Y), FVector2D(1060.0f, 70.0f));
+		AddCanvas(AbilityCanvas, Card, FAnchors(0.0f, 0.0f), FVector2D(X, Y), FVector2D(600.0f, 108.0f));
 		UCanvasPanel* const CardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), *FString::Printf(TEXT("%sCanvas"), *Name.ToString()));
 		Card->SetContent(CardCanvas);
-		AddCanvas(CardCanvas, MakeText(WidgetTree, *FString::Printf(TEXT("%sTitle"), *Name.ToString()), Title, 18.0f, FLinearColor::White), FAnchors(0.0f, 0.0f), FVector2D(24.0f, 7.0f), FVector2D(570.0f, 25.0f));
+		AddCanvas(CardCanvas, MakeText(WidgetTree, *FString::Printf(TEXT("%sTitle"), *Name.ToString()), Title, 18.0f, FLinearColor::White), FAnchors(0.0f, 0.0f), FVector2D(20.0f, 12.0f), FVector2D(380.0f, 30.0f));
 		UTextBlock* const Detail = MakeText(WidgetTree, *FString::Printf(TEXT("%sDetail"), *Name.ToString()), TEXT(""), 15.0f, FLinearColor(0.68f, 0.79f, 0.90f, 1.0f));
-		AddCanvas(CardCanvas, Detail, FAnchors(0.0f, 0.0f), FVector2D(24.0f, 37.0f), FVector2D(650.0f, 22.0f));
+		AddCanvas(CardCanvas, Detail, FAnchors(0.0f, 0.0f), FVector2D(20.0f, 62.0f), FVector2D(414.0f, 28.0f));
 		UButton* const Decrease = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("%sDecrease"), *Name.ToString()));
 		Decrease->SetBackgroundColor(FLinearColor(0.12f, 0.18f, 0.27f, 1.0f));
 		Decrease->SetContent(MakeText(WidgetTree, *FString::Printf(TEXT("%sDecreaseLabel"), *Name.ToString()), TEXT("−"), 18.0f, FLinearColor::White, ETextJustify::Center));
 		UTextBlock* const Rank = MakeText(WidgetTree, *FString::Printf(TEXT("%sRank"), *Name.ToString()), TEXT("0 / 5"), 16.0f, FLinearColor(0.55f, 0.90f, 1.0f, 1.0f), ETextJustify::Center);
-		AddCanvas(CardCanvas, Rank, FAnchors(0.0f, 0.0f), FVector2D(768.0f, 21.0f), FVector2D(154.0f, 26.0f));
-		AddCanvas(CardCanvas, Decrease, FAnchors(0.0f, 0.0f), FVector2D(930.0f, 14.0f), FVector2D(52.0f, 42.0f));
+		AddCanvas(CardCanvas, Rank, FAnchors(0.0f, 0.0f), FVector2D(430.0f, 15.0f), FVector2D(150.0f, 26.0f));
+		AddCanvas(CardCanvas, Decrease, FAnchors(0.0f, 0.0f), FVector2D(450.0f, 56.0f), FVector2D(52.0f, 40.0f));
 		UButton* const Increase = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("%sIncrease"), *Name.ToString()));
 		Increase->SetBackgroundColor(FLinearColor(0.08f, 0.34f, 0.30f, 1.0f));
 		Increase->SetContent(MakeText(WidgetTree, *FString::Printf(TEXT("%sIncreaseLabel"), *Name.ToString()), TEXT("+"), 18.0f, FLinearColor::White, ETextJustify::Center));
-		AddCanvas(CardCanvas, Increase, FAnchors(0.0f, 0.0f), FVector2D(996.0f, 14.0f), FVector2D(52.0f, 42.0f));
+		AddCanvas(CardCanvas, Increase, FAnchors(0.0f, 0.0f), FVector2D(528.0f, 56.0f), FVector2D(52.0f, 40.0f));
 
 		switch (Ability)
 		{
 		case EJTSPlayerAbility::InventorySlots:
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleInventorySlotsDecrease);
 			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleInventorySlotsIncrease);
-			break;
-		case EJTSPlayerAbility::StackLimit:
-			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStackLimitDecrease);
-			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStackLimitIncrease);
 			break;
 		case EJTSPlayerAbility::RunSpeed:
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRunSpeedDecrease);
@@ -958,6 +954,14 @@ void UJTSShopWidget::BuildWidgetTree()
 		case EJTSPlayerAbility::Stamina:
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaDecrease);
 			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStaminaIncrease);
+			break;
+		case EJTSPlayerAbility::Health:
+			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleHealthDecrease);
+			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleHealthIncrease);
+			break;
+		case EJTSPlayerAbility::Defense:
+			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDefenseDecrease);
+			Increase->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDefenseIncrease);
 			break;
 		case EJTSPlayerAbility::CriticalChance:
 			Decrease->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCriticalChanceDecrease);
@@ -971,29 +975,30 @@ void UJTSShopWidget::BuildWidgetTree()
 		AbilityDecreaseButtons.Add(Decrease);
 		AbilityIncreaseButtons.Add(Increase);
 	};
-	AddAbilityCard(EJTSPlayerAbility::InventorySlots, TEXT("INVENTORY SLOTS"), TEXT("ShipAbilityCargo"), 52.0f);
-	AddAbilityCard(EJTSPlayerAbility::StackLimit, TEXT("STACK SIZE"), TEXT("ShipAbilityStack"), 128.0f);
-	AddAbilityCard(EJTSPlayerAbility::RunSpeed, TEXT("RUN SPEED"), TEXT("ShipAbilitySpeed"), 204.0f);
-	AddAbilityCard(EJTSPlayerAbility::Stamina, TEXT("STAMINA"), TEXT("ShipAbilityStamina"), 280.0f);
-	AddAbilityCard(EJTSPlayerAbility::CriticalChance, TEXT("CRITICAL CHANCE"), TEXT("ShipAbilityCritical"), 356.0f);
+	AddAbilityCard(EJTSPlayerAbility::InventorySlots, TEXT("背包容量"), TEXT("ShipAbilityCargo"), 20.0f, 68.0f);
+	AddAbilityCard(EJTSPlayerAbility::RunSpeed, TEXT("奔跑速度"), TEXT("ShipAbilitySpeed"), 640.0f, 68.0f);
+	AddAbilityCard(EJTSPlayerAbility::Stamina, TEXT("耐力"), TEXT("ShipAbilityStamina"), 20.0f, 192.0f);
+	AddAbilityCard(EJTSPlayerAbility::CriticalChance, TEXT("暴击率"), TEXT("ShipAbilityCritical"), 640.0f, 192.0f);
+	AddAbilityCard(EJTSPlayerAbility::Health, TEXT("血量"), TEXT("ShipAbilityHealth"), 20.0f, 316.0f);
+	AddAbilityCard(EJTSPlayerAbility::Defense, TEXT("防御力"), TEXT("ShipAbilityDefense"), 640.0f, 316.0f);
 
 	ConfirmAbilitiesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityConfirm"));
 	ConfirmAbilitiesButton->SetBackgroundColor(FLinearColor(0.08f, 0.40f, 0.29f, 1.0f));
-	ConfirmAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityConfirmLabel"), TEXT("APPLY"), 14.0f, FLinearColor::White, ETextJustify::Center));
+	ConfirmAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityConfirmLabel"), TEXT("确认加点"), 14.0f, FLinearColor::White, ETextJustify::Center));
 	ConfirmAbilitiesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleConfirmAbilitiesClicked);
-	AddCanvas(AbilityCanvas, ConfirmAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(864.0f, 438.0f), FVector2D(216.0f, 42.0f));
+	AddCanvas(AbilityCanvas, ConfirmAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(1040.0f, 450.0f), FVector2D(200.0f, 46.0f));
 	ResetAbilitiesButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipAbilityReset"));
 	ResetAbilitiesButton->SetBackgroundColor(FLinearColor(0.13f, 0.18f, 0.27f, 1.0f));
-	ResetAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityResetLabel"), TEXT("UNDO"), 14.0f, FLinearColor::White, ETextJustify::Center));
+	ResetAbilitiesButton->SetContent(MakeText(WidgetTree, TEXT("ShipAbilityResetLabel"), TEXT("撤销修改"), 14.0f, FLinearColor::White, ETextJustify::Center));
 	ResetAbilitiesButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleResetAbilitiesClicked);
-	AddCanvas(AbilityCanvas, ResetAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(682.0f, 438.0f), FVector2D(170.0f, 42.0f));
+	AddCanvas(AbilityCanvas, ResetAbilitiesButton, FAnchors(0.0f, 0.0f), FVector2D(852.0f, 450.0f), FVector2D(170.0f, 46.0f));
 	DebugLevelsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugLevels"));
 	DebugLevelsButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
-	DebugLevelsButton->SetContent(MakeText(WidgetTree, TEXT("ShipDebugLevelsLabel"), TEXT("DEBUG +10 LVL"), 13.0f, FLinearColor::White, ETextJustify::Center));
-	DebugLevelsButton->SetToolTipText(FText::FromString(TEXT("+10 levels and +10 ability points")));
+	DebugLevelsButton->SetContent(MakeText(WidgetTree, TEXT("ShipDebugLevelsLabel"), TEXT("测试升级"), 13.0f, FLinearColor::White, ETextJustify::Center));
+	DebugLevelsButton->SetToolTipText(FText::FromString(TEXT("提升10级并获得10点能力点")));
 	DebugLevelsButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleDebugLevelsClicked);
-	AddCanvas(AbilityCanvas, DebugLevelsButton, FAnchors(0.0f, 0.0f), FVector2D(20.0f, 438.0f), FVector2D(202.0f, 42.0f));
-	AbilityStatusText = MakeText(WidgetTree, TEXT("ShipAbilityStatus"), TEXT("1 POINT PER RANK"), 13.0f, FLinearColor(0.72f, 0.82f, 0.92f, 1.0f), ETextJustify::Center);
+	AddCanvas(AbilityCanvas, DebugLevelsButton, FAnchors(0.0f, 0.0f), FVector2D(20.0f, 450.0f), FVector2D(160.0f, 46.0f));
+	AbilityStatusText = MakeText(WidgetTree, TEXT("ShipAbilityStatus"), TEXT("每级消耗1点 · 确认后永久生效 · 物品每格最多99个"), 13.0f, FLinearColor(0.72f, 0.82f, 0.92f, 1.0f), ETextJustify::Center);
 	AddCanvas(FrameCanvas, AbilityStatusText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -19.0f), FVector2D(1060.0f, 24.0f), FVector2D(0.5f, 1.0f));
 
 	StatusText = MakeText(WidgetTree, TEXT("ShipSupplyStatus"), TEXT(""), 13.0f, FLinearColor(0.64f, 0.78f, 0.92f, 1.0f), ETextJustify::Center);
@@ -1063,24 +1068,25 @@ void UJTSShopWidget::RefreshAbilities()
 	if (AbilityProgressText != nullptr)
 	{
 		const FString ExperienceLabel = ExperienceNeeded > 0
-			? FString::Printf(TEXT("XP %d / %d"), PlayerState->GetExperienceInCurrentLevel(), ExperienceNeeded)
-			: TEXT("LEVEL CAP");
+			? FString::Printf(TEXT("经验 %d / %d"), PlayerState->GetExperienceInCurrentLevel(), ExperienceNeeded)
+			: TEXT("已达等级上限");
 		AbilityProgressText->SetText(FText::FromString(FString::Printf(
-			TEXT("LEVEL %d  ·  %s"), PlayerState->GetProgressionLevel(), *ExperienceLabel)));
+			TEXT("等级 %d · %s"), PlayerState->GetProgressionLevel(), *ExperienceLabel)));
 	}
 	if (AbilityPointsText != nullptr)
 	{
 		AbilityPointsText->SetText(FText::FromString(PendingCost > 0
-			? FString::Printf(TEXT("POINTS %d  ·  PENDING %d"), PlayerState->GetUnspentAbilityPoints(), PendingCost)
-			: FString::Printf(TEXT("POINTS %d"), PlayerState->GetUnspentAbilityPoints())));
+			? FString::Printf(TEXT("可用点数 %d · 待用 %d"), PlayerState->GetUnspentAbilityPoints(), PendingCost)
+			: FString::Printf(TEXT("可用点数 %d"), PlayerState->GetUnspentAbilityPoints())));
 	}
 
-	const TArray<EJTSPlayerAbility, TInlineAllocator<5>> Abilities = {
+	const TArray<EJTSPlayerAbility, TInlineAllocator<6>> Abilities = {
 		EJTSPlayerAbility::InventorySlots,
-		EJTSPlayerAbility::StackLimit,
 		EJTSPlayerAbility::RunSpeed,
 		EJTSPlayerAbility::Stamina,
-		EJTSPlayerAbility::CriticalChance };
+		EJTSPlayerAbility::CriticalChance,
+		EJTSPlayerAbility::Health,
+		EJTSPlayerAbility::Defense };
 	for (int32 Index = 0; Index < Abilities.Num(); ++Index)
 	{
 		const EJTSPlayerAbility Ability = Abilities[Index];
@@ -1227,10 +1233,11 @@ bool UJTSShopWidget::AdjustPendingAbility(EJTSPlayerAbility Ability, int32 Delta
 	switch (Ability)
 	{
 	case EJTSPlayerAbility::InventorySlots: PendingRanks = &PendingAbilityAllocation.InventorySlotRanks; break;
-	case EJTSPlayerAbility::StackLimit: PendingRanks = &PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = &PendingAbilityAllocation.RunSpeedRanks; break;
 	case EJTSPlayerAbility::Stamina: PendingRanks = &PendingAbilityAllocation.StaminaRanks; break;
 	case EJTSPlayerAbility::CriticalChance: PendingRanks = &PendingAbilityAllocation.CriticalChanceRanks; break;
+	case EJTSPlayerAbility::Health: PendingRanks = &PendingAbilityAllocation.HealthRanks; break;
+	case EJTSPlayerAbility::Defense: PendingRanks = &PendingAbilityAllocation.DefenseRanks; break;
 	default: return false;
 	}
 
@@ -1248,7 +1255,7 @@ bool UJTSShopWidget::AdjustPendingAbility(EJTSPlayerAbility Ability, int32 Delta
 	*PendingRanks += Delta;
 	if (AbilityStatusText != nullptr)
 	{
-		AbilityStatusText->SetText(FText::FromString(TEXT("CHANGES READY  ·  APPLY TO CONFIRM")));
+		AbilityStatusText->SetText(FText::FromString(TEXT("已预览修改，点击“确认加点”后生效")));
 		AbilityStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.82f, 0.92f, 1.0f)));
 	}
 	RefreshAbilities();
@@ -1269,10 +1276,11 @@ int32 UJTSShopWidget::GetPendingAbilityRank(EJTSPlayerAbility Ability) const
 	switch (Ability)
 	{
 	case EJTSPlayerAbility::InventorySlots: PendingRanks = PendingAbilityAllocation.InventorySlotRanks; break;
-	case EJTSPlayerAbility::StackLimit: PendingRanks = PendingAbilityAllocation.StackLimitRanks; break;
 	case EJTSPlayerAbility::RunSpeed: PendingRanks = PendingAbilityAllocation.RunSpeedRanks; break;
 	case EJTSPlayerAbility::Stamina: PendingRanks = PendingAbilityAllocation.StaminaRanks; break;
 	case EJTSPlayerAbility::CriticalChance: PendingRanks = PendingAbilityAllocation.CriticalChanceRanks; break;
+	case EJTSPlayerAbility::Health: PendingRanks = PendingAbilityAllocation.HealthRanks; break;
+	case EJTSPlayerAbility::Defense: PendingRanks = PendingAbilityAllocation.DefenseRanks; break;
 	default: break;
 	}
 	return FMath::Clamp(PlayerState->GetAbilityRank(Ability) + PendingRanks, 0, FJTSPlayerProgressionRules::MaximumAbilityRank);
@@ -1293,35 +1301,41 @@ FString UJTSShopWidget::BuildAbilityDescription(EJTSPlayerAbility Ability) const
 	{
 	case EJTSPlayerAbility::InventorySlots:
 		return bMaxRank
-			? FString::Printf(TEXT("MAX  ·  +%d bonus slots"), FJTSPlayerProgressionRules::GetInventorySlotBonus(CurrentRank))
-			: FString::Printf(TEXT("Bonus slots  +%d → +%d"),
+			? FString::Printf(TEXT("已满级 · 额外容量 %d格"), FJTSPlayerProgressionRules::GetInventorySlotBonus(CurrentRank))
+			: FString::Printf(TEXT("额外容量 %d → %d格"),
 				FJTSPlayerProgressionRules::GetInventorySlotBonus(CurrentRank),
 				FJTSPlayerProgressionRules::GetInventorySlotBonus(PreviewRank));
-	case EJTSPlayerAbility::StackLimit:
-		return bMaxRank
-			? FString::Printf(TEXT("MAX  ·  %d items per slot"), FJTSPlayerProgressionRules::GetStackLimit(CurrentRank))
-			: FString::Printf(TEXT("Items per slot  %d → %d"),
-				FJTSPlayerProgressionRules::GetStackLimit(CurrentRank),
-				FJTSPlayerProgressionRules::GetStackLimit(PreviewRank));
 	case EJTSPlayerAbility::RunSpeed:
 		return bMaxRank
-			? FString::Printf(TEXT("MAX  ·  +%d%% speed"), FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(CurrentRank))
-			: FString::Printf(TEXT("Speed bonus  +%d%% → +%d%%"),
-				FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(CurrentRank),
-				FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(PreviewRank));
+			? FString::Printf(TEXT("已满级 · 速度 +%.1f米/秒"), FJTSPlayerProgressionRules::GetRunSpeedBonus(CurrentRank) / 100.0f)
+			: FString::Printf(TEXT("速度 +%.1f → +%.1f米/秒"),
+				FJTSPlayerProgressionRules::GetRunSpeedBonus(CurrentRank) / 100.0f,
+				FJTSPlayerProgressionRules::GetRunSpeedBonus(PreviewRank) / 100.0f);
 	case EJTSPlayerAbility::Stamina:
 		return bMaxRank
-			? FString::Printf(TEXT("MAX  ·  %.0f endurance"), FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank))
-			: FString::Printf(TEXT("Run and climb pool  %.0f → %.0f"),
+			? FString::Printf(TEXT("已满级 · 耐力上限 %.0f"), FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank))
+			: FString::Printf(TEXT("耐力上限 %.0f → %.0f"),
 				FJTSPlayerProgressionRules::GetMaxStamina(CurrentRank),
 				FJTSPlayerProgressionRules::GetMaxStamina(PreviewRank));
 	case EJTSPlayerAbility::CriticalChance:
 		return bMaxRank
-			? FString::Printf(TEXT("MAX  ·  %d%% crit chance · 1.75x damage"),
+			? FString::Printf(TEXT("已满级 · 暴击率 %d%% · 伤害1.75倍"),
 				FJTSPlayerProgressionRules::GetCriticalChancePercent(CurrentRank))
-			: FString::Printf(TEXT("Weapon crit chance  %d%% → %d%% · weak points always crit"),
+			: FString::Printf(TEXT("暴击率 %d%% → %d%%"),
 				FJTSPlayerProgressionRules::GetCriticalChancePercent(CurrentRank),
 				FJTSPlayerProgressionRules::GetCriticalChancePercent(PreviewRank));
+	case EJTSPlayerAbility::Health:
+		return bMaxRank
+			? FString::Printf(TEXT("已满级 · 血量上限 +%.0f点"), FJTSPlayerProgressionRules::GetHealthBonus(CurrentRank))
+			: FString::Printf(TEXT("血量上限 +%.0f → +%.0f点"),
+				FJTSPlayerProgressionRules::GetHealthBonus(CurrentRank),
+				FJTSPlayerProgressionRules::GetHealthBonus(PreviewRank));
+	case EJTSPlayerAbility::Defense:
+		return bMaxRank
+			? FString::Printf(TEXT("已满级 · 每次抵挡 %.1f点伤害"), FJTSPlayerProgressionRules::GetDefense(CurrentRank))
+			: FString::Printf(TEXT("抵挡伤害 %.1f → %.1f点"),
+				FJTSPlayerProgressionRules::GetDefense(CurrentRank),
+				FJTSPlayerProgressionRules::GetDefense(PreviewRank));
 	default:
 		return FString();
 	}
@@ -1356,19 +1370,19 @@ void UJTSShopWidget::RefreshCatalog()
 		AddCanvas(CardCanvas, MakeBorder(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyAccent_%d"), static_cast<int32>(ItemId)),
 			Definition->AccentColor.CopyWithNewOpacity(0.95f)),
-			FAnchors(0.0f, 0.0f), FVector2D(10.0f, 10.0f), FVector2D(4.0f, 82.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(10.0f, 10.0f), FVector2D(4.0f, 76.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyRole_%d"), static_cast<int32>(ItemId)),
-			ItemRoleLabel(Definition), 12.0f, Definition->AccentColor),
+			ItemRoleLabel(Definition), 16.0f, Definition->AccentColor),
 			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 9.0f), FVector2D(250.0f, 20.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyName_%d"), static_cast<int32>(ItemId)),
-			Definition->DisplayName.ToString(), 24.0f, FLinearColor::White),
-			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 34.0f), FVector2D(420.0f, 36.0f));
+			Definition->DisplayName.ToString(), 22.0f, FLinearColor::White),
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 31.0f), FVector2D(400.0f, 32.0f));
 		AddCanvas(CardCanvas, MakeText(WidgetTree,
 			*FString::Printf(TEXT("ShipSupplyCost_%d"), static_cast<int32>(ItemId)),
 			FormatCosts(ItemId), 18.0f, FLinearColor(0.72f, 0.82f, 0.90f, 1.0f)),
-			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 80.0f), FVector2D(400.0f, 28.0f));
+			FAnchors(0.0f, 0.0f), FVector2D(24.0f, 68.0f), FVector2D(400.0f, 26.0f));
 		if (bAffordable)
 		{
 			UButton* const BuyButton = WidgetTree->ConstructWidget<UButton>(
@@ -1376,13 +1390,14 @@ void UJTSShopWidget::RefreshCatalog()
 			BuyButton->SetBackgroundColor(FLinearColor(0.10f, 0.34f, 0.30f, 1.0f));
 			BuyButton->SetContent(MakeText(WidgetTree,
 				*FString::Printf(TEXT("ShipSupplyBuyLabel_%d"), static_cast<int32>(ItemId)),
-				TEXT("BUY"), 13.0f, FLinearColor::White, ETextJustify::Center));
+				TEXT("购买"), 13.0f, FLinearColor::White, ETextJustify::Center));
 			AddCanvas(CardCanvas, BuyButton, FAnchors(1.0f, 0.0f), FVector2D(-14.0f, 34.0f),
 				FVector2D(90.0f, 42.0f), FVector2D(1.0f, 0.0f));
 			switch (ItemId)
 			{
 			case EJTSItemId::ShortBlade: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleShortBladeBuy); break;
 			case EJTSItemId::ShockPole: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleShockPoleBuy); break;
+			case EJTSItemId::Pickaxe: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePickaxeBuy); break;
 			case EJTSItemId::PowerHammer: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandlePowerHammerBuy); break;
 			case EJTSItemId::RailPistol: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleRailPistolBuy); break;
 			case EJTSItemId::AssaultRifle: BuyButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAssaultRifleBuy); break;
@@ -1399,7 +1414,7 @@ void UJTSShopWidget::RefreshCatalog()
 		USizeBox* const Cell = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), *FString::Printf(TEXT("ShipSupplyCell_%d"), static_cast<int32>(ItemId)));
 		Cell->SetWidthOverride(572.0f);
-		Cell->SetHeightOverride(120.0f);
+		Cell->SetHeightOverride(104.0f);
 		Cell->SetContent(Card);
 		CatalogGrid->AddChildToUniformGrid(Cell, CatalogIndex, 0);
 		++CatalogIndex;
@@ -1413,7 +1428,7 @@ FString UJTSShopWidget::GetStellarItemLabel(FName ItemId) const
 	{
 		return Entry->DisplayName.ToString();
 	}
-	return ItemId.IsNone() ? TEXT("等待信号") : ItemId.ToString();
+	return ItemId.IsNone() ? TEXT("等待信号") : TEXT("未知星际物品");
 }
 
 int32 UJTSShopWidget::FindSelectedStellarCoreSlot() const
@@ -1501,7 +1516,7 @@ void UJTSShopWidget::RefreshStellarOddsTooltip()
 					? FString::Printf(TEXT("%.2f%%"), Percent)
 					: FString::Printf(TEXT("%.4f%%"), Percent);
 				const FString Name = Entry.DisplayName.IsEmpty()
-					? Entry.ItemId.ToString() : Entry.DisplayName.ToString();
+					? TEXT("未知星际物品") : Entry.DisplayName.ToString();
 				Tooltip += FString::Printf(TEXT("\n%s  %s"), *Name, *Chance);
 			}
 		}
@@ -1721,7 +1736,7 @@ bool UJTSShopWidget::RefreshWallet()
 				CurrentResourceAmounts.FindRef(ResourceType)));
 		}
 		WalletText->SetText(FText::FromString(WalletEntries.IsEmpty()
-			? TEXT("NO MATERIAL COST")
+			? TEXT("无需材料")
 			: FString::Join(WalletEntries, TEXT("     "))));
 	}
 	LastDisplayedResourceAmounts = MoveTemp(CurrentResourceAmounts);
@@ -1753,7 +1768,7 @@ FString UJTSShopWidget::FormatCosts(EJTSItemId ItemId) const
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
 	if (!IsValid(Definition))
 	{
-		return TEXT("NO COST");
+		return TEXT("无需材料");
 	}
 
 	TArray<FString> Costs;
@@ -1773,7 +1788,7 @@ FString UJTSShopWidget::FormatMissingCosts(EJTSItemId ItemId) const
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
 	if (!IsValid(Spacecraft) || !IsValid(Definition))
 	{
-		return TEXT("LINK");
+		return TEXT("飞船连接");
 	}
 
 	TArray<FString> Missing;
@@ -1785,7 +1800,7 @@ FString UJTSShopWidget::FormatMissingCosts(EJTSItemId ItemId) const
 			Missing.Add(FString::Printf(TEXT("%s +%d"), *ResourceLabel(Cost.ResourceType), Shortfall));
 		}
 	}
-	return Missing.IsEmpty() ? TEXT("NONE") : FString::Join(Missing, TEXT("  /  "));
+	return Missing.IsEmpty() ? TEXT("无") : FString::Join(Missing, TEXT("  /  "));
 }
 
 FText UJTSShopWidget::BuildItemTooltip(EJTSItemId ItemId) const
@@ -1797,8 +1812,8 @@ FText UJTSShopWidget::BuildItemTooltip(EJTSItemId ItemId) const
 	}
 
 	const FString Availability = CanAfford(ItemId)
-		? TEXT("READY")
-		: FString::Printf(TEXT("MISSING %s"), *FormatMissingCosts(ItemId));
+		? TEXT("可购买")
+		: FString::Printf(TEXT("缺少：%s"), *FormatMissingCosts(ItemId));
 	return FText::FromString(FString::Printf(
 		TEXT("%s\n\n%s\n\n%s\n%s"),
 		*Definition->DisplayName.ToString(),
@@ -1828,6 +1843,7 @@ void UJTSShopWidget::RequestPurchase(EJTSItemId ItemId)
 
 void UJTSShopWidget::HandleShortBladeBuy() { RequestPurchase(EJTSItemId::ShortBlade); }
 void UJTSShopWidget::HandleShockPoleBuy() { RequestPurchase(EJTSItemId::ShockPole); }
+void UJTSShopWidget::HandlePickaxeBuy() { RequestPurchase(EJTSItemId::Pickaxe); }
 void UJTSShopWidget::HandlePowerHammerBuy() { RequestPurchase(EJTSItemId::PowerHammer); }
 void UJTSShopWidget::HandleRailPistolBuy() { RequestPurchase(EJTSItemId::RailPistol); }
 void UJTSShopWidget::HandleAssaultRifleBuy() { RequestPurchase(EJTSItemId::AssaultRifle); }
@@ -1918,14 +1934,16 @@ void UJTSShopWidget::HandleCombineStellarWeaponClicked()
 }
 void UJTSShopWidget::HandleInventorySlotsDecrease() { AdjustPendingAbility(EJTSPlayerAbility::InventorySlots, -1); }
 void UJTSShopWidget::HandleInventorySlotsIncrease() { AdjustPendingAbility(EJTSPlayerAbility::InventorySlots, 1); }
-void UJTSShopWidget::HandleStackLimitDecrease() { AdjustPendingAbility(EJTSPlayerAbility::StackLimit, -1); }
-void UJTSShopWidget::HandleStackLimitIncrease() { AdjustPendingAbility(EJTSPlayerAbility::StackLimit, 1); }
 void UJTSShopWidget::HandleRunSpeedDecrease() { AdjustPendingAbility(EJTSPlayerAbility::RunSpeed, -1); }
 void UJTSShopWidget::HandleRunSpeedIncrease() { AdjustPendingAbility(EJTSPlayerAbility::RunSpeed, 1); }
 void UJTSShopWidget::HandleStaminaDecrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, -1); }
 void UJTSShopWidget::HandleStaminaIncrease() { AdjustPendingAbility(EJTSPlayerAbility::Stamina, 1); }
 void UJTSShopWidget::HandleCriticalChanceDecrease() { AdjustPendingAbility(EJTSPlayerAbility::CriticalChance, -1); }
+void UJTSShopWidget::HandleHealthDecrease() { AdjustPendingAbility(EJTSPlayerAbility::Health, -1); }
+void UJTSShopWidget::HandleDefenseDecrease() { AdjustPendingAbility(EJTSPlayerAbility::Defense, -1); }
 void UJTSShopWidget::HandleCriticalChanceIncrease() { AdjustPendingAbility(EJTSPlayerAbility::CriticalChance, 1); }
+void UJTSShopWidget::HandleHealthIncrease() { AdjustPendingAbility(EJTSPlayerAbility::Health, 1); }
+void UJTSShopWidget::HandleDefenseIncrease() { AdjustPendingAbility(EJTSPlayerAbility::Defense, 1); }
 
 void UJTSShopWidget::HandleConfirmAbilitiesClicked()
 {
@@ -1950,7 +1968,7 @@ void UJTSShopWidget::HandleResetAbilitiesClicked()
 	ResetPendingAbilityAllocation();
 	if (AbilityStatusText != nullptr)
 	{
-		AbilityStatusText->SetText(FText::FromString(TEXT("CHANGES UNDONE")));
+		AbilityStatusText->SetText(FText::FromString(TEXT("已撤销待确认的修改")));
 		AbilityStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.82f, 0.92f, 1.0f)));
 	}
 	RefreshAbilities();

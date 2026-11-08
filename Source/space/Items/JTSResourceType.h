@@ -16,7 +16,8 @@ enum class EJTSResourceType : uint8
 	Organic = 5 UMETA(DisplayName = "Organic"),
 	/** A carried Moon item. It occupies one inventory slot and is converted to Organic only by the spacecraft. */
 	MoonAntCorpse = 6 UMETA(DisplayName = "MoonAnt Corpse"),
-	Crystal = 7 UMETA(DisplayName = "Crystal")
+	Crystal = 7 UMETA(DisplayName = "Crystal"),
+	InorganicCarbon = 8 UMETA(DisplayName = "Inorganic Carbon")
 };
 
 USTRUCT(BlueprintType)

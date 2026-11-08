@@ -1,5 +1,34 @@
 #include "space/World/JTSMoonResourceDistribution.h"
 
+namespace
+{
+	float PatchNoise(const FVector& Point, float Size, int32 Seed, const FVector& Offset)
+	{
+		const uint32 Hash = GetTypeHash(Seed);
+		const FVector SeedOffset(Hash & 255, (Hash >> 8) & 255, (Hash >> 16) & 255);
+		return FMath::Clamp(2.0f * FMath::PerlinNoise3D(Point / FMath::Max(100.0f, Size) + SeedOffset + Offset), -1.0f, 1.0f);
+	}
+}
+
+float FJTSMoonResourcePatchSettings::Acceptance(const FVector& Point, int32 Seed) const
+{
+	if (!bEnabled) return 1;
+	const float Noise = PatchNoise(Point, PatchSize, Seed, FVector(17.3, 8.1, 2.7));
+	const float Richness = FMath::Square(0.5f + 0.5f * Noise);
+	return FMath::Lerp(1.0f, 0.1f + 0.9f * Richness, FMath::Clamp(DensityContrast, 0.0f, 1.0f));
+}
+
+float FJTSMoonResourcePatchSettings::KindWeight(EJTSMoonResourceKind Kind, const FVector& Point, int32 Seed) const
+{
+	if (!bEnabled) return 1;
+	const float Ore = PatchNoise(Point, PatchSize, Seed, FVector(6.2, 29.4, 13.8));
+	const bool bRock = Kind <= EJTSMoonResourceKind::LargeRock;
+	const bool bCrystal = Kind == EJTSMoonResourceKind::MediumCrystalRock || Kind == EJTSMoonResourceKind::LargeCrystalRock;
+	const float Affinity = bRock ? -Ore : bCrystal
+		? 0.5f * (Ore + PatchNoise(Point, PatchSize, Seed, FVector(41.1, 3.6, 27.2))) : Ore;
+	return FMath::Exp(Affinity * FMath::Clamp(CompositionContrast, 0.0f, 4.0f));
+}
+
 bool FJTSMoonResourceKinds::IsEnabled(EJTSMoonResourceKind Kind) const
 {
 	const bool Values[] = { bSmallRock, bMediumRock, bLargeRock, bMediumMetalRock,

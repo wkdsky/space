@@ -36,6 +36,8 @@ public:
 	/** Refreshes the mesh profile after inventory replication or quickbar selection. */
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Presentation")
 	void RefreshWeaponVisual();
+	/** Resolve the first shot from the new body heading, before the next render pose tick. */
+	void RefreshForAttack();
 	/** Keeps every held mesh stowed for the entire free-hand climb, including inventory refreshes. */
 	void SetClimbStowed(bool bStowed);
 
@@ -214,6 +216,7 @@ private:
 	bool bRangedVisible = false;
 	bool bUprightScepter = false;
 	bool bTwoHandVisible = false;
+	bool bAuthoredHeldMesh = false;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Weapon|Presentation|Shot", meta = (ClampMin = "1.0"))
 	float ShotKickRecoverySpeed = 20.0f;

@@ -75,6 +75,8 @@ public:
 	void SetCurrentMap(const FString& MapPackageName);
 	void SetCurrentPlanetId(const FString& PlanetId);
 	void SetCurrentCheckpoint(const FString& Checkpoint);
+	bool IsEntranceBlocked(FName EntranceId) const;
+	void MarkEntranceBlocked(FName EntranceId);
 	void RequestSave();
 	bool SaveNow();
 	bool LoadMostRecentSnapshot();

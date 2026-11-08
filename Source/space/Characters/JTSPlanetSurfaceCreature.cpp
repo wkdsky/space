@@ -9,6 +9,8 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSMirrorDefenseComponent.h"
+#include "space/Components/JTSNestBlockadeComponent.h"
 #include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetEcologyHabitat.h"
@@ -16,6 +18,7 @@
 AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	bReplicates = true;
 	SetReplicateMovement(true);
 	SetNetUpdateFrequency(20);
@@ -28,12 +31,15 @@ AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 	Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	Body->SetGenerateOverlapEvents(false);
 	Body->SetCanEverAffectNavigation(false);
-	Mesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CreatureMesh"));
+	Mesh = CreateDefaultSubobject<UJTSReflectorSkeletalMeshComponent>(TEXT("CreatureMesh"));
 	Mesh->SetupAttachment(Body);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCanEverAffectNavigation(false);
+	Mesh->AddTickPrerequisiteActor(this);
 	Health = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("Health"));
 	Steering = CreateDefaultSubobject<UJTSPlanetSurfaceSteeringComponent>(TEXT("SurfaceSteering"));
+	MirrorDefense = CreateDefaultSubobject<UJTSMirrorDefenseComponent>(TEXT("MirrorDefense"));
+	MirrorDefense->AddTickPrerequisiteActor(this);
 }
 
 void AJTSPlanetSurfaceCreature::BeginPlay()
@@ -51,6 +57,8 @@ void AJTSPlanetSurfaceCreature::BeginPlay()
 
 void AJTSPlanetSurfaceCreature::EndPlay(const EEndPlayReason::Type Reason)
 {
+	if (HasAuthority())
+		if (auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(RefugeActor.Get())) Mouth->Blockade->UnregisterResident(this, true);
 	GetWorldTimerManager().ClearTimer(BehaviorTimer);
 	Super::EndPlay(Reason);
 }
@@ -75,9 +83,15 @@ void AJTSPlanetSurfaceCreature::SetHabitat(AJTSPlanetEcologyHabitat* InHabitat, 
 	if (!HasAuthority()) return;
 	Habitat = InHabitat;
 	RefugeActor = InHabitat ? InHabitat->FindRefugeActor(RefugeLocation) : nullptr;
-	Refuge = RefugeActor.IsValid() ? RefugeActor->GetActorLocation() : RefugeLocation;
+	if (auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(RefugeActor.Get()); Mouth && !Mouth->Blockade->TryRegisterResident(this))
+	{
+		Destroy();
+		return;
+	}
+	Refuge = RefugeActor.IsValid() ? AJTSPlanetEcologyHabitat::GetRefugeSurfaceLocation(RefugeActor.Get()) : RefugeLocation;
 	if (!bDefendsNest) Home = Refuge;
-	if (!bDefendsNest && RefugeActor.IsValid() && State == EJTSForagerState::Emerge && ActivePlanet.IsValid())
+	if (!bDefendsNest && RefugeActor.IsValid() && State == EJTSForagerState::Emerge && ActivePlanet.IsValid()
+		&& (!InHabitat || !InHabitat->bStationaryFeeding))
 	{
 		FJTSPlanetSurfaceFrame Frame;
 		if (ActivePlanet->GetSurfaceFrameAt(Refuge, RefugeActor->GetActorForwardVector(), Frame))
@@ -85,13 +99,39 @@ void AJTSPlanetSurfaceCreature::SetHabitat(AJTSPlanetEcologyHabitat* InHabitat, 
 	}
 }
 
+void AJTSPlanetSurfaceCreature::SetFeedingTarget(AActor* Target)
+{
+	if (!HasAuthority() || !IsValid(Target) || !ActivePlanet.IsValid()) return;
+	if (FeedingTarget.IsValid()) FeedingTarget->OnDestroyed.RemoveDynamic(this, &ThisClass::OnFeedingTargetDestroyed);
+	FeedingTarget = Target;
+	FeedingTarget->OnDestroyed.AddDynamic(this, &ThisClass::OnFeedingTargetDestroyed);
+	bReturningFromFeeding = false;
+	FJTSPlanetSurfaceFrame Frame;
+	if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), Target->GetActorLocation() - GetActorLocation(), Frame))
+		SetActorRotation(Frame.Transform.GetRotation());
+	SetState(EJTSForagerState::Feed, FMath::FRandRange(4.0f, 9.0f));
+}
+
+void AJTSPlanetSurfaceCreature::OnFeedingTargetDestroyed(AActor* Target)
+{
+	if (!HasAuthority() || Health->IsDead()) return;
+	FeedingTarget.Reset();
+	bReturningFromFeeding = true;
+	SetState(EJTSForagerState::Flee, 20);
+}
+
 void AJTSPlanetSurfaceCreature::SetState(EJTSForagerState NewState, float Duration)
 {
+	const bool bChanged = State != NewState;
 	State = NewState;
 	const TObjectPtr<UAnimSequence>* Clip = Animations.Find(State);
-	StateEnd = GetWorld()->GetTimeSeconds() + (Duration > 0 ? Duration : (Clip && *Clip ? (*Clip)->GetPlayLength() : 0.8f));
+	const float* ConfiguredRate = AnimationPlayRates.Find(State);
+	const float Rate = ConfiguredRate ? FMath::Max(0.1f, *ConfiguredRate) : 1.0f;
+	StateEnd = GetWorld()->GetTimeSeconds() + (Duration > 0 ? Duration : (Clip && *Clip ? (*Clip)->GetPlayLength() / Rate : 0.8f));
 	Body->ComponentVelocity = FVector::ZeroVector;
-	OnRep_State();
+	MovementSpeed = 0;
+	if (HasAuthority()) SetActorTickEnabled(false);
+	if (bChanged) OnRep_State();
 	ForceNetUpdate();
 }
 
@@ -100,11 +140,16 @@ void AJTSPlanetSurfaceCreature::OnRep_State()
 	const bool bUnderground = State == EJTSForagerState::Hidden;
 	Mesh->SetVisibility(!bUnderground);
 	Body->SetCollisionEnabled(bUnderground || State == EJTSForagerState::Dead ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
-	if (const TObjectPtr<UAnimSequence>* Clip = Animations.Find(State); Clip && *Clip)
+	const EJTSForagerState AnimationState = State == EJTSForagerState::MirrorRetract || State == EJTSForagerState::MirrorPause
+		? EJTSForagerState::Reflect : State;
+	if (const TObjectPtr<UAnimSequence>* Clip = Animations.Find(AnimationState); Clip && *Clip)
 	{
 		const bool bLoop = State == EJTSForagerState::Idle || State == EJTSForagerState::Walk
-			|| State == EJTSForagerState::Feed || State == EJTSForagerState::Flee;
+			|| State == EJTSForagerState::Feed || State == EJTSForagerState::Flee || State == EJTSForagerState::Reflect
+			|| State == EJTSForagerState::MirrorRetract || State == EJTSForagerState::MirrorPause;
 		Mesh->PlayAnimation(*Clip, bLoop);
+		const float* Rate = AnimationPlayRates.Find(AnimationState);
+		Mesh->SetPlayRate(Rate ? FMath::Max(0.1f, *Rate) : 1.0f);
 	}
 }
 
@@ -125,18 +170,36 @@ APawn* AJTSPlanetSurfaceCreature::FindThreat() const
 
 bool AJTSPlanetSurfaceCreature::MoveTowards(const FVector& Destination, float Speed, float DeltaSeconds)
 {
+	const bool bBlockedAtSameGoal = bMovementBlocked && MovementGoal.Equals(Destination, 1.f);
+	MovementGoal = Destination;
+	MovementSpeed = Speed;
+	SetActorTickEnabled(true);
+	return !bBlockedAtSameGoal;
+}
+
+bool AJTSPlanetSurfaceCreature::AdvanceMovement(const FVector& Destination, float Speed, float DeltaSeconds)
+{
 	AJTSPlanetAnchor* Planet = ActivePlanet.Get();
 	if (!Planet) return false;
-	FVector Ground, Heading;
-	if (!Steering->Advance(Planet, GetActorLocation(), Destination - GetActorLocation(), Speed, DeltaSeconds, Ground, Heading)) return false;
-	// A species cannot wander out of its authored illumination or activity boundary.
-	if (Habitat.IsValid() && !Habitat->ContainsPoint(Ground, Planet)) return false;
-	FJTSPlanetSurfaceFrame Frame;
-	if (!Planet->GetSurfaceFrameAt(Ground, Heading, Frame)) return false;
 	const FVector Previous = GetActorLocation();
-	const FQuat Rotation = FQuat::Slerp(GetActorQuat(), Frame.Transform.GetRotation(), FMath::Clamp(DeltaSeconds * 9.0f, 0.0f, 1.0f));
-	SetActorLocationAndRotation(Ground, Rotation, false);
-	Body->ComponentVelocity = (Ground - Previous) / FMath::Max(DeltaSeconds, 0.001f);
+	const int32 Steps = FMath::Clamp(FMath::CeilToInt(DeltaSeconds / 0.05f), 1, 16);
+	const float StepTime = DeltaSeconds / Steps;
+	for (int32 Step = 0; Step < Steps; ++Step)
+	{
+		FVector Ground, Heading;
+		const float Remaining = FVector::VectorPlaneProject(Destination - GetActorLocation(), Planet->GetRadialUpVector(GetActorLocation())).Size();
+		if (Remaining < 2) break;
+		// Slow down while turning into a nearby destination instead of orbiting it at full run speed.
+		const float ArrivalSpeed = FMath::Min3(Speed, Remaining * Steering->HeadingResponse * 0.5f, Remaining / StepTime);
+		if (!Steering->Advance(Planet, GetActorLocation(), Destination - GetActorLocation(), ArrivalSpeed, StepTime, Ground, Heading)) return false;
+		// A species cannot wander out of its authored illumination or activity boundary.
+		if (Habitat.IsValid() && !bReturningFromFeeding && !bEntranceDefense && !Habitat->ContainsPoint(Ground, Planet)) return false;
+		FJTSPlanetSurfaceFrame Frame;
+		if (!Planet->GetSurfaceFrameAt(Ground, Heading, Frame)) return false;
+		const FQuat Rotation = FQuat::Slerp(GetActorQuat(), Frame.Transform.GetRotation(), FMath::Clamp(StepTime * 9.0f, 0.0f, 1.0f));
+		SetActorLocationAndRotation(Ground, Rotation, false);
+	}
+	Body->ComponentVelocity = (GetActorLocation() - Previous) / FMath::Max(DeltaSeconds, 0.001f);
 	return true;
 }
 
@@ -169,13 +232,241 @@ void AJTSPlanetSurfaceCreature::ChooseNextActivity()
 	SetState(EJTSForagerState::Idle, 3);
 }
 
+bool AJTSPlanetSurfaceCreature::BelongsToRefuge(const AJTSPlanetEcologyHabitat* RefugeOwner) const
+{
+	return RefugeActor.Get() == RefugeOwner || Habitat.Get() == RefugeOwner;
+}
+bool AJTSPlanetSurfaceCreature::IsAlive() const { return Health && !Health->IsDead(); }
+void AJTSPlanetSurfaceCreature::BeginEntranceEmergence(const FTransform& MouthPose, const FVector& ExitPoint)
+{
+	if (!HasAuthority()) return;
+	bTemporaryEntranceDefender = true;
+	bExitingEntrance = true;
+	EntranceExitPoint = ExitPoint;
+	SetActorLocationAndRotation(MouthPose.GetLocation(), MouthPose.GetRotation(), false);
+	SetState(EJTSForagerState::Emerge, 0);
+}
+void AJTSPlanetSurfaceCreature::DefendEntrance(APawn* Target, const FVector& Origin, float Leash, int32 Slot, int32 CohortSize)
+{
+	if (!HasAuthority() || !IsAlive() || !IsValid(Target)) return;
+	if (FVector::DistSquared(Target->GetActorLocation(), Origin) > FMath::Square(Leash)) return;
+	if (const auto* TargetHealth = Target->FindComponentByClass<UJTSHealthComponent>(); TargetHealth && TargetHealth->IsDead()) return;
+	EntranceDefenseTarget = Target; EntranceDefenseOrigin = Origin; EntranceDefenseLeash = Leash;
+	DefenseSlot = Slot;
+	DefenseCohortSize = FMath::Max(1, CohortSize);
+	if (bReturningFromDefense && GetWorld()->GetTimeSeconds() < DefenseReturnAfter) return;
+	bReturningFromDefense = false;
+	if (!bEntranceDefense)
+	{
+		MirrorAggressors.Reset();
+		bMirrorRetaliation = false;
+		Aggressor.Reset();
+		EntranceDefenseForward = GetActorForwardVector();
+		MirrorGuardBlockedTime = 0;
+		bMirrorGuardFallback = false;
+		bEntranceDefense = true;
+		SetState(State == EJTSForagerState::Hidden || bTemporaryEntranceDefender ? EJTSForagerState::Emerge : EJTSForagerState::Walk, 0);
+	}
+	if (bExitingEntrance) MoveTowards(EntranceExitPoint, FleeSpeed, 0);
+}
+void AJTSPlanetSurfaceCreature::ReturnFromEntranceDefense(bool bEntranceDestroyed)
+{
+	if (!HasAuthority() || !bEntranceDefense || !IsAlive()) return;
+	if (bReturningFromDefense) { bDestroyAfterDefense |= bEntranceDestroyed; return; }
+	MirrorDefense->StopReflection();
+	EntranceDefenseTarget.Reset(); Aggressor.Reset();
+	bReturningFromDefense = true;
+	bExitingEntrance = false;
+	bDestroyAfterDefense = bEntranceDestroyed || bTemporaryEntranceDefender;
+	DefenseReturnAfter = GetWorld()->GetTimeSeconds();
+	if (MirrorDefense->bEnabled)
+	{
+		DefenseReturnAfter += MirrorDefense->RetractSeconds + MirrorDefense->SurfacePauseSeconds;
+		SetState(EJTSForagerState::MirrorRetract, MirrorDefense->RetractSeconds);
+	}
+	else SetState(EJTSForagerState::Walk, 30);
+}
+
+APawn* AJTSPlanetSurfaceCreature::FindMirrorAggressor()
+{
+	// Damage creates individual threat. Proximity alone can never recreate a forgotten target.
+	MirrorAggressors.RemoveAll([this](const auto& Candidate)
+	{
+		const APawn* Pawn = Candidate.Get();
+		if (!Pawn || FVector::DistSquared(Pawn->GetActorLocation(), GetActorLocation()) > FMath::Square(LeashRadius)) return true;
+		const auto* TargetHealth = Pawn->FindComponentByClass<UJTSHealthComponent>();
+		return TargetHealth && TargetHealth->IsDead();
+	});
+	APawn* Closest = nullptr;
+	double Best = TNumericLimits<double>::Max();
+	for (const auto& Candidate : MirrorAggressors)
+	{
+		const double Distance = FVector::DistSquared(Candidate->GetActorLocation(), GetActorLocation());
+		if (Distance < Best) { Best = Distance; Closest = Candidate.Get(); }
+	}
+	return Closest;
+}
+
+bool AJTSPlanetSurfaceCreature::UpdateMirrorPosture(double Now, APawn* Target)
+{
+	if (State == EJTSForagerState::Reflect)
+	{
+		// Reflection has no duration limit. Only losing the provoked target begins retraction.
+		if (IsValid(Target)) { MirrorDefense->AimAt(Target); return true; }
+		MirrorDefense->StopReflection();
+		SetState(EJTSForagerState::MirrorRetract, MirrorDefense->RetractSeconds);
+		return true;
+	}
+	if (State == EJTSForagerState::MirrorRetract)
+	{
+		if (Now >= StateEnd) SetState(EJTSForagerState::MirrorPause, MirrorDefense->SurfacePauseSeconds);
+		return true;
+	}
+	if (State == EJTSForagerState::MirrorPause) return Now < StateEnd;
+	return false;
+}
+bool AJTSPlanetSurfaceCreature::UpdateEntranceDefense(double Now, float Dt)
+{
+	if (!bEntranceDefense) return false;
+	auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(RefugeActor.Get());
+	const bool bEntranceDestroyed = (Mouth && Mouth->IsEntranceBlocked()) || (Habitat.IsValid() && Habitat->IsEntranceBlocked());
+	APawn* Target = EntranceDefenseTarget.Get();
+	const auto* TargetHealth = Target ? Target->FindComponentByClass<UJTSHealthComponent>() : nullptr;
+	if (!Target || (TargetHealth && TargetHealth->IsDead())
+		|| FVector::DistSquared(Target->GetActorLocation(), EntranceDefenseOrigin) > FMath::Square(EntranceDefenseLeash))
+	{
+		// Another actual nest attacker can retain the alarm when the selected
+		// target leaves. Do not insert a false recovery window between players.
+		Target = Mouth ? Mouth->Blockade->FindDefenseAggressor() : nullptr;
+		if (Target) EntranceDefenseTarget = Target;
+		else ReturnFromEntranceDefense(bEntranceDestroyed);
+	}
+	if (bReturningFromDefense || !EntranceDefenseTarget.IsValid())
+	{
+		if (MirrorDefense->bEnabled && Now < DefenseReturnAfter)
+		{
+			UpdateMirrorPosture(Now, nullptr);
+			return true;
+		}
+		if (State != EJTSForagerState::Walk) SetState(EJTSForagerState::Walk, 30);
+		if (ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), EntranceDefenseOrigin) < RefugeEntryDistance)
+		{
+			bEntranceDefense = false;
+			if (bDestroyAfterDefense)
+			{
+				if (Mouth && !Mouth->IsEntranceBlocked())
+					Mouth->Blockade->UnregisterResident(this, false);
+				Destroy();
+			}
+			else SetState(EJTSForagerState::Burrow, 0);
+		}
+		else MoveTowards(EntranceDefenseOrigin, FleeSpeed, Dt);
+		return true;
+	}
+	if (bExitingEntrance)
+	{
+		// The emergence clip and forward travel happen together, so successive animals clear the lip.
+		MoveTowards(EntranceExitPoint, FleeSpeed, Dt);
+		if (ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), EntranceExitPoint) > 25) return true;
+		bExitingEntrance = false;
+		SetState(EJTSForagerState::Flee, 20);
+	}
+	if ((State == EJTSForagerState::Emerge || State == EJTSForagerState::Hit || State == EJTSForagerState::Attack) && Now < StateEnd) return true;
+	Target = EntranceDefenseTarget.Get();
+	if (MirrorDefense->bEnabled)
+	{
+		if (UpdateMirrorPosture(Now, Target)) return true;
+		// Fixed, mouth-relative guard lanes. Moving the player never drags the cohort away from its nest.
+		const FVector Up = ActivePlanet->GetRadialUpVector(EntranceDefenseOrigin);
+		const FVector Forward = FVector::VectorPlaneProject(EntranceDefenseForward, Up).GetSafeNormal();
+		const FVector Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
+		const int32 Column = DefenseSlot % 3, Row = DefenseSlot / 3;
+		const FVector GuardPoint = EntranceDefenseOrigin + Forward * (MirrorDefense->GuardRadius + Row * 70.f) + Right * ((Column-1)*105.f);
+		FJTSPlanetSurfaceHit GuardSurface;
+		if (!ActivePlanet->ProjectPointToSurface(GuardPoint, GuardSurface) || !Steering->IsWalkable(ActivePlanet.Get(), GuardSurface))
+			bMirrorGuardFallback = true;
+		const float Remaining = bMirrorGuardFallback ? 0.f : ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), GuardSurface.ImpactPoint);
+		if (Remaining > 30)
+		{
+			if (State != EJTSForagerState::Flee) SetState(EJTSForagerState::Flee, 20);
+			MoveTowards(GuardSurface.ImpactPoint, FleeSpeed, Dt);
+			MirrorGuardBlockedTime = bMovementBlocked ? MirrorGuardBlockedTime + Dt : 0.f;
+			// A rock beside the mouth must not leave a reflector running against it forever.
+			if (MirrorGuardBlockedTime > 1.5f) bMirrorGuardFallback = true;
+		}
+		else
+		{
+			Body->ComponentVelocity = FVector::ZeroVector;
+			if (State != EJTSForagerState::Reflect) SetState(EJTSForagerState::Reflect, 0);
+			MirrorDefense->AimAt(Target);
+		}
+		return true;
+	}
+	FJTSPlanetSurfaceHit TargetSurface;
+	if (!ActivePlanet->ProjectPointToSurface(Target->GetActorLocation(), TargetSurface)) return true;
+	const FVector Up = ActivePlanet->GetRadialUpVector(TargetSurface.ImpactPoint);
+	FVector Forward, Right;
+	Up.FindBestAxisVectors(Forward, Right);
+	const float Angle = DefenseSlot * 2 * PI / DefenseCohortSize;
+	FJTSPlanetSurfaceHit ApproachSurface;
+	if (!ActivePlanet->ProjectPointToSurface(TargetSurface.ImpactPoint + (Forward * FMath::Cos(Angle) + Right * FMath::Sin(Angle)) * AttackReach * 0.80f, ApproachSurface)) return true;
+	const FVector Approach = ApproachSurface.ImpactPoint;
+	// Reach the individual approach point before attacking. Otherwise every animal stops at the same near edge.
+	if (FVector::DistSquared(GetActorLocation(), Approach) > FMath::Square(15.0f))
+	{
+		if (State != EJTSForagerState::Flee) SetState(EJTSForagerState::Flee, 20);
+		MoveTowards(Approach, FleeSpeed, Dt);
+		return true;
+	}
+	// Combat distances use the real ground below the capsule, including inside a deep crater.
+	if (FVector::DistSquared(GetActorLocation(), TargetSurface.ImpactPoint) < FMath::Square(AttackReach)
+		&& FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) < FMath::Square(AttackReach + Target->GetSimpleCollisionHalfHeight()))
+	{
+		if (Now >= NextAttack)
+		{
+			FHitResult Hit; FCollisionQueryParams Params(SCENE_QUERY_STAT(EntranceDefense), true, this); Params.AddIgnoredActor(Target);
+			if (!GetWorld()->LineTraceSingleByChannel(Hit, GetActorLocation() + GetActorUpVector() * 35, Target->GetActorLocation(), ECC_Visibility, Params))
+			{
+				FJTSPlanetSurfaceFrame AttackFrame;
+				if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), TargetSurface.ImpactPoint - GetActorLocation(), AttackFrame))
+					SetActorRotation(AttackFrame.Transform.GetRotation());
+				if (!MirrorDefense->bEnabled) UGameplayStatics::ApplyDamage(Target, AttackDamage, nullptr, this, nullptr);
+				NextAttack = Now + AttackInterval; SetState(EJTSForagerState::Attack, 0);
+				return true;
+			}
+		}
+	}
+	return true;
+}
+
 void AJTSPlanetSurfaceCreature::UpdateBehavior()
 {
 	if (!HasAuthority() || !ActivePlanet.IsValid() || Health->IsDead()) return;
 	const double Now = GetWorld()->GetTimeSeconds();
-	const float Dt = FMath::Clamp(static_cast<float>(Now - LastUpdate), 0.001f, 0.15f);
+	// Decisions run at a modest cadence; active movement advances separately on every server frame.
+	const float Dt = FMath::Max(static_cast<float>(Now - LastUpdate), 0.001f);
 	LastUpdate = Now;
+	MovementSpeed = 0;
+	Body->ComponentVelocity = FVector::ZeroVector;
+	SetActorTickEnabled(false);
 	if (IsHidden()) return;
+	if (UpdateEntranceDefense(Now, Dt)) return;
+	if (MirrorDefense->bEnabled && bMirrorRetaliation)
+	{
+		APawn* Target = FindMirrorAggressor();
+		Aggressor = Target;
+		if (Target)
+		{
+			if (State == EJTSForagerState::Hit && Now < StateEnd) return;
+			if (State != EJTSForagerState::Reflect) SetState(EJTSForagerState::Reflect, 0);
+			MirrorDefense->AimAt(Target);
+			return;
+		}
+		if (UpdateMirrorPosture(Now, nullptr)) return;
+		bMirrorRetaliation = false;
+		SetState(EJTSForagerState::Flee, 20);
+	}
+	MirrorDefense->StopReflection();
 	if (Habitat.IsValid() && !bDefendsNest)
 	{
 		const UJTSHealthComponent* RefugeHealth = RefugeActor.IsValid() ? RefugeActor->FindComponentByClass<UJTSHealthComponent>() : nullptr;
@@ -185,7 +476,7 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 			RefugeActor = Habitat->FindRefugeActor(GetActorLocation());
 			if (RefugeActor.IsValid())
 			{
-				Refuge = RefugeActor->GetActorLocation(); Home = Refuge;
+				Refuge = AJTSPlanetEcologyHabitat::GetRefugeSurfaceLocation(RefugeActor.Get()); Home = Refuge;
 				if (State == EJTSForagerState::Hidden || State == EJTSForagerState::Burrow)
 				{
 					FJTSPlanetSurfaceFrame Frame;
@@ -199,12 +490,12 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 		}
 		else
 		{
-			Refuge = RefugeActor->GetActorLocation(); Home = Refuge;
+			Refuge = AJTSPlanetEcologyHabitat::GetRefugeSurfaceLocation(RefugeActor.Get()); Home = Refuge;
 		}
 	}
 	const bool bEnded = Now >= StateEnd;
 	if (State == EJTSForagerState::Burrow) { if (bEnded) SetState(EJTSForagerState::Hidden, FMath::FRandRange(12.0f, 28.0f)); return; }
-	if (State == EJTSForagerState::Hidden) { if (bEnded && !FindThreat()) SetState(EJTSForagerState::Emerge, 0); return; }
+	if (State == EJTSForagerState::Hidden) { if (!bReturningFromFeeding && bEnded && !FindThreat()) SetState(EJTSForagerState::Emerge, 0); return; }
 	if (State == EJTSForagerState::Startle || State == EJTSForagerState::Hit)
 	{
 		if (bEnded) SetState((bDefendsNest || (bRetaliates && Aggressor.IsValid())) ? EJTSForagerState::Idle : EJTSForagerState::Flee, 15);
@@ -264,8 +555,8 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 				if (!GetWorld()->LineTraceSingleByChannel(Obstacle, GetActorLocation() + GetActorUpVector() * 35,
 					Threat->GetActorLocation(), ECC_Visibility, Params))
 				{
-					UGameplayStatics::ApplyDamage(Threat, AttackDamage, nullptr, this, nullptr);
-					NextAttack = Now + 1.8;
+					if (!MirrorDefense->bEnabled) UGameplayStatics::ApplyDamage(Threat, AttackDamage, nullptr, this, nullptr);
+					NextAttack = Now + AttackInterval;
 					SetState(EJTSForagerState::Attack, 0);
 				}
 			}
@@ -279,6 +570,21 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 		return;
 	}
 	Aggressor.Reset();
+	if (bReturningFromFeeding)
+	{
+		if (RefugeActor.IsValid()) SetState(EJTSForagerState::Flee, 20);
+		return;
+	}
+	if (FeedingTarget.IsValid())
+	{
+		// Only a visual activity: no resource, health or inventory mutation.
+		if (State != EJTSForagerState::Feed && State != EJTSForagerState::Idle)
+			SetFeedingTarget(FeedingTarget.Get());
+		else if (bEnded)
+			SetState(State == EJTSForagerState::Feed ? EJTSForagerState::Idle : EJTSForagerState::Feed,
+				State == EJTSForagerState::Feed ? FMath::FRandRange(1.0f, 3.0f) : FMath::FRandRange(4.0f, 9.0f));
+		return;
+	}
 	if (bDefendsNest && FVector::DistSquared(GetActorLocation(), Home) > FMath::Square(HomeArrivalDistance))
 	{
 		if (State != EJTSForagerState::Walk) SetState(EJTSForagerState::Walk, 10);
@@ -317,6 +623,20 @@ void AJTSPlanetSurfaceCreature::OnDamaged(float Current, float Maximum, float Da
 	if (!HasAuthority() || Health->IsDead()) return;
 	APawn* Pawn = Cast<APawn>(Causer);
 	if (!Pawn && IsValid(Causer)) Pawn = Causer->GetInstigator();
+	if (MirrorDefense->bEnabled)
+	{
+		// An active nest alarm owns the larger, mouth-centred leash. A new hit after
+		// that alarm ended starts a fresh, smaller, creature-centred retaliation.
+		if (Pawn && (!bEntranceDefense || bReturningFromDefense))
+		{
+			MirrorAggressors.AddUnique(Pawn);
+			bMirrorRetaliation = true;
+			bEntranceDefense = false;
+			bReturningFromDefense = false;
+		}
+		if (State == EJTSForagerState::Reflect) return;
+	}
+	MirrorDefense->StopReflection();
 	Aggressor = Pawn;
 	AggressionOrigin = GetActorLocation();
 	SetState(EJTSForagerState::Hit, 0);
@@ -325,6 +645,8 @@ void AJTSPlanetSurfaceCreature::OnDamaged(float Current, float Maximum, float Da
 void AJTSPlanetSurfaceCreature::OnDied(AController* InstigatorController, AActor* Causer)
 {
 	if (!HasAuthority()) return;
+	MirrorDefense->StopReflection();
+	if (auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(RefugeActor.Get())) Mouth->Blockade->UnregisterResident(this, true);
 	GetWorldTimerManager().ClearTimer(BehaviorTimer);
 	SetState(EJTSForagerState::Dead, 0);
 	SetLifeSpan(8);
@@ -338,12 +660,14 @@ void AJTSPlanetSurfaceCreature::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTS
 FText AJTSPlanetSurfaceCreature::GetMeleeTargetDisplayName_Implementation() const { return DisplayName; }
 FText AJTSPlanetSurfaceCreature::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("攻击")); }
 FVector AJTSPlanetSurfaceCreature::GetMeleeTargetAnchorWorldLocation_Implementation() const { return GetActorLocation() + GetActorUpVector() * 20; }
-void AJTSPlanetSurfaceCreature::OnSettlementAttackStarted_Implementation() { if (HasAuthority()) SetState(EJTSForagerState::Attack, 0); }
+void AJTSPlanetSurfaceCreature::OnSettlementAttackStarted_Implementation() { if (HasAuthority() && !MirrorDefense->bEnabled) SetState(EJTSForagerState::Attack, 0); }
 void AJTSPlanetSurfaceCreature::OnSettlementForceImpact_Implementation(FVector Direction, float Speed) { if (HasAuthority() && !Health->IsDead()) SetState(EJTSForagerState::Hit, 0); }
 
 void AJTSPlanetSurfaceCreature::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (HasAuthority() && MovementSpeed > 0 && IsAlive())
+		bMovementBlocked = !AdvanceMovement(MovementGoal, MovementSpeed, DeltaSeconds);
 	FVector Location; FQuat Rotation;
 	if (!HasAuthority() && MotionBuffer.Sample(GetWorld()->GetTimeSeconds(), 0.1f, Location, Rotation)) SetActorLocationAndRotation(Location, Rotation, false);
 }

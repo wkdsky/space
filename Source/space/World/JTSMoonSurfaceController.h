@@ -23,6 +23,7 @@ class AJTSSpacecraftActor;
 class IJTSMoonSurfaceGameplaySettings;
 class UJTSMoonSurfaceGameplayData;
 class ULevel;
+class UJTSPlanetDistributionData;
 
 /**
  * Moon-specific gameplay controller for the active PlanetAnchor surface.
@@ -35,6 +36,7 @@ class SPACE_API AJTSMoonSurfaceController : public AActor, public IJTSPlanetSurf
 
 public:
 	AJTSMoonSurfaceController();
+	UPROPERTY(EditAnywhere, Category="Moon|Distribution") TObjectPtr<UJTSPlanetDistributionData> DistributionData;
 
 	/** Resolves a controller active in the current SpaceWorld. */
 	static AJTSMoonSurfaceController* FindMoonSurfaceController(const UObject* WorldContextObject, FName RequestedPlanetId = NAME_None);

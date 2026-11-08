@@ -17,6 +17,19 @@ enum class EJTSMoonResourceKind : uint8
 	Count UMETA(Hidden)
 };
 
+/** Smooth fields sampled in planet-local 3D, so patches have no longitude seam. */
+USTRUCT(BlueprintType)
+struct SPACE_API FJTSMoonResourcePatchSettings
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Patches") bool bEnabled = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Patches", meta=(ClampMin="100")) float PatchSize = 3500;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Patches", meta=(ClampMin="0", ClampMax="1")) float DensityContrast = 0.85f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Patches", meta=(ClampMin="0", ClampMax="4")) float CompositionContrast = 2.5f;
+	float Acceptance(const FVector& PlanetLocalPoint, int32 Seed) const;
+	float KindWeight(EJTSMoonResourceKind Kind, const FVector& PlanetLocalPoint, int32 Seed) const;
+};
+
 USTRUCT(BlueprintType)
 struct SPACE_API FJTSMoonResourceKinds
 {

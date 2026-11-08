@@ -10,6 +10,9 @@
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSPlanetSurfaceCutComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinition.h"
+#include "space/Player/JTSCharacter.h"
 
 AJTSPlanetSurfaceAttachment::AJTSPlanetSurfaceAttachment()
 {
@@ -36,13 +39,16 @@ AJTSPlanetSurfaceAttachment::AJTSPlanetSurfaceAttachment()
 	DamageTarget->SetCanEverAffectNavigation(false);
 }
 void AJTSPlanetSurfaceAttachment::Initialize(UStaticMesh* Mesh, AJTSPlanetAnchor* Planet,
-	const FTransform& Transform, bool bConform, bool bCastShadow, float SurfaceOffset, bool bDestructible, UStaticMesh* CutVolume)
+	const FTransform& Transform, bool bConform, bool bCastShadow, float SurfaceOffset, bool bDestructible, UStaticMesh* CutVolume,
+	UJTSItemDefinition* ResourceItem, int32 ResourceUnits)
 {
 	if (!HasAuthority()) return;
 	Appearance.Mesh = Mesh; Appearance.Planet = Planet; Appearance.Transform = Transform;
 	Appearance.bConform = bConform; Appearance.bCastShadow = bCastShadow; Appearance.SurfaceOffset = SurfaceOffset;
 	Appearance.bDestructible = bDestructible;
 	Appearance.CutVolume = CutVolume;
+	Appearance.ResourceItem = ResourceItem;
+	Appearance.ResourceUnits = FMath::Max(1, ResourceUnits);
 	bAlwaysRelevant = CutVolume != nullptr;
 	SetOwner(Planet); Tags.AddUnique(TEXT("PlanetSurfaceContent")); ApplyAppearance();
 }
@@ -71,7 +77,7 @@ void AJTSPlanetSurfaceAttachment::UpdateCutVisibility()
 	const bool bUsable = IsRefugeUsable();
 	SolidMesh->SetVisibility(bUsable && !Appearance.bConform);
 	SurfacePatch->SetVisibility(bUsable && Appearance.bConform);
-	DamageTarget->SetCollisionEnabled(bUsable && Appearance.bDestructible ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	DamageTarget->SetCollisionEnabled(bUsable && (Appearance.bDestructible || Appearance.ResourceItem) ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 }
 void AJTSPlanetSurfaceAttachment::OnAttachmentTransformUpdated(USceneComponent* Component, EUpdateTransformFlags Flags, ETeleportType Teleport)
 {
@@ -147,6 +153,47 @@ FVector AJTSPlanetSurfaceAttachment::GetMeleeTargetAnchorWorldLocation_Implement
 void AJTSPlanetSurfaceAttachment::OnAttachmentDepleted(AController* InstigatorController, AActor* Causer)
 {
 	if (HasAuthority() && Appearance.bDestructible) Destroy();
+}
+
+bool AJTSPlanetSurfaceAttachment::CanInteract_Implementation(APawn* Pawn) const
+{
+	return IsValid(Pawn) && Pawn->GetWorld() == GetWorld() && Appearance.ResourceItem && !bResourceConsumed
+		&& !IsActorBeingDestroyed() && IsRefugeUsable();
+}
+FText AJTSPlanetSurfaceAttachment::GetInteractionDisplayName() const
+{
+	return Appearance.ResourceItem ? Appearance.ResourceItem->DisplayName : FText::GetEmpty();
+}
+FVector AJTSPlanetSurfaceAttachment::GetInteractionAnchorWorldLocation() const
+{
+	const FVector Up = IsValid(Appearance.Planet) ? Appearance.Planet->GetRadialUpVector(GetActorLocation()) : GetActorUpVector();
+	return DamageTarget->GetComponentLocation() + Up * (DamageTarget->GetUnscaledBoxExtent().Z * GetActorScale3D().Z + 22.0f);
+}
+FText AJTSPlanetSurfaceAttachment::GetInteractionPrompt_Implementation(APawn* Pawn) const
+{
+	if (!CanInteract_Implementation(Pawn)) return FText::GetEmpty();
+	const auto* Inventory = Pawn->FindComponentByClass<UJTSInventoryComponent>();
+	if (Inventory && !Inventory->CanAddItem(Appearance.ResourceItem->ItemId, Appearance.ResourceUnits))
+		return FText::FromString(TEXT("背包已满"));
+	return FText::FromString(TEXT("[E] 拾取"));
+}
+void AJTSPlanetSurfaceAttachment::Interact_Implementation(APawn* Pawn)
+{
+	if (!HasAuthority() || !CanInteract_Implementation(Pawn) || !Pawn->HasAuthority()) return;
+	const auto* PawnHealth = Pawn->FindComponentByClass<UJTSHealthComponent>();
+	if (PawnHealth && PawnHealth->IsDead()) return;
+	const FVector Target = DamageTarget->GetComponentLocation();
+	if (FVector::DistSquared(Pawn->GetPawnViewLocation(), Target) > FMath::Square(400.0f)) return;
+	FHitResult Hit;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(SurfaceResourceInteraction), false, Pawn);
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Pawn->GetPawnViewLocation(), Target, ECC_Visibility, Query)
+		&& Hit.GetActor() != this) return;
+	auto* Inventory = Pawn->FindComponentByClass<UJTSInventoryComponent>();
+	if (!Inventory || !Inventory->CanAddItem(Appearance.ResourceItem->ItemId, Appearance.ResourceUnits)) return;
+	bResourceConsumed = true;
+	if (!Inventory->TryAddItemById(Appearance.ResourceItem->ItemId, Appearance.ResourceUnits)) { bResourceConsumed = false; return; }
+	if (auto* Character = Cast<AJTSCharacter>(Pawn)) Character->TryDepositCarriedResourcesToNearbySpacecraft();
+	Destroy();
 }
 void AJTSPlanetSurfaceAttachment::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {

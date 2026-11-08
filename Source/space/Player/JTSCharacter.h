@@ -14,10 +14,12 @@ class AJTSPlanetAnchor;
 class AJTSPlayerState;
 class UCameraComponent;
 class UJTSCarryComponent;
+class UJTSCombatFacingComponent;
 class UJTSHealthComponent;
 class UJTSInventoryComponent;
 class UJTSPlanetGravityComponent;
 class UJTSRangedWeaponComponent;
+class UJTSMiningStrikeComponent;
 class UJTSStaminaComponent;
 class UJTSWallClimbComponent;
 class UJTSWeaponVisualComponent;
@@ -133,11 +135,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
 	float GetAimPitch() const;
 
-	/**
-	 * Horizontal view offset used by the idle upper body. Tracks the camera while the
-	 * camera stays behind the chest, then returns to the body once that turn is past
-	 * the comfortable range.
-	 */
+	/** Free look does not twist the torso. Combat turns the entire body before posing the arms. */
 	UFUNCTION(BlueprintPure, Category = "Player|Aim")
 	float GetPresentationAimYaw() const;
 
@@ -148,6 +146,9 @@ public:
 
 	/** Local camera response to a shot; gameplay hit traces remain server-owned. */
 	void ApplyWeaponViewKick(float PitchDegrees);
+
+	/** Keeps the gravity-relative body frame consistent with a committed tool stroke. */
+	void AlignBodyForAction(const FVector& Forward);
 
 	/** The HUD queries this state to draw the selected-item destroy hold ring. */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
@@ -230,6 +231,7 @@ private:
 	void HandleJumpStarted(const FInputActionValue& Value);
 	void HandleClimbStarted(const FInputActionValue& Value);
 	void HandleInteractStarted(const FInputActionValue& Value);
+	void HandleInteractReleased(const FInputActionValue& Value);
 	void HandleBoardStarted(const FInputActionValue& Value);
 	void HandleEquipStarted(const FInputActionValue& Value);
 	void HandleBoardTriggered(const FInputActionValue& Value);
@@ -237,9 +239,8 @@ private:
 	void HandleBoardCanceled(const FInputActionValue& Value);
 	void HandleAttackStarted(const FInputActionValue& Value);
 	void HandleAttackReleased(const FInputActionValue& Value);
-	/** Ordinary third person never snaps the body onto a gun click. Aim and first person already face the camera. */
+	/** Commit the body to the same direction that the selected weapon will attack. */
 	void AlignBodyToViewOnAttack();
-	float GetRawViewYawDelta() const;
 	/**
 	 * First person and third-person aim keep the whole body on the camera.
 	 * Ordinary third person keeps its movement heading on the ground and in the air.
@@ -285,6 +286,7 @@ private:
 	void CancelItemDiscardHold();
 	void CompleteItemDiscardHold();
 	void ApplyProgressionMovementSpeed();
+	void ApplyProgressionSurvivability();
 	UFUNCTION(Server, Reliable)
 	void ServerSetSprintIntent(bool bRequested);
 	bool CanUseNormalGameplayInput() const;
@@ -307,9 +309,6 @@ private:
 	UFUNCTION(Server, Unreliable)
 	void ServerUpdateAimPitch(float NewPitch);
 
-	/** Owner asks the server to catch up to the current view. The server eases the feet; it does not snap. */
-	UFUNCTION(Server, Unreliable)
-	void ServerRequestViewFacing(FVector_NetQuantizeNormal ViewForward);
 	void PlayUnarmedPunchPresentation(bool bUseLeftPunch, bool bIsComboContinuation);
 	void StopUnarmedPunchPresentation();
 	void ApplySurfaceMovementSettings();
@@ -394,6 +393,10 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMeleeComponent> MeleeComponent;
 
+	/** Blueprint authors the rig's elbow reference and forearm limits on this component. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mining", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSMiningStrikeComponent> MiningStrikeComponent;
+
 	/** Server-authoritative hitscan prototype for active RangedWeapon items. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ranged", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSRangedWeaponComponent> RangedWeaponComponent;
@@ -459,10 +462,6 @@ private:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Planet|Orientation", meta = (AllowPrivateAccess = "true", ClampMin = "1.0", UIMin = "1.0"))
 	float PlanetBodyTurnInterpolationSpeed = 12.0f;
 
-	/** Comfortable upper-body follow. Past this the chest returns forward instead of wringing toward the camera. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "10.0", ClampMax = "80.0"))
-	float UpperBodyYawLimitDegrees = 48.0f;
-
 	/** Maximum body turn speed. Acceleration and braking keep short turns from snapping. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Facing", meta = (AllowPrivateAccess = "true", ClampMin = "60.0"))
 	float FootShuffleDegreesPerSecond = 1000.0f;
@@ -475,9 +474,6 @@ private:
 	float TurnVelocityDegreesPerSecond = 0.0f;
 	float TurnDirectionSign = 1.0f;
 	/** Captured view-facing request, completed over a short accelerated body turn. */
-	bool bWantsViewFacing = false;
-	bool bFinishingViewTurn = false;
-	FVector PendingViewFacingForward = FVector::ForwardVector;
 
 	/**
 	 * Blueprint-selectable third-person body behavior for real spherical planets only. Camera yaw is

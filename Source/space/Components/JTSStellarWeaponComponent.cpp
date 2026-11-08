@@ -12,6 +12,7 @@
 #include "space/Interaction/JTSCriticalHitTarget.h"
 #include "space/Items/JTSStellarLootTable.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Components/JTSCombatFacingComponent.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Weapons/JTSStellarEffectActor.h"
 #include "space/Weapons/JTSBlackHoleField.h"
@@ -146,6 +147,8 @@ void UJTSStellarWeaponComponent::SetPrimary(bool bHeld)
 	if (bHeld && !bLocalPrimary && Def && Def->Mode == EJTSStellarWeaponMode::BlackHole)
 		CastGestureUntil = GetWorld()->GetTimeSeconds() + 0.55;
 	bLocalPrimary = bHeld;
+	if (bHeld)
+		if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
 	SubmitLocalInput();
 }
 
@@ -153,6 +156,8 @@ void UJTSStellarWeaponComponent::SetSecondary(bool bHeld)
 {
 	if (bHeld && (!CanUseWeapon() || !HasActiveWeapon())) return;
 	bLocalSecondary = bHeld;
+	if (bHeld)
+		if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>()) Facing->PrepareAttack(false);
 	SubmitLocalInput();
 }
 
@@ -205,6 +210,9 @@ void UJTSStellarWeaponComponent::ServerUpdateAim_Implementation(FVector_NetQuant
 	if (!Pawn || Direction.ContainsNaN() || !FMath::IsNearlyEqual(static_cast<float>(Direction.SizeSquared()), 1.0f, 0.05f)
 		|| FVector::DotProduct(Pawn->GetBaseAimRotation().Vector(), Direction) < 0.5f) return;
 	AimDirection = Direction.GetSafeNormal();
+	if (auto* View = GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>())
+		View->AcceptViewIntent(FVector::ZeroVector, AimDirection);
+	if (auto* Character = Cast<AJTSCharacter>(GetOwner())) Character->AlignBodyForAction(AimDirection);
 	LastHeartbeat = GetWorld()->GetTimeSeconds();
 }
 

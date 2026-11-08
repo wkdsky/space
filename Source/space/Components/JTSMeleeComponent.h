@@ -53,6 +53,12 @@ public:
 	/** Starts one attack directly. Retained for Blueprint callers that do not use the player input path. */
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
 	void StartAttack();
+	void StartWorkAttack(AActor* WorkTarget);
+	bool CanApplyToolContact(AActor* Target) const;
+	bool ApplyToolContact(AActor* Target);
+
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	bool IsAttacking() const { return bIsAttacking; }
 
 	/** Immediately clears the attack state. Use this for interruption or explicit cancellation. */
 	UFUNCTION(BlueprintCallable, Category = "Melee|Attack")
@@ -72,7 +78,7 @@ public:
 
 	/** Input intent RPCs; hit targets are always acquired again on the authority. */
 	UFUNCTION(Server, Reliable)
-	void ServerStartAttack();
+	void ServerStartAttack(FVector_NetQuantize10 EyeOffset, FVector_NetQuantizeNormal Direction);
 
 	UFUNCTION(Server, Reliable)
 	void ServerPerformHitCheck();
@@ -90,10 +96,10 @@ public:
 	void MulticastPunchImpact(FVector_NetQuantize Location);
 
 	/** Presentation is multicasted after the server accepts each attack segment. */
-	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastBeginAttackPresentation(EJTSAttackType AttackType, bool bUseLeftPunch, bool bIsComboContinuation);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastBeginAttackPresentation(EJTSAttackType AttackType, bool bUseLeftPunch, bool bIsComboContinuation, float SwingPlayRate, FVector_NetQuantizeNormal Forward);
 
-	UFUNCTION(NetMulticast, Unreliable)
+	UFUNCTION(NetMulticast, Reliable)
 	void MulticastEndAttackPresentation(EJTSAttackType AttackType);
 
 	/** Bind a montage, weapon animation, or attack effects here without coupling this component to an Anim Blueprint. */
@@ -128,6 +134,12 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
 	float GetMeleeSwingPhase() const;
+
+	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
+	float GetHeldWeaponSwingDuration() const;
+
+	float GetHeldWeaponSwingPlayRate() const { return HeldWeaponSwingPlayRate; }
+	uint32 GetHeldWeaponSwingSequence() const { return HeldWeaponSwingSequence; }
 
 	/** Seconds since this punch's presentation began. Zero once the swing has been cleared. */
 	UFUNCTION(BlueprintPure, Category = "Melee|Attack")
@@ -269,6 +281,9 @@ private:
 	/** Local presentation clock for a held-weapon chop. Starts when the multicast presentation begins. */
 	bool bMeleeSwingClockActive = false;
 	float MeleeSwingClockElapsed = 0.0f;
+	float HeldWeaponSwingPlayRate = 1.0f;
+	uint32 HeldWeaponSwingSequence = 0;
+	TWeakObjectPtr<AActor> PendingWorkTarget;
 
 	/**
 	 * Local presentation clock for one unarmed punch. One BeginAttack is one legal hit;

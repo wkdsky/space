@@ -184,8 +184,9 @@ protected:
 	/** True after the tool has been raised, so the next motion is the cut rather than another lift from the carry. */
 	bool bMeleeChopRaised = false;
 
-	/** True once this press has played its chop, so a lingering attack clock cannot restart the lift. */
-	bool bMeleeChopLatched = false;
+	/** One accepted swing waiting for the arm to finish its current cut and raise. */
+	bool bMeleeChopPending = false;
+	uint32 LastMeleeSwingSequence = 0;
 
 	/** State machine that owns the ground locomotion asset player, selected by the Animation Blueprint. */
 	UPROPERTY(EditDefaultsOnly, Category = "Ground Pose")

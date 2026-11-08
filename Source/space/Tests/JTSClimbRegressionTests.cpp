@@ -206,6 +206,41 @@ bool FJTSClimbDiagonalLeapAndDropRegression::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSPlayableClimbLeapSpanRegression,
+	"JTS.Character.PlayableClimbLeapSpan", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSPlayableClimbLeapSpanRegression::RunTest(const FString& Parameters)
+{
+	UClass* PlayerBlueprint = LoadClass<AJTSCharacter>(nullptr,
+		TEXT("/Game/Space/Blueprints/Player/BP_JTSPlayer_Casual_2.BP_JTSPlayer_Casual_2_C"));
+	if (!TestNotNull(TEXT("Playable character Blueprint loads"), PlayerBlueprint)) return false;
+	FClimbTestWorld Fixture(PlayerBlueprint);
+	// Give the actual player Blueprint enough continuous surface for full-length leaps.
+	Fixture.Wall->SetActorLocation(FVector(120.0f, 0.0f, 600.0f));
+	Fixture.Wall->SetActorScale3D(FVector(0.5f, 20.0f, 20.0f));
+	UJTSWallClimbComponent* Climb = Fixture.Character->FindComponentByClass<UJTSWallClimbComponent>();
+	if (!TestNotNull(TEXT("Playable character has the shared climb component"), Climb)) return false;
+	Climb->TryAutoAttach();
+	if (!TestTrue(TEXT("Player grabs the real wall collision"), Climb->IsClimbing())) return false;
+	const FVector Directions[] = { FVector::UpVector, FVector::RightVector, -FVector::RightVector,
+		(FVector::UpVector + FVector::RightVector).GetSafeNormal() };
+	for (const FVector& Direction : Directions)
+	{
+		const FVector Start = Fixture.Character->GetActorLocation();
+		Climb->SubmitClimbLeap(Direction);
+		if (!TestTrue(TEXT("Directional leap starts from the current grip"), Climb->IsLeaping())) return false;
+		TestTrue(TEXT("Blueprint requests a 2.4 m grip along the intended wall direction"),
+			FMath::IsNearlyEqual(FVector::DotProduct(Climb->GetStepTarget() - Start, Direction), 240.0f, 1.0f));
+		Fixture.Advance(0.35f);
+		TestTrue(TEXT("Longer leap retains its travel phase before catching"), Climb->IsLeaping());
+		Fixture.Advance(0.30f);
+		TestFalse(TEXT("Leap completes within the 0.6-second action window"), Climb->IsLeaping());
+		TestTrue(TEXT("Player actually covers at least 2.3 m without losing the grip"),
+			FVector::DotProduct(Fixture.Character->GetActorLocation() - Start, Direction) > 230.0f && Climb->IsClimbing());
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSFastClimbDescentRegression,
 	"JTS.Character.ClimbFastDescentAndBottomOut", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

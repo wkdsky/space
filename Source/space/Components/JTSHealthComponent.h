@@ -49,6 +49,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Health")
 	void SetMaxHealth(float NewMaxHealth, bool bFillHealth = true);
 
+	/** Server-only flat defense, applied after authored armor; a normal hit retains at least one damage. */
+	void SetAbilityDefense(float Defense);
+
 	/** Server-only restore path for an expedition snapshot. Normal gameplay must still use damage/heal. */
 	void RestoreAuthoritativeHealth(float NewHealth);
 
@@ -87,6 +90,7 @@ private:
 	float MaxHealth = 100.0f;
 	/** Armor is enemy configuration; corrosion removes at most 40 percentage points. */
 	UPROPERTY(EditDefaultsOnly, Category="Health", meta=(ClampMin="0", ClampMax="0.8")) float ArmorDamageReduction = 0.0f;
+	float AbilityDefense = 0.0f;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentHealth, Category = "Health", meta = (AllowPrivateAccess = "true"))
 	float CurrentHealth = 100.0f;

@@ -42,7 +42,14 @@ float UJTSHealthComponent::ApplyDamage(float Damage, AController* InstigatorCont
 	}
 
 	const auto* Status = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
-	if (!bBypassArmor) Damage *= 1.f - FMath::Clamp(ArmorDamageReduction - (Status ? Status->GetArmorReduction() : 0.f), 0.f, .8f);
+	if (!bBypassArmor)
+	{
+		Damage *= 1.f - FMath::Clamp(ArmorDamageReduction
+			- (Status ? Status->GetArmorReduction() : 0.f), 0.f, .8f);
+		// Fixed defense follows authored armor. Keep at least one damage per hit, but never
+		// raise an incoming hit that was already below one (e.g. fractional periodic damage).
+		Damage = FMath::Max(FMath::Min(Damage, 1.0f), Damage - AbilityDefense);
+	}
 	if (auto* Support = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarSupportComponent>() : nullptr)
 		Damage = Support->AbsorbDamage(Damage, DamageCauser);
 	const float PreviousHealth = CurrentHealth;
@@ -115,6 +122,14 @@ void UJTSHealthComponent::SetMaxHealth(float NewMaxHealth, bool bFillHealth)
 	if (!FMath::IsNearlyEqual(PreviousMaxHealth, MaxHealth) || !FMath::IsNearlyEqual(PreviousHealth, CurrentHealth))
 	{
 		BroadcastHealthChanged();
+	}
+}
+
+void UJTSHealthComponent::SetAbilityDefense(float Defense)
+{
+	if (CanModifyHealth() && FMath::IsFinite(Defense))
+	{
+		AbilityDefense = FMath::Max(0.0f, Defense);
 	}
 }
 

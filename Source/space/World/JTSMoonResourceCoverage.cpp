@@ -52,7 +52,8 @@ AJTSMoonResourceSpawner* FJTSMoonResourceCoverage::ResolveOwner(const FVector& S
 	const FRegion* WinningConfiguration = nullptr;
 	for (const FRegion& Region : Regions)
 	{
-		if (FVector::DotProduct(Direction, Region.CenterDirection) + 1.e-10 < Region.CosAngle) continue;
+		if (!Region.Spawner.IsValid() || Region.Spawner->IsActorBeingDestroyed()
+			|| FVector::DotProduct(Direction, Region.CenterDirection) + 1.e-10 < Region.CosAngle) continue;
 		Covering.Add(&Region);
 		if (!WinningConfiguration || Region.Spawner->OverlapPriority < WinningConfiguration->Spawner->OverlapPriority
 			|| (Region.Spawner->OverlapPriority == WinningConfiguration->Spawner->OverlapPriority
@@ -66,18 +67,18 @@ AJTSMoonResourceSpawner* FJTSMoonResourceCoverage::ResolveOwner(const FVector& S
 	const FRegion* Owner = WinningConfiguration;
 	for (const FRegion* Region : Covering)
 	{
-		if (!SameDistribution(Region->Spawner, WinningConfiguration->Spawner)) continue;
+		if (!SameDistribution(Region->Spawner.Get(), WinningConfiguration->Spawner.Get())) continue;
 		if (Region->TieRank < Owner->TieRank)
 		{
 			Owner = Region;
 		}
 	}
-	return Owner->Spawner;
+	return Owner->Spawner.Get();
 }
 
 float FJTSMoonResourceCoverage::GetOwnedAreaSquareMeters(const AJTSMoonResourceSpawner* Spawner) const
 {
-	const FRegion* Region = Regions.FindByPredicate([Spawner](const FRegion& Candidate) { return Candidate.Spawner == Spawner; });
+	const FRegion* Region = Regions.FindByPredicate([Spawner](const FRegion& Candidate) { return Candidate.Spawner.Get() == Spawner; });
 	if (!Region) return 0;
 	const bool bHasOverlap = Regions.ContainsByPredicate([Region](const FRegion& Other)
 	{
@@ -86,7 +87,7 @@ float FJTSMoonResourceCoverage::GetOwnedAreaSquareMeters(const AJTSMoonResourceS
 	});
 	if (!bHasOverlap) return Spawner->GetCoverageAreaSquareMeters();
 	// Equal-area quadrature estimates the clipped region, so overlap rejection does not densify its remainder.
-	constexpr int32 SampleCount = 4096;
+	constexpr int32 SampleCount = 512;
 	constexpr double GoldenAngle = 2.399963229728653;
 	FVector TangentX, TangentY;
 	Region->CenterDirection.FindBestAxisVectors(TangentX, TangentY);
@@ -106,14 +107,61 @@ float FJTSMoonResourceCoverage::GetOwnedAreaSquareMeters(const AJTSMoonResourceS
 
 bool FJTSMoonResourceCoverage::CanPlace(const FVector& SurfaceLocation, float MinimumSpacing) const
 {
-	return !Placements.ContainsByPredicate([this, &SurfaceLocation, MinimumSpacing](const FPlacement& Placement)
+	if (!IsValid(Planet)) return false;
+	const FVector Point = SpacingPoint(SurfaceLocation);
+	const FIntVector Cell = CellAt(Point);
+	const double Radius = Planet->GetApproximateRadius();
+	const double QueryChord = 2 * Radius * FMath::Sin(FMath::Min(UE_DOUBLE_PI, MinimumSpacing / Radius) * 0.5);
+	const int32 Range = FMath::Max(1, FMath::CeilToInt(QueryChord / CellSize));
+	for (int32 X = -Range; X <= Range; ++X)
+	for (int32 Y = -Range; Y <= Range; ++Y)
+	for (int32 Z = -Range; Z <= Range; ++Z)
 	{
-		return Planet->ApproximateSurfaceArcDistance(Placement.Location, SurfaceLocation)
-			< FMath::Max(MinimumSpacing, Placement.MinimumSpacing);
-	});
+		const TArray<int32>* Bucket = SpacingGrid.Find(Cell + FIntVector(X, Y, Z));
+		if (!Bucket) continue;
+		for (int32 Index : *Bucket)
+		{
+			const FPlacement& Placement = Placements[Index];
+			if (Placement.bTracked && (!Placement.Resource.IsValid() || Placement.Resource->IsActorBeingDestroyed())) continue;
+			const double Arc = FMath::Min(UE_DOUBLE_PI, FMath::Max(MinimumSpacing, Placement.MinimumSpacing) / Radius);
+			const double Chord = 2 * Radius * FMath::Sin(Arc * 0.5);
+			if (FVector::DistSquared(Point, Placement.Location) < Chord * Chord) return false;
+		}
+	}
+	return true;
 }
 
-void FJTSMoonResourceCoverage::RecordPlacement(const FVector& SurfaceLocation, float MinimumSpacing)
+FVector FJTSMoonResourceCoverage::SpacingPoint(const FVector& Location) const
 {
-	Placements.Add({SurfaceLocation, MinimumSpacing});
+	return Planet->GetRadialUpVector(Location) * Planet->GetApproximateRadius();
+}
+
+FIntVector FJTSMoonResourceCoverage::CellAt(const FVector& Point) const
+{
+	return FIntVector(FMath::FloorToInt(Point.X / CellSize), FMath::FloorToInt(Point.Y / CellSize), FMath::FloorToInt(Point.Z / CellSize));
+}
+
+void FJTSMoonResourceCoverage::RebuildSpacingGrid()
+{
+	SpacingGrid.Reset();
+	for (int32 Index = 0; Index < Placements.Num(); ++Index)
+		SpacingGrid.FindOrAdd(CellAt(Placements[Index].Location)).Add(Index);
+}
+
+void FJTSMoonResourceCoverage::RemoveInvalidPlacements()
+{
+	if (Placements.RemoveAll([](const FPlacement& P)
+		{ return P.bTracked && (!P.Resource.IsValid() || P.Resource->IsActorBeingDestroyed()); }) > 0) RebuildSpacingGrid();
+}
+
+void FJTSMoonResourceCoverage::RecordPlacement(const FVector& SurfaceLocation, float MinimumSpacing, AActor* Resource)
+{
+	if (!IsValid(Planet)) return;
+	if (MinimumSpacing > CellSize)
+	{
+		CellSize = MinimumSpacing;
+		RebuildSpacingGrid();
+	}
+	const int32 Index = Placements.Add({SpacingPoint(SurfaceLocation), MinimumSpacing, Resource, Resource != nullptr});
+	SpacingGrid.FindOrAdd(CellAt(Placements[Index].Location)).Add(Index);
 }

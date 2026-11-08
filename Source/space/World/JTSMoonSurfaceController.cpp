@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/World/JTSMoonSurfaceController.h"
+#include "space/World/JTSPlanetDistributionData.h"
 
 #include "Engine/Level.h"
 #include "EngineUtils.h"
@@ -422,6 +423,8 @@ bool AJTSMoonSurfaceController::InitializeConfiguredSurfaceGameplay()
 	{
 		SpawnConfiguredCorpseAtPlanetSurfaceAnchor();
 	}
+
+	if (DistributionData) DistributionData->ApplyActorPoses(World);
 
 	// Landmarks must exist before procedural nests and resources derive their exclusion zones.
 	InitializeMoonLandmarksAndMoonAntNests();

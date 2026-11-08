@@ -31,7 +31,9 @@ public:
 		UWorld* World,
 		EJTSWorldPickupItemType NewItemType,
 		const FVector& GroundLocation,
-		AActor* SourceActor);
+		AActor* SourceActor,
+		const FTransform* AuthoredPose = nullptr,
+		int32 VisualVariant = INDEX_NONE);
 
 	/** Spawns one gameplay pickup with a short upward launch and grounded landing. */
 	static AJTSWorldPickupActor* SpawnGameplayDrop(
@@ -178,6 +180,9 @@ private:
 	TWeakObjectPtr<AJTSPlanetAnchor> SurfacePlanet;
 	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
 	FVector SurfaceUp = FVector::UpVector;
+	/** Optional authored appearance; item instance identity remains unique on every spawn. */
+	UPROPERTY(ReplicatedUsing = OnRep_SurfacePresentation)
+	int32 SurfaceVisualVariant = INDEX_NONE;
 	float DropElapsedSeconds = 0.0f;
 	double FailureFeedbackEndTime = 0.0;
 	FString FailureFeedbackText;

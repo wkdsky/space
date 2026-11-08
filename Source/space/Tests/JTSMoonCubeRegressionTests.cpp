@@ -181,7 +181,10 @@ bool FJTSWeaponTrajectoryRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Cube starts alive for trajectory checks"), InitialHealth > 0.0f);
 	Ranged->StartFire();
 	Ranged->StopFire();
-	TestEqual(TEXT("Camera target takes no damage when the muzzle points away"), Health->GetHealth(), InitialHealth);
+	TestTrue(TEXT("A shot refreshes the weapon pose before tracing"), Visual->GetMuzzleWorldTransform(MuzzleTransform)
+		&& FVector::DotProduct(MuzzleTransform.GetUnitAxis(EAxis::X),FVector::ForwardVector)>.99f);
+	TestTrue(TEXT("The refreshed physical barrel reaches the forward target"),Health->GetHealth()<InitialHealth);
+	const float AfterFirstShot=Health->GetHealth();
 	for (int32 Step = 0; Step < 10; ++Step) Fixture.World->Tick(LEVELTICK_All, 0.05f);
 	Muzzle->SetWorldLocationAndRotation(FVector(100.0f, 0.0f, 174.0f), FRotator::ZeroRotator);
 	TestTrue(TEXT("Fire interval has elapsed"), Fixture.World->GetTimeSeconds() >= 0.42f);
@@ -195,7 +198,26 @@ bool FJTSWeaponTrajectoryRegression::RunTest(const FString& Parameters)
 	TestEqual(TEXT("An aligned muzzle ray reaches the cube"), AlignedHit.GetActor(), static_cast<AActor*>(Cube));
 	Ranged->StartFire();
 	Ranged->StopFire();
-	TestTrue(TEXT("The same target takes damage when the barrel intersects it"), Health->GetHealth() < InitialHealth);
+	TestTrue(TEXT("The same target takes damage when the barrel intersects it"), Health->GetHealth() < AfterFirstShot);
+	for (int32 Step=0; Step<10; ++Step) Fixture.World->Tick(LEVELTICK_All,.05f);
+	Visual->RefreshForAttack();
+	Visual->GetMuzzleWorldTransform(MuzzleTransform);
+	auto* Cover=Fixture.World->SpawnActor<AActor>();
+	auto* CoverBody=NewObject<UBoxComponent>(Cover);
+	Cover->SetRootComponent(CoverBody);
+	CoverBody->SetBoxExtent(FVector(2));
+	CoverBody->SetCollisionProfileName(TEXT("BlockAll"));
+	CoverBody->RegisterComponent();
+	const FVector CoverPoint=MuzzleTransform.GetLocation()+MuzzleTransform.GetUnitAxis(EAxis::X)*15;
+	Cover->SetActorLocation(CoverPoint);
+	FVector Camera,CameraDirection;
+	Ranged->GetCameraRay(Camera,CameraDirection);
+	TestTrue(TEXT("The camera can see past cover that is immediately in front of the barrel"),
+		FVector::VectorPlaneProject(CoverPoint-Camera,CameraDirection).Size()>4);
+	const float BeforeCover=Health->GetHealth();
+	Ranged->StartFire(); Ranged->StopFire();
+	TestEqual(TEXT("Muzzle cover blocks damage even when the camera ray is clear"),Health->GetHealth(),BeforeCover);
+	Cover->Destroy();
 
 	if (!TestTrue(TEXT("Knife can be equipped"), Inventory->TryAddItemById(EJTSItemId::ShortBlade))) return false;
 	int32 KnifeSlot = INDEX_NONE;

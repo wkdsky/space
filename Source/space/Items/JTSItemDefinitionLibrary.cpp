@@ -35,6 +35,7 @@ namespace
 	{
 		switch (ItemId)
 		{
+		case EJTSItemId::Pickaxe: return TEXT("/Game/Space/Data/Items/DA_Item_Pickaxe.DA_Item_Pickaxe");
 		case EJTSItemId::ShortBlade: return TEXT("/Game/Space/Data/Items/DA_Item_ShortBlade.DA_Item_ShortBlade");
 		case EJTSItemId::ShockPole: return TEXT("/Game/Space/Data/Items/DA_Item_ShockPole.DA_Item_ShockPole");
 		case EJTSItemId::PowerHammer: return TEXT("/Game/Space/Data/Items/DA_Item_PowerHammer.DA_Item_PowerHammer");
@@ -48,6 +49,7 @@ namespace
 		case EJTSItemId::Rock: return TEXT("/Game/Space/Data/Items/DA_Item_Rock.DA_Item_Rock");
 		case EJTSItemId::Ore: return TEXT("/Game/Space/Data/Items/DA_Item_Ore.DA_Item_Ore");
 		case EJTSItemId::Crystal: return TEXT("/Game/Space/Data/Items/DA_Item_Crystal.DA_Item_Crystal");
+		case EJTSItemId::InorganicCarbon: return TEXT("/Game/Space/Data/Items/DA_Item_InorganicCarbon.DA_Item_InorganicCarbon");
 		case EJTSItemId::Fuel: return TEXT("/Game/Space/Data/Items/DA_Item_Fuel.DA_Item_Fuel");
 		case EJTSItemId::Water: return TEXT("/Game/Space/Data/Items/DA_Item_Water.DA_Item_Water");
 		case EJTSItemId::Food: return TEXT("/Game/Space/Data/Items/DA_Item_Food.DA_Item_Food");
@@ -67,6 +69,8 @@ namespace
 		EJTSMeleeAttackType MeleeClass = EJTSMeleeAttackType::Improvised;
 		float CombatDamage = 1.0f;
 		float MeleeInterval = 0.45f;
+		float MeleeSwingPlayRate = 1.0f;
+		bool bDirectedMiningSwing = false;
 		float MiningWork = 0.0f;
 		float RangedDamage = 0.0f;
 		float RangedInterval = 0.35f;
@@ -103,11 +107,19 @@ namespace
 	const TArray<FWeaponSeed>& GetWeaponSeeds()
 	{
 		// Damage is on a 100-health baseline; feel values (FOV, spread, kick) carry over from the prototype weapons.
-		// Mining work is per hit: the hammer replaces the old pickaxe as the dedicated miner.
+		// Mining work is per hit; the pickaxe also performs entrance demolition.
 		static const TArray<FWeaponSeed> Seeds = []()
 		{
 			TArray<FWeaponSeed> Result;
 			FWeaponSeed S;
+
+			S = FWeaponSeed();
+			S.Id = EJTSItemId::Pickaxe; S.Name = TEXT("镐子"); S.Description = TEXT("用于采矿与破坏巢穴洞口。装备后长按或反复按 E 施工。");
+			S.MeleeClass = EJTSMeleeAttackType::Tool; S.CombatDamage = 18; S.MeleeInterval = 0.32f; S.MeleeSwingPlayRate = 2.0f; S.MiningWork = 5; S.bDirectedMiningSwing = true;
+			S.Rock = 2; S.Ore = 1; S.Accent = FLinearColor(0.85f, 0.72f, 0.40f);
+			SetSilhouette(S, FVector(0.96f, 0.045f, 0.045f), FVector(22,0,0), FVector(0.08f,0.08f,0.44f), FVector(70,0,0),
+				FVector::ZeroVector, FVector::ZeroVector, FVector(-6,0,0), FVector(70,0,-22), FVector(0.22f,0.10f,0.10f));
+			Result.Add(S);
 
 			S = FWeaponSeed();
 			S.Id = EJTSItemId::ShortBlade; S.Name = TEXT("合金短刃"); S.Description = TEXT("快速连刺的近战短刃。开荒省资源，也能慢慢凿开矿石。");
@@ -262,6 +274,8 @@ namespace
 		Definition->MeleeAttackClass = Seed->MeleeClass;
 		Definition->CombatDamage = Seed->CombatDamage;
 		Definition->MeleeAttackInterval = Seed->MeleeInterval;
+		Definition->MeleeSwingPlayRate = Seed->MeleeSwingPlayRate;
+		Definition->bDirectedMiningSwing = Seed->bDirectedMiningSwing;
 		Definition->MiningWork = Seed->MiningWork;
 		Definition->RangedDamage = Seed->RangedDamage;
 		Definition->RangedFireInterval = Seed->RangedInterval;
@@ -322,7 +336,7 @@ namespace
 		{
 			Definition->ItemId = Id;
 			Definition->DisplayName = FText::FromString(Name);
-			Definition->Description = FText::FromString(TEXT("Single-unit expedition material. It can be held as an improvised melee item."));
+			Definition->Description = FText::FromString(TEXT("探险物资，可用于制造和飞船补给，也可握在手中攻击。"));
 			Definition->PrimaryCategory = Category;
 			Definition->ShopCategories = { EJTSShopCategory::Resources };
 			Definition->AffinityTags = { TEXT("Material"), TEXT("Improvised") };
@@ -335,26 +349,29 @@ namespace
 		switch (ItemId)
 		{
 		case EJTSItemId::Rock:
-			SetResource(TEXT("Rock"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.48f, 0.50f, 0.56f, 1.0f));
+			SetResource(TEXT("石头"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.48f, 0.50f, 0.56f, 1.0f));
 			break;
 		case EJTSItemId::Ore:
-			SetResource(TEXT("Ore"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.10f, 0.72f, 0.95f, 1.0f));
+			SetResource(TEXT("矿物"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.10f, 0.72f, 0.95f, 1.0f));
 			Definition->AffinityTags = { TEXT("Material"), TEXT("Conductive"), TEXT("Improvised") };
 			break;
 		case EJTSItemId::Crystal:
-			SetResource(TEXT("Crystal"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.45f, 0.25f, 1.0f, 1.0f));
+			SetResource(TEXT("矿物"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.45f, 0.25f, 1.0f, 1.0f));
+			break;
+		case EJTSItemId::InorganicCarbon:
+			SetResource(TEXT("无机碳"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.62f, 0.67f, 0.55f, 1.0f));
 			break;
 		case EJTSItemId::Fuel:
-			SetResource(TEXT("Fuel"), ItemId, EJTSItemCategory::Resources, FLinearColor(1.0f, 0.44f, 0.12f, 1.0f));
+			SetResource(TEXT("燃料"), ItemId, EJTSItemCategory::Resources, FLinearColor(1.0f, 0.44f, 0.12f, 1.0f));
 			break;
 		case EJTSItemId::Water:
-			SetResource(TEXT("Water"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.14f, 0.55f, 1.0f, 1.0f));
+			SetResource(TEXT("水"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.14f, 0.55f, 1.0f, 1.0f));
 			break;
 		case EJTSItemId::Food:
-			SetResource(TEXT("Food"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.34f, 0.90f, 0.38f, 1.0f));
+			SetResource(TEXT("食物"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.34f, 0.90f, 0.38f, 1.0f));
 			break;
 		case EJTSItemId::MoonAntCorpse:
-			SetResource(TEXT("Moon Ant Corpse"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.70f, 0.30f, 0.72f, 1.0f));
+			SetResource(TEXT("镜虫尸体"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.70f, 0.30f, 0.72f, 1.0f));
 			Definition->MaxStackSize = 1;
 			break;
 		case EJTSItemId::WaistLamp:
@@ -445,6 +462,7 @@ bool UJTSItemDefinitionLibrary::TryGetResourceType(EJTSItemId ItemId, EJTSResour
 	case EJTSItemId::Rock: OutResourceType = EJTSResourceType::Rock; return true;
 	case EJTSItemId::Ore: OutResourceType = EJTSResourceType::Ore; return true;
 	case EJTSItemId::Crystal: OutResourceType = EJTSResourceType::Crystal; return true;
+	case EJTSItemId::InorganicCarbon: OutResourceType = EJTSResourceType::InorganicCarbon; return true;
 	case EJTSItemId::MoonAntCorpse: OutResourceType = EJTSResourceType::MoonAntCorpse; return true;
 	default: return false;
 	}
@@ -460,6 +478,7 @@ EJTSItemId UJTSItemDefinitionLibrary::GetItemIdForResource(EJTSResourceType Reso
 	case EJTSResourceType::Rock: return EJTSItemId::Rock;
 	case EJTSResourceType::Ore: return EJTSItemId::Ore;
 	case EJTSResourceType::Crystal: return EJTSItemId::Crystal;
+	case EJTSResourceType::InorganicCarbon: return EJTSItemId::InorganicCarbon;
 	case EJTSResourceType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
 	default: return EJTSItemId::None;
 	}
@@ -490,7 +509,6 @@ bool UJTSItemDefinitionLibrary::IsGameplayItemAvailable(const EJTSItemId ItemId)
 	case EJTSItemId::None:
 	case EJTSItemId::Backpack:
 	// Retired test weapons: old saves may still hold them, but they are never obtainable or usable again.
-	case EJTSItemId::Pickaxe:
 	case EJTSItemId::Knife:
 	case EJTSItemId::Pistol:
 	case EJTSItemId::MachineGun:
@@ -506,6 +524,7 @@ bool UJTSItemDefinitionLibrary::IsGameplayItemAvailable(const EJTSItemId ItemId)
 const TArray<EJTSItemId>& UJTSItemDefinitionLibrary::GetDefaultShopCatalog()
 {
 	static const TArray<EJTSItemId> Catalog = {
+		EJTSItemId::Pickaxe,
 		EJTSItemId::ShortBlade,
 		EJTSItemId::ShockPole,
 		EJTSItemId::PowerHammer,

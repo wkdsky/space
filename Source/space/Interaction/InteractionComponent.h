@@ -30,10 +30,18 @@ public:
 	/** Attempts to interact with the selected valid target and reports whether interaction was dispatched. */
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	bool TryInteract();
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void CancelInteraction();
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	float GetInteractionHoldProgress() const;
 
 	/** Client intent only; the server independently validates range, line of sight, and target state. */
 	UFUNCTION(Server, Reliable)
 	void ServerTryInteract(AActor* Target);
+	UFUNCTION(Server, Reliable)
+	void ServerBeginInteractionHold(AActor* Target);
+	UFUNCTION(Server, Reliable)
+	void ServerCancelInteractionHold();
 
 	/** Returns the target selected by the most recent detection pass. */
 	UFUNCTION(BlueprintPure, Category = "Interaction")
@@ -75,6 +83,13 @@ private:
 	bool CanServerInteractWith(APawn* InteractingPawn, AActor* Candidate) const;
 	FVector GetInteractionTargetWorldLocation(const AActor* Candidate, const FVector& ReferenceLocation = FVector::ZeroVector) const;
 	void SetCurrentInteractable(AActor* NewTarget);
+	void UpdateServerInteractionHold();
+	void ClearServerInteractionHold();
+	TWeakObjectPtr<AActor> HeldTarget;
+	TWeakObjectPtr<AActor> ServerHeldTarget;
+	double HoldStartTime = 0;
+	double ServerHoldStartTime = 0;
+	FTimerHandle ServerHoldTimerHandle;
 
 	/** Radius, in centimeters, used to look for IInteractable actors. */
 	UPROPERTY(EditAnywhere, Category = "Interaction", meta = (ClampMin = "0.0", UIMin = "0.0"))

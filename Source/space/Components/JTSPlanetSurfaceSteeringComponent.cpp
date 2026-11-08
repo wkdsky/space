@@ -10,7 +10,7 @@ UJTSPlanetSurfaceSteeringComponent::UJTSPlanetSurfaceSteeringComponent()
 
 bool UJTSPlanetSurfaceSteeringComponent::IsWalkable(const AJTSPlanetAnchor* Planet, const FJTSPlanetSurfaceHit& Hit) const
 {
-	return IsValid(Planet) && Hit.bBlockingHit && FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(),
+	return IsValid(Planet) && Planet->IsSurfacePlacementAllowed(Hit) && FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(),
 		Planet->GetRadialUpVector(Hit.ImpactPoint)) >= FMath::Cos(FMath::DegreesToRadians(MaxSlopeDegrees));
 }
 

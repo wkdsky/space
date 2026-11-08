@@ -129,8 +129,6 @@ def import_species(species):
     cdo.set_editor_property('defends_nest',species.startswith('Spire'))
     cdo.set_editor_property('retaliates',species=='Riftlip')
     cdo.set_editor_property('repairs_refuge',species=='SpireWorker')
-    cdo.set_editor_property('walk_speed',next(c['ground_speed_cm_s'] for c in manifest['clips'] if c['name']=='Walk'))
-    cdo.set_editor_property('flee_speed',next(c['ground_speed_cm_s'] for c in manifest['clips'] if c['name']=='Run'))
     cdo.set_editor_property('roam_radius',250 if species.startswith('Spire') else 650)
     cdo.set_editor_property('startle_distance',320 if species=='MirrorSkimmer' else 210)
     cdo.set_editor_property('home_arrival_distance',220 if species.startswith('Spire') else 120)
@@ -147,6 +145,9 @@ def import_species(species):
     if species=='SpireSoldier' and 'Guard' in clips:clipmap[state.IDLE]='Guard'
     cdo.set_editor_property('animations',{key:clips[value] for key,value in clipmap.items()})
     unreal.BlueprintEditorLibrary.compile_blueprint(bp);save(bp)
+    # Clip stride metadata describes the authored animation, not a playable movement speed.
+    from moon_earthen_unreal import configure_species
+    configure_species(species)
     return json.dumps(dict(species=species,mesh=mesh.get_path_name(),skeleton=skeleton.get_path_name(),clips=len(clips),blueprint=bp.get_path_name()))
 
 def import_surface(batch):
@@ -372,7 +373,7 @@ def inspect_surface():
     return json.dumps(result)
 
 def capture_scene(view):
-    assert view in ('overview','crater','mirror','mirror_inside','rift','tower','feeding','creature','player','player_view','MirrorSkimmer','Riftlip','SpireWorker','SpireSoldier')
+    assert view in ('overview','crater','resources','crystals','carbon','mirror','mirror_inside','rift','tower','feeding','creature','player','player_view','MirrorSkimmer','Riftlip','SpireWorker','SpireSoldier')
     game_world=unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()
     world=game_world or editor_world()
     state={a.get_actor_label():a for a in unreal.GameplayStatics.get_all_actors_of_class(world,unreal.Actor)} if game_world else actors()
@@ -380,6 +381,20 @@ def capture_scene(view):
     if view=='overview':
         offset=moon.get_actor_transform().rotation.rotate_vector(unreal.Vector(-12000,51000,18000))
         location=center+offset;target=center;up=unreal.Vector(0,0,1);fov=46
+    elif view in ('resources','crystals','carbon'):
+        if view=='carbon':
+            candidates=[a for a in state.values() if isinstance(a,unreal.JTSPlanetSurfaceAttachment)
+                and a.get_component_by_class(unreal.StaticMeshComponent).get_editor_property('static_mesh').get_name().startswith('SM_MR_Carbon_')]
+        else:
+            candidates=[a for a in state.values() if isinstance(a,unreal.JTSMoonResourceActor)
+                and a.get_node_size()==(unreal.JTSMoonResourceNodeSize.LARGE_CRYSTAL_ROCK if view=='crystals' else unreal.JTSMoonResourceNodeSize.LARGE_METAL_ROCK)]
+        assert candidates,'Enter Moon gameplay to generate resource models'
+        sunlight=-state['Sun_Main'].get_actor_forward_vector()
+        landmark=max(candidates,key=lambda a:unreal.MathLibrary.dot_vector_vector((a.get_actor_location()-center).normal(),sunlight))
+        up=(landmark.get_actor_location()-center).normal()
+        tangent=(sunlight-up*unreal.MathLibrary.dot_vector_vector(sunlight,up)).normal()
+        target=landmark.get_actor_location()+up*(8 if view=='carbon' else 60)
+        location=target+up*(160 if view=='carbon' else 350)+tangent*(220 if view=='carbon' else 650);fov=52
     elif view=='crater':
         landmark=state['Moon_Corpse_SkeletonAstronaut'];target=landmark.get_actor_location();up=(target-center).normal()
         location=target+up*11000-landmark.get_actor_forward_vector()*3500;fov=60
@@ -447,7 +462,7 @@ def capture_scene(view):
         lamp.point_light_component.set_intensity(1000000 if view=='tower' else 20000)
         lamp.point_light_component.set_attenuation_radius(1800)
     component=a.capture_component2d
-    if game_world and view in ('rift','mirror','mirror_inside','creature','MirrorSkimmer','Riftlip','SpireWorker','SpireSoldier'):component.set_editor_property('hidden_actors',[unreal.GameplayStatics.get_player_pawn(world,0)])
+    if game_world and view in ('resources','crystals','carbon','rift','mirror','mirror_inside','creature','MirrorSkimmer','Riftlip','SpireWorker','SpireSoldier'):component.set_editor_property('hidden_actors',[unreal.GameplayStatics.get_player_pawn(world,0)])
     tex=unreal.RenderingLibrary.create_render_target2d(world,1600,1000,unreal.TextureRenderTargetFormat.RTF_RGBA8)
     component.set_editor_property('texture_target',tex)
     component.set_editor_property('capture_source',unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
@@ -478,6 +493,21 @@ def capture_scene(view):
     return json.dumps(dict(view=view,file=str(output)))
 
 def validate_play(stage):
+    if stage.startswith('earthen_'):
+        import importlib, moon_earthen_unreal
+        return importlib.reload(moon_earthen_unreal).run(stage.removeprefix('earthen_'))
+    if stage.startswith('blockade_'):
+        import importlib, moon_blockade
+        return importlib.reload(moon_blockade).run(stage.removeprefix('blockade_'))
+    if stage.startswith('mining_'):
+        import importlib, mining_feedback
+        return importlib.reload(mining_feedback).run(stage.removeprefix('mining_'))
+    if stage.startswith('polish_'):
+        import importlib, moon_scene_polish
+        return importlib.reload(moon_scene_polish).run(stage.removeprefix('polish_'))
+    if stage.startswith('refinement_'):
+        import importlib, moon_surface_refinement
+        return importlib.reload(moon_surface_refinement).run(stage.removeprefix('refinement_'))
     if stage.startswith('repair_'):
         import importlib,moon_surface_cut_unreal
         try:return importlib.reload(moon_surface_cut_unreal).run(stage.removeprefix('repair_'))

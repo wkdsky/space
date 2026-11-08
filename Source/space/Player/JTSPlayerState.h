@@ -67,7 +67,7 @@ public:
 	int32 GetItemStackLimit() const;
 
 	UFUNCTION(BlueprintPure, Category = "Progression")
-	float GetRunSpeedMultiplier() const;
+	float GetRunSpeedBonus() const;
 
 	UFUNCTION(BlueprintPure, Category = "Progression")
 	int32 GetCriticalChancePercent() const;
@@ -112,7 +112,9 @@ public:
 		int32 NewStackLimitRank,
 		int32 NewRunSpeedRank,
 		int32 NewStaminaRank = 0,
-		int32 NewCriticalChanceRank = 0);
+		int32 NewCriticalChanceRank = 0,
+		int32 NewHealthRank = 0,
+		int32 NewDefenseRank = 0);
 
 	static constexpr int32 ShipLockerCapacity = 30;
 	const TArray<FJTSShipLockerSlot>& GetShipLockerSlots() const { return ShipLockerSlots; }
@@ -214,9 +216,6 @@ private:
 	int32 InventorySlotAbilityRank = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
-	int32 StackLimitAbilityRank = 0;
-
-	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 RunSpeedAbilityRank = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
@@ -224,6 +223,12 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 CriticalChanceAbilityRank = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
+	int32 HealthAbilityRank = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
+	int32 DefenseAbilityRank = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Progression, VisibleInstanceOnly, BlueprintReadOnly, Category = "Progression", meta = (AllowPrivateAccess = "true"))
 	int32 ProgressionRevision = 0;

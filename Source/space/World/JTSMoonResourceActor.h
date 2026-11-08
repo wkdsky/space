@@ -16,6 +16,7 @@ class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class AJTSPlanetAnchor;
+class UJTSMiningImpactComponent;
 
 /** Physical Moon resource forms. Small rocks are loose pickups; the other forms are mineable nodes. */
 UENUM(BlueprintType)
@@ -37,6 +38,7 @@ class SPACE_API AJTSMoonResourceActor : public AActor, public IInteractable, pub
 
 public:
 	AJTSMoonResourceActor();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Moon|Mining") TObjectPtr<UJTSMiningImpactComponent> MiningImpact;
 
 	UFUNCTION(BlueprintPure, Category = "Moon|Resource")
 	EJTSResourceType GetResourceType() const;
@@ -84,6 +86,7 @@ public:
 	virtual bool Disassemble_Implementation(APawn* Operator) override;
 
 	virtual bool CanInteract_Implementation(APawn* InteractingPawn) const override;
+	virtual bool CanExecuteInteraction_Implementation(APawn* InteractingPawn) const override;
 	virtual FText GetInteractionPrompt_Implementation(APawn* InteractingPawn) const override;
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
 

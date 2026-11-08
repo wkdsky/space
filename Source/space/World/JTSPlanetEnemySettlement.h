@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "space/World/JTSPopulationRecovery.h"
 #include "JTSPlanetEnemySettlement.generated.h"
 
 class AJTSPlanetAnchor;
@@ -19,11 +20,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Planet|Enemy Settlement")
 	void Activate(AJTSPlanetAnchor* Planet, AActor* SurfaceController);
 	UFUNCTION(BlueprintCallable, Category = "Planet|Enemy Settlement")
-	void Deactivate();
+	virtual void Deactivate();
 	UFUNCTION(BlueprintPure, Category = "Planet|Enemy Settlement")
 	int32 GetSpawnedEnemyCount() const;
+	/** Used by a scatter recipe before activation; normal settlement spawning still validates every point. */
+	void SetInitialPopulation(int32 Count) { EnemyCount = FMath::Clamp(Count, 0, 512); }
 
 protected:
+	virtual AActor* SpawnSettlementEnemy(const FTransform& Pose, const FVector& Ground);
+	virtual FVector GetSettlementLocation() const { return GetActorLocation(); }
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -50,6 +55,8 @@ protected:
 	/** Optional server refill policy, authored per settlement in Blueprint or the level. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population")
 	bool bMaintainPopulation = false;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population")
+	FJTSPopulationRecoverySettings Recovery;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population", meta = (ClampMin = "0.25"))
 	float RefillInterval = 1.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Enemy Settlement|Population", meta = (ClampMin = "1", ClampMax = "512"))
@@ -61,10 +68,11 @@ protected:
 
 private:
 	void RefillPopulation();
-	void SpawnMissingEnemies(int32 SpawnBudget);
+	void SpawnMissingEnemies(int32 SpawnBudget, bool bReplenishing = false);
 	TWeakObjectPtr<AJTSPlanetAnchor> ActivePlanet;
 	TWeakObjectPtr<AActor> ActiveSurfaceController;
 	FVector SettlementCenter = FVector::ZeroVector;
 	FTimerHandle RefillTimer;
+	FJTSPopulationRecovery RecoveryState;
 	bool bActive = false;
 };

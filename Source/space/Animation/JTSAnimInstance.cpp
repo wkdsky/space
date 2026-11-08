@@ -6,6 +6,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
+#include "JTSMiningPose.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSWallClimbComponent.h"
@@ -122,8 +124,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		const AJTSPlayerState* const GroundState = Character->GetPlayerState<AJTSPlayerState>();
 		const bool bGroundDead = IsValid(GroundState)
 			&& GroundState->GetExpeditionStatus() == EJTSPlayerExpeditionStatus::Dead;
-		const float SpeedScale = IsValid(GroundState)
-			? FMath::Max(0.1f, GroundState->GetRunSpeedMultiplier()) : 1.0f;
+		const float SpeedBonus = IsValid(GroundState) ? GroundState->GetRunSpeedBonus() : 0.0f;
 		const bool bGroundEligible = !bAirborne && !bGroundClimbing && ClimbBlendAlpha <= 0.02f
 			&& !Character->IsBoarded() && !bGroundDead;
 		const FVector GroundVelocity = IsValid(Movement) ? Movement->Velocity : FVector::ZeroVector;
@@ -155,7 +156,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		// 800 cm/s. Keep the authored walk untouched until actual speed passes the
 		// normal walk band, then blend in the stylized run presentation.
 		const float TargetRun = FMath::GetMappedRangeValueClamped(
-			FVector2D(550.0f * SpeedScale, 700.0f * SpeedScale), FVector2D(0.0f, 1.0f), GroundSpeed);
+			FVector2D(550.0f + SpeedBonus, 700.0f + SpeedBonus), FVector2D(0.0f, 1.0f), GroundSpeed);
 		if (bGroundMoving && !bGroundGaitMoving)
 		{
 			GaitBlend = 1.0f + TargetRun;
@@ -165,18 +166,21 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			GaitBlend = FMath::FInterpTo(GaitBlend, bGroundMoving ? 1.0f + TargetRun : 0.0f, DeltaSeconds, 8.0f);
 		}
 		bGroundGaitMoving = bGroundMoving;
-		if (bMeleeHeld)
+		const UJTSMeleeComponent* const Melee = Character->FindComponentByClass<UJTSMeleeComponent>();
+		const auto* Mining = Character->FindComponentByClass<UJTSMiningStrikeComponent>();
+		if (bMeleeHeld && !(Mining && Mining->IsDirectedToolEquipped()))
 		{
-			const UJTSMeleeComponent* const Melee = Character->FindComponentByClass<UJTSMeleeComponent>();
+			const float ChopDelta = DeltaSeconds * (Melee ? Melee->GetHeldWeaponSwingPlayRate() : 1.0f);
 			const bool bHeld = IsValid(Melee) && Melee->IsAttackInputHeld();
-			const bool bSwingActive = IsValid(Melee) && Melee->GetMeleeSwingPhase() > 0.0f;
-			// The attack clock restarts on every server swing. The chop itself does not:
-			// a held button keeps the hand on the arc, and a click owes exactly one cycle.
-			if (!bHeld && !bSwingActive)
+			const uint32 SwingSequence = Melee ? Melee->GetHeldWeaponSwingSequence() : 0;
+			if (SwingSequence != LastMeleeSwingSequence)
 			{
-				bMeleeChopLatched = false;
+				// Keep a newly accepted swing even when it arrives during the previous raise.
+				bMeleeChopPending = true;
+				LastMeleeSwingSequence = SwingSequence;
 			}
-			const bool bOweChop = bHeld || (bSwingActive && !bMeleeChopLatched);
+			if (bHeld) bMeleeChopPending = false;
+			const bool bOweChop = bHeld || bMeleeChopPending;
 
 			// Cut, a beat on the hit, then a raise that ends on the same pose the next cut leaves.
 			const float RaisedPose = 0.34f;
@@ -211,15 +215,16 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 				if (!bOweChop)
 				{
 					MeleeChopStroke = 0.0f;
-					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, DeltaSeconds, 7.0f);
+					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, ChopDelta, 7.0f);
 				}
 				else
 				{
 					// First press only lifts. The cut starts from that raised pose, never from the carry.
-					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, RaisedPose, DeltaSeconds, 7.0f);
+					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, RaisedPose, ChopDelta, 7.0f);
 					if (MeleeChopAlpha > RaisedPose - 0.04f)
 					{
 						bMeleeChopRaised = true;
+						bMeleeChopPending = false;
 						MeleeChopStroke = 0.0f;
 						MeleeChopAlpha = RaisedPose;
 					}
@@ -227,17 +232,17 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			}
 			else
 			{
-				const float NextStroke = MeleeChopStroke + DeltaSeconds;
-				if (NextStroke >= Cycle && !bHeld)
+				const float NextStroke = MeleeChopStroke + ChopDelta;
+				if (NextStroke >= Cycle && !bOweChop)
 				{
 					// The owed chop has come back to the top. Release settles from there to the carry.
 					bMeleeChopRaised = false;
-					bMeleeChopLatched = true;
 					MeleeChopStroke = 0.0f;
-					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, DeltaSeconds, 6.0f);
+					MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, ChopDelta, 6.0f);
 				}
 				else
 				{
+					if (NextStroke >= Cycle) bMeleeChopPending = false;
 					MeleeChopStroke = FMath::Fmod(NextStroke, Cycle);
 					SampleChop(MeleeChopStroke);
 				}
@@ -246,7 +251,8 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		else
 		{
 			bMeleeChopRaised = false;
-			bMeleeChopLatched = false;
+			bMeleeChopPending = false;
+			LastMeleeSwingSequence = Melee ? Melee->GetHeldWeaponSwingSequence() : 0;
 			MeleeChopStroke = 0.0f;
 			MeleeChopAlpha = FMath::FInterpTo(MeleeChopAlpha, 0.0f, DeltaSeconds, 8.0f);
 		}
@@ -335,22 +341,14 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 				: FMath::Clamp(Character->GetAimPitch(), -55.0f, 55.0f);
 			AimPitch = bClimbPoseActive ? 0.0f : FMath::FInterpTo(AimPitch, HeadPitchTarget, DeltaSeconds, 14.0f);
 		}
-		// Ordinary grounded third person keeps the player's facing. The arms only cover
-		// the view while it is already close to the body. Past that cone the arms
-		// return forward instead of dragging the barrel onto screen center.
-		// First person and weapon aiming already turn the whole actor with the view.
-		// Ordinary third-person jumps keep the movement heading instead.
+		// Combat facing turns the body before an attack; free look never twists the weapon backward.
 		const bool bWholeBodyOnView = bClimbPoseActive || Character->IsFirstPersonView()
 			|| bWeaponAiming;
 		AimYaw = bWholeBodyOnView ? 0.0f : Character->GetPresentationAimYaw();
 		TurnShuffleAlpha = bWholeBodyOnView ? 0.0f : Character->GetTurnShuffleAlpha();
 		const float YawLimit = 48.0f;
 		const float DesiredUpperYaw = FMath::Clamp(AimYaw, -YawLimit, YawLimit);
-		UpperBodyYaw = bClimbPoseActive ? 0.0f : FMath::FInterpTo(
-			UpperBodyYaw,
-			DesiredUpperYaw,
-			DeltaSeconds,
-			bWholeBodyOnView ? 24.0f : 9.0f);
+		UpperBodyYaw = DesiredUpperYaw;
 
 		// Small alternating weight transfers accompany the capsule turn.
 		ShufflePhase += DeltaSeconds * (TurnShuffleAlpha > 0.05f ? 17.0f : 0.0f);
@@ -940,31 +938,35 @@ void UJTSAnimInstance::ApplyFacingPose()
 	}
 	else if (bMeleeHeld)
 	{
-		// Present-arms L at rest. A chop lifts the shoulder with the forearm, then the
-		// forearm runs the long arc. The blade is rigid in the hand, so the lift stays
-		// in front of the shoulder. 0 is the upright carry, 0.34 is the raised tool,
-		// 1 is the strike. The last part of the cut tips the wrist so the head bites.
-		const float Chop = FMath::Clamp(MeleeChopAlpha, 0.0f, 1.0f);
-		const float Raised = 0.34f;
-		const float ChopDegrees = Chop <= Raised
-			? FMath::Lerp(0.0f, 72.0f, Chop / Raised)
-			: FMath::Lerp(72.0f, -58.0f, (Chop - Raised) / (1.0f - Raised));
-		const float Bite = FMath::Clamp((Chop - 0.72f) / 0.28f, 0.0f, 1.0f);
-		const float SwingDegrees = ChopDegrees - Bite * Bite * 24.0f;
-		const FVector FoldR = (PoseForward * 0.90f - PoseRight * 0.28f).GetSafeNormal();
-		// Positive degrees lift the forearm. The opposite sign drove it straight down.
-		const FVector ForeAim = FQuat(PoseRight, FMath::DegreesToRadians(-SwingDegrees)).RotateVector(FoldR);
-		// The upper arm stays forward of the ribs at rest and through the cut, so the
-		// elbow and the tool clear the torso. A raise adds a little more reach.
-		const float ShoulderLift = FMath::Clamp(ChopDegrees / 72.0f, 0.0f, 1.0f);
-		const FVector UpperAim = (-PoseUp + FoldR * (0.52f + 0.20f * ShoulderLift)).GetSafeNormal();
+		const auto* Mining=Mesh->GetOwner()->FindComponentByClass<UJTSMiningStrikeComponent>();
+		if (!JTSMiningPose::Apply(Mining,Mesh,Pose,AimSegment,CloseGrip))
+		{
+			// Present-arms L at rest. A chop lifts the shoulder with the forearm, then the
+			// forearm runs the long arc. The blade is rigid in the hand, so the lift stays
+			// in front of the shoulder. 0 is the upright carry, 0.34 is the raised tool,
+			// 1 is the strike. The last part of the cut tips the wrist so the head bites.
+			const float Chop = FMath::Clamp(MeleeChopAlpha, 0.0f, 1.0f);
+			const float Raised = 0.34f;
+			const float ChopDegrees = Chop <= Raised
+				? FMath::Lerp(0.0f, 72.0f, Chop / Raised)
+				: FMath::Lerp(72.0f, -58.0f, (Chop - Raised) / (1.0f - Raised));
+			const float Bite = FMath::Clamp((Chop - 0.72f) / 0.28f, 0.0f, 1.0f);
+			const float SwingDegrees = ChopDegrees - Bite * Bite * 24.0f;
+			const FVector FoldR = (PoseForward * 0.90f - PoseRight * 0.28f).GetSafeNormal();
+			// Positive degrees lift the forearm. The opposite sign drove it straight down.
+			const FVector ForeAim = FQuat(PoseRight, FMath::DegreesToRadians(-SwingDegrees)).RotateVector(FoldR);
+			// The upper arm stays forward of the ribs at rest and through the cut, so the
+			// elbow and the tool clear the torso. A raise adds a little more reach.
+			const float ShoulderLift = FMath::Clamp(ChopDegrees / 72.0f, 0.0f, 1.0f);
+			const FVector UpperAim = (-PoseUp + FoldR * (0.52f + 0.20f * ShoulderLift)).GetSafeNormal();
 
-		// Only the holding hand folds into the L. The other arm hangs the way empty hands do.
-		AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), -PoseUp);
-		AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), -PoseUp);
-		AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), UpperAim);
-		AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), ForeAim);
-		CloseGrip(true);
+			// Only the holding hand folds into the L. The other arm hangs the way empty hands do.
+			AimSegment(TEXT("UpperArm_L"), TEXT("LowerArm_L"), -PoseUp);
+			AimSegment(TEXT("LowerArm_L"), TEXT("Wrist_L"), -PoseUp);
+			AimSegment(TEXT("UpperArm_R"), TEXT("LowerArm_R"), UpperAim);
+			AimSegment(TEXT("LowerArm_R"), TEXT("Wrist_R"), ForeAim);
+			CloseGrip(true);
+		}
 	}
 	else
 	{

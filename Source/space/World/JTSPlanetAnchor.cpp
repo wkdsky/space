@@ -203,6 +203,35 @@ bool AJTSPlanetAnchor::IsWithinGravityInfluence(const FVector& WorldPosition) co
 	return IsGravityEnabled() && GetApproximateAltitude(WorldPosition) <= GetGravityInfluenceRange();
 }
 
+bool AJTSPlanetAnchor::IsSurfacePlacementAllowed(const FJTSPlanetSurfaceHit& Hit) const
+{
+	return Hit.bBlockingHit && !Hit.ImpactNormal.IsNearlyZero()
+		&& FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(), GetRadialUpVector(Hit.ImpactPoint)) + UE_SMALL_NUMBER
+			>= FMath::Cos(FMath::DegreesToRadians(static_cast<double>(FMath::Clamp(MaximumPlacementSlopeDegrees, 0.0f, 90.0f))));
+}
+
+bool AJTSPlanetAnchor::FindSurfacePlacementSupport(const FVector& WorldPoint, float SearchRadius, FJTSPlanetSurfaceHit& OutHit) const
+{
+	const FVector SearchOrigin = WorldPoint;
+	if (ProjectPointToSurface(SearchOrigin, OutHit) && IsSurfacePlacementAllowed(OutHit)) return true;
+	if (SearchRadius <= 0) return false;
+	const FVector Up = GetRadialUpVector(SearchOrigin);
+	FVector Forward, Right;
+	Up.FindBestAxisVectors(Forward, Right);
+	double Best = FMath::Square(SearchRadius) + 1;
+	bool bFound = false;
+	for (const float Fraction : {0.5f, 1.0f}) for (int32 I = 0; I < 16; ++I)
+	{
+		const double Angle = I * UE_TWO_PI / 16;
+		FJTSPlanetSurfaceHit Hit;
+		const FVector Point = SearchOrigin + (Forward * FMath::Cos(Angle) + Right * FMath::Sin(Angle)) * (SearchRadius * Fraction);
+		if (!ProjectPointToSurface(Point, Hit) || !IsSurfacePlacementAllowed(Hit)) continue;
+		const double Distance = FVector::DistSquared(SearchOrigin, Hit.ImpactPoint);
+		if (Distance < Best) { Best = Distance; OutHit = Hit; bFound = true; }
+	}
+	return bFound;
+}
+
 FVector AJTSPlanetAnchor::GetRadialUpVector(const FVector& WorldPosition) const
 {
 	const FVector RadialOffset = WorldPosition - GetPlanetCenter();
@@ -497,11 +526,10 @@ bool AJTSPlanetAnchor::RandomPointInSurfaceCap(
 
 float AJTSPlanetAnchor::ApproximateSurfaceArcDistance(const FVector& WorldPositionA, const FVector& WorldPositionB) const
 {
-	const float Dot = FMath::Clamp(
-		FVector::DotProduct(GetRadialUpVector(WorldPositionA), GetRadialUpVector(WorldPositionB)),
-		-1.0f,
-		1.0f);
-	return FMath::Acos(Dot) * GetApproximateRadius();
+	const FVector UpA = GetRadialUpVector(WorldPositionA);
+	const FVector UpB = GetRadialUpVector(WorldPositionB);
+	// atan2 retains centimetre precision when both radial directions are almost identical.
+	return FMath::Atan2(FVector::CrossProduct(UpA, UpB).Size(), FVector::DotProduct(UpA, UpB)) * GetApproximateRadius();
 }
 
 FTransform AJTSPlanetAnchor::GetLandingTransform() const

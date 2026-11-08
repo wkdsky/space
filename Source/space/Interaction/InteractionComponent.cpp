@@ -12,6 +12,7 @@
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/World/JTSPlanetEcologyHabitat.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "TimerManager.h"
 
@@ -46,6 +47,7 @@ void UInteractionComponent::BeginPlay()
 
 void UInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ClearServerInteractionHold();
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DetectionTimerHandle);
@@ -59,6 +61,8 @@ void UInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void UInteractionComponent::RefreshInteractable()
 {
 	SetCurrentInteractable(FindBestInteractable(Cast<APawn>(GetOwner())));
+	if (HeldTarget.IsValid() && (HeldTarget.Get() != CurrentInteractable || !IsInteractableInView(HeldTarget.Get())))
+		CancelInteraction();
 }
 
 bool UInteractionComponent::TryInteract()
@@ -68,9 +72,18 @@ bool UInteractionComponent::TryInteract()
 	// the player is looking at when the input is actually committed.
 	RefreshInteractable();
 	AActor* const Target = GetCurrentInteractable();
-	if (!IsValidInteractable(Target, InteractingPawn))
+	if (!IsValidInteractable(Target, InteractingPawn) || !IInteractable::Execute_CanExecuteInteraction(Target, InteractingPawn))
 	{
 		return false;
+	}
+	if (IInteractable::Execute_GetInteractionHoldDuration(Target, InteractingPawn) > 0)
+	{
+		if (HeldTarget.Get() == Target) return true;
+		CancelInteraction();
+		HeldTarget = Target;
+		HoldStartTime = GetWorld()->GetTimeSeconds();
+		ServerBeginInteractionHold(Target);
+		return true;
 	}
 
 	if (GetOwner() != nullptr && GetOwner()->HasAuthority())
@@ -91,9 +104,64 @@ bool UInteractionComponent::TryInteract()
 void UInteractionComponent::ServerTryInteract_Implementation(AActor* Target)
 {
 	APawn* const InteractingPawn = Cast<APawn>(GetOwner());
-	if (CanServerInteractWith(InteractingPawn, Target))
+	if (CanServerInteractWith(InteractingPawn, Target)
+		&& IInteractable::Execute_GetInteractionHoldDuration(Target, InteractingPawn) <= 0)
 	{
 		IInteractable::Execute_Interact(Target, InteractingPawn);
+	}
+}
+
+void UInteractionComponent::CancelInteraction()
+{
+	HeldTarget.Reset();
+	HoldStartTime = 0;
+	ServerCancelInteractionHold();
+}
+
+float UInteractionComponent::GetInteractionHoldProgress() const
+{
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	if (IsValidInteractable(CurrentInteractable, Pawn) && IInteractable::Execute_UsesSharedInteractionProgress(CurrentInteractable))
+		return IInteractable::Execute_GetSharedInteractionProgress(CurrentInteractable);
+	if (!HeldTarget.IsValid() || !GetWorld() || !IsValidInteractable(HeldTarget.Get(), Pawn)) return 0;
+	const float Duration = IInteractable::Execute_GetInteractionHoldDuration(HeldTarget.Get(), Pawn);
+	return Duration > 0 ? FMath::Clamp(float((GetWorld()->GetTimeSeconds() - HoldStartTime) / Duration), 0.0f, 1.0f) : 0;
+}
+
+void UInteractionComponent::ClearServerInteractionHold()
+{
+	if (ServerHeldTarget.IsValid() && ServerHeldTarget->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		IInteractable::Execute_SetInteractionHeld(ServerHeldTarget.Get(), Cast<APawn>(GetOwner()), false);
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ServerHoldTimerHandle);
+	ServerHeldTarget.Reset();
+	ServerHoldStartTime = 0;
+}
+
+void UInteractionComponent::ServerCancelInteractionHold_Implementation() { ClearServerInteractionHold(); }
+
+void UInteractionComponent::ServerBeginInteractionHold_Implementation(AActor* Target)
+{
+	ClearServerInteractionHold();
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	if (!CanServerInteractWith(Pawn, Target) || IInteractable::Execute_GetInteractionHoldDuration(Target, Pawn) <= 0) return;
+	ServerHeldTarget = Target;
+	ServerHoldStartTime = GetWorld()->GetTimeSeconds();
+	IInteractable::Execute_SetInteractionHeld(Target, Pawn, true);
+	GetWorld()->GetTimerManager().SetTimer(ServerHoldTimerHandle, this, &ThisClass::UpdateServerInteractionHold, 0.05f, true);
+}
+
+void UInteractionComponent::UpdateServerInteractionHold()
+{
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	AActor* Target = ServerHeldTarget.Get();
+	if (!CanServerInteractWith(Pawn, Target)) { ClearServerInteractionHold(); return; }
+	const float Duration = IInteractable::Execute_GetInteractionHoldDuration(Target, Pawn);
+	if (Duration <= 0) { ClearServerInteractionHold(); return; }
+	if (IInteractable::Execute_UsesSharedInteractionProgress(Target)) return;
+	if (GetWorld()->GetTimeSeconds() - ServerHoldStartTime >= Duration)
+	{
+		ClearServerInteractionHold();
+		IInteractable::Execute_Interact(Target, Pawn);
 	}
 }
 
@@ -111,7 +179,9 @@ FText UInteractionComponent::GetCurrentInteractionPrompt() const
 		return FText::GetEmpty();
 	}
 
-	return IInteractable::Execute_GetInteractionPrompt(Target, InteractingPawn);
+	const FText Prompt = IInteractable::Execute_GetInteractionPrompt(Target, InteractingPawn);
+	return HeldTarget.Get() == Target ? FText::Format(FText::FromString(TEXT("{0}  {1}%")), Prompt,
+		FText::AsNumber(FMath::FloorToInt(GetInteractionHoldProgress() * 100))) : Prompt;
 }
 
 bool UInteractionComponent::IsInteractableInView(AActor* Candidate) const
@@ -379,13 +449,14 @@ bool UInteractionComponent::CanServerInteractWith(APawn* InteractingPawn, AActor
 	if (!IsValid(InteractingPawn)
 		|| !IsValid(Candidate)
 		|| !Candidate->GetClass()->ImplementsInterface(UInteractable::StaticClass())
-		|| !IInteractable::Execute_CanInteract(Candidate, InteractingPawn))
+		|| !IInteractable::Execute_CanInteract(Candidate, InteractingPawn)
+		|| !IInteractable::Execute_CanExecuteInteraction(Candidate, InteractingPawn))
 	{
 		return false;
 	}
 	// The server deliberately validates against its own authoritative pawn eye
 	// position, never a client-provided camera transform.
-	const FVector Start = InteractingPawn->GetActorLocation() + FVector(0.0f, 0.0f, InteractingPawn->BaseEyeHeight);
+	const FVector Start = InteractingPawn->GetPawnViewLocation();
 	const FVector TargetLocation = GetInteractionTargetWorldLocation(Candidate, Start);
 	const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Candidate);
 	if (Spacecraft != nullptr)
@@ -429,6 +500,8 @@ FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* C
 	{
 		return ResourcePickup->GetInteractionAnchorWorldLocation();
 	}
+	if (const AJTSPlanetEcologyHabitat* Habitat = Cast<AJTSPlanetEcologyHabitat>(Candidate))
+		return Habitat->GetInteractionAnchorWorldLocation();
 
 	const FBox CandidateBounds = Candidate->GetComponentsBoundingBox(true);
 	return CandidateBounds.IsValid ? CandidateBounds.GetCenter() : Candidate->GetActorLocation();

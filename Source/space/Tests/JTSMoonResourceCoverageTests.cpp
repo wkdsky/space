@@ -160,6 +160,8 @@ bool FJTSMoonCoverageOwnershipTest::RunTest(const FString& Parameters)
 	Partial.RecordPlacement(Fixture.Point(0), 100);
 	TestFalse(TEXT("Spacing is shared even when the new region requests zero spacing"), Partial.CanPlace(Fixture.Point(0.001), 0));
 	TestTrue(TEXT("Separated placements remain permitted"), Partial.CanPlace(Fixture.Point(0.05), 100));
+	B->Destroy();
+	TestTrue(TEXT("A removed region cannot retain ownership in a shared runtime coverage cache"), Partial.ResolveOwner(Fixture.Point(0.1)) == A);
 	return true;
 }
 
@@ -229,6 +231,60 @@ bool FJTSMoonCoverageGenerationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Preview stays hidden in game"), Preview->bHiddenInGame);
 	}
 #endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSMoonResourceRecoveryTest, "JTS.Moon.Resources.BatchedRecovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJTSMoonResourceRecoveryTest::RunTest(const FString&)
+{
+	FCoverageWorld Fixture;
+	const uint64 OriginalFrame = GFrameCounter;
+	AJTSMoonResourceSpawner* Spawner = Fixture.Add(0);
+	Spawner->InitialSpawnBatchSize = 2;
+	Spawner->Recovery.bEnabled = true;
+	Spawner->Recovery.Delay = 1;
+	Spawner->Recovery.Duration = 12;
+	Spawner->Recovery.CheckInterval = 0.25f;
+	Spawner->Recovery.BatchSize = 2;
+	Spawner->Recovery.MinimumPlayerDistance = 0;
+	const int32 Target = Spawner->GetTargetResourceCount();
+	auto Advance = [&](float Seconds)
+	{
+		for (int32 I = 0; I < FMath::CeilToInt(Seconds / 0.1f); ++I)
+		{
+			++GFrameCounter;
+			Fixture.World->Tick(LEVELTICK_All, 0.1f);
+		}
+	};
+	AJTSMoonResourceSpawner::GenerateResourceGroup({Spawner});
+	TestEqual(TEXT("Batched initialization does not create all Actors on the calling frame"), Spawner->GetLiveResourceCount(), 0);
+	// TimerManager promotes pending timers after its first tick in this synthetic world.
+	++GFrameCounter;
+	Fixture.World->Tick(LEVELTICK_All, 0.1f);
+	const int32 BeforeLongFrame = Spawner->GetLiveResourceCount();
+	++GFrameCounter;
+	Fixture.World->Tick(LEVELTICK_All, 2.0f);
+	TestEqual(TEXT("A long frame cannot catch up multiple initial batches"), Spawner->GetLiveResourceCount() - BeforeLongFrame, 2);
+	Advance(3);
+	TestEqual(TEXT("Initial batches reach the configured density"), Spawner->GetLiveResourceCount(), Target);
+	for (auto* Node : Fixture.Nodes()) Node->Destroy();
+	TestEqual(TEXT("A region can be completely harvested"), Spawner->GetLiveResourceCount(), 0);
+	Advance(0.8f);
+	TestEqual(TEXT("Timer integration respects depletion cooldown"), Spawner->GetLiveResourceCount(), 0);
+	Advance(4);
+	TestTrue(TEXT("Part of the region recovers before the full recovery period"), Spawner->GetLiveResourceCount() > 0 && Spawner->GetLiveResourceCount() < Target);
+	Advance(14);
+	TestEqual(TEXT("Destroyed placement reservations are released and capacity recovers"), Spawner->GetLiveResourceCount(), Target);
+	Advance(3);
+	TestEqual(TEXT("Recovery cannot exceed initial capacity"), Spawner->GetLiveResourceCount(), Target);
+	for (auto* Node : Fixture.Nodes()) Node->Destroy();
+	Spawner->SetRole(ROLE_SimulatedProxy);
+	Advance(16);
+	TestEqual(TEXT("A client-role resource spawner cannot replenish"), Spawner->GetLiveResourceCount(), 0);
+	Spawner->SetRole(ROLE_Authority);
+	GFrameCounter = OriginalFrame;
 	return true;
 }
 

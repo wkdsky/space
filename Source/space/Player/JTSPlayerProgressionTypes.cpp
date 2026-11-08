@@ -8,13 +8,15 @@ namespace
 	// the later values retain a meaningful long-term chase without an exponential grind wall.
 	constexpr int32 ExperienceRequirements[] = { 100, 150, 225, 325, 450, 600, 775, 975, 1200 };
 
-	// Cumulative effects by ability rank.  Cargo reaches its first complete nine-key row at rank 4;
-	// speed uses small, predictable percentage steps and deliberately tops out at a safe 20%.
-	constexpr int32 InventorySlotBonuses[] = { 0, 1, 3, 5, 7, 10 };
-	constexpr int32 StackLimits[] = { 1, 2, 4, 7, 11, 16 };
-	constexpr int32 RunSpeedBonusPercents[] = { 0, 4, 8, 12, 16, 20 };
-	constexpr float StaminaCapacities[] = { 100.0f, 120.0f, 140.0f, 165.0f, 190.0f, 220.0f };
-	constexpr int32 CriticalChancePercents[] = { 0, 5, 10, 15, 20, 25 };
+	// Constant additive gains per point. Speed is in cm/s, health/defense are damage units.
+	// At the current 10-health baseline, max health/defense give 20 HP and 2.5 flat defense:
+	// a 6-damage attack needs six hits to defeat the player; a 12-damage attack needs three.
+	constexpr int32 InventorySlotsPerRank = 2;
+	constexpr float RunSpeedPerRank = 20.0f;
+	constexpr float StaminaPerRank = 20.0f;
+	constexpr float HealthPerRank = 2.0f;
+	constexpr float DefensePerRank = 0.5f;
+	constexpr int32 CriticalChancePerRank = 5;
 
 	int32 ClampRank(const int32 Rank)
 	{
@@ -32,30 +34,30 @@ int32 FJTSPlayerProgressionRules::GetExperienceRequiredForNextLevel(const int32 
 
 int32 FJTSPlayerProgressionRules::GetInventorySlotBonus(const int32 AbilityRank)
 {
-	return InventorySlotBonuses[ClampRank(AbilityRank)];
+	return InventorySlotsPerRank * ClampRank(AbilityRank);
 }
 
-int32 FJTSPlayerProgressionRules::GetStackLimit(const int32 AbilityRank)
+float FJTSPlayerProgressionRules::GetRunSpeedBonus(const int32 AbilityRank)
 {
-	return StackLimits[ClampRank(AbilityRank)];
-}
-
-int32 FJTSPlayerProgressionRules::GetRunSpeedBonusPercent(const int32 AbilityRank)
-{
-	return RunSpeedBonusPercents[ClampRank(AbilityRank)];
-}
-
-float FJTSPlayerProgressionRules::GetRunSpeedMultiplier(const int32 AbilityRank)
-{
-	return 1.0f + static_cast<float>(GetRunSpeedBonusPercent(AbilityRank)) / 100.0f;
+	return RunSpeedPerRank * ClampRank(AbilityRank);
 }
 
 float FJTSPlayerProgressionRules::GetMaxStamina(const int32 AbilityRank)
 {
-	return StaminaCapacities[ClampRank(AbilityRank)];
+	return 100.0f + StaminaPerRank * ClampRank(AbilityRank);
 }
 
 int32 FJTSPlayerProgressionRules::GetCriticalChancePercent(const int32 AbilityRank)
 {
-	return CriticalChancePercents[ClampRank(AbilityRank)];
+	return CriticalChancePerRank * ClampRank(AbilityRank);
+}
+
+float FJTSPlayerProgressionRules::GetHealthBonus(const int32 AbilityRank)
+{
+	return HealthPerRank * ClampRank(AbilityRank);
+}
+
+float FJTSPlayerProgressionRules::GetDefense(const int32 AbilityRank)
+{
+	return DefensePerRank * ClampRank(AbilityRank);
 }

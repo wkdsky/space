@@ -28,7 +28,7 @@ namespace
 		switch (Type)
 		{
 		case EJTSResourceType::Rock: return TEXT("石头");
-		case EJTSResourceType::Ore: return TEXT("铁矿物");
+		case EJTSResourceType::Ore: return TEXT("矿物");
 		case EJTSResourceType::Organic: return TEXT("有机物");
 		default: return TEXT("资源");
 		}
@@ -129,7 +129,7 @@ TArray<uint8> UJTSWeaponUpgradePanel::GetRecordedPoints(const FJTSShipLockerSlot
 
 FText UJTSWeaponUpgradePanel::BuildTitle(const FJTSShipLockerSlot& LockerSlot) const
 {
-	return FText::FromString(FString::Printf(TEXT("%s  ·  机体 Lv %d / %d"),
+	return FText::FromString(FString::Printf(TEXT("%s · 机体等级 %d / %d"),
 		*UJTSItemDefinitionLibrary::GetItemDisplayName(LockerSlot.StandardItem.ItemId).ToString(),
 		LockerSlot.StandardItem.WeaponBodyLevel, FJTSWeaponProgression::MaxBodyLevel));
 }
@@ -151,7 +151,7 @@ FText UJTSWeaponUpgradePanel::BuildCostText(const FJTSShipLockerSlot& LockerSlot
 	{
 		return FText::FromString(TEXT("机体已满级"));
 	}
-	FString Text = FString::Printf(TEXT("升到 Lv %d："), LockerSlot.StandardItem.WeaponBodyLevel + 1);
+	FString Text = FString::Printf(TEXT("升到 %d 级："), LockerSlot.StandardItem.WeaponBodyLevel + 1);
 	for (const FJTSItemCost& Entry : Cost)
 	{
 		const int32 Have = ActiveSpacecraft.IsValid() ? ActiveSpacecraft->GetResourceAmount(Entry.ResourceType) : 0;

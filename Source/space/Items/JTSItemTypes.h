@@ -19,7 +19,7 @@ enum class EJTSItemId : uint8
 	Ore UMETA(DisplayName = "Ore"),
 	MoonAntCorpse UMETA(DisplayName = "Moon Ant Corpse"),
 	/** Retired test weapons. Values stay reserved so old saves deserialize; they are no longer obtainable. */
-	Pickaxe UMETA(Hidden),
+	Pickaxe UMETA(DisplayName = "Pickaxe"),
 	/** Retired serialized value kept only so old saves/world assets can be safely ignored. */
 	Backpack UMETA(Hidden),
 	Knife UMETA(Hidden),
@@ -49,7 +49,8 @@ enum class EJTSItemId : uint8
 	GrenadeLauncher UMETA(DisplayName = "Grenade Launcher"),
 	ArcGun UMETA(DisplayName = "Arc Gun"),
 	/** Append-only identity for material recovered from crystal-bearing rocks. */
-	Crystal UMETA(DisplayName = "Crystal")
+	Crystal UMETA(DisplayName = "Crystal"),
+	InorganicCarbon UMETA(DisplayName = "Inorganic Carbon")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */

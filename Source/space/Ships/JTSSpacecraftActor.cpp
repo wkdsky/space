@@ -82,6 +82,8 @@ namespace
 
 		case EJTSResourceType::Organic:
 			return TEXT("Organic");
+		case EJTSResourceType::InorganicCarbon:
+			return TEXT("Inorganic Carbon");
 
 		default:
 			return TEXT("Unknown");
@@ -99,6 +101,7 @@ namespace
 		case EJTSResourceType::Ore:
 		case EJTSResourceType::Crystal:
 		case EJTSResourceType::Organic:
+		case EJTSResourceType::InorganicCarbon:
 			return true;
 
 		default:
@@ -3494,6 +3497,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 	const int32 RockCount = Inventory->GetItemCount(EJTSItemId::Rock);
 	const int32 OreCount = Inventory->GetItemCount(EJTSItemId::Ore);
 	const int32 CrystalCount = Inventory->GetItemCount(EJTSItemId::Crystal);
+	const int32 CarbonCount = Inventory->GetItemCount(EJTSItemId::InorganicCarbon);
 	const int32 MoonAntCorpseCount = Inventory->GetItemCount(EJTSItemId::MoonAntCorpse);
 	TMap<EJTSResourceType, int32> Materials;
 	if (RockCount > 0)
@@ -3505,6 +3509,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 		Materials.Add(EJTSResourceType::Ore, OreCount);
 	}
 	if (CrystalCount > 0) Materials.Add(EJTSResourceType::Crystal, CrystalCount);
+	if (CarbonCount > 0) Materials.Add(EJTSResourceType::InorganicCarbon, CarbonCount);
 	if (MoonAntCorpseCount > 0)
 	{
 		// A corpse is a carried item, but it becomes processed Organic when submitted to the ship.
@@ -3518,8 +3523,9 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 	const bool bRemovedRock = RockCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Rock, RockCount);
 	const bool bRemovedOre = bRemovedRock && (OreCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Ore, OreCount));
 	const bool bRemovedCrystal = bRemovedOre && (CrystalCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Crystal, CrystalCount));
-	const bool bRemovedCorpse = bRemovedCrystal && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
-	if (!bRemovedRock || !bRemovedOre || !bRemovedCrystal || !bRemovedCorpse)
+	const bool bRemovedCarbon = bRemovedCrystal && (CarbonCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::InorganicCarbon, CarbonCount));
+	const bool bRemovedCorpse = bRemovedCarbon && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
+	if (!bRemovedRock || !bRemovedOre || !bRemovedCrystal || !bRemovedCarbon || !bRemovedCorpse)
 	{
 		if (bRemovedRock && RockCount > 0)
 		{
@@ -3530,6 +3536,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
 		}
 		if (bRemovedCrystal && CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
+		if (bRemovedCarbon && CarbonCount > 0) Inventory->TryAddItemById(EJTSItemId::InorganicCarbon, CarbonCount);
 		if (bRemovedCorpse && MoonAntCorpseCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
@@ -3548,6 +3555,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
 		}
 		if (CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
+		if (CarbonCount > 0) Inventory->TryAddItemById(EJTSItemId::InorganicCarbon, CarbonCount);
 		if (MoonAntCorpseCount > 0)
 		{
 			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);

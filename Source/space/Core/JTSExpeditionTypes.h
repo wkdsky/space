@@ -231,6 +231,12 @@ struct SPACE_API FJTSPlayerSnapshot
 
 	UPROPERTY()
 	int32 CriticalChanceAbilityRank = 0;
+
+	UPROPERTY()
+	int32 HealthAbilityRank = 0;
+
+	UPROPERTY()
+	int32 DefenseAbilityRank = 0;
 };
 
 /** Cross-level snapshot owned by the authoritative expedition subsystem, never by a client GameInstance. */
@@ -271,6 +277,10 @@ struct SPACE_API FJTSExpeditionSnapshot
 
 	UPROPERTY()
 	TArray<FJTSPlayerSnapshot> Players;
+
+	/** Monotonic per-expedition entrance tombstones; absent in older saves means intact. */
+	UPROPERTY()
+	TSet<FName> BlockedEntranceIds;
 
 	/** UTC ticks written by the authoritative host whenever this snapshot is persisted. */
 	UPROPERTY()

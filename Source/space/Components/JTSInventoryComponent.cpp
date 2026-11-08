@@ -324,9 +324,7 @@ int32 UJTSInventoryComponent::GetEffectiveStackLimit(const EJTSItemId ItemId) co
 		return 1;
 	}
 
-	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
-	const AJTSPlayerState* const PlayerState = IsValid(OwnerPawn) ? OwnerPawn->GetPlayerState<AJTSPlayerState>() : nullptr;
-	return IsValid(PlayerState) ? FMath::Max(1, PlayerState->GetItemStackLimit()) : 1;
+	return FJTSPlayerProgressionRules::ItemStackLimit;
 }
 
 bool UJTSInventoryComponent::TryRemoveItem(EJTSItemId ItemId, int32 Count)
@@ -597,8 +595,7 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 		NotifyInventoryChanged();
 	};
 
-	// Save files written before the two-slot, one-resource-per-slot rules can contain both
-	// oversized inventories and resource stacks. Normalize them without throwing away any saved
+	// Old saves can contain oversized inventories and resource stacks. Normalize them without throwing away any saved
 	// payload: only active-capacity slots are exposed now, while migration overflow stays
 	// serialized and becomes visible again after a progression capacity upgrade.
 	const int32 Capacity = GetInventoryCapacity();
@@ -632,8 +629,7 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 
 			if (!bPlacedFirstChunk && SavedSlotIndex < Capacity)
 			{
-				// Preserve the visible order of existing slot zero/one items. A stack's
-				// remaining units deliberately move behind the active capacity boundary.
+				// Preserve existing visible item positions before placing split remainders.
 				RestoredSlots[SavedSlotIndex] = NormalizedItem;
 				bPlacedFirstChunk = true;
 			}
@@ -645,6 +641,15 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 		}
 	}
 
+	int32 PlacedOverflow = 0;
+	for (FJTSItemInstance& Slot : RestoredSlots)
+	{
+		if (Slot.IsEmpty() && OverflowItems.IsValidIndex(PlacedOverflow))
+		{
+			Slot = OverflowItems[PlacedOverflow++];
+		}
+	}
+	OverflowItems.RemoveAt(0, PlacedOverflow);
 	RestoredSlots.Append(OverflowItems);
 	ItemSlots = MoveTemp(RestoredSlots);
 	FinalizeRestore();

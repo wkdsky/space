@@ -37,4 +37,23 @@ public:
 	/** Performs this actor's interaction behavior. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void Interact(APawn* InteractingPawn);
+
+	/** Availability of the prompt is independent from permission to execute (e.g. a required tool). */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
+	bool CanExecuteInteraction(APawn* Pawn) const;
+	virtual bool CanExecuteInteraction_Implementation(APawn* Pawn) const { return true; }
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
+	bool UsesSharedInteractionProgress() const;
+	virtual bool UsesSharedInteractionProgress_Implementation() const { return false; }
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
+	float GetSharedInteractionProgress() const;
+	virtual float GetSharedInteractionProgress_Implementation() const { return 0; }
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
+	void SetInteractionHeld(APawn* Pawn, bool bHeld);
+	virtual void SetInteractionHeld_Implementation(APawn* Pawn, bool bHeld) {}
+
+	/** Zero keeps ordinary press interactions; positive values require a server-timed hold. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	float GetInteractionHoldDuration(APawn* InteractingPawn) const;
+	virtual float GetInteractionHoldDuration_Implementation(APawn* InteractingPawn) const { return 0.0f; }
 };

@@ -32,6 +32,7 @@
 #include "space/Components/JTSWallClimbComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSRangedWeaponComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSStellarAbilityComponent.h"
@@ -51,6 +52,7 @@
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Items/JTSItemDefinition.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
@@ -62,6 +64,8 @@
 #include "space/UI/JTSCelestialMarkerWidget.h"
 #include "space/UI/JTSCelestialNavigationLibrary.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSPlanetSurfaceAttachment.h"
+#include "space/World/JTSPlanetEcologyHabitat.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -980,6 +984,10 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			FVector2D(280.0f, 54.0f),
 			FVector2D(0.5f, 1.0f));
 		CrosshairText = MakeTextBlock(WidgetTree, TEXT("CrosshairText"), TEXT("+"), 30.0f, FLinearColor(0.88f, 0.96f, 1.0f, 0.92f), ETextJustify::Center);
+		FSlateFontInfo CrosshairFont = CrosshairText->GetFont();
+		CrosshairFont.OutlineSettings.OutlineSize = 2;
+		CrosshairFont.OutlineSettings.OutlineColor = FLinearColor(0.015f, 0.02f, 0.03f, 0.95f);
+		CrosshairText->SetFont(CrosshairFont);
 		AddCanvasChild(GameplayLayer, CrosshairText, FAnchors(0.5f, 0.5f), FVector2D::ZeroVector, FVector2D(36.0f, 36.0f), FVector2D(0.5f, 0.5f));
 
 		SpacecraftWorldMarker = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("SpacecraftWorldMarker"));
@@ -1071,7 +1079,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			if (ShipResourcesPanel != nullptr && ShipResourcesBox != nullptr)
 			{
 				ShipResourcesPanel->SetContent(ShipResourcesBox);
-				AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("SHIP RESOURCES"), 18.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+				AddVerticalChild(ShipResourcesBox, MakeTextBlock(WidgetTree, TEXT("ShipResourcesHeading"), TEXT("飞船资源"), 18.0f, FLinearColor(0.95f, 0.85f, 1.0f, 1.0f)), FMargin(0.0f, 0.0f, 0.0f, 5.0f));
 
 				const EJTSResourceType DisplayedResourceTypes[] = {
 					EJTSResourceType::Fuel,
@@ -1079,7 +1087,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 					EJTSResourceType::Food,
 					EJTSResourceType::Rock,
 					EJTSResourceType::Ore,
-					EJTSResourceType::Organic};
+					EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon};
 				for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
 				{
 					UHorizontalBox* const ResourceRow = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -1129,6 +1137,12 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(RightSidebarBox, ShipResourcesPanel, FMargin(0.0f, 0.0f));
 		}
 
+		EntranceProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("EntranceProgressWidget"));
+		EntranceProgressWidget->SetProgressColor(FLinearColor(1.0f, 0.74f, 0.30f));
+		EntranceProgressWidget->SetBackgroundColor(FLinearColor(0.12f, 0.15f, 0.18f, 0.8f));
+		EntranceProgressSlot = AddCanvasChild(GameplayLayer, EntranceProgressWidget, FAnchors(0,0), FVector2D::ZeroVector,
+			FVector2D(46,46), FVector2D(0.5f,0.5f));
+		EntranceProgressWidget->SetVisibility(ESlateVisibility::Collapsed);
 		BoardingProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("BoardingProgressWidget"));
 		if (BoardingProgressWidget != nullptr)
 		{
@@ -1386,7 +1400,7 @@ void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
 		EJTSResourceType::Food,
 		EJTSResourceType::Rock,
 		EJTSResourceType::Ore,
-		EJTSResourceType::Organic};
+		EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon};
 	const AJTSSpacecraftActor* const Spacecraft = BoundSpacecraftResources.IsValid()
 		? BoundSpacecraftResources.Get()
 		: FindSpacecraft();
@@ -1836,13 +1850,20 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		? PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>() : nullptr;
 	const float PunchHitFeedback = IsValid(CrosshairMelee)
 		? CrosshairMelee->GetConfirmedPunchHitFeedbackAlpha() : 0.0f;
+	const auto* MiningStrike = PlayerCharacter ? PlayerCharacter->FindComponentByClass<UJTSMiningStrikeComponent>() : nullptr;
+	const float MiningFeedback = MiningStrike ? MiningStrike->GetImpactFeedback() : 0.f;
 	const auto* CrosshairStellar = PlayerCharacter ? PlayerCharacter->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
+	const auto* CrosshairInventory = PlayerCharacter ? PlayerCharacter->FindComponentByClass<UJTSInventoryComponent>() : nullptr;
+	const auto* CrosshairItem = CrosshairInventory ? UJTSItemDefinitionLibrary::GetItemDefinition(this, CrosshairInventory->GetActiveItemId()) : nullptr;
+	const bool bHasDamagingHeldItem = CrosshairItem && CrosshairItem->IsHoldable()
+		&& (CrosshairItem->CombatDamage > 0 || CrosshairItem->RangedDamage > 0);
+	const bool bEmptyHandAiming = CrosshairInventory && CrosshairInventory->GetActiveItemId() == EJTSItemId::None
+		&& CrosshairRanged && CrosshairRanged->IsAiming();
 	const bool bShowGameplayAiming = (bEarthCollection || bMoonExploration || bSpaceWorldSurfaceActive)
 		&& !bGameMenuOpen
 		&& PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded()
-		&& IsValid(CrosshairRanged)
-		&& (CrosshairRanged->HasActiveRangedWeapon() || CrosshairRanged->IsAiming()
+		&& (bHasDamagingHeldItem || bEmptyHandAiming
 			|| (CrosshairStellar && CrosshairStellar->HasActiveWeapon()));
 	const bool bShowPunchHit = !bGameMenuOpen && PlayerCharacter != nullptr
 		&& !PlayerCharacter->IsBoarded() && PunchHitFeedback > 0.0f;
@@ -1852,12 +1873,12 @@ void UJTSPrototypeHUDWidget::RefreshGameplayHud()
 		const UJTSRangedWeaponComponent* const Ranged = PlayerCharacter != nullptr
 			? PlayerCharacter->FindComponentByClass<UJTSRangedWeaponComponent>() : nullptr;
 		const bool bEquippedRanged = IsValid(Ranged) && Ranged->HasActiveRangedWeapon();
-		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : PunchHitFeedback;
+		const float ReticleKick = bEquippedRanged ? Ranged->GetReticleKickAlpha() : FMath::Max(PunchHitFeedback,MiningFeedback);
 		const bool bCriticalHit = bEquippedRanged && Ranged->HasRecentConfirmedCriticalHit();
 		CrosshairText->SetRenderScale(FVector2D(1.0f + 0.22f * ReticleKick + (bCriticalHit ? 0.20f : 0.0f)));
 		CrosshairText->SetColorAndOpacity(FSlateColor(bCriticalHit
 			? FLinearColor(1.0f, 0.78f, 0.20f)
-			: (bShowPunchHit || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
+			: (bShowPunchHit || MiningFeedback > 0 || (bEquippedRanged && Ranged->HasRecentConfirmedHit())
 				? FLinearColor(1.0f, 0.56f, 0.24f) : FLinearColor::White)));
 	}
 	// The quickbar and contextual interaction prompt already teach surface actions. A second
@@ -2255,8 +2276,8 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 						PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
 						TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
 						PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
-						bHasPromptAnchor = !PromptText.IsEmpty() && !TargetName.IsEmpty();
 						bUseCompactPrompt = MeleeTarget->IsA<AJTSMoonResourceActor>();
+						bHasPromptAnchor = !TargetName.IsEmpty() && (bUseCompactPrompt || !PromptText.IsEmpty());
 					}
 				}
 
@@ -2289,6 +2310,20 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 								PromptAnchor = Resource->GetInteractionAnchorWorldLocation();
 								bHasPromptAnchor = true;
 							}
+							else if (const AJTSPlanetSurfaceAttachment* const Attachment = Cast<AJTSPlanetSurfaceAttachment>(Target))
+							{
+								TargetName = Attachment->GetInteractionDisplayName();
+								PromptAnchor = Attachment->GetInteractionAnchorWorldLocation();
+								bUseCompactPrompt = true;
+								bHasPromptAnchor = !TargetName.IsEmpty();
+							}
+							else if (const AJTSPlanetEcologyHabitat* const Habitat = Cast<AJTSPlanetEcologyHabitat>(Target))
+							{
+								TargetName = FText::FromString(TEXT("巢穴洞口"));
+								PromptAnchor = Habitat->GetInteractionAnchorWorldLocation();
+								bUseCompactPrompt = true;
+								bHasPromptAnchor = true;
+							}
 							else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
 							{
 								TargetName = FText::FromString(TEXT("SPACECRAFT"));
@@ -2317,15 +2352,34 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 		}
 	}
 
+	const AJTSCharacter* WorkCharacter = Cast<AJTSCharacter>(GetOwningPlayerPawn());
+	const auto* WorkInteraction = WorkCharacter ? WorkCharacter->FindComponentByClass<UInteractionComponent>() : nullptr;
+	const auto* WorkHabitat = WorkInteraction ? Cast<AJTSPlanetEcologyHabitat>(WorkInteraction->GetCurrentInteractable()) : nullptr;
+	const bool bWorkEnabled = WorkHabitat && IInteractable::Execute_CanExecuteInteraction(const_cast<AJTSPlanetEcologyHabitat*>(WorkHabitat), const_cast<AJTSCharacter*>(WorkCharacter));
 	FVector2D PromptScreenPosition = FVector2D::ZeroVector;
 	const bool bProjected = bHasPromptAnchor && ProjectWorldToViewportWidget(PromptAnchor, PromptScreenPosition);
-	const bool bShowPrompt = !PromptText.IsEmpty() && !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
+	const bool bShowPrompt = !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
+	if (EntranceProgressWidget)
+	{
+		const float Progress = WorkHabitat ? WorkInteraction->GetInteractionHoldProgress() : 0;
+		EntranceProgressWidget->SetProgress(Progress);
+		EntranceProgressWidget->SetRenderTransformAngle(0);
+		EntranceProgressWidget->SetVisibility(bShowPrompt && WorkHabitat && Progress > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (EntranceProgressSlot)
+		{
+			EntranceProgressSlot->SetAnchors(bUseCenteredPrompt ? FAnchors(0.5f,0.5f) : FAnchors(0,0));
+			EntranceProgressSlot->SetPosition(bUseCenteredPrompt ? FVector2D(0,32) : PromptScreenPosition + FVector2D(0,-54));
+		}
+	}
 	if (InteractionPromptText != nullptr)
 	{
+		InteractionPromptText->SetColorAndOpacity(FSlateColor(WorkHabitat
+			? (bWorkEnabled ? FLinearColor(1.0f,0.78f,0.32f) : FLinearColor(0.48f,0.50f,0.54f))
+			: FLinearColor(0.90f,0.96f,1.0f)));
 		InteractionPromptText->SetAutoWrapText(!bUseCompactPrompt);
 		InteractionPromptText->SetText(bShowPrompt
-			? (bUseCompactPrompt ? PromptText
-				: FText::FromString(FString::Printf(TEXT("%s\n%s"), *TargetName.ToString(), *PromptText.ToString())))
+			? (PromptText.IsEmpty() ? TargetName
+				: FText::Format(FText::FromString(TEXT("{0}\n{1}")), TargetName, PromptText))
 			: FText::GetEmpty());
 		InteractionPromptText->SetVisibility(bShowPrompt ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
@@ -2883,28 +2937,32 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 	switch (ResourceType)
 	{
 	case EJTSResourceType::Fuel:
-		return TEXT("Fuel");
+		return TEXT("燃料");
 
 	case EJTSResourceType::Water:
-		return TEXT("Water");
+		return TEXT("水");
 
 	case EJTSResourceType::Food:
-		return TEXT("Food");
+		return TEXT("食物");
 
 	case EJTSResourceType::Rock:
-		return TEXT("Rock");
+		return TEXT("石头");
 
 	case EJTSResourceType::Ore:
-		return TEXT("Ore");
+		return TEXT("矿物");
+	case EJTSResourceType::Crystal:
+		return TEXT("矿物");
 
 	case EJTSResourceType::Organic:
-		return TEXT("Organic");
+		return TEXT("有机质");
+	case EJTSResourceType::InorganicCarbon:
+		return TEXT("无机碳");
 
 	case EJTSResourceType::MoonAntCorpse:
-		return TEXT("MoonAnt Corpse");
+		return TEXT("镜虫尸体");
 
 	default:
-		return TEXT("Unknown");
+		return TEXT("未知资源");
 	}
 }
 

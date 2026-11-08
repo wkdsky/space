@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "space/Interaction/JTSMeleeTarget.h"
+#include "space/Interaction/IInteractable.h"
 #include "JTSPlanetSurfaceAttachment.generated.h"
 class AJTSPlanetAnchor;
 class UStaticMesh;
@@ -9,6 +10,7 @@ class UStaticMeshComponent;
 class UProceduralMeshComponent;
 class UBoxComponent;
 class UJTSHealthComponent;
+class UJTSItemDefinition;
 
 /** Independent presentation data: no changes to the source mesh or the planet asset. */
 USTRUCT()
@@ -23,16 +25,26 @@ struct FJTSPlanetAttachmentAppearance
 	UPROPERTY() bool bCastShadow = false;
 	UPROPERTY() bool bDestructible = false;
 	UPROPERTY() float SurfaceOffset = 1;
+	UPROPERTY() TObjectPtr<UJTSItemDefinition> ResourceItem;
+	UPROPERTY() int32 ResourceUnits = 1;
 };
 
 UCLASS()
-class SPACE_API AJTSPlanetSurfaceAttachment : public AActor, public IJTSMeleeTarget
+class SPACE_API AJTSPlanetSurfaceAttachment : public AActor, public IJTSMeleeTarget, public IInteractable
 {
 	GENERATED_BODY()
 public:
 	AJTSPlanetSurfaceAttachment();
 	void Initialize(UStaticMesh* Mesh, AJTSPlanetAnchor* Planet, const FTransform& Transform,
-		bool bConform, bool bCastShadow, float SurfaceOffset, bool bDestructible = false, UStaticMesh* CutVolume = nullptr);
+		bool bConform, bool bCastShadow, float SurfaceOffset, bool bDestructible = false, UStaticMesh* CutVolume = nullptr,
+		UJTSItemDefinition* ResourceItem = nullptr, int32 ResourceUnits = 1);
+	virtual bool CanInteract_Implementation(APawn* Pawn) const override;
+	virtual FText GetInteractionPrompt_Implementation(APawn* Pawn) const override;
+	virtual void Interact_Implementation(APawn* Pawn) override;
+	UFUNCTION(BlueprintPure, Category = "Planet|Resource")
+	FText GetInteractionDisplayName() const;
+	UFUNCTION(BlueprintPure, Category = "Planet|Resource")
+	FVector GetInteractionAnchorWorldLocation() const;
 	UFUNCTION(BlueprintPure, Category="Planet|Attachment") bool IsRefugeUsable() const;
 	virtual bool CanReceiveMeleeHit_Implementation(APawn* Pawn) const override;
 	virtual void ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type) override;
@@ -50,6 +62,7 @@ private:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UJTSHealthComponent> Health;
 	UPROPERTY(ReplicatedUsing=ApplyAppearance) FJTSPlanetAttachmentAppearance Appearance;
 	bool bApplyingAppearance = false;
+	bool bResourceConsumed = false;
 	void OnAttachmentTransformUpdated(USceneComponent* Component, EUpdateTransformFlags Flags, ETeleportType Teleport);
 	void UpdateCutVisibility();
 	UFUNCTION() void ApplyAppearance();

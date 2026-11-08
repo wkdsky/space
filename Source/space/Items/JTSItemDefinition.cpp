@@ -10,9 +10,7 @@ bool UJTSItemDefinition::HasCapability(EJTSItemCapability Capability) const
 
 bool UJTSItemDefinition::IsStackable() const
 {
-	// A stackable type can still have an effective limit of one at rank zero. The inventory's
-	// PlayerState-driven stack rule owns that limit, so a later ability upgrade immediately applies
-	// to existing resource definitions without requiring asset edits.
+	// The inventory applies the fixed per-slot cap to resource types; equipment stays unique.
 	return PrimaryCategory == EJTSItemCategory::Resources
 		|| HasCapability(EJTSItemCapability::StackableResource);
 }

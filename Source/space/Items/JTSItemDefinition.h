@@ -12,6 +12,7 @@
 class UMaterialInterface;
 class UStaticMesh;
 class USoundBase;
+class USoundAttenuation;
 
 /**
  * Authorable item-local pivots for a held visual.  GripTransform's origin is the point the
@@ -27,6 +28,12 @@ struct SPACE_API FJTSHeldItemPresentation
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item")
 	bool bOverridePrototypeProfile = false;
+	/** Optional authored mesh, in model-local centimetres, replacing the primitive silhouette. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item")
+	TObjectPtr<UStaticMesh> Mesh;
+	/** Authored mesh scale; grip and contact pivots are configured in final held centimetres. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (ClampMin = "0.01"))
+	float MeshScale = 1.0f;
 
 	/** Model-local pivot that is placed directly at the character's hand socket. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item", meta = (EditCondition = "bOverridePrototypeProfile", EditConditionHides))
@@ -184,6 +191,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
 	TObjectPtr<UStaticMesh> WorldPickupMesh;
 
+	/** Optional interchangeable forms. The replicated item identity selects the same form on every peer. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
+	TArray<TObjectPtr<UStaticMesh>> WorldPickupMeshVariants;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation", meta = (ClampMin = "1.0"))
 	float WorldPickupWidth = 32.0f;
 
@@ -213,6 +224,24 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.05"))
 	float MeleeAttackInterval = 0.45f;
+
+	/** Scales the held-item motion and its server hit/chain/recovery clocks together. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.25", ClampMax = "4.0"))
+	float MeleeSwingPlayRate = 1.0f;
+
+	/** Directed tool stroke: the arm pose and server contact use the same trajectory and clock. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining")
+	bool bDirectedMiningSwing = false;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining", meta = (ClampMin = "0.25"))
+	float MiningSwingDuration = 0.32f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining", meta = (ClampMin = "0.2", ClampMax = "0.7"))
+	float MiningContactFraction = 0.48f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining", meta = (ClampMin = "50"))
+	float MiningReach = 180.0f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining")
+	TSoftObjectPtr<USoundBase> MiningSwingSound;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Mining")
+	TSoftObjectPtr<USoundAttenuation> MiningSwingAttenuation;
 
 	/** What a swing of this item counts as for targets that react to the weapon kind (for example ant nests). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")

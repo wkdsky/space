@@ -194,7 +194,7 @@ FText AJTSResourcePickupActor::GetInteractionPrompt_Implementation(APawn* Intera
 	}
 
 	const FText FailureFeedback = GetFailureFeedback();
-	return FailureFeedback.IsEmpty() ? FText::FromString(TEXT("[E] PICK UP")) : FailureFeedback;
+	return FailureFeedback.IsEmpty() ? FText::FromString(TEXT("[E] 拾取")) : FailureFeedback;
 }
 
 void AJTSResourcePickupActor::Interact_Implementation(APawn* InteractingPawn)
@@ -338,21 +338,23 @@ FString AJTSResourcePickupActor::ResourceTypeToPromptName(EJTSResourceType InRes
 	switch (InResourceType)
 	{
 	case EJTSResourceType::Fuel:
-		return TEXT("FUEL");
+		return TEXT("燃料");
 
 	case EJTSResourceType::Water:
-		return TEXT("WATER");
+		return TEXT("水");
 
 	case EJTSResourceType::Food:
-		return TEXT("FOOD");
+		return TEXT("食物");
 
 	case EJTSResourceType::Rock:
-		return TEXT("ROCK");
+		return TEXT("石头");
 
 	case EJTSResourceType::Ore:
-		return TEXT("ORE");
+		return TEXT("矿物");
+	case EJTSResourceType::Crystal:
+		return TEXT("矿物");
 
 	default:
-		return TEXT("RESOURCE");
+		return TEXT("资源");
 	}
 }
