@@ -1,4 +1,5 @@
 #include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/Components/JTSColonyDefenseComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "space/Components/JTSNestBlockadeComponent.h"
 #include "space/Components/JTSMiningImpactComponent.h"
@@ -46,7 +47,9 @@ AJTSPlanetEcologyHabitat::AJTSPlanetEcologyHabitat()
 void AJTSPlanetEcologyHabitat::BeginPlay()
 {
 	Super::BeginPlay();
-	SetCanBeDamaged(bDestructibleEntrance);
+	SetCanBeDamaged(bDestructibleEntrance && !bCanBlockEntrance);
+	// Weapon damage must not kill the legacy health component and disable pickaxe targeting.
+	if (HasAuthority()) EntranceHealth->SetInvulnerable(bCanBlockEntrance);
 	RefugeMesh->SetCastShadow(false);
 	RefugeMesh->SetCollisionObjectType(ECC_WorldDynamic);
 	RefugeMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -83,30 +86,19 @@ void AJTSPlanetEcologyHabitat::ApplyCollapsed()
 	if (bCollapsed && HasAuthority() && IsValid(EntranceAttachment)) EntranceAttachment->Destroy();
 }
 
-bool AJTSPlanetEcologyHabitat::CanInteract_Implementation(APawn* Pawn) const
-{
-	const auto* Health = IsValid(Pawn) ? Pawn->FindComponentByClass<UJTSHealthComponent>() : nullptr;
-	return IsValid(Pawn) && Pawn->GetWorld() == GetWorld() && (!Health || !Health->IsDead())
-		&& bCanBlockEntrance && !bCollapsed && !bEntrancePlacementRejected && RefugeMesh->GetStaticMesh();
-}
+bool AJTSPlanetEcologyHabitat::CanInteract_Implementation(APawn* Pawn) const { return false; }
 
 FVector AJTSPlanetEcologyHabitat::GetInteractionAnchorWorldLocation() const
 {
 	return RefugeMesh->GetComponentTransform().TransformPosition(EntranceInteractionOffset);
 }
 
-FText AJTSPlanetEcologyHabitat::GetInteractionPrompt_Implementation(APawn* Pawn) const
-{
-	return !CanInteract_Implementation(Pawn) ? FText::GetEmpty() : FText::FromString(Blockade->HasRequiredTool(Pawn)
-		? TEXT("[E] 破坏洞口") : TEXT("[E] 破坏洞口（需要镐子）"));
-}
-
-float AJTSPlanetEcologyHabitat::GetInteractionHoldDuration_Implementation(APawn* Pawn) const { return FMath::Max(0.5f, BlockHoldDuration); }
-
-bool AJTSPlanetEcologyHabitat::CanExecuteInteraction_Implementation(APawn* Pawn) const { return Blockade->CanWork(Pawn); }
-float AJTSPlanetEcologyHabitat::GetSharedInteractionProgress_Implementation() const { return Blockade->GetProgress(); }
-void AJTSPlanetEcologyHabitat::SetInteractionHeld_Implementation(APawn* Pawn, bool bHeld) { Blockade->SetWorking(Pawn, bHeld); }
-void AJTSPlanetEcologyHabitat::Interact_Implementation(APawn* Pawn) { /* Completion is committed by the server work component. */ }
+FText AJTSPlanetEcologyHabitat::GetInteractionPrompt_Implementation(APawn* Pawn) const { return FText::GetEmpty(); }
+float AJTSPlanetEcologyHabitat::GetInteractionHoldDuration_Implementation(APawn* Pawn) const { return 0; }
+bool AJTSPlanetEcologyHabitat::CanExecuteInteraction_Implementation(APawn* Pawn) const { return false; }
+float AJTSPlanetEcologyHabitat::GetSharedInteractionProgress_Implementation() const { return 0; }
+void AJTSPlanetEcologyHabitat::SetInteractionHeld_Implementation(APawn* Pawn, bool bHeld) {}
+void AJTSPlanetEcologyHabitat::Interact_Implementation(APawn* Pawn) {}
 AActor* AJTSPlanetEcologyHabitat::GetEntranceAttachment() const { return EntranceAttachment; }
 void AJTSPlanetEcologyHabitat::ReleaseEntranceAttachment()
 {
@@ -184,22 +176,37 @@ AJTSPlanetSurfaceAttachment* AJTSPlanetEcologyHabitat::CreateEntranceAttachment(
 
 void AJTSPlanetEcologyHabitat::OnEntranceDestroyed(AController* InstigatorController, AActor* Causer)
 {
-	if (!HasAuthority() || !bDestructibleEntrance) return;
+	if (!HasAuthority() || !bDestructibleEntrance || bCanBlockEntrance) return;
 	bCollapsed = true;
 	SetInitialPopulation(0);
 	ApplyCollapsed();
 	ForceNetUpdate();
 }
 
-bool AJTSPlanetEcologyHabitat::CanReceiveMeleeHit_Implementation(APawn* Pawn) const { return bDestructibleEntrance && !bCollapsed; }
+bool AJTSPlanetEcologyHabitat::CanReceiveMeleeHit_Implementation(APawn* Pawn) const
+{
+	if (!bCanBlockEntrance) return bDestructibleEntrance && !bCollapsed;
+	const auto* Health = IsValid(Pawn) ? Pawn->FindComponentByClass<UJTSHealthComponent>() : nullptr;
+	return IsValid(Pawn) && Pawn->GetWorld() == GetWorld() && (!Health || !Health->IsDead())
+		&& (bCanBlockEntrance || bDestructibleEntrance) && !bCollapsed && !bEntrancePlacementRejected
+		&& RefugeMesh->GetStaticMesh();
+}
 void AJTSPlanetEcologyHabitat::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
 {
-	if (HasAuthority() && CanReceiveMeleeHit_Implementation(Pawn))
-		EntranceHealth->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn);
+	if (!HasAuthority() || !CanReceiveMeleeHit_Implementation(Pawn)) return;
+	if (bCanBlockEntrance)
+	{
+		if (Type == EJTSMeleeAttackType::Tool) Blockade->ApplyStrikeWork(Pawn);
+		return;
+	}
+	EntranceHealth->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn);
 }
-FText AJTSPlanetEcologyHabitat::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("巢穴洞口")); }
-FText AJTSPlanetEcologyHabitat::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("摧毁洞口")); }
-FVector AJTSPlanetEcologyHabitat::GetMeleeTargetAnchorWorldLocation_Implementation() const { return GetActorLocation() + GetActorUpVector() * 25; }
+FText AJTSPlanetEcologyHabitat::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("镜虫巢穴")); }
+FText AJTSPlanetEcologyHabitat::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const
+{
+	return FText::FromString(Blockade->HasRequiredTool(Pawn) ? TEXT("[左键] 镐击") : TEXT("需要镐子"));
+}
+FVector AJTSPlanetEcologyHabitat::GetMeleeTargetAnchorWorldLocation_Implementation() const { return GetInteractionAnchorWorldLocation(); }
 void AJTSPlanetEcologyHabitat::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -314,6 +321,8 @@ void AJTSPlanetEcologyHabitat::ConfigureSpawnedEnemy_Implementation(AActor* Enem
 	{
 		Creature->SetHabitat(this, FindRefuge(Creature->GetActorLocation()));
 		if (Creature->IsActorBeingDestroyed()) return;
+		if (AActor* Refuge = FindRefugeActor(Creature->GetActorLocation()))
+			if (auto* Colony = Refuge->FindComponentByClass<UJTSColonyDefenseComponent>()) Colony->RegisterResident(Creature, this);
 		if (bStationaryFeeding && !FoodPoints.IsEmpty()) Creature->SetFeedingTarget(FoodPoints[0]);
 	}
 }

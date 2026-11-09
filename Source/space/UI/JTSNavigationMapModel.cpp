@@ -1,6 +1,7 @@
 #include "space/UI/JTSNavigationMapModel.h"
 
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "space/Components/JTSCompressedSpaceComponent.h"
 #include "space/Components/JTSPlanetGravityComponent.h"
 #include "space/Player/JTSCharacter.h"
@@ -42,11 +43,19 @@ namespace
 FVector2D FJTSNavigationTerrainPatch::Project(const FVector& WorldPosition, const FVector& PlanetCenter) const
 {
 	const FVector Delta = WorldPosition - Origin;
-	const FVector2D Planar(FVector::DotProduct(Delta, East), -FVector::DotProduct(Delta, North));
+	const FVector2D Planar(FVector::DotProduct(Delta, Right), -FVector::DotProduct(Delta, Forward));
 	// The far hemisphere projects onto the same plane but is occluded by the planet.
 	if (FVector::DotProduct(WorldPosition - PlanetCenter, Up) < 0)
 		return (Planar.IsNearlyZero() ? FVector2D(1, 0) : Planar.GetSafeNormal()) * 2;
 	return Planar / FMath::Max(1.0f, HalfWidth);
+}
+
+void FJTSNavigationTerrainPatch::AlignToView(const FVector& ViewForward)
+{
+	Forward = FVector::VectorPlaneProject(ViewForward, Up).GetSafeNormal();
+	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::ForwardVector, Up).GetSafeNormal();
+	if (Forward.IsNearlyZero()) Forward = FVector::VectorPlaneProject(FVector::RightVector, Up).GetSafeNormal();
+	Right = FVector::CrossProduct(Up, Forward).GetSafeNormal();
 }
 
 FVector2D FJTSNavigationMapModel::SurfaceCoordinates(const FVector& Position, const FVector& Center, const FQuat& PlanetRotation)
@@ -79,12 +88,13 @@ FVector FJTSNavigationMapModel::ProjectSystemContact(const FVector& Delta, const
 	return Local.GetSafeNormal() * Radius;
 }
 
-void FJTSNavigationMapModel::UpdateTerrain(const AJTSPlanetAnchor* Planet, const FVector& Position, float HalfWidth)
+void FJTSNavigationMapModel::UpdateTerrain(const AJTSPlanetAnchor* Planet, const FVector& Position, const FVector& ViewForward, float HalfWidth)
 {
 	Terrain = MakeShared<FJTSNavigationTerrainPatch>();
 	Terrain->Origin = Position;
 	Terrain->Up = (Position - Planet->GetPlanetCenter()).GetSafeNormal();
-	SurfaceAxes(Planet, Terrain->Up, Terrain->East, Terrain->North);
+	Terrain->Planet = Planet;
+	Terrain->AlignToView(ViewForward);
 	Terrain->Radius = FVector::Distance(Position, Planet->GetPlanetCenter());
 	Terrain->HalfWidth = FMath::Min(FMath::Max(500.0f, HalfWidth), static_cast<float>(Terrain->Radius * 0.5));
 }
@@ -106,19 +116,29 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	if (Frame.bGroundMap)
 	{
 		const FVector PlayerLocation = Frame.bPlayerOnFoot ? Character->GetActorLocation() : Ship->GetActorLocation();
-		UpdateTerrain(GroundPlanet, PlayerLocation, Settings.GroundMapHalfWidth);
+		const FVector Forward = Frame.bPlayerOnFoot ? Character->GetActorForwardVector() : Ship->GetActorForwardVector();
+		FVector ViewForward = Forward;
+		if (const auto* PC = Character ? Cast<APlayerController>(Character->GetController()) : nullptr)
+		{
+			FVector Eye; FRotator View;
+			PC->GetPlayerViewPoint(Eye, View);
+			ViewForward = FVector::VectorPlaneProject(View.Vector(), GroundPlanet->GetRadialUpVector(PlayerLocation));
+			if (ViewForward.IsNearlyZero()) ViewForward = Forward;
+		}
+		UpdateTerrain(GroundPlanet, PlayerLocation, ViewForward, Settings.GroundMapHalfWidth);
 		Frame.Terrain = Terrain;
 		Frame.GroundHalfWidth = Terrain->HalfWidth;
 		Frame.PlayerPosition = Terrain->Project(PlayerLocation, GroundPlanet->GetPlanetCenter());
 		if (IsValid(Ship))
 		{
 			Frame.ShipPosition = Terrain->Project(Ship->GetActorLocation(), GroundPlanet->GetPlanetCenter());
-			Frame.ShipHeading = FVector2D(FVector::DotProduct(Ship->GetActorForwardVector(), Terrain->East),
-				-FVector::DotProduct(Ship->GetActorForwardVector(), Terrain->North)).GetSafeNormal();
+			Frame.ShipHeading = FVector2D(FVector::DotProduct(Ship->GetActorForwardVector(), Terrain->Right),
+				-FVector::DotProduct(Ship->GetActorForwardVector(), Terrain->Forward)).GetSafeNormal();
 			Frame.ShipSurfaceDistance = GroundPlanet->ApproximateSurfaceArcDistance(PlayerLocation, Ship->GetActorLocation());
 		}
-		const FVector Forward = Frame.bPlayerOnFoot ? Character->GetActorForwardVector() : Ship->GetActorForwardVector();
-		Frame.PlayerHeading = FVector2D(FVector::DotProduct(Forward, Terrain->East), -FVector::DotProduct(Forward, Terrain->North)).GetSafeNormal();
+		Frame.PlayerHeading = FVector2D(FVector::DotProduct(Forward, Terrain->Right), -FVector::DotProduct(Forward, Terrain->Forward)).GetSafeNormal();
+		FVector East, North; SurfaceAxes(GroundPlanet, Terrain->Up, East, North);
+		Frame.NorthHeading = FVector2D(FVector::DotProduct(North, Terrain->Right), -FVector::DotProduct(North, Terrain->Forward)).GetSafeNormal();
 		const FVector2D Coordinates = SurfaceCoordinates(PlayerLocation, GroundPlanet->GetPlanetCenter(), GroundPlanet->GetActorQuat());
 		Frame.Coordinates = FString::Printf(TEXT("%07.3f%s  %08.3f%s"), FMath::Abs(Coordinates.X),
 			Coordinates.X >= 0 ? TEXT("N") : TEXT("S"), FMath::Abs(Coordinates.Y), Coordinates.Y >= 0 ? TEXT("E") : TEXT("W"));
@@ -140,6 +160,8 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	TArray<FMapGroup> Groups;
 	for (const auto& Source : UJTSCelestialNavigationLibrary::GatherBodies(Manager, Ship))
 	{
+		// Uncharted nearby bodies normally remain a local focus. A locked discovery is hidden entirely.
+		if (Source.Planet && !Source.Planet->IsNavigationDiscovered()) continue;
 		FMapBody Body;
 		Body.Source = Source;
 		Body.Actor = Source.Planet ? static_cast<const AActor*>(Source.Planet) : Source.VisualActor.Get();

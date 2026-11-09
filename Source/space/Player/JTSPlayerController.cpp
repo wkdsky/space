@@ -1,9 +1,20 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "JTSPlayerController.h"
+#include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/UI/JTSExpeditionNoticeWidget.h"
+
+void AJTSPlayerController::ClientShowExpeditionNotice_Implementation(const FText& Message)
+{
+	if (!IsLocalController() || Message.IsEmpty()) return;
+	auto* Notice = CreateWidget<UJTSExpeditionNoticeWidget>(this);
+	Notice->SetMessage(Message);
+	Notice->AddToPlayerScreen(120);
+}
 
 #include "Blueprint/UserWidget.h"
 #include "Engine/World.h"
+#include "Net/UnrealNetwork.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerInput.h"
 #include "InputCoreTypes.h"
@@ -15,6 +26,7 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Items/JTSStellarLootTable.h"
 #include "space/UI/JTSStellarAttachmentDialog.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
@@ -100,6 +112,19 @@ void AJTSPlayerController::OnRep_Pawn()
 {
 	Super::OnRep_Pawn();
 	RefreshGameplayInputAfterPossess();
+}
+
+void AJTSPlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+	ApplyDebugInvulnerability();
+}
+
+void AJTSPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME_CONDITION(AJTSPlayerController, bDebugInvulnerable, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(AJTSPlayerController, bDebugOneHitKill, COND_OwnerOnly);
 }
 
 void AJTSPlayerController::ClientRestart_Implementation(APawn* NewPawn)
@@ -283,6 +308,19 @@ void AJTSPlayerController::ServerRequestShopPurchase_Implementation(AJTSSpacecra
 		? Spacecraft->TryPurchase(ControlledCharacter, ItemId)
 		: EJTSShopPurchaseResult::DeliveryFailed;
 	ClientReceiveShopPurchaseResult(Result);
+}
+
+void AJTSPlayerController::ServerRequestMaterialProcessing_Implementation(AJTSSpacecraftActor* Spacecraft, const FJTSMaterialGraph& Graph, bool bExecute)
+{
+	FString Message = TEXT("物料处理器不可用。");
+	UJTSMaterialProcessorComponent* Processor = IsValid(Spacecraft) ? Spacecraft->GetMaterialProcessor() : nullptr;
+	const bool bSucceeded = Processor && Processor->Submit(GetPawn(), Graph, bExecute, Message);
+	ClientReceiveMaterialProcessingResult(bSucceeded, Message);
+}
+
+void AJTSPlayerController::ClientReceiveMaterialProcessingResult_Implementation(bool bSucceeded, const FString& Message)
+{
+	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyMaterialProcessingResult(bSucceeded, Message);
 }
 
 void AJTSPlayerController::ServerRequestStellarRoll_Implementation(AJTSSpacecraftActor* Spacecraft, FGuid RequestId)
@@ -1138,6 +1176,54 @@ void AJTSPlayerController::PlayerTick(float DeltaTime)
 void AJTSPlayerController::ServerRequestDebugPlanet_Implementation(FName PlanetId, bool bSetDefault)
 {
 	if (auto* Debug = AJTSSpaceDebugTravelManager::Find(this)) Debug->Request(this, PlanetId, bSetDefault);
+}
+
+void AJTSPlayerController::ServerSetDebugInvulnerable_Implementation(bool bEnabled)
+{
+	if (!HasAuthority()) return;
+	const auto* Debug = AJTSSpaceDebugTravelManager::Find(this);
+	if (bEnabled && (!Debug || !Debug->IsAvailable())) return;
+	bDebugInvulnerable = bEnabled;
+	ApplyDebugInvulnerability();
+	ForceNetUpdate();
+}
+
+void AJTSPlayerController::ServerSetDebugOneHitKill_Implementation(bool bEnabled)
+{
+	if (!HasAuthority()) return;
+	const auto* Debug = AJTSSpaceDebugTravelManager::Find(this);
+	if (bEnabled && (!Debug || !Debug->IsAvailable())) return;
+	bDebugOneHitKill = bEnabled;
+	ForceNetUpdate();
+}
+
+bool AJTSPlayerController::IsDebugOneHitKillEnabled() const
+{
+	const auto* Debug = bDebugOneHitKill ? AJTSSpaceDebugTravelManager::Find(this) : nullptr;
+	return Debug && Debug->IsAvailable();
+}
+
+void AJTSPlayerController::ApplyDebugInvulnerability()
+{
+	if (!HasAuthority()) return;
+	const auto* Debug = AJTSSpaceDebugTravelManager::Find(this);
+	if (!Debug || !Debug->IsAvailable()) bDebugInvulnerable = false;
+	AJTSCharacter* ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
+	if (const auto* Ship = Cast<AJTSSpacecraftActor>(GetPawn()))
+	{
+		for (const auto& Occupant : Ship->GetOccupants())
+		{
+			if (Occupant.PlayerState == GetPlayerState<AJTSPlayerState>())
+			{
+				ControlledCharacter = Occupant.Character;
+				break;
+			}
+		}
+	}
+	if (IsValid(ControlledCharacter))
+	{
+		if (auto* Health = ControlledCharacter->GetHealthComponent()) Health->SetInvulnerable(bDebugInvulnerable);
+	}
 }
 
 bool AJTSPlayerController::IsNormalGameplayPhase() const

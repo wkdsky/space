@@ -29,7 +29,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Habitat|Blocking") TObjectPtr<UJTSNestBlockadeComponent> Blockade;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Habitat|Blocking") TObjectPtr<UJTSMiningImpactComponent> MiningImpact;
 	virtual bool CanExecuteInteraction_Implementation(APawn* Pawn) const override;
-	virtual bool UsesSharedInteractionProgress_Implementation() const override { return bCanBlockEntrance; }
+	virtual bool UsesSharedInteractionProgress_Implementation() const override { return false; }
 	virtual float GetSharedInteractionProgress_Implementation() const override;
 	virtual void SetInteractionHeld_Implementation(APawn* Pawn, bool bHeld) override;
 	void CommitEntranceBlockade(bool bAnimate = false);
@@ -47,7 +47,6 @@ public:
 	UPROPERTY(EditAnywhere, Category="Habitat") bool bDestructibleEntrance = false;
 	/** Authored only on the special level entrances; scatter recipes and Blueprint defaults leave this off. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Habitat|Blocking") bool bCanBlockEntrance = false;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Habitat|Blocking", meta=(ClampMin="0.5")) float BlockHoldDuration = 2.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Habitat|Blocking") FVector EntranceInteractionOffset = FVector::ZeroVector;
 	/** Mesh-local ground points, configured with the entrance artwork. */
 	UPROPERTY(EditAnywhere, Category="Habitat|Blocking") FVector EntranceEmergenceOffset = FVector(-40, 0, 0);

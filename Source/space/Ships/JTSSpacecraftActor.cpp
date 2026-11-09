@@ -29,6 +29,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
+#include "space/Components/JTSMaterialProcessorComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Components/JTSSpacecraftInterferenceComponent.h"
@@ -82,6 +83,8 @@ namespace
 
 		case EJTSResourceType::Organic:
 			return TEXT("Organic");
+		case EJTSResourceType::MoonAntCorpse:
+			return TEXT("Biological Corpse");
 		case EJTSResourceType::InorganicCarbon:
 			return TEXT("Inorganic Carbon");
 
@@ -101,6 +104,7 @@ namespace
 		case EJTSResourceType::Ore:
 		case EJTSResourceType::Crystal:
 		case EJTSResourceType::Organic:
+		case EJTSResourceType::MoonAntCorpse:
 		case EJTSResourceType::InorganicCarbon:
 			return true;
 
@@ -163,6 +167,7 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	LandingSupportComponent = CreateDefaultSubobject<UJTSSpacecraftLandingSupportComponent>(TEXT("LandingSupportComponent"));
 	SurfaceEnvelopeComponent = CreateDefaultSubobject<UJTSSpacecraftSurfaceEnvelopeComponent>(TEXT("SurfaceEnvelopeComponent"));
 	PresentationComponent = CreateDefaultSubobject<UJTSSpacecraftPresentationComponent>(TEXT("PresentationComponent"));
+	MaterialProcessor = CreateDefaultSubobject<UJTSMaterialProcessorComponent>(TEXT("MaterialProcessor"));
 
 	// Retain the legacy subobject name so existing Blueprint component templates keep their camera tuning.
 	FlightCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -1541,7 +1546,8 @@ bool AJTSSpacecraftActor::TryGrantDebugResources(AJTSCharacter* Player)
 	TMap<EJTSResourceType, int32> Resources;
 	for (const EJTSResourceType Resource : {
 		EJTSResourceType::Fuel, EJTSResourceType::Water, EJTSResourceType::Food,
-		EJTSResourceType::Rock, EJTSResourceType::Ore, EJTSResourceType::Organic })
+		EJTSResourceType::Rock, EJTSResourceType::Ore, EJTSResourceType::Organic,
+		EJTSResourceType::MoonAntCorpse, EJTSResourceType::InorganicCarbon, EJTSResourceType::Crystal })
 	{
 		Resources.Add(Resource, 100);
 	}
@@ -2920,6 +2926,59 @@ int32 AJTSSpacecraftActor::GetResourceAmount(EJTSResourceType ResourceType) cons
 	return ResourceAmount != nullptr ? FMath::Max(0, *ResourceAmount) : 0;
 }
 
+int64 AJTSSpacecraftActor::GetResourceHalfUnits(EJTSResourceType ResourceType) const
+{
+	return int64(GetResourceAmount(ResourceType)) * 2 + FMath::Clamp(StorageHalfUnitRemainders.FindRef(ResourceType), 0, 1);
+}
+
+bool AJTSSpacecraftActor::ApplyMaterialDeltas(const TMap<EJTSResourceType, int64>& Deltas)
+{
+	if (!HasAuthority()) return false;
+	for (const auto& Entry : Deltas)
+	{
+		if (!IsSupportedResourceType(Entry.Key) || Entry.Value < -int64(MAX_int32) * 2 - 1
+			|| Entry.Value > int64(MAX_int32) * 2 + 1) return false;
+		const int64 Result = GetResourceHalfUnits(Entry.Key) + Entry.Value;
+		if (Result < 0 || Result > int64(MAX_int32) * 2 + 1) return false;
+	}
+	for (const auto& Entry : Deltas)
+	{
+		const int64 Result = GetResourceHalfUnits(Entry.Key) + Entry.Value;
+		if (Result / 2) Storage.Add(Entry.Key, int32(Result / 2)); else Storage.Remove(Entry.Key);
+		if (Result % 2) StorageHalfUnitRemainders.Add(Entry.Key, 1); else StorageHalfUnitRemainders.Remove(Entry.Key);
+	}
+	SyncReplicatedStorage();
+	SavePersistentStorage();
+	return true;
+}
+
+TArray<FJTSResourceAmount> AJTSSpacecraftActor::ExportStorageSnapshot() const
+{
+	TArray<FJTSResourceAmount> Result;
+	for (uint8 I = 0; I <= uint8(EJTSResourceType::InorganicCarbon); ++I)
+	{
+		const EJTSResourceType Type = EJTSResourceType(I);
+		const int64 HalfUnits = GetResourceHalfUnits(Type);
+		if (!HalfUnits) continue;
+		FJTSResourceAmount& Entry = Result.AddDefaulted_GetRef();
+		Entry.ResourceType = Type; Entry.Amount = int32(HalfUnits / 2); Entry.HalfUnitRemainder = int32(HalfUnits % 2);
+	}
+	return Result;
+}
+
+void AJTSSpacecraftActor::RestoreStorageSnapshot(const TArray<FJTSResourceAmount>& Snapshot)
+{
+	if (!HasAuthority()) return;
+	Storage.Reset(); StorageHalfUnitRemainders.Reset();
+	for (const FJTSResourceAmount& Entry : Snapshot)
+	{
+		if (!IsSupportedResourceType(Entry.ResourceType) || Entry.Amount < 0) continue;
+		Storage.Add(Entry.ResourceType, Entry.Amount);
+		StorageHalfUnitRemainders.Add(Entry.ResourceType, FMath::Clamp(Entry.HalfUnitRemainder, 0, 1));
+	}
+	SyncReplicatedStorage();
+}
+
 bool AJTSSpacecraftActor::HasResource(EJTSResourceType ResourceType, int32 ResourceAmount) const
 {
 	return IsSupportedResourceType(ResourceType)
@@ -3020,7 +3079,8 @@ bool AJTSSpacecraftActor::DepositResourceAmounts(const TMap<EJTSResourceType, in
 
 	for (const TPair<EJTSResourceType, int32>& Resource : ResourceAmounts)
 	{
-		if (!IsSupportedResourceType(Resource.Key) || Resource.Value <= 0)
+		if (!IsSupportedResourceType(Resource.Key) || Resource.Value <= 0
+			|| int64(GetResourceAmount(Resource.Key)) + Resource.Value > MAX_int32)
 		{
 			return false;
 		}
@@ -3046,27 +3106,20 @@ const TMap<EJTSResourceType, int32>& AJTSSpacecraftActor::GetStorage() const
 void AJTSSpacecraftActor::SyncReplicatedStorage()
 {
 	if (!HasAuthority()) return;
-	ReplicatedStorage.Reset();
-	for (const TPair<EJTSResourceType, int32>& Entry : Storage)
-	{
-		if (Entry.Value > 0)
-		{
-			FJTSResourceAmount& ReplicatedEntry = ReplicatedStorage.AddDefaulted_GetRef();
-			ReplicatedEntry.ResourceType = Entry.Key;
-			ReplicatedEntry.Amount = Entry.Value;
-		}
-	}
+	ReplicatedStorage = ExportStorageSnapshot();
 	OnRep_Storage();
 }
 
 void AJTSSpacecraftActor::RebuildStorageFromReplicatedArray()
 {
 	Storage.Reset();
+	StorageHalfUnitRemainders.Reset();
 	for (const FJTSResourceAmount& Entry : ReplicatedStorage)
 	{
-		if (IsSupportedResourceType(Entry.ResourceType) && Entry.Amount > 0)
+		if (IsSupportedResourceType(Entry.ResourceType) && Entry.Amount >= 0)
 		{
-			Storage.FindOrAdd(Entry.ResourceType) += Entry.Amount;
+			Storage.Add(Entry.ResourceType, Entry.Amount);
+			StorageHalfUnitRemainders.Add(Entry.ResourceType, FMath::Clamp(Entry.HalfUnitRemainder, 0, 1));
 		}
 	}
 }
@@ -3384,6 +3437,7 @@ void AJTSSpacecraftActor::RestoreStorageFromExpedition(const TMap<EJTSResourceTy
 		return;
 	}
 	Storage.Reset();
+	StorageHalfUnitRemainders.Reset();
 	for (const TPair<EJTSResourceType, int32>& Entry : NewStorage)
 	{
 		if (IsSupportedResourceType(Entry.Key) && Entry.Value > 0)
@@ -3458,15 +3512,7 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 	TMap<EJTSResourceType, int32> ShipResourceAmounts;
 	for (const TPair<EJTSResourceType, int32>& Resource : ResourcesToDeposit)
 	{
-		if (Resource.Key == EJTSResourceType::MoonAntCorpse)
-		{
-			// Corpses deliberately remain ordinary carried items until they are submitted to the ship.
-			ShipResourceAmounts.FindOrAdd(EJTSResourceType::Organic) += Resource.Value;
-		}
-		else
-		{
-			ShipResourceAmounts.FindOrAdd(Resource.Key) += Resource.Value;
-		}
+		ShipResourceAmounts.FindOrAdd(Resource.Key) += Resource.Value;
 	}
 
 	if (!DepositResourceAmounts(ShipResourceAmounts))
@@ -3512,8 +3558,7 @@ bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 	if (CarbonCount > 0) Materials.Add(EJTSResourceType::InorganicCarbon, CarbonCount);
 	if (MoonAntCorpseCount > 0)
 	{
-		// A corpse is a carried item, but it becomes processed Organic when submitted to the ship.
-		Materials.Add(EJTSResourceType::Organic, MoonAntCorpseCount);
+		Materials.Add(EJTSResourceType::MoonAntCorpse, MoonAntCorpseCount);
 	}
 	if (Materials.IsEmpty())
 	{
@@ -3633,7 +3678,7 @@ void AJTSSpacecraftActor::ReconcileInitialBoardingOverlaps()
 void AJTSSpacecraftActor::RestorePersistentStorage()
 {
 	UWorld* const World = GetWorld();
-	if (!HasAuthority() || World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
+	if (!HasAuthority() || World == nullptr || World->GetGameInstance() == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}
@@ -3667,14 +3712,14 @@ void AJTSSpacecraftActor::RestoreStorageForMoonTravel()
 void AJTSSpacecraftActor::SavePersistentStorage() const
 {
 	UWorld* const World = GetWorld();
-	if (!HasAuthority() || World == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
+	if (!HasAuthority() || World == nullptr || World->GetGameInstance() == nullptr || (!IsSpaceWorldRuntimeActive() && !IsMoonSurfaceRuntimeActive()))
 	{
 		return;
 	}
 
 	if (UJTSExpeditionSubsystem* const Expedition = World->GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
 	{
-		Expedition->SetSpacecraftSnapshot(GetClass(), Storage);
+		Expedition->CaptureSpacecraftState(this);
 		Expedition->RequestSave();
 	}
 }

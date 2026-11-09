@@ -32,7 +32,7 @@ bool UJTSNestBlockadeComponent::CanWork(APawn* Pawn) const
 {
 	const auto* Habitat = Cast<AJTSPlanetEcologyHabitat>(GetOwner());
 	if (!Habitat || !IsValid(Pawn) || Pawn->GetWorld() != GetWorld() || !HasRequiredTool(Pawn)
-		|| !Habitat->CanInteract_Implementation(Pawn)) return false;
+		|| !Habitat->bCanBlockEntrance || !Habitat->CanReceiveMeleeHit_Implementation(Pawn)) return false;
 	if (const auto* Character = Cast<AJTSCharacter>(Pawn); Character && Character->IsBoarded()) return false;
 	if (const auto* Climb = Pawn->FindComponentByClass<UJTSWallClimbComponent>(); Climb && Climb->IsClimbing()) return false;
 	const auto* Strike = Pawn->FindComponentByClass<UJTSMiningStrikeComponent>();
@@ -47,89 +47,46 @@ bool UJTSNestBlockadeComponent::CanWork(APawn* Pawn) const
 	return !GetWorld()->LineTraceSingleByChannel(Hit, Pawn->GetPawnViewLocation(), Target, ECC_Visibility, Params)
 		|| Hit.GetActor() == Habitat;
 }
-void UJTSNestBlockadeComponent::SetWorking(APawn* Pawn, bool bHeld)
-{
-	if (!GetOwner()->HasAuthority() || !IsValid(Pawn)) return;
-	if (!bHeld)
-	{
-		if (auto* Worker = Workers.Find(Pawn)) Worker->bHeld = false;
-		return;
-	}
-	if (!CanWork(Pawn)) return;
-	const double Now = GetWorld()->GetTimeSeconds();
-	auto& Worker = Workers.FindOrAdd(Pawn);
-	Worker.bHeld = true;
-	Worker.PulseUntil = Now + TapWorkDuration;
-	if (!GetWorld()->GetTimerManager().IsTimerActive(WorkTimer))
-	{
-		LastUpdate = Now;
-		GetWorld()->GetTimerManager().SetTimer(WorkTimer, this, &ThisClass::ServiceWork, 0.05f, true);
-	}
-	if (auto* Melee = Pawn->FindComponentByClass<UJTSMeleeComponent>(); Melee && !Melee->IsAttacking() && Now >= Worker.NextSwing)
-	{
-		Melee->StartWorkAttack(GetOwner()); Worker.NextSwing = Now + Melee->GetHeldWeaponSwingDuration();
-	}
-	DefenseAggressors.AddUnique(Pawn);
-	if (!bAlarmed) StartDefense();
-}
 void UJTSNestBlockadeComponent::ServiceWork()
 {
 	if (!GetOwner()->HasAuthority()) return;
 	const double Now = GetWorld()->GetTimeSeconds();
-	const float Dt = FMath::Max(float(Now - LastUpdate), 0.0f); LastUpdate = Now;
+	// Count only the portion of this service interval after the recovery delay.
+	const float RecoveryTime = FMath::Max(0.f, float(Now - FMath::Max(LastUpdate, LastWork + DecayDelay)));
+	LastUpdate = Now;
 	auto* Habitat = CastChecked<AJTSPlanetEcologyHabitat>(GetOwner());
-	float Work = 0;
-	for (auto It = Workers.CreateIterator(); It; ++It)
+	if (!Habitat->IsEntranceBlocked()) Progress = FMath::Max(0.f, Progress - RecoveryTime * DecayPerSecond);
+	UpdateDefense();
+	if ((Progress <= 0 || Habitat->IsEntranceBlocked()) && !bAlarmed)
+		GetWorld()->GetTimerManager().ClearTimer(WorkTimer);
+}
+bool UJTSNestBlockadeComponent::ApplyStrikeWork(APawn* Pawn)
+{
+	if (!GetOwner()->HasAuthority() || !CanWork(Pawn)) return false;
+	auto* Habitat = CastChecked<AJTSPlanetEcologyHabitat>(GetOwner());
+	Progress = FMath::Min(1.f, Progress + FMath::Clamp(DamagePerStrike, .01f, 1.f));
+	const double Now = GetWorld()->GetTimeSeconds();
+	LastWork = Now;
+	if (!GetWorld()->GetTimerManager().IsTimerActive(WorkTimer))
 	{
-		APawn* Pawn = It.Key().Get(); auto& Worker = It.Value();
-		if (!CanWork(Pawn)) { It.RemoveCurrent(); continue; }
-		const float Contribution = Worker.bHeld ? Dt : FMath::Clamp(float(Worker.PulseUntil - (Now - Dt)), 0.0f, Dt);
-		if (Contribution > 0)
-		{
-			Work += Contribution;
-			Worker.UnspentWork += Contribution;
-		}
-		// A tap can end during windup. Keep its earned work until that strike lands.
-		if (Contribution > 0 || Worker.UnspentWork > 0)
-		{
-			if (auto* Melee = Pawn->FindComponentByClass<UJTSMeleeComponent>(); Melee && !Melee->IsAttacking() && Now >= Worker.NextSwing)
-			{
-				Melee->StartWorkAttack(GetOwner()); Worker.NextSwing = Now + Melee->GetHeldWeaponSwingDuration();
-			}
-		}
-		else if (!Worker.bHeld) It.RemoveCurrent();
+		LastUpdate = Now;
+		GetWorld()->GetTimerManager().SetTimer(WorkTimer, this, &ThisClass::ServiceWork, .05f, true);
 	}
-	if (Work > 0)
+	DefenseAggressors.AddUnique(Pawn);
+	if (!bAlarmed) StartDefense();
+	if (Progress >= 1.f - KINDA_SMALL_NUMBER)
 	{
-		LastWork = Now;
-	}
-	else if (Now - LastWork > DecayDelay) Progress = FMath::Max(0.0f, Progress - Dt * DecayPerSecond);
-	if (Progress >= 1 && !Habitat->IsEntranceBlocked())
-	{
-		// The only commit path is this server clock; direct Interact/RPC calls cannot bypass the work.
-		Habitat->CommitEntranceBlockade(true); Workers.Reset();
+		Progress = 1.f;
+		Habitat->CommitEntranceBlockade(true);
 		if (auto* GameInstance = GetWorld()->GetGameInstance())
 			if (auto* Expedition = GameInstance->GetSubsystem<UJTSExpeditionSubsystem>())
 				Expedition->MarkEntranceBlocked(PersistentEntranceId);
 		MulticastCollapseDust();
 		if (auto* Impact = GetOwner()->FindComponentByClass<UJTSMiningImpactComponent>()) Impact->ConfirmBreak();
 		GetWorld()->GetTimerManager().SetTimer(RubbleTimer, FTimerDelegate::CreateWeakLambda(Habitat,
-			[Habitat] { Habitat->ShowBlockedRubble(); }), FMath::Max(0.01f, RubbleDelay), false);
+			[Habitat] { Habitat->ShowBlockedRubble(); }), FMath::Max(.01f, RubbleDelay), false);
 	}
-	UpdateDefense();
-	if (Progress <= 0 && Workers.IsEmpty() && !bAlarmed) GetWorld()->GetTimerManager().ClearTimer(WorkTimer);
-}
-bool UJTSNestBlockadeComponent::ApplyStrikeWork(APawn* Pawn)
-{
-	if (!GetOwner()->HasAuthority() || !CanWork(Pawn)) return false;
-	auto* Worker = Workers.Find(Pawn);
-	if (!Worker || Worker->UnspentWork <= 0) return false;
-	const auto* Melee = Pawn->FindComponentByClass<UJTSMeleeComponent>();
-	const float MaximumWork = Melee ? Melee->GetHeldWeaponSwingDuration()+.06f : .4f;
-	const auto* Habitat = CastChecked<AJTSPlanetEcologyHabitat>(GetOwner());
-	Progress = FMath::Min(1.f,Progress+FMath::Min(Worker->UnspentWork,MaximumWork)/FMath::Max(.5f,Habitat->BlockHoldDuration));
-	Worker->UnspentWork=0;
-	LastWork=GetWorld()->GetTimeSeconds();
+	GetOwner()->ForceNetUpdate();
 	return true;
 }
 void UJTSNestBlockadeComponent::StartDefense()
@@ -276,7 +233,7 @@ void UJTSNestBlockadeComponent::ResetTransientState()
 {
 	if (!GetOwner()->HasAuthority()) return;
 	for (auto Defender : Defenders) if (Defender.IsValid()) Defender->ReturnFromEntranceDefense(false);
-	Defenders.Reset(); DefenseAggressors.Reset(); Workers.Reset(); Progress = 0; PendingDefenders = 0; bAlarmed = false;
+	Defenders.Reset(); DefenseAggressors.Reset(); Progress = 0; PendingDefenders = 0; bAlarmed = false;
 	if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(WorkTimer);
 }
 void UJTSNestBlockadeComponent::EndPlay(const EEndPlayReason::Type Reason)

@@ -106,6 +106,9 @@ public:
 	int32 GetNavigationPaletteIndex() const { return NavigationPaletteIndex; }
 	float GetNavigationMarkerDistance() const { return NavigationMarkerDistance; }
 	float GetNavigationMarkerRangeKilometers() const { return NavigationMarkerRangeKilometers; }
+	/** A UI discovery requirement; never changes physical travel or landing. */
+	bool IsNavigationDiscovered() const;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Planet|Navigation") FName NavigationRequiredImportantItem;
 	double GetCruiseApproachExponent(double Fallback) const { return CruiseApproachExponentOverride > 0.0f ? CruiseApproachExponentOverride : Fallback; }
 	float GetCruiseApproachExpansionDegreesPerSecond() const { return CruiseApproachExpansionDegreesPerSecond; }
 	/** Uses full authored size, never the changing distant presentation scale. */

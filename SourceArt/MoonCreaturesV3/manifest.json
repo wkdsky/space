@@ -662,7 +662,7 @@
       "species": "SpireSoldier",
       "mesh": "SK_SpireSoldier",
       "bones": 24,
-      "triangles": 1656,
+      "triangles": 2652,
       "clips": [
         {
           "name": "Idle",
@@ -831,8 +831,8 @@
           "fps": 30,
           "loop": false,
           "events": [],
-          "vertical_root_motion": "Baked grounded support and species-specific impulse",
-          "max_ik_reach_correction_m": 0.0
+          "vertical_root_motion": false,
+          "max_ik_reach_correction_m": 0.067422
         },
         {
           "name": "Guard",
@@ -842,7 +842,7 @@
           "loop": true,
           "events": [],
           "vertical_root_motion": false,
-          "max_ik_reach_correction_m": 0.0
+          "max_ik_reach_correction_m": 0
         },
         {
           "name": "ChargeWindup",

@@ -68,6 +68,8 @@ protected:
 private:
 	UPROPERTY(Replicated) bool bReflecting = false;
 	UPROPERTY(Replicated) FVector_NetQuantizeNormal AimDirection = FVector::UpVector;
+	UPROPERTY(Replicated) FVector_NetQuantize GlareOrigin = FVector::ZeroVector;
+	UPROPERTY(Replicated) float ActiveGlareRadius = 0;
 	FQuat PresentationLean = FQuat::Identity;
 	float ReflectionBlend = 0;
 	TWeakObjectPtr<USkeletalMeshComponent> CreatureMesh;

@@ -4,6 +4,8 @@
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSColonyDefenseComponent.h"
+#include "GameFramework/Controller.h"
 #include "space/World/JTSPlanetEnemySettlement.h"
 #include "space/World/JTSPlanetAnchor.h"
 
@@ -17,20 +19,23 @@ AJTSPlanetColonyNest::AJTSPlanetColonyNest()
 	SetRootComponent(NestMesh);
 	NestMesh->SetCollisionProfileName(TEXT("BlockAll"));
 	Health = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("Health"));
+	ColonyDefense = CreateDefaultSubobject<UJTSColonyDefenseComponent>(TEXT("ColonyDefense"));
 }
 
-void AJTSPlanetColonyNest::OnConstruction(const FTransform& Transform) { Super::OnConstruction(Transform); ApplyStage(); }
+void AJTSPlanetColonyNest::OnConstruction(const FTransform& Transform) { Super::OnConstruction(Transform); ApplyAppearance(); }
 void AJTSPlanetColonyNest::BeginPlay()
 {
 	Super::BeginPlay();
 	if (HasAuthority() && HeightRange.X > 0 && HeightRange.Y >= HeightRange.X)
 		ChosenHeight = FMath::FRandRange(HeightRange.X, HeightRange.Y);
-	ApplyStage();
+	ApplyAppearance();
 	if (HasAuthority())
 	{
-		Health->SetMaxHealth(Health->GetMaxHealth(), true);
-		Health->OnDamaged.AddDynamic(this, &ThisClass::OnDamaged);
-		Health->OnDeath.AddDynamic(this, &ThisClass::OnDied);
+		SetCanBeDamaged(false);
+		Health->SetInvulnerable(true);
+		ColonyDefense->Initialize(Planet, Workers, Guards);
+		if (IsValid(Workers)) Workers->Activate(Planet, SurfaceController);
+		if (IsValid(Guards)) Guards->Activate(Planet, SurfaceController);
 	}
 }
 void AJTSPlanetColonyNest::EndPlay(const EEndPlayReason::Type Reason)
@@ -42,9 +47,9 @@ void AJTSPlanetColonyNest::EndPlay(const EEndPlayReason::Type Reason)
 	}
 	Super::EndPlay(Reason);
 }
-void AJTSPlanetColonyNest::ApplyStage()
+void AJTSPlanetColonyNest::ApplyAppearance()
 {
-	UStaticMesh* Desired = Stage >= 2 ? BrokenMesh : (Stage == 1 ? DamagedMesh : ClosedMesh);
+	UStaticMesh* Desired = ClosedMesh;
 	if (Desired)
 	{
 		NestMesh->SetStaticMesh(Desired);
@@ -53,26 +58,26 @@ void AJTSPlanetColonyNest::ApplyStage()
 		if (HeightRange.X > 0 && HeightRange.Y >= HeightRange.X && Top > 0) SetActorScale3D(FVector(Height / Top));
 	}
 }
-void AJTSPlanetColonyNest::OnDamaged(float Current, float Maximum, float Damage, AActor* Causer)
+float AJTSPlanetColonyNest::TakeDamage(float Damage, const FDamageEvent&, AController* InstigatorController, AActor* Causer)
 {
-	if (!HasAuthority()) return;
-	const uint8 Desired = Current <= Maximum * 0.4f ? 2 : 1;
-	if (Desired > Stage)
+	if (HasAuthority() && Damage > 0)
 	{
-		Stage = Desired;
-		ApplyStage();
-		if (IsValid(Workers)) Workers->Activate(Planet, SurfaceController);
-		if (Stage >= 2 && IsValid(Guards)) Guards->Activate(Planet, SurfaceController);
-		ForceNetUpdate();
+		APawn* Attacker = Cast<APawn>(Causer);
+		if (InstigatorController) Attacker = InstigatorController->GetPawn();
+		ColonyDefense->RaiseAlarm(Attacker);
 	}
+	return 0;
 }
-void AJTSPlanetColonyNest::OnDied(AController* InstigatorController, AActor* Causer) { if (HasAuthority()) { Stage = 2; ApplyStage(); ForceNetUpdate(); } }
-bool AJTSPlanetColonyNest::CanReceiveMeleeHit_Implementation(APawn* Pawn) const { return !Health->IsDead(); }
-void AJTSPlanetColonyNest::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
+bool AJTSPlanetColonyNest::CanReceiveMeleeHit_Implementation(APawn*) const { return true; }
+void AJTSPlanetColonyNest::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType)
 {
-	if (HasAuthority() && !Health->IsDead()) Health->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn);
+	ColonyDefense->RaiseAlarm(Pawn);
 }
-FText AJTSPlanetColonyNest::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("封闭巢塔")); }
-FText AJTSPlanetColonyNest::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("敲击巢壳")); }
+FText AJTSPlanetColonyNest::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("塔蚁巢穴")); }
+FText AJTSPlanetColonyNest::GetMeleeTargetPrompt_Implementation(APawn*) const { return FText::FromString(TEXT("敲击巢穴会惊动守卫")); }
 FVector AJTSPlanetColonyNest::GetMeleeTargetAnchorWorldLocation_Implementation() const { return NestMesh->Bounds.Origin; }
-void AJTSPlanetColonyNest::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const { Super::GetLifetimeReplicatedProps(OutLifetimeProps); DOREPLIFETIME(AJTSPlanetColonyNest, Stage); DOREPLIFETIME(AJTSPlanetColonyNest, ChosenHeight); }
+void AJTSPlanetColonyNest::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AJTSPlanetColonyNest, ChosenHeight);
+}

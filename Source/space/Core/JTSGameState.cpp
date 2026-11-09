@@ -149,6 +149,14 @@ void AJTSGameState::SetExpeditionId(const FString& NewExpeditionId)
 	}
 }
 
+void AJTSGameState::SetImportantItems(const TArray<FName>& ItemIds)
+{
+	if (!HasAuthority()) return;
+	ImportantItemIds = ItemIds;
+	ForceNetUpdate();
+	OnRep_ExpeditionState();
+}
+
 void AJTSGameState::RefreshCachedRemainingTime()
 {
 	if (GameplayPhase != EJTSGameplayPhase::EarthCollection || EarthCollectionEndTimeSeconds <= 0.0)
@@ -176,4 +184,5 @@ void AJTSGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AJTSGameState, ActiveSpacecraft);
 	DOREPLIFETIME(AJTSGameState, CurrentPlanetId);
 	DOREPLIFETIME(AJTSGameState, ExpeditionId);
+	DOREPLIFETIME(AJTSGameState, ImportantItemIds);
 }

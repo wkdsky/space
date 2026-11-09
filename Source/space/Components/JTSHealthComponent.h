@@ -37,6 +37,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Health")
 	bool IsDead() const;
 
+	UFUNCTION(BlueprintPure, Category = "Health")
+	bool IsInvulnerable() const { return bInvulnerable; }
+
+	/** Server-owned damage immunity, shared by direct and standard UE damage paths. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Health")
+	void SetInvulnerable(bool bEnabled);
+
 	/** Applies authoritative damage and returns the health amount actually removed. */
 	UFUNCTION(BlueprintCallable, Category = "Health")
 	float ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser, bool bBypassArmor = false);
@@ -97,6 +104,9 @@ private:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_IsDead, Category = "Health", meta = (AllowPrivateAccess = "true"))
 	bool bIsDead = false;
+
+	UPROPERTY(Transient, Replicated)
+	bool bInvulnerable = false;
 
 	bool bDeathBroadcasted = false;
 };

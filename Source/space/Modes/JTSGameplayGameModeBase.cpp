@@ -135,6 +135,26 @@ void AJTSGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
 	}
 }
 
+void AJTSGameplayGameModeBase::BeginPlay()
+{
+	Super::BeginPlay();
+	if (auto* Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
+		if (auto* State = GetGameState<AJTSGameState>()) State->SetImportantItems(Expedition->GetSnapshot().ImportantItemIds.Array());
+}
+
+bool AJTSGameplayGameModeBase::GrantImportantItem(FName ItemId, const FText& Notice)
+{
+	if (!HasAuthority() || ItemId.IsNone()) return false;
+	auto* Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>();
+	auto* State = GetGameState<AJTSGameState>();
+	if (!Expedition || !State || !Expedition->RecordImportantItem(ItemId)) return false;
+	State->SetImportantItems(Expedition->GetSnapshot().ImportantItemIds.Array());
+	if (!Notice.IsEmpty())
+		for (auto It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+			if (auto* PC = Cast<AJTSPlayerController>(It->Get())) PC->ClientShowExpeditionNotice(Notice);
+	return true;
+}
+
 void AJTSGameplayGameModeBase::Logout(AController* Exiting)
 {
 	UWorld* const World = GetWorld();

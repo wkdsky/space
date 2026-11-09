@@ -574,14 +574,14 @@ void UJTSInventoryComponent::RefreshCapacityFromProgression()
 	}
 }
 
-void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot)
+void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot, bool bRestoreWaistLamp)
 {
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
 	{
 		return;
 	}
 
-	auto FinalizeRestore = [this, NewSelectedQuickbarSlot]()
+	auto FinalizeRestore = [this, NewSelectedQuickbarSlot, bRestoreWaistLamp]()
 	{
 		for (FJTSItemInstance& Item : ItemSlots)
 		{
@@ -592,6 +592,7 @@ void UJTSInventoryComponent::RestoreItems(const TArray<FJTSItemInstance>& NewSlo
 		}
 		SelectedQuickbarSlot = FMath::Clamp(NewSelectedQuickbarSlot, 0, FMath::Max(0, GetInventoryCapacity() - 1));
 		QuickbarPageIndex = SelectedQuickbarSlot / MaximumQuickbarSlots;
+		bWaistLampEquipped = bRestoreWaistLamp && OwnsWaistLamp();
 		NotifyInventoryChanged();
 	};
 

@@ -12,7 +12,7 @@ public:
 	SLATE_END_ARGS()
 	void Construct(const FArguments&) { SetCanTick(true); }
 	void SetPresentation(const FJTSNavigationMapFrame& InFrame);
-	void SetSurfaceTexture(class UTextureRenderTarget2D* Texture);
+	void SetSurfaceTexture(UObject* Resource);
 	float GetZoom() const { return Zoom; }
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(520, 560); }
 	virtual void Tick(const FGeometry& Geometry, double CurrentTime, float DeltaTime) override;

@@ -17,6 +17,10 @@
 #include "space/UI/JTSCruiseNavigationWidget.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/Core/JTSGameState.h"
+#include "space/UI/JTSCelestialNavigationLibrary.h"
+#include "space/Systems/JTSExpeditionSaveGame.h"
+#include "Kismet/GameplayStatics.h"
 
 namespace
 {
@@ -76,12 +80,22 @@ bool FJTSNavigationCoordinatesTest::RunTest(const FString&)
 		TestTrue(TEXT("Finite latitude including both poles"), FMath::IsFinite(B.X) && FMath::Abs(B.X) <= 90.0);
 	}
 	FJTSNavigationTerrainPatch Patch; Patch.Radius = 10000; Patch.HalfWidth = 1000;
-	const FVector NorthPoint = FVector(-0.1, 0, 1).GetSafeNormal() * 10000;
-	TestTrue(TEXT("North appears above the player"), Patch.Project(NorthPoint, FVector::ZeroVector).Y < 0);
-	const FQuat CaptureRotation = FRotationMatrix::MakeFromXY(-Patch.Up, Patch.East).ToQuat();
-	const FVector CameraPoint = CaptureRotation.UnrotateVector(NorthPoint - Patch.Origin);
-	TestTrue(TEXT("Surface markers match the orthographic texture after its vertical display flip"),
-		Patch.Project(NorthPoint, FVector::ZeroVector).Equals(FVector2D(CameraPoint.Y, CameraPoint.Z) / Patch.HalfWidth, 0.001));
+	for (const FVector Up : {FVector::UpVector,FVector(1,2,3).GetSafeNormal(),-FVector::UpVector})
+	for (const float Heading : {0.f,90.f,180.f,270.f})
+	{
+		Patch.Up=Up; Patch.Origin=Center+Up*10000;
+		const FVector Base=FVector::VectorPlaneProject(FVector::ForwardVector,Up).GetSafeNormal();
+		Patch.AlignToView(Base.RotateAngleAxis(Heading,Up));
+		const FVector Right=FVector::CrossProduct(Up,Patch.Forward).GetSafeNormal();
+		TestTrue(TEXT("Movement right projects right on every spherical orientation"),Patch.Project(Patch.Origin+Right*100,Center).X>0);
+		TestTrue(TEXT("Movement forward projects up"),Patch.Project(Patch.Origin+Patch.Forward*100,Center).Y<0);
+		const FQuat CaptureRotation=FRotationMatrix::MakeFromXZ(-Up,Patch.Forward).ToQuat();
+		const FVector Contact=Patch.Origin+Right*150+Patch.Forward*250;
+		const FVector CameraPoint=CaptureRotation.UnrotateVector(Contact-Patch.Origin);
+		TestTrue(TEXT("Terrain texture and markers share one unmirrored camera projection"),
+			Patch.Project(Contact,Center).Equals(FVector2D(CameraPoint.Y,-CameraPoint.Z)/Patch.HalfWidth,.001));
+	}
+	Patch.Up=FVector::UpVector;Patch.Origin=FVector::ZeroVector;
 	TestTrue(TEXT("Occluded far-side ship remains off-map"), Patch.Project(FVector(0, 0, -10000), FVector::ZeroVector).Size() > 1);
 	return true;
 }
@@ -220,4 +234,41 @@ bool FJTSNavigationWidgetLifecycleTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSImportantDiscoveryTest, "JTS.NavigationMap.ImportantItemDiscoveryAndSave", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSImportantDiscoveryTest::RunTest(const FString&)
+{
+	FNavigationWorld W;
+	auto* State = W.World->SpawnActor<AJTSGameState>(); W.World->SetGameState(State);
+	const FName Key(TEXT("TestEcologyAccess"));
+	W.Primary->NavigationRequiredImportantItem = Key;
+	auto FindPrimary = [&]() {
+		for (const auto& Body : UJTSCelestialNavigationLibrary::GatherBodies(W.Manager, W.Ship)) if (Body.Planet == W.Primary) return Body;
+		return FJTSCelestialNavigationBody();
+	};
+	auto Body = FindPrimary();
+	TestNotNull(TEXT("Undiscovered planet remains physically registered"), Body.Planet.Get());
+	TestFalse(TEXT("No star chart entry before picking up the key"), Body.bShowOnStarChart);
+	TestFalse(TEXT("No approach marker before picking up the key"), Body.bShowScreenMarker);
+	FJTSNavigationMapModel Model;
+	const auto LockedFrame = Model.Build(W.Manager, W.Ship, nullptr);
+	TestTrue(TEXT("Even approaching an undiscovered system does not reveal a map contact"), LockedFrame.Bodies.IsEmpty() && LockedFrame.Systems.IsEmpty());
+	FJTSPlanetSurfaceHit Surface;
+	TestTrue(TEXT("Undiscovered planet retains its real landing surface"), W.Primary->ProjectPointToSurface(W.Primary->GetPlanetCenter() + FVector::UpVector * 10000, Surface));
+	State->SetImportantItems({Key}); Body = FindPrimary();
+	TestTrue(TEXT("Picking up the key reveals star chart entry"), Body.bShowOnStarChart);
+	TestTrue(TEXT("Picking up the key enables the approach marker"), Body.bShowScreenMarker);
+	TestFalse(TEXT("Unlocked planet appears in the actual navigation map"), Model.Build(W.Manager, W.Ship, nullptr).Bodies.IsEmpty());
+	auto* Save = NewObject<UJTSExpeditionSaveGame>();
+	Save->Snapshot.ImportantItemIds.Add(Key); Save->Snapshot.DefeatedEncounterIds.Add(TEXT("TestLeader"));
+	TArray<uint8> Bytes;
+	TestTrue(TEXT("Progress serializes through the real SaveGame envelope"), UGameplayStatics::SaveGameToMemory(Save, Bytes));
+	auto* Restored = Cast<UJTSExpeditionSaveGame>(UGameplayStatics::LoadGameFromMemory(Bytes));
+	if (TestNotNull(TEXT("Restore progression save"), Restored))
+	{
+		TestTrue(TEXT("Important key survives save and load"), Restored->Snapshot.ImportantItemIds.Contains(Key));
+		TestTrue(TEXT("Defeated encounter survives save and load"), Restored->Snapshot.DefeatedEncounterIds.Contains(TEXT("TestLeader")));
+		TestTrue(TEXT("Shared key never becomes a normal inventory item"), Restored->Snapshot.Players.IsEmpty() && Restored->Snapshot.SpacecraftStorage.IsEmpty());
+	}
+	return true;
+}
 #endif

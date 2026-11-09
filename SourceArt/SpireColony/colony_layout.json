@@ -1,0 +1,71 @@
+[
+  {
+    "name": "SM_SpireColony_0",
+    "triangles": 1300,
+    "height_cm": 400.0,
+    "entrances_cm": [
+      [
+        87.89924895763397,
+        -23.552532970905304,
+        0
+      ],
+      [
+        -23.552532970905304,
+        -87.89924895763397,
+        0
+      ],
+      [
+        -64.34671598672867,
+        64.34671598672867,
+        0
+      ]
+    ],
+    "fbx": "D:\\projects\\space\\SourceArt\\SpireColony\\SM_SpireColony_0.fbx"
+  },
+  {
+    "name": "SM_SpireColony_1",
+    "triangles": 1310,
+    "height_cm": 423.9999771118164,
+    "entrances_cm": [
+      [
+        87.89924895763397,
+        -23.552532970905304,
+        0
+      ],
+      [
+        -23.552532970905304,
+        -87.89924895763397,
+        0
+      ],
+      [
+        -64.34671598672867,
+        64.34671598672867,
+        0
+      ]
+    ],
+    "fbx": "D:\\projects\\space\\SourceArt\\SpireColony\\SM_SpireColony_1.fbx"
+  },
+  {
+    "name": "SM_SpireColony_2",
+    "triangles": 1300,
+    "height_cm": 383.99999141693115,
+    "entrances_cm": [
+      [
+        87.89924895763397,
+        -23.552532970905304,
+        0
+      ],
+      [
+        -23.552532970905304,
+        -87.89924895763397,
+        0
+      ],
+      [
+        -64.34671598672867,
+        64.34671598672867,
+        0
+      ]
+    ],
+    "fbx": "D:\\projects\\space\\SourceArt\\SpireColony\\SM_SpireColony_2.fbx"
+  }
+]

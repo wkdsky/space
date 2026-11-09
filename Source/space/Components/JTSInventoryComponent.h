@@ -153,7 +153,7 @@ public:
 	 * rules. Items beyond the active capacity remain serialized as migration overflow until a
 	 * progression capacity upgrade exposes them, never silently discarded.
 	 */
-	void RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot);
+	void RestoreItems(const TArray<FJTSItemInstance>& NewSlots, int32 NewSelectedQuickbarSlot, bool bRestoreWaistLamp = false);
 	void RestoreLegacyResources(const TArray<EJTSResourceType>& Resources);
 
 	UPROPERTY(BlueprintAssignable, Category = "Inventory")

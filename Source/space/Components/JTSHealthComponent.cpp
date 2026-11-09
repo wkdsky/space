@@ -1,6 +1,8 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSStellarSupportComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
+#include "space/Player/JTSCharacter.h"
+#include "space/Player/JTSPlayerController.h"
 
 #include "GameFramework/Actor.h"
 #include "GameFramework/DamageType.h"
@@ -34,24 +36,48 @@ bool UJTSHealthComponent::IsDead() const
 	return bIsDead || CurrentHealth <= 0.0f;
 }
 
+void UJTSHealthComponent::SetInvulnerable(bool bEnabled)
+{
+	if (!CanModifyHealth()) return;
+	bInvulnerable = bEnabled;
+	if (AActor* const Owner = GetOwner()) Owner->ForceNetUpdate();
+}
+
 float UJTSHealthComponent::ApplyDamage(float Damage, AController* InstigatorController, AActor* DamageCauser, bool bBypassArmor)
 {
-	if (!CanModifyHealth() || IsDead() || !FMath::IsFinite(Damage) || Damage <= 0.0f)
+	if (!CanModifyHealth() || bInvulnerable || IsDead() || !FMath::IsFinite(Damage) || Damage <= 0.0f)
 	{
 		return 0.0f;
 	}
 
-	const auto* Status = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
-	if (!bBypassArmor)
+	const auto* Attacker = Cast<AJTSPlayerController>(InstigatorController);
+	if (!Attacker && !InstigatorController && DamageCauser)
 	{
-		Damage *= 1.f - FMath::Clamp(ArmorDamageReduction
-			- (Status ? Status->GetArmorReduction() : 0.f), 0.f, .8f);
-		// Fixed defense follows authored armor. Keep at least one damage per hit, but never
-		// raise an incoming hit that was already below one (e.g. fractional periodic damage).
-		Damage = FMath::Max(FMath::Min(Damage, 1.0f), Damage - AbilityDefense);
+		const auto* Pawn = Cast<APawn>(DamageCauser);
+		Attacker = Cast<AJTSPlayerController>(Pawn ? Pawn->GetController() : DamageCauser->GetInstigatorController());
 	}
-	if (auto* Support = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarSupportComponent>() : nullptr)
-		Damage = Support->AbsorbDamage(Damage, DamageCauser);
+	// Resolve the attacker's server-owned toggle here so melee, guns and abilities agree.
+	// Player characters are excluded even while unpossessed (boarding/respawn).
+	const bool bOneHitKill = Attacker && Attacker->IsDebugOneHitKillEnabled()
+		&& GetOwner() && !GetOwner()->IsA<AJTSCharacter>();
+	const auto* Status = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
+	if (bOneHitKill)
+	{
+		Damage = CurrentHealth;
+	}
+	else
+	{
+		if (!bBypassArmor)
+		{
+			Damage *= 1.f - FMath::Clamp(ArmorDamageReduction
+				- (Status ? Status->GetArmorReduction() : 0.f), 0.f, .8f);
+			// Fixed defense follows authored armor. Keep at least one damage per hit, but never
+			// raise an incoming hit that was already below one (e.g. fractional periodic damage).
+			Damage = FMath::Max(FMath::Min(Damage, 1.0f), Damage - AbilityDefense);
+		}
+		if (auto* Support = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarSupportComponent>() : nullptr)
+			Damage = Support->AbsorbDamage(Damage, DamageCauser);
+	}
 	const float PreviousHealth = CurrentHealth;
 	CurrentHealth = FMath::Clamp(CurrentHealth - Damage, 0.0f, MaxHealth);
 	const float AppliedDamage = PreviousHealth - CurrentHealth;
@@ -180,6 +206,7 @@ void UJTSHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(UJTSHealthComponent, MaxHealth);
 	DOREPLIFETIME(UJTSHealthComponent, CurrentHealth);
 	DOREPLIFETIME(UJTSHealthComponent, bIsDead);
+	DOREPLIFETIME(UJTSHealthComponent, bInvulnerable);
 }
 
 void UJTSHealthComponent::HandleOwnerTakeAnyDamage(

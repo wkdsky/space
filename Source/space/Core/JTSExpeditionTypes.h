@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "space/Items/JTSMaterialProcessingRecipes.h"
 #include "space/UI/FrontEnd/JTSAvatarTypes.h"
 #include "GameFramework/PlayerState.h"
 #include "space/Items/JTSItemTypes.h"
@@ -86,6 +87,10 @@ struct SPACE_API FJTSResourceAmount
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources", meta = (ClampMin = "0"))
 	int32 Amount = 0;
+
+	/** Half-unit remainder used by spacecraft storage; old saves default to zero. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources", meta = (ClampMin = "0", ClampMax = "1"))
+	int32 HalfUnitRemainder = 0;
 };
 
 /** Server-authoritative third-person flight intent submitted by the current driver. */
@@ -276,11 +281,22 @@ struct SPACE_API FJTSExpeditionSnapshot
 	TArray<FJTSResourceAmount> SpacecraftStorage;
 
 	UPROPERTY()
+	FJTSMaterialGraph MaterialProcessingGraph;
+
+	UPROPERTY()
 	TArray<FJTSPlayerSnapshot> Players;
 
 	/** Monotonic per-expedition entrance tombstones; absent in older saves means intact. */
 	UPROPERTY()
 	TSet<FName> BlockedEntranceIds;
+
+	/** Shared progression, separate from every player's ordinary inventory. */
+	UPROPERTY()
+	TSet<FName> ImportantItemIds;
+
+	/** Recover unclaimed loot after loading without respawning its boss. */
+	UPROPERTY()
+	TSet<FName> DefeatedEncounterIds;
 
 	/** UTC ticks written by the authoritative host whenever this snapshot is persisted. */
 	UPROPERTY()

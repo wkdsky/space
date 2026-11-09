@@ -22,6 +22,9 @@ class SPACE_API AJTSGameplayGameModeBase : public AGameModeBase
 
 public:
 	AJTSGameplayGameModeBase();
+	virtual void BeginPlay() override;
+	/** Invoked by validated server interactions; no client RPC accepts arbitrary key IDs. */
+	bool GrantImportantItem(FName ItemId, const FText& Notice);
 
 	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;

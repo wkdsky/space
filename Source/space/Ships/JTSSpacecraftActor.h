@@ -18,6 +18,7 @@
 class AJTSCharacter;
 class AJTSPlayerState;
 class UJTSStellarLootTable;
+class UJTSMaterialProcessorComponent;
 class AJTSPlanetAnchor;
 class AJTSPlanetLandingSite;
 class AJTSPlanetSurfaceAnchor;
@@ -312,6 +313,17 @@ public:
 	/** Returns the amount of one resource type currently stored in the spacecraft. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	int32 GetResourceAmount(EJTSResourceType ResourceType) const;
+
+	/** Exact fixed-point storage for processing. Integer gameplay costs preserve the remainder. */
+	int64 GetResourceHalfUnits(EJTSResourceType ResourceType) const;
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	double GetResourceUnits(EJTSResourceType ResourceType) const { return GetResourceHalfUnits(ResourceType) * 0.5; }
+	bool ApplyMaterialDeltas(const TMap<EJTSResourceType, int64>& Deltas);
+	TArray<FJTSResourceAmount> ExportStorageSnapshot() const;
+	void RestoreStorageSnapshot(const TArray<FJTSResourceAmount>& Snapshot);
+	void PersistMaterialConfiguration() const { SavePersistentStorage(); }
+	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
+	UJTSMaterialProcessorComponent* GetMaterialProcessor() const { return MaterialProcessor; }
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
 	bool HasResource(EJTSResourceType ResourceType, int32 ResourceAmount) const;
@@ -709,6 +721,11 @@ private:
 	/** Unbounded resource storage used by both Earth and Moon collection. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TMap<EJTSResourceType, int32> Storage;
+
+	UPROPERTY(VisibleAnywhere, Category = "Ship|Resources")
+	TMap<EJTSResourceType, int32> StorageHalfUnitRemainders;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UJTSMaterialProcessorComponent> MaterialProcessor;
 
 	/** Assign the project-specific stellar catalog in BP_Spacecraft. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Shop", meta = (AllowPrivateAccess = "true"))

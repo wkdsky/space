@@ -13,6 +13,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMirrorDefenseComponent.h"
 #include "space/Components/JTSNestBlockadeComponent.h"
+#include "space/Components/JTSColonyDefenseComponent.h"
 #include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetEcologyHabitat.h"
@@ -55,6 +56,8 @@ AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 void AJTSPlanetSurfaceCreature::BeginPlay()
 {
 	Super::BeginPlay();
+	Mesh->SetRelativeScale3D(Mesh->GetRelativeScale3D() * BodyScale);
+	Body->SetSphereRadius(Body->GetUnscaledSphereRadius() * BodyScale);
 	if (!CombatBodyBone.IsNone() && Mesh->GetSkeletalMeshAsset())
 	{
 		const FReferenceSkeleton& Skeleton = Mesh->GetSkeletalMeshAsset()->GetRefSkeleton();
@@ -267,6 +270,12 @@ bool AJTSPlanetSurfaceCreature::BelongsToRefuge(const AJTSPlanetEcologyHabitat* 
 	return RefugeActor.Get() == RefugeOwner || Habitat.Get() == RefugeOwner;
 }
 bool AJTSPlanetSurfaceCreature::IsAlive() const { return Health && !Health->IsDead(); }
+void AJTSPlanetSurfaceCreature::GetMirrorThreatArea(FVector& Origin, float& Radius) const
+{
+	const bool bNestAlarm = bEntranceDefense && !bReturningFromDefense;
+	Origin = bNestAlarm ? EntranceDefenseOrigin : GetActorLocation();
+	Radius = bNestAlarm ? EntranceDefenseLeash : LeashRadius;
+}
 void AJTSPlanetSurfaceCreature::BeginEntranceEmergence(const FTransform& MouthPose, const FVector& ExitPoint)
 {
 	if (!HasAuthority()) return;
@@ -275,6 +284,37 @@ void AJTSPlanetSurfaceCreature::BeginEntranceEmergence(const FTransform& MouthPo
 	EntranceExitPoint = ExitPoint;
 	SetActorLocationAndRotation(MouthPose.GetLocation(), MouthPose.GetRotation(), false);
 	SetState(EJTSForagerState::Emerge, 0);
+}
+void AJTSPlanetSurfaceCreature::ShelterInColony()
+{
+	if (!HasAuthority() || !IsAlive()) return;
+	bColonyResident = bColonySheltered = true;
+	bEntranceDefense = bExitingEntrance = bTemporaryEntranceDefender = false;
+	SetState(EJTSForagerState::Hidden, 0);
+}
+void AJTSPlanetSurfaceCreature::LeaveColony(const FTransform& MouthPose, const FVector& ExitPoint)
+{
+	if (!HasAuthority() || !IsInsideColony()) return;
+	bColonySheltered = false;
+	bReturningFromDefense = bDestroyAfterDefense = false;
+	BeginEntranceEmergence(MouthPose, ExitPoint);
+	bTemporaryEntranceDefender = false;
+}
+void AJTSPlanetSurfaceCreature::RecallToColony(const FVector& Entrance)
+{
+	if (!HasAuthority() || !IsAlive()) return;
+	if (bColonySheltered)
+	{
+		if (bEntranceDefense && bReturningFromDefense) EntranceDefenseOrigin = Entrance;
+		return;
+	}
+	bColonySheltered = true;
+	bEntranceDefense = bReturningFromDefense = true;
+	bExitingEntrance = bDestroyAfterDefense = bTemporaryEntranceDefender = false;
+	EntranceDefenseOrigin = Entrance;
+	EntranceDefenseTarget.Reset(); Aggressor.Reset();
+	DefenseReturnAfter = GetWorld()->GetTimeSeconds();
+	SetState(EJTSForagerState::Walk, 30);
 }
 void AJTSPlanetSurfaceCreature::DefendEntrance(APawn* Target, const FVector& Origin, float Leash, int32 Slot, int32 CohortSize)
 {
@@ -307,6 +347,7 @@ void AJTSPlanetSurfaceCreature::ReturnFromEntranceDefense(bool bEntranceDestroye
 	MirrorDefense->ReleaseGuardStation();
 	EntranceDefenseTarget.Reset(); Aggressor.Reset();
 	bReturningFromDefense = true;
+	if (bColonyResident) bColonySheltered = true;
 	bExitingEntrance = false;
 	bDestroyAfterDefense = bEntranceDestroyed || bTemporaryEntranceDefender;
 	DefenseReturnAfter = GetWorld()->GetTimeSeconds();
@@ -428,41 +469,46 @@ bool AJTSPlanetSurfaceCreature::UpdateEntranceDefense(double Now, float Dt)
 		}
 		return true;
 	}
-	FJTSPlanetSurfaceHit TargetSurface;
-	if (!ActivePlanet->ProjectPointToSurface(Target->GetActorLocation(), TargetSurface)) return true;
-	const FVector Up = ActivePlanet->GetRadialUpVector(TargetSurface.ImpactPoint);
-	FVector Forward, Right;
-	Up.FindBestAxisVectors(Forward, Right);
-	const float Angle = DefenseSlot * 2 * PI / DefenseCohortSize;
-	FJTSPlanetSurfaceHit ApproachSurface;
-	if (!ActivePlanet->ProjectPointToSurface(TargetSurface.ImpactPoint + (Forward * FMath::Cos(Angle) + Right * FMath::Sin(Angle)) * AttackReach * 0.80f, ApproachSurface)) return true;
-	const FVector Approach = ApproachSurface.ImpactPoint;
-	// Reach the individual approach point before attacking. Otherwise every animal stops at the same near edge.
-	if (FVector::DistSquared(GetActorLocation(), Approach) > FMath::Square(15.0f))
+	UpdateMeleePursuit(Target, Now, Dt, DefenseSlot, DefenseCohortSize);
+	return true;
+}
+
+void AJTSPlanetSurfaceCreature::UpdateMeleePursuit(APawn* Target, double Now, float Dt, int32 Slot, int32 CohortSize)
+{
+	FJTSPlanetSurfaceHit Surface;
+	if (!Target || !ActivePlanet->ProjectPointToSurface(Target->GetActorLocation(), Surface)) return;
+	// The actual mesh surface and capsule height both matter, especially in deep craters.
+	const bool bInReach = FVector::DistSquared(GetActorLocation(), Surface.ImpactPoint) < FMath::Square(AttackReach)
+		&& FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) < FMath::Square(AttackReach + Target->GetSimpleCollisionHalfHeight());
+	if (bInReach)
 	{
-		if (State != EJTSForagerState::Flee) SetState(EJTSForagerState::Flee, 20);
-		MoveTowards(Approach, FleeSpeed, Dt);
-		return true;
-	}
-	// Combat distances use the real ground below the capsule, including inside a deep crater.
-	if (FVector::DistSquared(GetActorLocation(), TargetSurface.ImpactPoint) < FMath::Square(AttackReach)
-		&& FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) < FMath::Square(AttackReach + Target->GetSimpleCollisionHalfHeight()))
-	{
-		if (Now >= NextAttack)
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(ColonyAttack), true, this);
+		Params.AddIgnoredActor(Target);
+		const FVector AttackOrigin = Mesh->GetComponentLocation() + GetActorUpVector() * FMath::Max(8.f, 35.f * BodyScale);
+		if (!GetWorld()->LineTraceSingleByChannel(Hit, AttackOrigin, Target->GetActorLocation(), ECC_Visibility, Params))
 		{
-			FHitResult Hit; FCollisionQueryParams Params(SCENE_QUERY_STAT(EntranceDefense), true, this); Params.AddIgnoredActor(Target);
-			if (!GetWorld()->LineTraceSingleByChannel(Hit, GetActorLocation() + GetActorUpVector() * 35, Target->GetActorLocation(), ECC_Visibility, Params))
+			FJTSPlanetSurfaceFrame Frame;
+			if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), Surface.ImpactPoint - GetActorLocation(), Frame))
+				SetActorRotation(Frame.Transform.GetRotation());
+			if (Now >= NextAttack)
 			{
-				FJTSPlanetSurfaceFrame AttackFrame;
-				if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), TargetSurface.ImpactPoint - GetActorLocation(), AttackFrame))
-					SetActorRotation(AttackFrame.Transform.GetRotation());
-				if (!MirrorDefense->bEnabled) UGameplayStatics::ApplyDamage(Target, AttackDamage, nullptr, this, nullptr);
-				NextAttack = Now + AttackInterval; SetState(EJTSForagerState::Attack, 0);
-				return true;
+				UGameplayStatics::ApplyDamage(Target, AttackDamage, nullptr, this, nullptr);
+				NextAttack = Now + AttackInterval;
+				SetState(EJTSForagerState::Attack, 0);
 			}
+			return;
 		}
 	}
-	return true;
+	const FVector Up = ActivePlanet->GetRadialUpVector(Surface.ImpactPoint);
+	FVector Forward, Right; Up.FindBestAxisVectors(Forward, Right);
+	const float Angle = (Slot % FMath::Max(1, CohortSize)) * 2 * PI / FMath::Max(1, CohortSize);
+	FJTSPlanetSurfaceHit Approach;
+	const FVector Offset = (Forward * FMath::Cos(Angle) + Right * FMath::Sin(Angle)) * AttackReach * 0.7f;
+	const FVector GoalPoint = ActivePlanet->ProjectPointToSurface(Surface.ImpactPoint + Offset, Approach) ? Approach.ImpactPoint : Surface.ImpactPoint;
+	// Attack as soon as contact is valid; a moving target must never require an exact formation slot.
+	if (State != EJTSForagerState::Walk) SetState(EJTSForagerState::Walk, 20);
+	MoveTowards(GoalPoint, FleeSpeed, Dt);
 }
 
 void AJTSPlanetSurfaceCreature::UpdateBehavior()
@@ -476,6 +522,21 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 	Body->ComponentVelocity = FVector::ZeroVector;
 	SetActorTickEnabled(false);
 	if (IsHidden()) return;
+	if (bColonySheltered && !bEntranceDefense)
+	{
+		if (State == EJTSForagerState::Burrow && Now >= StateEnd) SetState(EJTSForagerState::Hidden, 0);
+		return;
+	}
+	if (bColonyResident && bExitingEntrance && !bEntranceDefense)
+	{
+		MoveTowards(EntranceExitPoint, FleeSpeed, Dt);
+		if (ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), EntranceExitPoint) <= 20)
+		{
+			bExitingEntrance = false;
+			SetState(EJTSForagerState::Idle, 0.2f);
+		}
+		return;
+	}
 	if (UpdateEntranceDefense(Now, Dt)) return;
 	if (MirrorDefense->bEnabled && bMirrorRetaliation)
 	{
@@ -574,31 +635,13 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 		else if (!MoveTowards(Refuge, FleeSpeed, Dt) && bEnded) SetState(EJTSForagerState::Idle, 2);
 		return;
 	}
-	APawn* Threat = FindThreat();
+	APawn* Threat = bColonyResident ? nullptr : FindThreat();
 	if (bRetaliates && Aggressor.IsValid() && FVector::DistSquared(Aggressor->GetActorLocation(), AggressionOrigin) < FMath::Square(LeashRadius)) Threat = Aggressor.Get();
 	if (Threat)
 	{
 		if (bDefendsNest || (bRetaliates && Threat == Aggressor.Get()))
 		{
-			const float Distance = ActivePlanet->ApproximateSurfaceArcDistance(GetActorLocation(), Threat->GetActorLocation());
-			if (Distance < AttackReach && Now >= NextAttack)
-			{
-				FHitResult Obstacle;
-				FCollisionQueryParams Params(SCENE_QUERY_STAT(ColonyAttack), true, this);
-				Params.AddIgnoredActor(Threat);
-				if (!GetWorld()->LineTraceSingleByChannel(Obstacle, GetActorLocation() + GetActorUpVector() * 35,
-					Threat->GetActorLocation(), ECC_Visibility, Params))
-				{
-					if (!MirrorDefense->bEnabled) UGameplayStatics::ApplyDamage(Threat, AttackDamage, nullptr, this, nullptr);
-					NextAttack = Now + AttackInterval;
-					SetState(EJTSForagerState::Attack, 0);
-				}
-			}
-			else
-			{
-				if (State != EJTSForagerState::Walk) SetState(EJTSForagerState::Walk, 20);
-				MoveTowards(Threat->GetActorLocation(), FleeSpeed, Dt);
-			}
+			UpdateMeleePursuit(Threat, Now, Dt);
 		}
 		else SetState(EJTSForagerState::Startle, 0);
 		return;
@@ -657,6 +700,8 @@ void AJTSPlanetSurfaceCreature::OnDamaged(float Current, float Maximum, float Da
 	if (!HasAuthority() || Health->IsDead()) return;
 	APawn* Pawn = Cast<APawn>(Causer);
 	if (!Pawn && IsValid(Causer)) Pawn = Causer->GetInstigator();
+	if (bColonyResident && RefugeActor.IsValid())
+		if (auto* Colony = RefugeActor->FindComponentByClass<UJTSColonyDefenseComponent>()) Colony->RaiseAlarm(Pawn);
 	if (MirrorDefense->bEnabled)
 	{
 		// An active nest alarm owns the larger, mouth-centred leash. A new hit after

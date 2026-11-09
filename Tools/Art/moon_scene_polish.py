@@ -44,7 +44,8 @@ def accessible_nests(apply=False):
         assert best,'No accessible slope foot for '+name
         if apply:
             a.modify();a.set_editor_property('can_block_entrance',True);a.set_editor_property('destructible_entrance',False)
-            a.set_editor_property('block_hold_duration',2.5);a.set_editor_property('entrance_interaction_offset',unreal.Vector(-20,0,28))
+            a.get_editor_property('blockade').set_editor_property('damage_per_strike',.2)
+            a.set_editor_property('entrance_interaction_offset',unreal.Vector(-20,0,28))
             c=a.get_editor_property('refuge_mesh');c.set_world_location(best['pos'],False,True);c.set_world_rotation(best['rotation'],False,True)
         rows.append(dict(nest=name,offset_cm=round((best['pos']-origin).length(),1),slope=round(best['slope'],2),approach=round(best['approach'],2),position=s.xyz(best['pos'])))
     r.check_protected()

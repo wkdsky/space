@@ -12,10 +12,10 @@ enum class EJTSResourceType : uint8
 	Food = 2 UMETA(DisplayName = "Food"),
 	Rock = 3 UMETA(DisplayName = "Rock"),
 	Ore = 4 UMETA(DisplayName = "Ore"),
-	/** A processed ship resource produced by submitting an MoonAnt Corpse. */
+	/** Legacy processed organic material used by equipment recipes. */
 	Organic = 5 UMETA(DisplayName = "Organic"),
-	/** A carried Moon item. It occupies one inventory slot and is converted to Organic only by the spacecraft. */
-	MoonAntCorpse = 6 UMETA(DisplayName = "MoonAnt Corpse"),
+	/** Generic biological feedstock; retain the serialized enum name/value for existing saves and assets. */
+	MoonAntCorpse = 6 UMETA(DisplayName = "Biological Corpse"),
 	Crystal = 7 UMETA(DisplayName = "Crystal"),
 	InorganicCarbon = 8 UMETA(DisplayName = "Inorganic Carbon")
 };

@@ -56,7 +56,7 @@ namespace
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSAntCorpseItemTest, "JTS.Moon.Ants.CorpsePickupAndOrganicDeposit",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSAntCorpseItemTest, "JTS.Moon.Ants.CorpsePickupAndRawDeposit",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FJTSAntCorpseItemTest::RunTest(const FString&)
 {
@@ -96,10 +96,12 @@ bool FJTSAntCorpseItemTest::RunTest(const FString&)
 	auto* Ship = W.World->SpawnActor<AJTSSpacecraftActor>(FVector(5000, 0, 1000), FRotator::ZeroRotator, Spawn);
 	if (!TestNotNull(TEXT("Shared spacecraft spawns"), Ship)) return false;
 	const int32 OrganicBefore = Ship->GetResourceAmount(EJTSResourceType::Organic);
+	const int32 CorpseBefore = Ship->GetResourceAmount(EJTSResourceType::MoonAntCorpse);
 	Player->SetActorLocation(Ship->GetBoardingInteractionCenter());
 	Ship->TryDepositResourcesFromPawn(Player); // Overlap may already have submitted the item.
 	TestEqual(TEXT("Depositing consumes the carried corpse"), Inventory->GetItemCount(EJTSItemId::MoonAntCorpse), 0);
-	TestEqual(TEXT("A corpse becomes one shared Organic resource"), Ship->GetResourceAmount(EJTSResourceType::Organic), OrganicBefore + 1);
+	TestEqual(TEXT("A corpse remains one biological feedstock unit"), Ship->GetResourceAmount(EJTSResourceType::MoonAntCorpse), CorpseBefore + 1);
+	TestEqual(TEXT("Deposit never automatically processes corpses"), Ship->GetResourceAmount(EJTSResourceType::Organic), OrganicBefore);
 	return true;
 }
 

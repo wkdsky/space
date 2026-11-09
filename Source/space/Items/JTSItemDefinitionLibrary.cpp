@@ -371,8 +371,8 @@ namespace
 			SetResource(TEXT("食物"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.34f, 0.90f, 0.38f, 1.0f));
 			break;
 		case EJTSItemId::MoonAntCorpse:
-			SetResource(TEXT("镜虫尸体"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.70f, 0.30f, 0.72f, 1.0f));
-			Definition->MaxStackSize = 1;
+			SetResource(TEXT("生物尸体"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.70f, 0.30f, 0.72f, 1.0f));
+			Definition->MaxStackSize = 99;
 			break;
 		case EJTSItemId::WaistLamp:
 			Definition->DisplayName = FText::FromString(TEXT("头灯"));

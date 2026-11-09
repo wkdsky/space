@@ -15,6 +15,7 @@
 #include "space/Player/JTSCharacter.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Components/JTSMaterialProcessorComponent.h"
 #include "space/Systems/JTSExpeditionSaveGame.h"
 
 void UJTSExpeditionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -316,7 +317,7 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 	}
 	if (Spacecraft != nullptr)
 	{
-		SetSpacecraftSnapshot(Spacecraft->GetClass(), Spacecraft->GetStorage());
+		CaptureSpacecraftState(Spacecraft);
 	}
 	Snapshot.Players.Reset();
 	if (GameState != nullptr)
@@ -368,8 +369,11 @@ void UJTSExpeditionSubsystem::RestoreSpacecraft(AJTSSpacecraftActor* Spacecraft)
 {
 	if (Spacecraft != nullptr && !Snapshot.SpacecraftStorage.IsEmpty())
 	{
-		Spacecraft->RestoreStorageFromExpedition(ToResourceMap(Snapshot.SpacecraftStorage));
+		Spacecraft->RestoreStorageSnapshot(Snapshot.SpacecraftStorage);
 	}
+	if (Spacecraft)
+		if (UJTSMaterialProcessorComponent* Processor = Spacecraft->GetMaterialProcessor())
+			Processor->RestoreGraph(Snapshot.MaterialProcessingGraph);
 }
 
 void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, AJTSCharacter* Character) const
@@ -447,6 +451,15 @@ void UJTSExpeditionSubsystem::SetSpacecraftSnapshot(TSubclassOf<AJTSSpacecraftAc
 	Snapshot.SpacecraftStorage = ToResourceArray(Storage);
 }
 
+void UJTSExpeditionSubsystem::CaptureSpacecraftState(const AJTSSpacecraftActor* Spacecraft)
+{
+	if (!Spacecraft) return;
+	Snapshot.SpacecraftClass = Spacecraft->GetClass();
+	Snapshot.SpacecraftStorage = Spacecraft->ExportStorageSnapshot();
+	if (const UJTSMaterialProcessorComponent* Processor = Spacecraft->GetMaterialProcessor())
+		Snapshot.MaterialProcessingGraph = Processor->GetSavedGraph();
+}
+
 void UJTSExpeditionSubsystem::SetCurrentMap(const FString& MapPackageName)
 {
 	Snapshot.CurrentMapPackage = UWorld::RemovePIEPrefix(MapPackageName);
@@ -475,6 +488,21 @@ void UJTSExpeditionSubsystem::MarkEntranceBlocked(FName EntranceId)
 	if (HasActiveExpedition() && !SaveNow()) RequestSave();
 }
 
+bool UJTSExpeditionSubsystem::RecordImportantItem(FName ItemId)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || ItemId.IsNone() || Snapshot.ImportantItemIds.Contains(ItemId)) return false;
+	Snapshot.ImportantItemIds.Add(ItemId);
+	Snapshot.SaveVersion = FMath::Max(8, Snapshot.SaveVersion);
+	if (HasActiveExpedition() && !SaveNow()) RequestSave();
+	return true;
+}
+void UJTSExpeditionSubsystem::MarkEncounterDefeated(FName EncounterId)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || EncounterId.IsNone() || Snapshot.DefeatedEncounterIds.Contains(EncounterId)) return;
+	Snapshot.DefeatedEncounterIds.Add(EncounterId);
+	Snapshot.SaveVersion = FMath::Max(8, Snapshot.SaveVersion);
+	if (HasActiveExpedition() && !SaveNow()) RequestSave();
+}
 void UJTSExpeditionSubsystem::RequestSave()
 {
 	UWorld* const World = GetWorld();

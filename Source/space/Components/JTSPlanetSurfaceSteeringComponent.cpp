@@ -33,8 +33,8 @@ bool UJTSPlanetSurfaceSteeringComponent::Probe(AJTSPlanetAnchor* Planet, const F
 	Params.AddIgnoredActor(Planet->GetGameplaySurfaceActor());
 	FHitResult Obstacle;
 	const FVector Up = Planet->GetRadialUpVector(Ground);
-	return !GetWorld()->SweepSingleByObjectType(Obstacle, Ground + Up * (BodyRadius + 3),
-		OutHit.ImpactPoint + Planet->GetRadialUpVector(OutHit.ImpactPoint) * (BodyRadius + 3),
+	return !GetWorld()->SweepSingleByObjectType(Obstacle, Ground + Up * (BodyRadius + BodyGroundClearance),
+		OutHit.ImpactPoint + Planet->GetRadialUpVector(OutHit.ImpactPoint) * (BodyRadius + BodyGroundClearance),
 		FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(BodyRadius), Params);
 }
 

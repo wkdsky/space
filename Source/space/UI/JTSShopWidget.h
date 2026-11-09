@@ -35,6 +35,7 @@ public:
 	void CloseShop();
 	bool IsShopOpen() const;
 	void NotifyPurchaseResult(EJTSShopPurchaseResult Result);
+	void NotifyMaterialProcessingResult(bool bSucceeded, const FString& Message);
 	void HandleStellarItemDrop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId);
 	void NotifyStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
 	void NotifyDebugStellarItemsResult(bool bAvailable, int32 AddedCount, int32 RequestedCount);
@@ -106,6 +107,7 @@ private:
 	UFUNCTION() void HandleDebugStellarItemsClicked();
 	UFUNCTION() void HandleDebugLevelsClicked();
 	UFUNCTION() void HandleSupplyTabClicked();
+	UFUNCTION() void HandleMaterialTabClicked();
 	UFUNCTION() void HandleAbilityTabClicked();
 	UFUNCTION() void HandleStellarTabClicked();
 	UFUNCTION() void HandleWeaponTabClicked();
@@ -183,6 +185,8 @@ private:
 	UPROPERTY(Transient) TObjectPtr<class UJTSWeaponUpgradePanel> WeaponPanel;
 	UPROPERTY(Transient) TObjectPtr<UBorder> WeaponPage;
 	UPROPERTY(Transient) TObjectPtr<UButton> WeaponTabButton;
+	UPROPERTY(Transient) TObjectPtr<class UJTSMaterialProcessorWidget> MaterialPanel;
+	UPROPERTY(Transient) TObjectPtr<UButton> MaterialTabButton;
 	/** Top-right corner numbers on locker slots: skill points invested in a normal weapon. */
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> LockerSlotBadges;
 	FVector2D LockerPressPosition = FVector2D::ZeroVector;
@@ -195,6 +199,7 @@ private:
 	bool bShowingAbilityPage = false;
 	bool bShowingStellarPage = false;
 	bool bShowingWeaponPage = false;
+	bool bShowingMaterialPage = false;
 	bool bRollAnimating = false;
 	bool bDebugStellarGrantPending = false;
 	bool bRollResultReceived = false;

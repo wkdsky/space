@@ -46,7 +46,7 @@ void UJTSMirrorGlareWidget::NativeTick(const FGeometry& Geometry, float Dt)
 	}
 	for (int32 I = 0; I < 3; ++I)
 	{
-		Strength[I] = FMath::FInterpConstantTo(Strength[I], Illuminated[I] ? 1.f : 0.f, Dt, Illuminated[I] ? 2.5f : 1.1f);
+		Strength[I] = FMath::FInterpConstantTo(Strength[I], Illuminated[I] ? 1.f : 0.f, Dt, Illuminated[I] ? 3.2f : 1.1f);
 		const FName Name(*FString::Printf(TEXT("Spot%d"),I));
 		Glare->SetVectorParameterValue(Name, FLinearColor(Centers[I].X, Centers[I].Y, Strength[I], 0));
 	}

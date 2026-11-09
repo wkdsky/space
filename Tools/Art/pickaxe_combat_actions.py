@@ -27,6 +27,9 @@ def inspect():
     return dict(species=rows,item=props,habitats=habitats,world=str(unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()))
 
 def main(stage):
+    if stage.startswith('boss_'):
+        import mirror_boss_editor, importlib
+        return importlib.reload(mirror_boss_editor).run(stage)
     if stage.startswith('moon_revision_'):
         import moon_combat_revision, importlib
         return importlib.reload(moon_combat_revision).run(stage)

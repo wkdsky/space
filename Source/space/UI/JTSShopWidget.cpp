@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/UI/JTSShopWidget.h"
+#include "space/UI/JTSMaterialProcessorWidget.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -232,12 +233,14 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 	BuildWidgetTree();
 	SetIsFocusable(true);
 	ActiveSpacecraft = Spacecraft;
+	if (MaterialPanel) MaterialPanel->SetContext(Spacecraft, Cast<AJTSPlayerController>(GetOwningPlayer()));
 	ResetLockerDrag();
 	LastDisplayedResourceAmounts.Reset();
 	LastRequestedItem = EJTSItemId::None;
 	bShowingAbilityPage = false;
 	bShowingStellarPage = false;
 	bShowingWeaponPage = false;
+	bShowingMaterialPage = false;
 	bRollAnimating = false;
 	bDebugStellarGrantPending = false;
 	bRollResultReceived = false;
@@ -432,7 +435,7 @@ void UJTSShopWidget::UpdateCarriedDragPreview(const FVector2D& ScreenPosition,
 
 void UJTSShopWidget::HandleStellarItemDrop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId)
 {
-	if (!IsShopOpen() || bShowingAbilityPage) return;
+	if (!IsShopOpen() || bShowingAbilityPage || bShowingMaterialPage) return;
 	auto* PS = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
 	if (!PS) return;
 	for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
@@ -446,7 +449,7 @@ void UJTSShopWidget::HandleStellarItemDrop(const FVector2D& ScreenPosition, int3
 void UJTSShopWidget::HandleCarriedItemDrop(const FVector2D& ScreenPosition,
 	int32 CarriedSlotIndex, FGuid ExpectedInstanceId)
 {
-	if (!IsShopOpen() || bShowingAbilityPage || !ExpectedInstanceId.IsValid()) return;
+	if (!IsShopOpen() || bShowingAbilityPage || bShowingMaterialPage || !ExpectedInstanceId.IsValid()) return;
 	AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer());
 	if (!IsValid(Controller)) return;
 	if (TrashImage && TrashImage->GetCachedGeometry().IsUnderLocation(ScreenPosition))
@@ -554,7 +557,7 @@ FReply UJTSShopWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, cons
 		LeverGrabY = StellarPanel->GetCachedGeometry().AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()).Y;
 		return FReply::Handled().CaptureMouse(TakeWidget());
 	}
-	if (bShopOpen && !bShowingAbilityPage && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	if (bShopOpen && !bShowingAbilityPage && !bShowingMaterialPage && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const AJTSPlayerState* const State = GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<AJTSPlayerState>() : nullptr;
 		for (int32 Index = 0; Index < LockerSlotBorders.Num(); ++Index)
@@ -776,6 +779,11 @@ void UJTSShopWidget::BuildWidgetTree()
 	WeaponTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipWeaponTabLabel"), TEXT("武器改装"), 16.0f));
 	WeaponTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleWeaponTabClicked);
 	AddCanvas(FrameCanvas, WeaponTabButton, FAnchors(0.0f, 0.0f), FVector2D(382.0f, 84.0f), FVector2D(168.0f, 40.0f));
+
+	MaterialTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipMaterialTab"));
+	MaterialTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipMaterialTabLabel"), TEXT("物料处理器"), 16.0f));
+	MaterialTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleMaterialTabClicked);
+	AddCanvas(FrameCanvas, MaterialTabButton, FAnchors(0.0f, 0.0f), FVector2D(734.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
 	CatalogPanel = MakeBorder(WidgetTree, TEXT("ShipSupplyGridFrame"), FLinearColor(0.014f, 0.040f, 0.075f, 1.0f));
 	AddCanvas(FrameCanvas, CatalogPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
@@ -1001,6 +1009,9 @@ void UJTSShopWidget::BuildWidgetTree()
 	AbilityStatusText = MakeText(WidgetTree, TEXT("ShipAbilityStatus"), TEXT("每级消耗1点 · 确认后永久生效 · 物品每格最多99个"), 13.0f, FLinearColor(0.72f, 0.82f, 0.92f, 1.0f), ETextJustify::Center);
 	AddCanvas(FrameCanvas, AbilityStatusText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -19.0f), FVector2D(1060.0f, 24.0f), FVector2D(0.5f, 1.0f));
 
+	MaterialPanel = WidgetTree->ConstructWidget<UJTSMaterialProcessorWidget>(UJTSMaterialProcessorWidget::StaticClass(), TEXT("ShipMaterialProcessor"));
+	AddCanvas(FrameCanvas, MaterialPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(1260.0f, 520.0f));
+
 	StatusText = MakeText(WidgetTree, TEXT("ShipSupplyStatus"), TEXT(""), 13.0f, FLinearColor(0.64f, 0.78f, 0.92f, 1.0f), ETextJustify::Center);
 	AddCanvas(FrameCanvas, StatusText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -43.0f), FVector2D(1060.0f, 24.0f), FVector2D(0.5f, 1.0f));
 
@@ -1138,32 +1149,32 @@ void UJTSShopWidget::RefreshPageVisibility()
 	};
 	if (CatalogPanel != nullptr)
 	{
-		SetVisibilityIfChanged(CatalogPanel, bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
+		SetVisibilityIfChanged(CatalogPanel, bShowingMaterialPage || bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (StellarPanel != nullptr)
 	{
-		SetVisibilityIfChanged(StellarPanel, !bShowingAbilityPage && !bShowingWeaponPage && bShowingStellarPage
+		SetVisibilityIfChanged(StellarPanel, !bShowingMaterialPage && !bShowingAbilityPage && !bShowingWeaponPage && bShowingStellarPage
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (WeaponPage != nullptr)
 	{
-		SetVisibilityIfChanged(WeaponPage, bShowingWeaponPage && !bShowingAbilityPage
+		SetVisibilityIfChanged(WeaponPage, !bShowingMaterialPage && bShowingWeaponPage && !bShowingAbilityPage
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (LockerPanel != nullptr)
 	{
-		SetVisibilityIfChanged(LockerPanel, bShowingAbilityPage
+		SetVisibilityIfChanged(LockerPanel, bShowingMaterialPage || bShowingAbilityPage
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (AbilityPanel != nullptr)
 	{
-		SetVisibilityIfChanged(AbilityPanel, bShowingAbilityPage
+		SetVisibilityIfChanged(AbilityPanel, !bShowingMaterialPage && bShowingAbilityPage
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (StatusText != nullptr)
 	{
-		SetVisibilityIfChanged(StatusText, bShowingAbilityPage || StatusText->GetText().IsEmpty()
+		SetVisibilityIfChanged(StatusText, bShowingMaterialPage || bShowingAbilityPage || StatusText->GetText().IsEmpty()
 			? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (AbilityStatusText != nullptr)
@@ -1173,7 +1184,7 @@ void UJTSShopWidget::RefreshPageVisibility()
 	}
 	if (SupplyTabButton != nullptr)
 	{
-		SupplyTabButton->SetBackgroundColor(bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
+		SupplyTabButton->SetBackgroundColor(bShowingMaterialPage || bShowingAbilityPage || bShowingStellarPage || bShowingWeaponPage
 			? FLinearColor(0.10f, 0.16f, 0.25f, 1.0f)
 			: FLinearColor(0.08f, 0.29f, 0.43f, 1.0f));
 	}
@@ -1195,13 +1206,17 @@ void UJTSShopWidget::RefreshPageVisibility()
 			? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f)
 			: FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
 	}
+	SetVisibilityIfChanged(MaterialPanel, bShowingMaterialPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (MaterialTabButton) MaterialTabButton->SetBackgroundColor(bShowingMaterialPage
+		? FLinearColor(0.08f, 0.29f, 0.43f, 1.0f) : FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
 
 }
 
 void UJTSShopWidget::ToggleShopPage()
 {
-	// Supply -> stellar -> weapon -> ability -> supply.
-	if (bShowingAbilityPage) { bShowingAbilityPage = false; }
+	// Supply -> stellar -> weapon -> ability -> material processor -> supply.
+	if (bShowingMaterialPage) { bShowingMaterialPage = false; }
+	else if (bShowingAbilityPage) { bShowingAbilityPage = false; bShowingMaterialPage = true; }
 	else if (bShowingWeaponPage) { bShowingWeaponPage = false; bShowingAbilityPage = true; }
 	else if (bShowingStellarPage) { bShowingStellarPage = false; bShowingWeaponPage = true; }
 	else bShowingStellarPage = true;
@@ -1876,10 +1891,16 @@ void UJTSShopWidget::HandleDebugLevelsClicked()
 		if (ActiveSpacecraft.IsValid()) Controller->ServerRequestDebugAbilityLevels(ActiveSpacecraft.Get());
 	}
 }
-void UJTSShopWidget::HandleSupplyTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
-void UJTSShopWidget::HandleStellarTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = true; bShowingWeaponPage = false; RefreshAll(); }
-void UJTSShopWidget::HandleWeaponTabClicked() { bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = true; RefreshAll(); }
-void UJTSShopWidget::HandleAbilityTabClicked() { bShowingAbilityPage = true; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleSupplyTabClicked() { bShowingMaterialPage = false; bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleStellarTabClicked() { bShowingMaterialPage = false; bShowingAbilityPage = false; bShowingStellarPage = true; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleWeaponTabClicked() { bShowingMaterialPage = false; bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = true; RefreshAll(); }
+void UJTSShopWidget::HandleAbilityTabClicked() { bShowingMaterialPage = false; bShowingAbilityPage = true; bShowingStellarPage = false; bShowingWeaponPage = false; RefreshAll(); }
+void UJTSShopWidget::HandleMaterialTabClicked() { bShowingMaterialPage = true; bShowingAbilityPage = false; bShowingStellarPage = false; bShowingWeaponPage = false; ResetLockerDrag(); RefreshAll(); }
+
+void UJTSShopWidget::NotifyMaterialProcessingResult(bool bSucceeded, const FString& Message)
+{
+	if (MaterialPanel) MaterialPanel->NotifyResult(bSucceeded, Message);
+}
 
 void UJTSShopWidget::HandleStellarRollClicked()
 {

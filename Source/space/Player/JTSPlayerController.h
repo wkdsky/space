@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemTypes.h"
+#include "space/Items/JTSMaterialProcessingRecipes.h"
 #include "space/Player/JTSPlayerProgressionTypes.h"
 
 #include "JTSPlayerController.generated.h"
@@ -30,6 +31,11 @@ class SPACE_API AJTSPlayerController : public APlayerController
 
 public:
 	AJTSPlayerController();
+	UFUNCTION(Server, Reliable)
+	void ServerRequestMaterialProcessing(AJTSSpacecraftActor* Spacecraft, const FJTSMaterialGraph& Graph, bool bExecute);
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveMaterialProcessingResult(bool bSucceeded, const FString& Message);
+	UFUNCTION(Client, Reliable) void ClientShowExpeditionNotice(const FText& Message);
 
 	UFUNCTION(BlueprintCallable, Category = "Menu")
 	void StartGame();
@@ -246,6 +252,20 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDebugPlanet(FName PlanetId, bool bSetDefault);
 
+	/** Own-player debug intent; the server requires enabled development controls. */
+	UFUNCTION(Server, Reliable)
+	void ServerSetDebugInvulnerable(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category = "Debug")
+	bool IsDebugInvulnerable() const { return bDebugInvulnerable; }
+
+	/** Own-player outgoing damage only; never changes damage received by players. */
+	UFUNCTION(Server, Reliable)
+	void ServerSetDebugOneHitKill(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category = "Debug")
+	bool IsDebugOneHitKillEnabled() const;
+
 	/** Called by the HUD's focused keyboard path as well as the gameplay viewport. */
 	void SetAltCursorHeld(bool bHeld);
 
@@ -254,11 +274,19 @@ protected:
 	virtual void BeginPlayingState() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnRep_Pawn() override;
+	virtual void OnPossess(APawn* InPawn) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void ClientRestart_Implementation(APawn* NewPawn) override;
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 	virtual void PlayerTick(float DeltaTime) override;
 
 private:
+	void ApplyDebugInvulnerability();
+	UPROPERTY(Transient, Replicated)
+	bool bDebugInvulnerable = false;
+	UPROPERTY(Transient, Replicated)
+	bool bDebugOneHitKill = false;
+
 	bool bInventoryArrangementMode = false;
 	bool bAltCursorHeld = false;
 	bool bStellarItemDragging = false;

@@ -39,6 +39,9 @@ public:
 	float ProbeDistance = 65.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Traversal", meta = (ClampMin = "1"))
 	float BodyRadius = 12.0f;
+	/** Height beneath the obstacle probe; larger, long-legged creatures can straddle low debris. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Traversal", meta = (ClampMin = "0"))
+	float BodyGroundClearance = 3.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Traversal", meta = (ClampMin = "0.1"))
 	float AvoidanceCommitSeconds = 1.25f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Planet|Traversal", meta = (ClampMin = "1"))

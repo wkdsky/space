@@ -31,8 +31,17 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 private:
 	void Refresh();
+	UFUNCTION() void ToggleDarkVisibility();
+	UFUNCTION() void ToggleInvulnerability();
+	UFUNCTION() void ToggleOneHitKill();
 	UPROPERTY(Transient) TObjectPtr<UVerticalBox> Content;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> StatusText;
+	UPROPERTY(Transient) TObjectPtr<UButton> DarkVisibilityButton;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> DarkVisibilityLabel;
+	UPROPERTY(Transient) TObjectPtr<UButton> InvulnerabilityButton;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> InvulnerabilityLabel;
+	UPROPERTY(Transient) TObjectPtr<UButton> OneHitKillButton;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> OneHitKillLabel;
 	UPROPERTY(Transient) TArray<TObjectPtr<UJTSDebugPlanetButton>> Buttons;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> DefaultLabels;
 	TWeakObjectPtr<AJTSSpaceDebugTravelManager> Manager;

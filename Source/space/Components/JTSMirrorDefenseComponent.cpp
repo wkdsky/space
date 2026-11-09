@@ -51,6 +51,11 @@ void UJTSMirrorDefenseComponent::AimAt(APawn* Target)
 	FVector Eye = Target->GetPawnViewLocation(), Ray;
 	if (const auto* View = Target->FindComponentByClass<UJTSRangedWeaponComponent>()) View->GetCameraRay(Eye, Ray);
 	AimDirection = (Eye - GetMirrorLocation()).GetSafeNormal(SMALL_NUMBER, GetOwner()->GetActorUpVector());
+	FVector Origin = GetOwner()->GetActorLocation();
+	float Radius = GlareRange;
+	if (const auto* Creature = Cast<AJTSPlanetSurfaceCreature>(GetOwner())) Creature->GetMirrorThreatArea(Origin, Radius);
+	GlareOrigin = Origin;
+	ActiveGlareRadius = FMath::Min(GlareRange, FMath::Max(0.f, Radius));
 	bReflecting = true;
 }
 
@@ -207,19 +212,15 @@ void UJTSMirrorDefenseComponent::SetNearbyReflection(UTexture* Texture, bool bVi
 bool UJTSMirrorDefenseComponent::CanGlareAt(APlayerController* Viewer) const
 {
 	const auto* Creature = Cast<AJTSPlanetSurfaceCreature>(GetOwner());
-	if (!bEnabled || !bReflecting || ReflectionBlend < .8f || !Creature || !Creature->IsAlive()
+	if (!bEnabled || !bReflecting || ReflectionBlend < .2f || !Creature || !Creature->IsAlive()
 		|| GetOwner()->IsHidden() || !Viewer || !Viewer->GetPawn()) return false;
 	if (const auto* Health = Viewer->GetPawn()->FindComponentByClass<UJTSHealthComponent>(); Health && Health->IsDead()) return false;
+	// The server publishes the active threat area. Turning the camera away or standing
+	// beside another target cannot cancel glare; solid cover still blocks the light.
+	if (ActiveGlareRadius <= 0 || FVector::DistSquared(Viewer->GetPawn()->GetActorLocation(), GlareOrigin)
+		> FMath::Square(ActiveGlareRadius)) return false;
 	FVector Eye; FRotator View;
 	Viewer->GetPlayerViewPoint(Eye, View);
-	const FVector ToEye = Eye - GetMirrorLocation();
-	if (ToEye.SizeSquared() > FMath::Square(GlareRange) || ToEye.IsNearlyZero()) return false;
-	const FVector Direction = ToEye.GetSafeNormal();
-	if (FVector::DotProduct(GetMirrorNormal(), Direction) < FMath::Cos(FMath::DegreesToRadians(GlareHalfAngle))) return false;
-	FVector2D Screen;
-	if (!Viewer->ProjectWorldLocationToScreen(GetMirrorLocation(), Screen, true)) return false;
-	int32 Width, Height; Viewer->GetViewportSize(Width, Height);
-	if (Screen.X < 0 || Screen.Y < 0 || Screen.X > Width || Screen.Y > Height) return false;
 	return HasClearGlarePath(Eye, Viewer->GetPawn());
 }
 
@@ -322,6 +323,8 @@ void UJTSMirrorDefenseComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UJTSMirrorDefenseComponent, bReflecting);
+	DOREPLIFETIME(UJTSMirrorDefenseComponent, GlareOrigin);
+	DOREPLIFETIME(UJTSMirrorDefenseComponent, ActiveGlareRadius);
 	DOREPLIFETIME(UJTSMirrorDefenseComponent, AimDirection);
 }
 

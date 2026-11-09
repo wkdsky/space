@@ -57,9 +57,8 @@ void UJTSCruiseNavigationWidget::UpdateNavigation(const AJTSSpaceWorldManager* M
     if (Frame->bGroundMap && Manager && NavigationSlate.IsValid() && IsVisible())
     {
         if (!SurfaceCapture) SurfaceCapture = NewObject<UJTSSurfaceMapCapture>(this);
-        SurfaceCapture->Update(Manager->GetWorld(), *Frame, Manager->NavigationMapSettings.GroundMapResolution,
-            Manager->NavigationMapSettings.GroundCaptureHeight, Character, Ship);
-        NavigationSlate->SetSurfaceTexture(SurfaceCapture->GetTexture());
+        SurfaceCapture->Update(Manager->GetWorld(), *Frame, Manager->NavigationMapSettings, Character, Ship);
+        NavigationSlate->SetSurfaceTexture(SurfaceCapture->GetPresentationResource());
     }
     else if (SurfaceCapture) SurfaceCapture->Stop();
     PushPresentation();
@@ -107,7 +106,7 @@ TArray<FVector> UJTSCruiseNavigationWidget::GetNavigationBodyProjections() const
 TSharedRef<SWidget> UJTSCruiseNavigationWidget::RebuildWidget()
 {
     NavigationSlate = SNew(SJTSCruiseNavigation);
-    if (SurfaceCapture) NavigationSlate->SetSurfaceTexture(SurfaceCapture->GetTexture());
+    if (SurfaceCapture) NavigationSlate->SetSurfaceTexture(SurfaceCapture->GetPresentationResource());
     return NavigationSlate.ToSharedRef();
 }
 

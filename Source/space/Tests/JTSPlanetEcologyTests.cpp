@@ -25,6 +25,7 @@
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/DamageType.h"
 #include "Components/SceneComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -238,14 +239,14 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	if (!Nest->HasActorBegunPlay()) Nest->DispatchBeginPlay();
 	auto* Health = Nest->FindComponentByClass<UJTSHealthComponent>();
 	Health->SetMaxHealth(160, true);
-	TestEqual(TEXT("Closed towers have no visible workers"), Workers->GetSpawnedEnemyCount(), 0);
+	TestEqual(TEXT("Colony worker population starts without damaging the nest"), Workers->GetSpawnedEnemyCount(), 3);
+	TestEqual(TEXT("Finite soldier population is initialized with the colony"), Guards->GetSpawnedEnemyCount(), 1);
 	Health->ApplyDamage(15, nullptr, nullptr);
-	TestEqual(TEXT("First strike releases workers"), Workers->GetSpawnedEnemyCount(), 3);
-	TestEqual(TEXT("First strike does not release soldiers"), Guards->GetSpawnedEnemyCount(), 0);
+	TestEqual(TEXT("Direct component damage cannot harm a tower"), Health->GetHealth(), 160.f);
 	Health->ApplyDamage(95, nullptr, nullptr);
-	TestEqual(TEXT("Severe shell damage releases one guard"), Guards->GetSpawnedEnemyCount(), 1);
 	Health->ApplyDamage(10, nullptr, nullptr);
-	TestEqual(TEXT("Further damage does not duplicate either cohort"), Workers->GetSpawnedEnemyCount()+Guards->GetSpawnedEnemyCount(), 4);
+	TestEqual(TEXT("Further damage does not duplicate either population"), Workers->GetSpawnedEnemyCount()+Guards->GetSpawnedEnemyCount(), 4);
+	TestFalse(TEXT("The colony has no destroyed health state"), Health->IsDead());
 	auto* Symbolic = Scope.World->SpawnActor<AJTSPlanetEcologyHabitat>(Origin, Frame);
 	auto* Destructible = Scope.World->SpawnActor<AJTSPlanetEcologyHabitat>(Origin, Frame);
 	Destructible->bDestructibleEntrance = true;
@@ -283,14 +284,19 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	TestTrue(TEXT("A harvested deposit is removed for all peers"), Deposit->IsActorBeingDestroyed());
 	Deposit->Interact_Implementation(Collector);
 	TestEqual(TEXT("Repeated interaction cannot duplicate a deposit"), Inventory->GetItemCount(EJTSItemId::InorganicCarbon), 1);
-	// The interaction component owns hold timing on the server, including cancellation and range checks.
+	// Only real pickaxe contacts reduce nest durability; E never starts work.
 	auto* Blockable = Scope.World->SpawnActor<AJTSPlanetEcologyHabitat>(Origin + FVector(0, 1800, 0), Frame);
 	Blockable->RefugeMesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
 	Blockable->EntranceBlocker->SetStaticMesh(Blockable->RefugeMesh->GetStaticMesh());
-	Blockable->bCanBlockEntrance = true; Blockable->BlockHoldDuration = 0.5f;
+	Blockable->bCanBlockEntrance = true; Blockable->Blockade->DefensePopulation = 0;
 	Blockable->RefugeMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Blockable->RefugeMesh->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
 	Blockable->EntranceInteractionOffset = FVector(0, 0, 100);
+	if (!Blockable->HasActorBegunPlay()) Blockable->DispatchBeginPlay();
+	const auto* NestHealth = Blockable->FindComponentByClass<UJTSHealthComponent>();
+	const float NestHealthBefore = NestHealth->GetHealth();
+	UGameplayStatics::ApplyDamage(Blockable, 10000, nullptr, nullptr, UDamageType::StaticClass());
+	TestEqual(TEXT("Other weapons cannot kill the nest's legacy health and disable pickaxe targeting"), NestHealth->GetHealth(), NestHealthBefore);
 	const FVector WorkPosition=Blockable->GetActorLocation()-Blockable->GetActorForwardVector()*115+Blockable->GetActorUpVector()*25;
 	Collector->SetActorLocation(WorkPosition); Collector->SetActorRotation(Blockable->GetActorRotation());
 	auto* Melee=NewObject<UJTSMeleeComponent>(Collector); Collector->AddInstanceComponent(Melee); Melee->RegisterComponent();
@@ -298,33 +304,43 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	auto* Interaction = NewObject<UInteractionComponent>(Collector); Collector->AddInstanceComponent(Interaction); Interaction->RegisterComponent();
 	auto TickFor = [&](int32 Frames) { for (int32 I=0; I<Frames; ++I) { ++GFrameCounter; Scope.World->Tick(LEVELTICK_All, 0.05f); } };
 	TestFalse(TEXT("Ordinary habitat markers never offer blocking interaction"), Symbolic->CanInteract_Implementation(Collector));
-	TestTrue(TEXT("Explicitly marked entrances offer the blocking action"), Blockable->CanInteract_Implementation(Collector));
-	Blockable->SetRole(ROLE_SimulatedProxy); Blockable->Interact_Implementation(Collector);
-	TestFalse(TEXT("Client-local blocking cannot change the nest"), Blockable->IsEntranceBlocked());
+	TestFalse(TEXT("Marked nests never offer an E interaction"), Blockable->CanInteract_Implementation(Collector));
+	Blockable->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client-local strikes cannot damage the nest"), Blockable->Blockade->ApplyStrikeWork(Collector));
 	Blockable->SetRole(ROLE_Authority);
 	Interaction->ServerTryInteract_Implementation(Blockable);
-	TestFalse(TEXT("An instant interaction RPC cannot bypass the hold"), Blockable->IsEntranceBlocked());
-	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(4);
-	TestEqual(TEXT("No equipped pickaxe means no work"), Blockable->Blockade->GetProgress(), 0.0f);
+	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(20);
+	TestEqual(TEXT("E cannot change durability"), Blockable->Blockade->GetDurabilityFraction(), 1.f);
+	TestFalse(TEXT("An unequipped pickaxe cannot damage the nest"), Blockable->Blockade->ApplyStrikeWork(Collector));
 	TestTrue(TEXT("Pickaxe is restored to the normal shop"), UJTSItemDefinitionLibrary::GetDefaultShopCatalog().Contains(EJTSItemId::Pickaxe));
 	TestTrue(TEXT("Pickaxe can be equipped"), Inventory->TryAddItemById(EJTSItemId::Pickaxe));
 	for (int32 Slot=0; Slot<Inventory->GetItemSlots().Num(); ++Slot)
 		if (Inventory->GetItemAtSlot(Slot).ItemId == EJTSItemId::Pickaxe) Inventory->SelectQuickbarSlot(Slot);
-	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(4);
-	TestFalse(TEXT("A partial hold does not block the entrance"), Blockable->IsEntranceBlocked());
-	Interaction->ServerCancelInteractionHold_Implementation(); TickFor(2);
+	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(20);
+	TestEqual(TEXT("E with an equipped pickaxe still cannot damage the nest"), Blockable->Blockade->GetProgress(), 0.f);
+	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Punch);
+	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Knife);
+	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Axe);
+	TestEqual(TEXT("Other attack types cannot damage the nest"), Blockable->Blockade->GetProgress(), 0.f);
+	Melee->StartWorkAttack(Blockable); TickFor(20);
 	const float RetainedProgress = Blockable->Blockade->GetProgress();
-	TestTrue(TEXT("A tap retains progress during the grace period"), RetainedProgress > 0);
-	TickFor(25);
-	TestTrue(TEXT("Idle work decays gradually"), Blockable->Blockade->GetProgress() < RetainedProgress);
-	TestFalse(TEXT("Releasing E cancels server hold completion"), Blockable->IsEntranceBlocked());
-	Interaction->ServerBeginInteractionHold_Implementation(Blockable);
-	Collector->SetActorLocation(Blockable->GetActorLocation() + FVector(0, -1000, 0)); TickFor(12);
-	TestFalse(TEXT("Leaving interaction range cancels the hold"), Blockable->IsEntranceBlocked());
+	TestTrue(TEXT("A physical pickaxe contact reduces durability"), RetainedProgress > 0);
+	TestEqual(TEXT("The HUD fraction represents remaining durability"), Blockable->Blockade->GetDurabilityFraction(), 1.f - RetainedProgress);
+	TickFor(200);
+	TestEqual(TEXT("Durability waits for the extended recovery delay"), Blockable->Blockade->GetProgress(), RetainedProgress);
+	Melee->StartWorkAttack(Blockable); TickFor(20);
+	const float RefreshedProgress = Blockable->Blockade->GetProgress();
+	TickFor(200);
+	TestEqual(TEXT("A new hit resets the recovery delay"), Blockable->Blockade->GetProgress(), RefreshedProgress);
+	TickFor(60);
+	TestTrue(TEXT("After the delay durability repairs slowly"), Blockable->Blockade->GetProgress() < RefreshedProgress
+		&& Blockable->Blockade->GetProgress() > RefreshedProgress - .08f);
+	Collector->SetActorLocation(Blockable->GetActorLocation() + FVector(0, -1000, 0));
+	TestFalse(TEXT("Out-of-range strikes cannot damage the nest"), Blockable->Blockade->ApplyStrikeWork(Collector));
 	Collector->SetActorLocation(WorkPosition);
-	Interaction->ServerBeginInteractionHold_Implementation(Blockable); TickFor(25);
-	TestTrue(TEXT("Confirmed server strikes complete the marked entrance"), Blockable->IsEntranceBlocked());
-	TestTrue(TEXT("Completion requires multiple physical contacts"), Strike->GetConfirmedImpactCount() >= 2);
+	for (int32 I=0; I<5 && !Blockable->IsEntranceBlocked(); ++I) { Melee->StartWorkAttack(Blockable); TickFor(20); }
+	TestTrue(TEXT("Confirmed pickaxe strikes destroy the marked entrance"), Blockable->IsEntranceBlocked());
+	TestTrue(TEXT("Completion requires multiple physical contacts"), Strike->GetConfirmedImpactCount() >= 5);
 	// The rubble follows the confirmed final strike, whose timing comes from the equipped tool.
 	TickFor(FMath::CeilToInt(Blockable->Blockade->RubbleDelay / .05f) + 1);
 	TestTrue(TEXT("Blocking shows the configured plug mesh"), Blockable->EntranceBlocker->IsVisible());
@@ -470,7 +486,7 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	Planet->GetSurfaceFrameAt(Origin + FVector(0, -1800, 0), FVector::YAxisVector, AlarmFrame);
 	auto* AlarmHome = Scope.World->SpawnActor<AJTSPlanetEcologyHabitat>(AlarmFrame.Location, AlarmFrame.Transform.Rotator());
 	Configure(AlarmHome, 0); AlarmHome->Refuges.Add(AlarmHome);
-	AlarmHome->bCanBlockEntrance = true; AlarmHome->BlockHoldDuration = 1000;
+	AlarmHome->bCanBlockEntrance = true; AlarmHome->Blockade->DamagePerStrike = .01f;
 	AlarmHome->RefugeMesh->SetStaticMesh(Blockable->RefugeMesh->GetStaticMesh());
 	AlarmHome->RefugeMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	AlarmHome->RefugeMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
@@ -485,13 +501,13 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	Collector->SetActorLocationAndRotation(AlarmWorkPosition, AlarmFrame.Transform.GetRotation());
 	AttackTarget->SetActorLocation(AlarmFrame.Location + AlarmFrame.Forward*900 + AlarmFrame.Up*88);
 	TestTrue(TEXT("A real nest attack can pass the normal server work validation"), AlarmHome->Blockade->CanWork(Collector));
-	AlarmHome->Blockade->SetWorking(Collector, true); AlarmHome->Blockade->SetWorking(Collector, false); TickFor(160);
+	AlarmHome->Blockade->ApplyStrikeWork(Collector); TickFor(160);
 	TestTrue(TEXT("Validated nest work establishes an alarm against its worker"), AlarmDefense->IsReflecting());
 	Collector->SetActorLocation(AlarmFrame.Location - AlarmFrame.Forward*2500); TickFor(4);
 	TestFalse(TEXT("An uninvolved player inside the nest radius cannot retain a departed worker's alarm"), AlarmDefense->IsReflecting());
 	Collector->SetActorLocation(AlarmWorkPosition); TickFor(30);
 	TestFalse(TEXT("Returning to a real nest without attacking does not restart its alarm"), AlarmDefense->IsReflecting());
-	AlarmHome->Blockade->SetWorking(Collector, true); AlarmHome->Blockade->SetWorking(Collector, false); TickFor(100);
+	AlarmHome->Blockade->ApplyStrikeWork(Collector); TickFor(100);
 	TestTrue(TEXT("Attacking the nest again establishes a fresh alarm"), AlarmDefense->IsReflecting());
 	auto* SecondInventory = NewObject<UJTSInventoryComponent>(AttackTarget); AttackTarget->AddInstanceComponent(SecondInventory); SecondInventory->RegisterComponent();
 	auto* SecondMelee = NewObject<UJTSMeleeComponent>(AttackTarget); AttackTarget->AddInstanceComponent(SecondMelee); SecondMelee->RegisterComponent();
@@ -501,7 +517,7 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 		if (SecondInventory->GetItemAtSlot(Slot).ItemId == EJTSItemId::Pickaxe) SecondInventory->SelectQuickbarSlot(Slot);
 	AttackTarget->SetActorLocationAndRotation(AlarmWorkPosition, AlarmFrame.Transform.GetRotation());
 	TestTrue(TEXT("Another expedition member can provoke the same nest"), AlarmHome->Blockade->CanWork(AttackTarget));
-	AlarmHome->Blockade->SetWorking(AttackTarget, true); AlarmHome->Blockade->SetWorking(AttackTarget, false); TickFor(4);
+	AlarmHome->Blockade->ApplyStrikeWork(AttackTarget); TickFor(4);
 	Collector->SetActorLocation(AlarmFrame.Location - AlarmFrame.Forward*2500);
 	bHeldReflection = true;
 	for (int32 I = 0; I < 40; ++I) { TickFor(1); bHeldReflection &= AlarmDefense->IsReflecting(); }
@@ -509,7 +525,7 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	Collector->SetActorLocation(AlarmWorkPosition);
 	AttackTarget->SetActorLocation(AlarmFrame.Location - AlarmFrame.Forward*2500); TickFor(4);
 	TestFalse(TEXT("A former worker returning during another player's fight remains forgotten"), AlarmDefense->IsReflecting());
-	AlarmHome->Blockade->SetWorking(Collector, true); AlarmHome->Blockade->SetWorking(Collector, false); TickFor(100);
+	AlarmHome->Blockade->ApplyStrikeWork(Collector); TickFor(100);
 	TestTrue(TEXT("A fresh attack restores the alarm before the entrance is destroyed"), AlarmDefense->IsReflecting());
 	AlarmHome->CommitEntranceBlockade(); TickFor(4);
 	TestTrue(TEXT("Destroying the mouth stops new spawns without clearing an active defender's threat"), AlarmDefense->IsReflecting());

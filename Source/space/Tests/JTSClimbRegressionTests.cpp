@@ -71,18 +71,18 @@ namespace
 			GEngine->DestroyWorldContext(World);
 		}
 
-		void Advance(float Seconds)
+		void Advance(float Seconds, float DeltaTime = 0.05f)
 		{
-			for (float Elapsed = 0.0f; Elapsed < Seconds; Elapsed += 0.05f)
+			for (float Elapsed = 0.0f; Elapsed < Seconds; Elapsed += DeltaTime)
 			{
-				World->Tick(LEVELTICK_All, 0.05f);
+				World->Tick(LEVELTICK_All, DeltaTime);
 				if (UJTSWallClimbComponent* Climb = Character->FindComponentByClass<UJTSWallClimbComponent>())
 				{
-					static_cast<UActorComponent*>(Climb)->TickComponent(0.05f, LEVELTICK_All, nullptr);
+					static_cast<UActorComponent*>(Climb)->TickComponent(DeltaTime, LEVELTICK_All, nullptr);
 				}
 				if (UJTSStaminaComponent* Stamina = Character->GetStaminaComponent())
 				{
-					Stamina->TickComponent(0.05f, LEVELTICK_All, nullptr);
+					Stamina->TickComponent(DeltaTime, LEVELTICK_All, nullptr);
 				}
 			}
 		}
@@ -222,6 +222,12 @@ bool FJTSPlayableClimbLeapSpanRegression::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Playable character has the shared climb component"), Climb)) return false;
 	Climb->TryAutoAttach();
 	if (!TestTrue(TEXT("Player grabs the real wall collision"), Climb->IsClimbing())) return false;
+	const FVector StepStart = Fixture.Character->GetActorLocation();
+	Climb->SubmitClimbIntent(FVector::UpVector);
+	Fixture.Advance(0.30f);
+	TestTrue(TEXT("Normal climbing covers an 85 cm step within 0.3 seconds and keeps the grip"),
+		FMath::IsNearlyEqual(Fixture.Character->GetActorLocation().Z - StepStart.Z, 85.0f, 1.0f)
+			&& Climb->IsClimbing());
 	const FVector Directions[] = { FVector::UpVector, FVector::RightVector, -FVector::RightVector,
 		(FVector::UpVector + FVector::RightVector).GetSafeNormal() };
 	for (const FVector& Direction : Directions)
@@ -229,14 +235,14 @@ bool FJTSPlayableClimbLeapSpanRegression::RunTest(const FString& Parameters)
 		const FVector Start = Fixture.Character->GetActorLocation();
 		Climb->SubmitClimbLeap(Direction);
 		if (!TestTrue(TEXT("Directional leap starts from the current grip"), Climb->IsLeaping())) return false;
-		TestTrue(TEXT("Blueprint requests a 2.4 m grip along the intended wall direction"),
-			FMath::IsNearlyEqual(FVector::DotProduct(Climb->GetStepTarget() - Start, Direction), 240.0f, 1.0f));
-		Fixture.Advance(0.35f);
+		TestTrue(TEXT("Blueprint requests a 3.2 m grip along the intended wall direction"),
+			FMath::IsNearlyEqual(FVector::DotProduct(Climb->GetStepTarget() - Start, Direction), 320.0f, 1.0f));
+		Fixture.Advance(0.25f);
 		TestTrue(TEXT("Longer leap retains its travel phase before catching"), Climb->IsLeaping());
 		Fixture.Advance(0.30f);
-		TestFalse(TEXT("Leap completes within the 0.6-second action window"), Climb->IsLeaping());
-		TestTrue(TEXT("Player actually covers at least 2.3 m without losing the grip"),
-			FVector::DotProduct(Fixture.Character->GetActorLocation() - Start, Direction) > 230.0f && Climb->IsClimbing());
+		TestFalse(TEXT("Leap completes after the 0.5-second action window"), Climb->IsLeaping());
+		TestTrue(TEXT("Player actually covers at least 3.1 m without losing the grip"),
+			FVector::DotProduct(Fixture.Character->GetActorLocation() - Start, Direction) > 310.0f && Climb->IsClimbing());
 	}
 	return true;
 }
@@ -580,7 +586,8 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 		TEXT("/Game/Space/Blueprints/Player/BP_JTSPlayer_Casual_2.BP_JTSPlayer_Casual_2_C"));
 	if (!TestNotNull(TEXT("Playable Casual_2 Blueprint loads"), PlayerBlueprint)) return false;
 	FClimbTestWorld Fixture(PlayerBlueprint);
-	Fixture.Wall->SetActorScale3D(FVector(0.5f, 4.0f, 8.0f));
+	// Keep a continuous face above the full step and the player's longer wall leap.
+	Fixture.Wall->SetActorScale3D(FVector(0.5f, 4.0f, 20.0f));
 	Fixture.Character->SetActorLocation(FVector(0.0f, 0.0f, 260.0f));
 	USkeletalMeshComponent* Mesh = Fixture.Character->GetMesh();
 	UJTSWallClimbComponent* Climb = Fixture.Character->FindComponentByClass<UJTSWallClimbComponent>();
@@ -615,12 +622,12 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 				FVector::DotProduct(Hip - Ankle, Up) > 63.0f);
 		}
 	};
-	auto AdvancePose = [&](int32 Frames)
+	auto AdvancePose = [&](int32 Frames, float FrameSeconds = 0.05f)
 	{
 		for (int32 Frame = 0; Frame < Frames; ++Frame)
 		{
-			Fixture.Advance(0.05f);
-			Mesh->TickAnimation(0.05f, false);
+			Fixture.Advance(FrameSeconds, FrameSeconds);
+			Mesh->TickAnimation(FrameSeconds, false);
 			Mesh->RefreshBoneTransforms();
 		}
 	};
@@ -639,6 +646,10 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 			FVector::Distance(Mesh->GetBoneLocation(Foot), Mesh->GetBoneLocation(Ankle)) < 27.0f);
 	}
 	Climb->SubmitClimbIntent(FVector::UpVector);
+	const FFloatProperty* StepSecondsProperty = FindFProperty<FFloatProperty>(Climb->GetClass(), TEXT("StepSeconds"));
+	if (!TestNotNull(TEXT("Climb stride duration is configurable"), StepSecondsProperty)) return false;
+	// Compare the same load/pull/catch phases when Blueprint movement timing changes.
+	const float StepFrameSeconds = StepSecondsProperty->GetPropertyValue_InContainer(Climb) / 8.0f;
 	const FName LeadWrist = Climb->IsLeadHandLeft() ? TEXT("Wrist_L") : TEXT("Wrist_R");
 	const FName SupportWrist = Climb->IsLeadHandLeft() ? TEXT("Wrist_R") : TEXT("Wrist_L");
 	const FName SupportAnkle = Climb->IsLeadHandLeft() ? TEXT("LowerLeg_L_end") : TEXT("LowerLeg_R_end");
@@ -650,7 +661,7 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 	const FVector CapsuleStart = Fixture.Character->GetActorLocation();
 	AddInfo(FString::Printf(TEXT("Rest contact: actor X %.1f, lead wrist X %.1f, support wrist X %.1f, left knee X %.1f, ankle X %.1f"),
 		CapsuleStart.X, LeadStart.X, SupportStart.X, LeftKneeStart.X, LeftAnkleStart.X));
-	AdvancePose(2);
+	AdvancePose(2, StepFrameSeconds);
 	const float LeadTravel = FVector::Distance(LeadStart, Mesh->GetBoneLocation(LeadWrist));
 	const float SupportSlip = FVector::Distance(SupportStart, Mesh->GetBoneLocation(SupportWrist));
 	const float AnkleSlip = FVector::Distance(AnkleStart, Mesh->GetBoneLocation(SupportAnkle));
@@ -665,7 +676,7 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 		AnkleSlip < 9.0f);
 	TestTrue(FString::Printf(TEXT("Capsule waits for a foothold before traveling: %.1f cm"), CapsuleTravel),
 		CapsuleTravel < 15.0f);
-	AdvancePose(3);
+	AdvancePose(3, StepFrameSeconds);
 	DescribeLegs(TEXT("Pull"));
 	const float WallFaceX = Fixture.Wall->GetActorLocation().X
 		- Fixture.Wall->GetStaticMeshComponent()->Bounds.BoxExtent.X;
@@ -678,7 +689,7 @@ bool FJTSClimbContactWeightTransfer::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Reaching hand stays close to the rock through the pull"), LeadWallGap < 25.0f);
 	TestTrue(TEXT("Following hand stays close to the rock through the pull"), SupportWallGap < 25.0f);
 	TestTrue(TEXT("Following ankle clears the wall without peeling far away"), AnkleWallGap < 18.0f);
-	AdvancePose(3);
+	AdvancePose(3, StepFrameSeconds);
 	TestTrue(TEXT("Body completes the pull after the contact sequence"),
 		Fixture.Character->GetActorLocation().Z > CapsuleStart.Z + 55.0f);
 	Climb->SubmitClimbLeap(FVector::UpVector);

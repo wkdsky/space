@@ -335,18 +335,50 @@ def build(kind):
                   stride=.055,lift=.024,depth=.33,role="colony_builder_and_carrier")
     elif kind=="SpireSoldier":
         base(b,.125)
-        b.pebble("power_thorax",(-.025,0,.125),(.28,.27,.17),"body",1,power=2.5,n=12)
-        b.pebble("short_stable_rear",(-.20,0,.105),(.19,.20,.13),"abdomen",0,power=3,n=10)
-        outline=[(-.026,-.092),(.17,-.169),(.304,-.12),(.33,-.072),
-                 (.33,.072),(.304,.12),(.17,.169),(-.026,.092)]
-        b.loft("massive_wedge_headshield",outline,[(.09,.89,0),(.125,1,0),(.255,.94,-.012),
-                                                   (.287,.69,-.019)],"head",0,crown=True)
-        # A single inset impact plane reinforces the shield silhouette.
-        b.pebble("blunt_impact_face",(.307,0,.187),(.044,.202,.112),"head",1,power=3,n=8)
-        mouths(b,.235,.053,.105,.053,.068)
-        ls=legs(b,(.095,-.06,-.205),.093,.096,.122,.025)
-        spec=dict(legs=ls,body_z=.125,length=.65,height=.30,walk_speed=.14,run_speed=.62,
-                  stride=.071,lift=.023,depth=.41,role="colony_shield_defender")
+        # A low armoured thorax, narrow waist and compact abdomen read as a fighter at gameplay scale.
+        b.pebble("sealed_muscular_thorax",(-.018,0,.14),(.27,.265,.155),"body",2,power=2.6,n=10)
+        b.pebble("overlapping_scapular_shield",(-.035,0,.193),(.255,.30,.125),"body",0,power=3,n=10)
+        b.pebble("dorsal_keel",(-.048,0,.251),(.19,.07,.035),"body",3,power=3,n=8)
+        b.pebble("protected_waist",(-.159,0,.127),(.075,.11,.085),"abdomen",2,n=10)
+        b.pebble("compact_armoured_gaster",(-.225,0,.126),(.17,.185,.14),"abdomen",0,power=2.5,n=10)
+        b.pebble("gaster_overlapping_band",(-.19,0,.158),(.05,.19,.096),"abdomen",1,n=10)
+        outline=[(-.015,-.085),(.12,-.137),(.215,-.115),(.257,-.062),
+                 (.257,.062),(.215,.115),(.12,.137),(-.015,.085)]
+        b.loft("sloped_head_carapace",outline,[(.095,.83,0),(.15,1,0),(.23,.88,-.016),
+                                               (.255,.58,-.03)],"head",0,crown=True)
+        b.pebble("recessed_mouth_seal",(.245,0,.116),(.06,.14,.073),"head",2,power=3,n=8)
+        for side,sign in (("L",1),("R",-1)):
+            bone="mouth_"+side
+            b.bone(bone,(.218,sign*.079,.115),(.39,sign*.032,.115),"head")
+            # Clearly exposed hooked mandibles sit in FRONT of the shield, with a visible biting gap.
+            jaw=[(.205,.071),(.242,.115),(.31,.109),(.391,.055),(.407,.018),
+                 (.367,.028),(.310,.062),(.265,.064),(.234,.043)]
+            jaw=[(x,sign*y) for x,y in jaw]
+            if sign>0:jaw.reverse()
+            b.loft("hooked_battle_mandible_"+side,jaw,[(.082,.93,0),(.113,1,0),(.143,.95,0)],bone,1)
+            b.link("pale_cutting_edge_"+side,(.307,sign*.065,.127),(.395,sign*.025,.116),.014,.007,bone,3,5)
+            for j,x in enumerate((.275,.313,.347)):
+                y=.057-(x-.275)*.25
+                tooth=[(x-.014,sign*y),(x+.014,sign*y),(x+.008,sign*(y-.024))]
+                if sign<0:tooth.reverse()
+                b.loft("interlocking_tooth_"+side+str(j),tooth,[(.099,1,0),(.124,.93,0)],bone,3)
+            b.pebble("protected_sensory_slit_"+side,(.187,sign*.113,.192),(.06,.018,.024),"head",2,power=3,n=8)
+            b.link("swept_cheek_ridge_"+side,(.052,sign*.115,.204),(.204,sign*.092,.219),.019,.011,"head",3,5)
+        ls=legs(b,(.095,-.035,-.19),.105,.116,.145,.023)
+        # Forelegs carry broad shields and hooked contact claws, unlike the worker's flat digging spades.
+        for leg in ls:
+            sign=1 if leg['label'][0]=='L' else -1
+            front=leg['label'].endswith('1')
+            h,k,f=map(Vector,(leg['h'],leg['k'],leg['f']))
+            if front:
+                b.pebble("forearm_buckler_"+leg['label'],tuple(h.lerp(k,.58)+Vector((.012,0,.020))),
+                         (.13,.09,.065),leg['upper'],0,power=3,n=8)
+                b.link("foreleg_hook_"+leg['label'],tuple(f),tuple(f+Vector((.073,-sign*.012,.002))),.017,.004,leg['tip'],3,5)
+            else:
+                b.pebble("haunch_plate_"+leg['label'],tuple(h.lerp(k,.35)),(.07,.067,.045),leg['upper'],0,n=8)
+        spec=dict(legs=ls,body_z=.125,length=.72,height=.28,walk_speed=.14,run_speed=.62,
+                  stride=.071,lift=.026,depth=.41,role="armoured_colony_biter",
+                  mouth_design="Exposed hooked mandibles with inner teeth; closed pressure seal behind mouth")
     else:
         raise ValueError(kind)
     return b.finish(spec)

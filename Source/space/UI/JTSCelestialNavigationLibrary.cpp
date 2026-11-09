@@ -23,8 +23,8 @@ TArray<FJTSCelestialNavigationBody> UJTSCelestialNavigationLibrary::GatherBodies
 		Body.Planet = Planet;
 		Body.VisualActor = Planet->GetGameplaySurfaceActor();
 		Body.DisplayName = Planet->GetNavigationDisplayName();
-		Body.bShowOnStarChart = Planet->ShouldShowOnStarChart();
-		Body.bShowScreenMarker = Planet->ShouldShowScreenMarker();
+		Body.bShowOnStarChart = Planet->ShouldShowOnStarChart() && Planet->IsNavigationDiscovered();
+		Body.bShowScreenMarker = Planet->ShouldShowScreenMarker() && Planet->IsNavigationDiscovered();
 		Body.PaletteIndex = Planet->GetNavigationPaletteIndex();
 		Body.Center = Planet->GetPlanetCenter();
 		Body.ShipDistanceCentimeters = FVector::Distance(Ship->GetActorLocation(), Body.Center);

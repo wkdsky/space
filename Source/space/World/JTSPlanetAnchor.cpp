@@ -1,6 +1,14 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/Core/JTSGameState.h"
+
+bool AJTSPlanetAnchor::IsNavigationDiscovered() const
+{
+	if (NavigationRequiredImportantItem.IsNone()) return true;
+	const auto* State = GetWorld() ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
+	return State && State->HasImportantItem(NavigationRequiredImportantItem);
+}
 
 #include "CollisionQueryParams.h"
 #include "Components/PrimitiveComponent.h"

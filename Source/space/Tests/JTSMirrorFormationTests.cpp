@@ -5,11 +5,18 @@
 #include "Engine/World.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/LocalPlayer.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraActor.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Math/RotationMatrix.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/UnrealType.h"
 #include "space/Characters/JTSPlanetSurfaceCreature.h"
+#include "space/Player/JTSCharacter.h"
+#include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSMirrorDefenseComponent.h"
 #include "space/Systems/JTSMirrorGlareSubsystem.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -59,6 +66,46 @@ bool FJTSMirrorFormationTest::RunTest(const FString&)
 	TestTrue(TEXT("An invisible mouth interaction proxy cannot extinguish glare"),Mirrors[0]->HasClearGlarePath(Eye,nullptr));
 	Box->ComponentTags.Reset();
 	TestFalse(TEXT("A physical occluder at the same location still blocks glare"),Mirrors[0]->HasClearGlarePath(Eye,nullptr));
+	Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// A local viewer need not look at the source. The server's active threat area
+	// defines who receives glare, including viewers beside the selected attacker.
+	auto* PC=World->SpawnActor<APlayerController>();
+	PC->SetPlayer(NewObject<ULocalPlayer>(GEngine));
+	auto* Player=World->SpawnActor<AJTSCharacter>();
+	if (!Player->HasActorBegunPlay()) Player->DispatchBeginPlay();
+	Player->GetCharacterMovement()->DisableMovement(); Player->SetActorTickEnabled(false); PC->Possess(Player);
+	Player->SetActorLocation(Origin+Forward*350+Up*100);
+	auto* Camera=World->SpawnActor<ACameraActor>();
+	PC->SetViewTarget(Camera);
+	auto UpdateView=[&](float Angle)
+	{
+		Camera->SetActorLocationAndRotation(Player->GetActorLocation()+Up*100,
+			FRotationMatrix::MakeFromXZ(Forward.RotateAngleAxis(Angle,Up),Up).Rotator());
+		PC->PlayerCameraManager->UpdateCamera(.04f);
+	};
+	Mirrors[0]->AimAt(Player);
+	const uint64 OriginalFrame=GFrameCounter;
+	for(int32 I=0;I<10;++I) { ++GFrameCounter; World->Tick(LEVELTICK_All,.04f); }
+	for(float Angle : {0.f,90.f,180.f,270.f})
+	{
+		UpdateView(Angle);
+		TestTrue(TEXT("Active glare remains visible at every camera heading"),Mirrors[0]->CanGlareAt(PC));
+	}
+	Player->SetActorLocation(Origin+Forward*2400+Up*100); UpdateView(0);
+	TestFalse(TEXT("Leaving individual aggro range stops glare"),Mirrors[0]->CanGlareAt(PC));
+	// Alarm coverage is centred on the mouth, not the defender's current station.
+	const FVector AlarmOrigin=Origin+Forward*700;
+	Player->SetActorLocation(AlarmOrigin+Forward*1600+Up*100);
+	Bugs[0]->DefendEntrance(Player,AlarmOrigin,1800,0,1); Mirrors[0]->AimAt(Player);
+	UpdateView(180);
+	TestTrue(TEXT("The larger nest alarm still covers a viewer beyond the creature leash"),Mirrors[0]->CanGlareAt(PC));
+	Player->SetActorLocation(AlarmOrigin+Forward*1900+Up*100); UpdateView(180);
+	TestFalse(TEXT("Leaving the mouth's alarm radius stops glare"),Mirrors[0]->CanGlareAt(PC));
+	Player->SetActorLocation(Origin+Forward*350+Up*100); UpdateView(0);
+	Mirrors[0]->StopReflection();
+	TestFalse(TEXT("A retracted mirror cannot apply lingering new glare"),Mirrors[0]->CanGlareAt(PC));
+	GFrameCounter=OriginalFrame;
+	PC->Player=nullptr;
 	World->DestroyWorld(false);GEngine->DestroyWorldContext(World);
 	return true;
 }

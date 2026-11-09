@@ -13,6 +13,8 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "Math/RotationMatrix.h"
 #include "space/Components/JTSSpacecraftGroundProbeComponent.h"
@@ -581,8 +583,20 @@ bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController
 		return false;
 	}
 
+	// Death has no inventory penalty. Transfer the full item payload before replacing the pawn.
+	TArray<FJTSItemInstance> CarriedItems;
+	int32 SelectedSlot = 0;
+	bool bHadInventory = false;
+	bool bWaistLampEquipped = false;
 	if (APawn* const ExistingPawn = PlayerController->GetPawn())
 	{
+		if (const auto* Inventory = ExistingPawn->FindComponentByClass<UJTSInventoryComponent>())
+		{
+			CarriedItems = Inventory->GetItemSlots();
+			SelectedSlot = Inventory->GetSelectedQuickbarSlot();
+			bWaistLampEquipped = Inventory->IsWaistLampEquipped();
+			bHadInventory = true;
+		}
 		PlayerController->UnPossess();
 		ExistingPawn->Destroy();
 	}
@@ -598,6 +612,15 @@ bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController
 	Character->SetGameplayPlanet(Planet);
 	Character->InitializePlanetFrame();
 	Character->BeginPlanetFalling();
+	if (bHadInventory && Character->GetInventoryComponent())
+	{
+		Character->GetInventoryComponent()->RestoreItems(CarriedItems, SelectedSlot, bWaistLampEquipped);
+	}
+	// Respawn starts a fresh life, including health capacity granted by the possessed PlayerState.
+	if (UJTSHealthComponent* const Health = Character->GetHealthComponent())
+	{
+		Health->Heal(Health->GetMaxHealth());
+	}
 	if (AJTSPlayerState* const PlayerState = PlayerController->GetPlayerState<AJTSPlayerState>())
 	{
 		PlayerState->SetBoarded(false);

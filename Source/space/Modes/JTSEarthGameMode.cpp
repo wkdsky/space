@@ -407,7 +407,7 @@ void AJTSEarthGameMode::ResolveLaunchOutcome()
 				LaunchFuelCost,
 				Spacecraft->GetFuelCount());
 
-			Expedition->SetSpacecraftSnapshot(Spacecraft->GetClass(), Spacecraft->GetStorage());
+			Expedition->CaptureSpacecraftState(Spacecraft);
 			Expedition->CaptureWorldState(JTSGameState, Spacecraft);
 			Expedition->RequestSave();
 			UE_LOG(

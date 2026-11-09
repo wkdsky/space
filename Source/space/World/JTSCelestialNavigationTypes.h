@@ -4,6 +4,7 @@
 #include "JTSCelestialNavigationTypes.generated.h"
 
 class AJTSPlanetAnchor;
+class UMaterialInterface;
 
 /** Map presentation tuning. Concrete system membership uses CompressedSpace.Bodies.PresentationGroup. */
 USTRUCT(BlueprintType)
@@ -19,6 +20,8 @@ struct SPACE_API FJTSNavigationMapSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "500", Units = "cm")) float GroundMapHalfWidth = 6000.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "128", ClampMax = "1024")) int32 GroundMapResolution = 512;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1000", Units = "cm")) float GroundCaptureHeight = 20000.0f;
+	/** UI material combining real albedo and surface depth into shaded elevation bands. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UMaterialInterface> GroundReliefMaterial;
 };
 
 /** Level-authored navigation metadata for an existing visual-only local-sky member. */

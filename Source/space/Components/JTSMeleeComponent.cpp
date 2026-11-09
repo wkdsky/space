@@ -1,4 +1,5 @@
 #include "space/Components/JTSMeleeComponent.h"
+#include "space/Components/JTSNestBlockadeComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSCombatFacingComponent.h"
@@ -1181,6 +1182,11 @@ bool UJTSMeleeComponent::ApplyAttackToTarget(AActor* Target, APawn* AttackingPaw
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || !IsValidDamageTarget(Target, AttackingPawn))
 	{
 		return false;
+	}
+
+	if (auto* Nest = Target->FindComponentByClass<UJTSNestBlockadeComponent>(); Nest && !Target->CanBeDamaged())
+	{
+		return AttackType == EJTSMeleeAttackType::Tool && Nest->ApplyStrikeWork(AttackingPawn);
 	}
 
 	if (Target->FindComponentByClass<UJTSHealthComponent>() != nullptr)

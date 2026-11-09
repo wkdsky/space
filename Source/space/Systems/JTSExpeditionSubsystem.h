@@ -72,11 +72,14 @@ public:
 	void RestoreSpacecraft(AJTSSpacecraftActor* Spacecraft) const;
 	void RestorePlayerState(AJTSPlayerState* PlayerState, AJTSCharacter* Character) const;
 	void SetSpacecraftSnapshot(TSubclassOf<AJTSSpacecraftActor> SpacecraftClass, const TMap<EJTSResourceType, int32>& Storage);
+	void CaptureSpacecraftState(const AJTSSpacecraftActor* Spacecraft);
 	void SetCurrentMap(const FString& MapPackageName);
 	void SetCurrentPlanetId(const FString& PlanetId);
 	void SetCurrentCheckpoint(const FString& Checkpoint);
 	bool IsEntranceBlocked(FName EntranceId) const;
 	void MarkEntranceBlocked(FName EntranceId);
+	bool RecordImportantItem(FName ItemId);
+	void MarkEncounterDefeated(FName EncounterId);
 	void RequestSave();
 	bool SaveNow();
 	bool LoadMostRecentSnapshot();

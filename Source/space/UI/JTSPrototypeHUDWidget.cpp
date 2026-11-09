@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/Items/JTSMaterialProcessingRecipes.h"
 #include "space/UI/JTSSpaceDebugWidget.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -26,6 +27,7 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Brushes/SlateColorBrush.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSStaminaComponent.h"
@@ -51,6 +53,7 @@
 #include "space/Interaction/JTSMeleeTarget.h"
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
+#include "space/Items/JTSExpeditionKeyPickup.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Player/JTSCharacter.h"
@@ -66,6 +69,7 @@
 #include "space/World/JTSMoonResourceActor.h"
 #include "space/World/JTSPlanetSurfaceAttachment.h"
 #include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/Components/JTSNestBlockadeComponent.h"
 #include "space/World/JTSMoonSurfaceController.h"
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -473,6 +477,9 @@ void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	// The persistent SpaceWorld can become playable after HUD construction, or the
 	// local pawn can change on boarding/respawn without a gameplay phase change.
 	AJTSCharacter* const CurrentCharacter = FindPlayerCharacter();
+	UJTSHealthComponent* const CurrentHealth = IsValid(CurrentCharacter)
+		? CurrentCharacter->GetHealthComponent() : nullptr;
+	if (BoundPlayerHealthComponent.Get() != CurrentHealth) BindPlayerHealth();
 	UJTSStaminaComponent* const CurrentStamina = IsValid(CurrentCharacter)
 		? CurrentCharacter->GetStaminaComponent() : nullptr;
 	if (BoundPlayerStaminaComponent.Get() != CurrentStamina) BindPlayerStamina();
@@ -971,7 +978,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		if (auto* GhostSlot = AddCanvasChild(GameplayLayer, InventoryDragPreview, FAnchors(0, 0), FVector2D::ZeroVector, FVector2D(140, 48))) GhostSlot->SetZOrder(100);
 		InventoryDragPreview->SetVisibility(ESlateVisibility::Collapsed);
 		SpaceDebugWidget = CreateWidget<UJTSSpaceDebugWidget>(GetOwningPlayer());
-		if (auto* DebugSlot = AddCanvasChild(GameplayLayer, SpaceDebugWidget, FAnchors(1, 1), FVector2D(-24, -190), FVector2D(272, 172), FVector2D(1, 1)))
+		if (auto* DebugSlot = AddCanvasChild(GameplayLayer, SpaceDebugWidget, FAnchors(1, 1), FVector2D(-24, -190), FVector2D(272, 244), FVector2D(1, 1)))
 			DebugSlot->SetZOrder(50);
 		EquipmentHintText = MakeTextBlock(WidgetTree, TEXT("EquipmentHintText"), TEXT(""), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -210.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
@@ -1087,7 +1094,7 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 					EJTSResourceType::Food,
 					EJTSResourceType::Rock,
 					EJTSResourceType::Ore,
-					EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon};
+					EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse};
 				for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
 				{
 					UHorizontalBox* const ResourceRow = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -1137,11 +1144,15 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 			AddVerticalChild(RightSidebarBox, ShipResourcesPanel, FMargin(0.0f, 0.0f));
 		}
 
-		EntranceProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("EntranceProgressWidget"));
-		EntranceProgressWidget->SetProgressColor(FLinearColor(1.0f, 0.74f, 0.30f));
-		EntranceProgressWidget->SetBackgroundColor(FLinearColor(0.12f, 0.15f, 0.18f, 0.8f));
+		EntranceProgressWidget = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("EntranceProgressWidget"));
+		EntranceProgressWidget->SetFillColorAndOpacity(FLinearColor(1.0f, 0.80f, 0.05f));
+		FProgressBarStyle EntranceStyle;
+		EntranceStyle.BackgroundImage = FSlateColorBrush(FLinearColor(0.025f, 0.03f, 0.04f, 0.92f));
+		EntranceStyle.FillImage = FSlateColorBrush(FLinearColor::White);
+		EntranceProgressWidget->SetWidgetStyle(EntranceStyle);
+		EntranceProgressWidget->SetBarFillType(EProgressBarFillType::LeftToRight);
 		EntranceProgressSlot = AddCanvasChild(GameplayLayer, EntranceProgressWidget, FAnchors(0,0), FVector2D::ZeroVector,
-			FVector2D(46,46), FVector2D(0.5f,0.5f));
+			FVector2D(180,12), FVector2D(0.5f,0.5f));
 		EntranceProgressWidget->SetVisibility(ESlateVisibility::Collapsed);
 		BoardingProgressWidget = WidgetTree->ConstructWidget<UJTSCircularProgressWidget>(UJTSCircularProgressWidget::StaticClass(), TEXT("BoardingProgressWidget"));
 		if (BoardingProgressWidget != nullptr)
@@ -1400,15 +1411,15 @@ void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
 		EJTSResourceType::Food,
 		EJTSResourceType::Rock,
 		EJTSResourceType::Ore,
-		EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon};
+		EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse};
 	const AJTSSpacecraftActor* const Spacecraft = BoundSpacecraftResources.IsValid()
 		? BoundSpacecraftResources.Get()
 		: FindSpacecraft();
 
 	for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
 	{
-		const int32 ResourceAmount = IsValid(Spacecraft)
-			? Spacecraft->GetResourceAmount(DisplayedResourceTypes[ResourceIndex])
+		const int64 ResourceAmount = IsValid(Spacecraft)
+			? Spacecraft->GetResourceHalfUnits(DisplayedResourceTypes[ResourceIndex])
 			: 0;
 		if (ShipResourceRows.IsValidIndex(ResourceIndex) && ShipResourceRows[ResourceIndex] != nullptr)
 		{
@@ -1420,7 +1431,7 @@ void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
 		}
 		if (ShipResourceAmountTexts.IsValidIndex(ResourceIndex) && ShipResourceAmountTexts[ResourceIndex] != nullptr)
 		{
-			ShipResourceAmountTexts[ResourceIndex]->SetText(FText::AsNumber(ResourceAmount));
+			ShipResourceAmountTexts[ResourceIndex]->SetText(FText::FromString(JTSMaterialProcessing::FormatHalfUnits(ResourceAmount)));
 		}
 	}
 }
@@ -2244,6 +2255,7 @@ void UJTSPrototypeHUDWidget::RefreshEquipmentHint()
 void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 {
 	FText PromptText;
+	const AJTSPlanetEcologyHabitat* WorkHabitat = nullptr;
 	FText TargetName;
 	FVector PromptAnchor = FVector::ZeroVector;
 	bool bHasPromptAnchor = false;
@@ -2280,7 +2292,9 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 						PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
 						TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
 						PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
-						bUseCompactPrompt = MeleeTarget->IsA<AJTSMoonResourceActor>();
+						WorkHabitat = Cast<AJTSPlanetEcologyHabitat>(MeleeTarget);
+						if (WorkHabitat && !WorkHabitat->bCanBlockEntrance) WorkHabitat = nullptr;
+						bUseCompactPrompt = WorkHabitat || MeleeTarget->IsA<AJTSMoonResourceActor>();
 						bHasPromptAnchor = !TargetName.IsEmpty() && (bUseCompactPrompt || !PromptText.IsEmpty());
 					}
 				}
@@ -2299,6 +2313,12 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 								const EJTSItemId ItemId = Pickup->GetItemInstance().ItemId;
 								bUseCompactPrompt = ItemId == EJTSItemId::Rock || ItemId == EJTSItemId::Ore;
 								PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
+								bHasPromptAnchor = true;
+							}
+							else if (const AJTSExpeditionKeyPickup* const KeyPickup = Cast<AJTSExpeditionKeyPickup>(Target))
+							{
+								TargetName = KeyPickup->DisplayName;
+								PromptAnchor = KeyPickup->GetInteractionAnchorWorldLocation();
 								bHasPromptAnchor = true;
 							}
 							else if (const AJTSResourcePickupActor* const ResourcePickup = Cast<AJTSResourcePickupActor>(Target))
@@ -2357,22 +2377,19 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	}
 
 	const AJTSCharacter* WorkCharacter = Cast<AJTSCharacter>(GetOwningPlayerPawn());
-	const auto* WorkInteraction = WorkCharacter ? WorkCharacter->FindComponentByClass<UInteractionComponent>() : nullptr;
-	const auto* WorkHabitat = WorkInteraction ? Cast<AJTSPlanetEcologyHabitat>(WorkInteraction->GetCurrentInteractable()) : nullptr;
-	const bool bWorkEnabled = WorkHabitat && IInteractable::Execute_CanExecuteInteraction(const_cast<AJTSPlanetEcologyHabitat*>(WorkHabitat), const_cast<AJTSCharacter*>(WorkCharacter));
+	const bool bWorkEnabled = WorkHabitat && WorkHabitat->Blockade->HasRequiredTool(const_cast<AJTSCharacter*>(WorkCharacter));
 	FVector2D PromptScreenPosition = FVector2D::ZeroVector;
 	const bool bProjected = bHasPromptAnchor && ProjectWorldToViewportWidget(PromptAnchor, PromptScreenPosition);
 	const bool bShowPrompt = !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
 	if (EntranceProgressWidget)
 	{
-		const float Progress = WorkHabitat ? WorkInteraction->GetInteractionHoldProgress() : 0;
-		EntranceProgressWidget->SetProgress(Progress);
-		EntranceProgressWidget->SetRenderTransformAngle(0);
-		EntranceProgressWidget->SetVisibility(bShowPrompt && WorkHabitat && Progress > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		const float Durability = WorkHabitat ? WorkHabitat->Blockade->GetDurabilityFraction() : 0;
+		EntranceProgressWidget->SetPercent(Durability);
+		EntranceProgressWidget->SetVisibility(bShowPrompt && WorkHabitat ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		if (EntranceProgressSlot)
 		{
 			EntranceProgressSlot->SetAnchors(bUseCenteredPrompt ? FAnchors(0.5f,0.5f) : FAnchors(0,0));
-			EntranceProgressSlot->SetPosition(bUseCenteredPrompt ? FVector2D(0,32) : PromptScreenPosition + FVector2D(0,-54));
+			EntranceProgressSlot->SetPosition(bUseCenteredPrompt ? FVector2D(0,32) : PromptScreenPosition + FVector2D(0,-66));
 		}
 	}
 	if (InteractionPromptText != nullptr)
@@ -2963,7 +2980,7 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 		return TEXT("无机碳");
 
 	case EJTSResourceType::MoonAntCorpse:
-		return TEXT("镜虫尸体");
+		return TEXT("生物尸体");
 
 	default:
 		return TEXT("未知资源");

@@ -37,9 +37,16 @@ public:
 	void SetFeedingTarget(AActor* Target);
 	bool BelongsToRefuge(const AJTSPlanetEcologyHabitat* RefugeOwner) const;
 	bool IsAlive() const;
+	/** Active mirror defence uses the creature leash or the larger mouth-centred alarm. */
+	void GetMirrorThreatArea(FVector& Origin, float& Radius) const;
 	UFUNCTION(BlueprintCallable, Category="Creature|Defense") void BeginEntranceEmergence(const FTransform& MouthPose, const FVector& ExitPoint);
 	UFUNCTION(BlueprintCallable, Category="Creature|Defense") void DefendEntrance(APawn* Target, const FVector& Origin, float Leash, int32 Slot = 0, int32 CohortSize = 1);
 	UFUNCTION(BlueprintCallable, Category="Creature|Defense") void ReturnFromEntranceDefense(bool bEntranceDestroyed);
+	void ShelterInColony();
+	void LeaveColony(const FTransform& MouthPose, const FVector& ExitPoint);
+	void RecallToColony(const FVector& Entrance);
+	bool IsShelteringInColony() const { return bColonySheltered; }
+	bool IsInsideColony() const { return bColonySheltered && State == EJTSForagerState::Hidden; }
 
 	virtual bool CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const override;
 	virtual void ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTSMeleeAttackType AttackType) override;
@@ -64,6 +71,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSPlanetSurfaceSteeringComponent> Steering;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSMirrorDefenseComponent> MirrorDefense;
 	UPROPERTY(EditDefaultsOnly, Category="Creature") FText DisplayName;
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Appearance", meta=(ClampMin="0.1")) float BodyScale = 1;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Motion", meta=(ClampMin="1")) float WalkSpeed = 65;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Motion", meta=(ClampMin="1")) float FleeSpeed = 210;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Behavior", meta=(ClampMin="0")) float RoamRadius = 1400;
@@ -83,6 +91,7 @@ protected:
 	UPROPERTY(ReplicatedUsing=OnRep_State, VisibleInstanceOnly, BlueprintReadOnly, Category="Creature") EJTSForagerState State = EJTSForagerState::Idle;
 private:
 	bool UpdateEntranceDefense(double Now, float Dt);
+	void UpdateMeleePursuit(APawn* Target, double Now, float Dt, int32 Slot = 0, int32 CohortSize = 1);
 	bool UpdateMirrorPosture(double Now, APawn* Target);
 	APawn* FindMirrorAggressor();
 	void UpdateBehavior();
@@ -108,6 +117,8 @@ private:
 	float MirrorGuardBlockedTime = 0;
 	float EntranceDefenseLeash = 1800;
 	bool bEntranceDefense = false;
+	bool bColonyResident = false;
+	bool bColonySheltered = false;
 	bool bReturningFromDefense = false;
 	bool bMirrorRetaliation = false;
 	double DefenseReturnAfter = 0;

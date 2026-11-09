@@ -206,12 +206,11 @@ namespace
 	}
 }
 
-void SJTSCruiseNavigation::SetSurfaceTexture(UTextureRenderTarget2D* Texture)
+void SJTSCruiseNavigation::SetSurfaceTexture(UObject* Resource)
 {
-	SurfaceBrush.SetResourceObject(Texture);
+	SurfaceBrush.SetResourceObject(Resource);
 	SurfaceBrush.DrawAs = ESlateBrushDrawType::Image;
-	// Looking down with camera Y=east makes camera Z=south. Match the north-up markers.
-	SurfaceBrush.Mirroring = ESlateBrushMirrorType::Vertical;
+	SurfaceBrush.Mirroring = ESlateBrushMirrorType::NoMirror;
 	SurfaceBrush.ImageSize = FVector2D(512, 512);
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
@@ -251,7 +250,7 @@ int32 SJTSCruiseNavigation::OnPaint(const FPaintArgs& Args, const FGeometry& Geo
 	const auto TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 22);
 	const auto SmallFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 18);
 	const FString StageName = Frame.bGroundMap ? TEXT("地表定位") : Zoom < 0.5f ? TEXT("近地导航") : Zoom < 1.5f ? TEXT("星域导航") : TEXT("星际导航");
-	const FString Context = Frame.bGroundMap ? TEXT("ORTHO / NORTH UP") : Zoom < 0.5f ? Frame.PlanetName : Zoom < 1.5f ? Frame.SystemName : TEXT("EXPEDITION");
+	const FString Context = Frame.bGroundMap ? TEXT("视角朝上 / 地形") : Zoom < 0.5f ? Frame.PlanetName : Zoom < 1.5f ? Frame.SystemName : TEXT("EXPEDITION");
 	DrawText(Elements, Layer + 2, Geometry, TitleFont, StageName, FVector2D(24, 16), Ink * Tint, ETextJustify::Left);
 	DrawText(Elements, Layer + 2, Geometry, SmallFont, Context, FVector2D(Size.X - 24, 20), InkDim * Tint, ETextJustify::Right);
 	for (int32 I = 0; I < 3; ++I)
@@ -459,7 +458,10 @@ void SJTSCruiseNavigation::PaintGround(FSlateWindowElementList& Elements, int32 
 		StrokeCircle(Elements, Layer + 6, Geometry, Player, 13, Opacity(Ink * Tint, 0.65f), 1.6f);
 		Arrow(Elements, Layer + 6, Geometry, Player + Data.PlayerHeading * 24, Data.PlayerHeading, 7, Ink * Tint);
 	}
-	DrawText(Elements, Layer + 7, Geometry, Font, TEXT("N ↑"), Origin + FVector2D(10, 9), Ink * Tint, ETextJustify::Left);
+	const FVector2D Compass = Origin + FVector2D(28, 36);
+	Disc(Elements, Layer + 7, Geometry, Compass, 24, Opacity(PanelFill * Tint, .9f));
+	Arrow(Elements, Layer + 8, Geometry, Compass, Data.NorthHeading, 12, Ink * Tint);
+	DrawText(Elements, Layer + 8, Geometry, Font, TEXT("N"), Compass + FVector2D(0, 24), Ink * Tint, ETextJustify::Center);
 	const FVector2D ScaleStart = Origin + FVector2D(12, Reach * 2 - 26);
 	StrokeLine(Elements, Layer + 7, Geometry, ScaleStart, ScaleStart + FVector2D(Reach * 0.5, 0), Ink * Tint, 2);
 	DrawText(Elements, Layer + 7, Geometry, Font, FString::Printf(TEXT("%.0f m"), Data.GroundHalfWidth / 200), ScaleStart + FVector2D(0, -27), Ink * Tint, ETextJustify::Left);

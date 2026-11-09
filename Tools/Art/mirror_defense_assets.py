@@ -64,9 +64,9 @@ float3 spots[3] = {Spot0, Spot1, Spot2};
 for (int i=0; i<3; ++i) {
     float2 delta = (UV-spots[i].xy)*float2(Aspect,1);
     float d = length(delta);
-    float radius = lerp(0.17,0.32,spots[i].z);
-    float core = 1-smoothstep(radius*0.72,radius,d);
-    float bloom = (1-smoothstep(radius*0.62,radius*1.55,d))*0.22;
+    float radius = lerp(0.22,0.42,spots[i].z);
+    float core = 1-smoothstep(radius*0.80,radius,d);
+    float bloom = (1-smoothstep(radius*0.62,radius*1.55,d))*0.30;
     float ghost = exp(-pow((d-radius*1.22)/0.035,2))*0.035;
     float a = saturate(core+bloom+ghost)*spots[i].z;
     opacity = 1-(1-opacity)*(1-a);
@@ -156,7 +156,7 @@ def tune():
     bp = unreal.load_asset(BP)
     cdo = unreal.get_default_object(bp.generated_class())
     defense = cdo.get_editor_property('mirror_defense')
-    for key, value in dict(glare_range=1600, glare_half_angle=28,
+    for key, value in dict(glare_range=2200, glare_half_angle=28,
                            retract_seconds=1.5, surface_pause_seconds=2.5, stride_length=40, step_height=5).items():
         defense.set_editor_property(key, value)
     cdo.set_editor_property('walk_speed', 110)
@@ -184,7 +184,10 @@ def tune():
     glare = unreal.load_asset(EFFECT + '/M_MirrorRetinalGlare')
     custom = next(node for node in LIB.get_material_expressions(glare) if isinstance(node, unreal.MaterialExpressionCustom))
     old_code = custom.get_editor_property('code')
-    code = old_code.replace('lerp(0.24,0.49,spots[i].z)', 'lerp(0.17,0.32,spots[i].z)')
+    code = old_code.replace('lerp(0.24,0.49,spots[i].z)', 'lerp(0.22,0.42,spots[i].z)')
+    code = code.replace('lerp(0.17,0.32,spots[i].z)', 'lerp(0.22,0.42,spots[i].z)')
+    code = code.replace('radius*0.72,radius,d', 'radius*0.80,radius,d')
+    code = code.replace('radius*1.55,d))*0.22', 'radius*1.55,d))*0.30')
     if code != old_code:
         custom.set_editor_property('code', code)
         LIB.recompile_material(glare)

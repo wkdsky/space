@@ -41,11 +41,13 @@ struct FJTSNavigationTerrainPatch
 {
 	FVector Origin = FVector::ZeroVector;
 	FVector Up = FVector::UpVector;
-	FVector East = FVector::RightVector;
-	FVector North = -FVector::ForwardVector;
+	FVector Right = FVector::RightVector;
+	FVector Forward = FVector::ForwardVector;
+	TWeakObjectPtr<const AJTSPlanetAnchor> Planet;
 	double Radius = 1.0;
 	float HalfWidth = 6000.0f;
 	FVector2D Project(const FVector& WorldPosition, const FVector& PlanetCenter) const;
+	void AlignToView(const FVector& ViewForward);
 };
 
 struct FJTSNavigationMapFrame
@@ -62,6 +64,7 @@ struct FJTSNavigationMapFrame
 	FVector2D PlayerPosition = FVector2D::ZeroVector;
 	FVector2D PlayerHeading = FVector2D(0, -1);
 	FVector2D ShipHeading = FVector2D(0, -1);
+	FVector2D NorthHeading = FVector2D(0, -1);
 	float Altitude = 0.0f;
 	float ShipSurfaceDistance = 0.0f;
 	float GroundHalfWidth = 6000.0f;
@@ -89,5 +92,5 @@ private:
 	EJTSNavigationMapStage PreviousStage = EJTSNavigationMapStage::Interstellar;
 	TWeakObjectPtr<const AActor> FocusBody;
 	TSharedPtr<FJTSNavigationTerrainPatch> Terrain;
-	void UpdateTerrain(const AJTSPlanetAnchor* Planet, const FVector& Position, float HalfWidth);
+	void UpdateTerrain(const AJTSPlanetAnchor* Planet, const FVector& Position, const FVector& ViewForward, float HalfWidth);
 };

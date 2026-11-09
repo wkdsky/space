@@ -92,6 +92,8 @@ public:
 	void SetActiveSpacecraft(AJTSSpacecraftActor* NewSpacecraft);
 	void SetCurrentPlanetId(const FString& NewPlanetId);
 	void SetExpeditionId(const FString& NewExpeditionId);
+	UFUNCTION(BlueprintPure, Category="Expedition") bool HasImportantItem(FName ItemId) const { return !ItemId.IsNone() && ImportantItemIds.Contains(ItemId); }
+	void SetImportantItems(const TArray<FName>& ItemIds);
 
 	UPROPERTY(BlueprintAssignable, Category = "Gameplay")
 	FOnJTSGameplayPhaseChanged OnGameplayPhaseChanged;
@@ -105,6 +107,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	UPROPERTY(ReplicatedUsing=OnRep_ExpeditionState) TArray<FName> ImportantItemIds;
 	UPROPERTY(Replicated) double LaunchDeadline = 0;
 	void RefreshCachedRemainingTime();
 

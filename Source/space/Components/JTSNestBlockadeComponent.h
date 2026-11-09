@@ -7,7 +7,7 @@ class APawn;
 class UNiagaraSystem;
 class AJTSPlanetSurfaceCreature;
 
-/** Server-owned cooperative work, durable entrance identity, and its temporary defense cohort. */
+/** Server-owned pickaxe durability, persistent entrance identity, and its defense cohort. */
 UCLASS(ClassGroup=(Planet), meta=(BlueprintSpawnableComponent))
 class SPACE_API UJTSNestBlockadeComponent : public UActorComponent
 {
@@ -15,9 +15,9 @@ class SPACE_API UJTSNestBlockadeComponent : public UActorComponent
 public:
 	UJTSNestBlockadeComponent();
 	UPROPERTY(EditAnywhere, Category="Blockade|Save") FName PersistentEntranceId;
-	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0")) float DecayDelay = 0.8f;
-	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.01")) float DecayPerSecond = 0.18f;
-	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.05")) float TapWorkDuration = 0.2f;
+	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0")) float DecayDelay = 12.0f;
+	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.001")) float DecayPerSecond = 0.02f;
+	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.01", ClampMax="1")) float DamagePerStrike = 0.2f;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="1", ClampMax="32")) int32 DefensePopulation = 10;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="410")) float DefenseLeashDistance = 1800;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="0.08")) float DefenderEmergenceInterval = 0.2f;
@@ -35,9 +35,9 @@ public:
 	UPROPERTY(EditAnywhere, Category="Blockade|Effects") FVector DustScale = FVector::OneVector;
 	UPROPERTY(EditAnywhere, Category="Blockade|Effects", meta=(ClampMin="0")) float RubbleDelay = 0.45f;
 	UFUNCTION(BlueprintPure, Category="Blockade") float GetProgress() const { return Progress; }
+	UFUNCTION(BlueprintPure, Category="Blockade") float GetDurabilityFraction() const { return 1.0f - Progress; }
 	UFUNCTION(BlueprintPure, Category="Blockade") bool HasRequiredTool(APawn* Pawn) const;
 	bool CanWork(APawn* Pawn) const;
-	void SetWorking(APawn* Pawn, bool bHeld);
 	bool ApplyStrikeWork(APawn* Pawn);
 	/** Keeps only actual attackers still inside this entrance's defensive radius. */
 	APawn* FindDefenseAggressor();
@@ -49,12 +49,10 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
 private:
 	void ServicePopulation();
-	struct FWorker { bool bHeld = false; double PulseUntil = 0; double NextSwing = 0; float UnspentWork = 0; };
 	void ServiceWork();
 	void StartDefense();
 	void UpdateDefense();
 	UPROPERTY(Replicated) float Progress = 0;
-	TMap<TWeakObjectPtr<APawn>, FWorker> Workers;
 	TArray<TWeakObjectPtr<AJTSPlanetSurfaceCreature>> Defenders;
 	TArray<TWeakObjectPtr<APawn>> DefenseAggressors;
 	TArray<TWeakObjectPtr<AJTSPlanetSurfaceCreature>> Residents;
