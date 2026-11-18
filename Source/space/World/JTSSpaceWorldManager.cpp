@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/World/JTSSpaceWorldManager.h"
+#include "space/Components/JTSNavigationStageComponent.h"
 
 #include "space/Components/JTSCompressedSpaceComponent.h"
 #include "Camera/CameraComponent.h"
@@ -116,6 +117,7 @@ namespace
 
 AJTSSpaceWorldManager::AJTSSpaceWorldManager()
 {
+	CreateDefaultSubobject<UJTSNavigationStageComponent>(TEXT("NavigationStage"));
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	bAlwaysRelevant = true;

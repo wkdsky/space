@@ -33,6 +33,7 @@ class SPACE_API UJTSMeleeComponent : public UActorComponent
 
 public:
 	UJTSMeleeComponent();
+	AActor* GetAttackBlockerInAim() const;
 
 	/** Refreshes the current target under the player's current camera aim. */
 	UFUNCTION(BlueprintCallable, Category = "Melee")

@@ -431,11 +431,24 @@ void SJTSCruiseNavigation::PaintGround(FSlateWindowElementList& Elements, int32 
 	const FGeometry& Geometry, const FLinearColor& Tint) const
 {
 	const auto& Data = GroundFrame;
+    if (Data.bIndoor)
+    {
+        DrawText(Elements,Layer+7,Geometry,FCoreStyle::GetDefaultFontStyle(TEXT("Regular"),22),
+            FString(TEXT("地下 · "))+Data.InteriorName,Geometry.GetLocalSize()*.5,Ink*Tint,ETextJustify::Center);
+        return;
+    }
 	if (!Data.Terrain) return;
 	const FVector2D Size = Geometry.GetLocalSize();
 	const FVector2D Center(Size.X * 0.5, (Size.Y - 20) * 0.5);
 	const FVector2D HalfSize((Size.X - 48) * 0.5, (Size.Y - 172) * 0.5);
 	const float Reach = FMath::Min(HalfSize.X, HalfSize.Y);
+    for (const auto& W:Data.Waypoints)
+    {
+        FVector2D P=W.Position;
+        const double M=FMath::Max(FMath::Abs(P.X),FMath::Abs(P.Y)); if (M>.88) P*=.88/M;
+        DrawText(Elements,Layer+8,Geometry,FCoreStyle::GetDefaultFontStyle(TEXT("Regular"),16),
+            FString::Printf(TEXT("◆ %s %.0fm"),*W.Name,W.Meters),Center+P*Reach,Ink*Tint,ETextJustify::Center);
+    }
 	const FVector2D Origin = Center - FVector2D(Reach, Reach);
 	if (SurfaceBrush.GetResourceObject())
 		FSlateDrawElement::MakeBox(Elements, Layer, Geometry.ToPaintGeometry(FVector2D(Reach * 2, Reach * 2),

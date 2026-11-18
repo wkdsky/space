@@ -17,7 +17,9 @@ enum class EJTSResourceType : uint8
 	/** Generic biological feedstock; retain the serialized enum name/value for existing saves and assets. */
 	MoonAntCorpse = 6 UMETA(DisplayName = "Biological Corpse"),
 	Crystal = 7 UMETA(DisplayName = "Crystal"),
-	InorganicCarbon = 8 UMETA(DisplayName = "Inorganic Carbon")
+	InorganicCarbon = 8 UMETA(DisplayName = "Inorganic Carbon"),
+	ManufacturedPart = 9 UMETA(DisplayName = "Manufactured Part"),
+	HighGradeAlloy = 10 UMETA(DisplayName = "High Grade Alloy")
 };
 
 USTRUCT(BlueprintType)

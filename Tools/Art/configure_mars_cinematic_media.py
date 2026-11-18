@@ -58,7 +58,9 @@ def finish(error=None):
                   duration_seconds=unreal.MathLibrary.get_total_seconds(player.get_duration()),
                   played_seconds=unreal.MathLibrary.get_total_seconds(player.get_time()),
                   assets=[item.get_path_name() for item in (source, player, texture, material)])
-    (ART / 'validation_unreal_media.json').write_text(json.dumps(report, indent=2))
+    qa=ROOT/'Saved/MarsDestruction'
+    qa.mkdir(parents=True,exist_ok=True)
+    (qa / 'validation_unreal_media.json').write_text(json.dumps(report, indent=2))
     unreal.log('MARS_MEDIA_VALIDATION ' + json.dumps(report))
     player.close()
     unreal.unregister_slate_post_tick_callback(handle)

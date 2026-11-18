@@ -51,7 +51,7 @@ class MoonSurfaceV3Tools(unreal.ToolsetDefinition):
     @toolset_registry.tool_call
     @staticmethod
     def author_level() -> str:
-        """Apply the Moon V3 recipe in L_SpaceWorld, preserving the corpse and nine entrance locations."""
+        """Apply the Moon V3 recipe in L_SpaceWorld, preserving the corpse and seven entrance locations."""
         return _surface().author_level()
     @toolset_registry.tool_call
     @staticmethod

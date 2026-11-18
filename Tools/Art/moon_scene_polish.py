@@ -95,7 +95,7 @@ def configure_blocking():
     unreal.BlueprintEditorLibrary.compile_blueprint(bp);s.save(bp)
     rows=accessible_nests(True)
     assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
-    return dict(nests=rows,only_nine_blockable=True,hold_seconds=2.5,protected=r.check_protected())
+    return dict(nests=rows,only_seven_blockable=True,hold_seconds=2.5,protected=r.check_protected())
 
 
 def audit_blocking():
@@ -103,7 +103,7 @@ def audit_blocking():
     planet=next(a for a in actors if isinstance(a,unreal.JTSPlanetAnchor) and str(a.get_planet_id())=='Moon')
     pawn=unreal.GameplayStatics.get_player_pawn(world,0)
     marked=[a for a in actors if isinstance(a,unreal.JTSPlanetEcologyHabitat) and a.get_editor_property('can_block_entrance')]
-    assert len(marked)==9 and all(a.get_actor_label().startswith('Moon_Nest_') for a in marked)
+    assert len(marked)==7 and all(a.get_actor_label().startswith('Moon_Nest_') for a in marked)
     rows=[]
     for a in sorted(marked,key=lambda a:a.get_actor_label()):
         mesh=a.get_editor_property('refuge_mesh');hit=planet.project_point_to_surface(mesh.get_world_location())
@@ -346,7 +346,7 @@ def configure():
     assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
     r.check_protected()
     blocking=configure_blocking()
-    return dict(slope_limit=50,resource_entries=changed,residents='0-2 per deposit',cut_source=None,fixed_nests=9,blocking=blocking,protected=True)
+    return dict(slope_limit=50,resource_entries=changed,residents='0-2 per deposit',cut_source=None,fixed_nests=7,blocking=blocking,protected=True)
 
 
 def materials():
@@ -539,7 +539,7 @@ def run(stage):
             nests=[a for a in actors if a.get_actor_label().startswith('Moon_Nest_')]
             rows.append(dict(world=world.get_name(),server=bool(unreal.GameplayStatics.get_game_mode(world)),fixed_nests=len(nests),
                 visible_source_meshes=sum(a.get_editor_property('refuge_mesh').is_visible() for a in nests)))
-        assert len(rows)==2 and all(x['fixed_nests']==9 and x['visible_source_meshes']==0 for x in rows),rows
+        assert len(rows)==2 and all(x['fixed_nests']==7 and x['visible_source_meshes']==0 for x in rows),rows
         return json.dumps(rows)
     if stage in ('return_prepare','return_check'):return json.dumps(collect_return(stage=='return_prepare'))
     if stage == 'entrances_rebuild':return json.dumps([a.get_name() for a in author_entrances(True)])

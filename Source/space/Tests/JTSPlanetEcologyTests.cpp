@@ -284,7 +284,7 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	TestTrue(TEXT("A harvested deposit is removed for all peers"), Deposit->IsActorBeingDestroyed());
 	Deposit->Interact_Implementation(Collector);
 	TestEqual(TEXT("Repeated interaction cannot duplicate a deposit"), Inventory->GetItemCount(EJTSItemId::InorganicCarbon), 1);
-	// Only real pickaxe contacts reduce nest durability; E never starts work.
+	// Weapon hits reduce nest durability; E never starts work.
 	auto* Blockable = Scope.World->SpawnActor<AJTSPlanetEcologyHabitat>(Origin + FVector(0, 1800, 0), Frame);
 	Blockable->RefugeMesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
 	Blockable->EntranceBlocker->SetStaticMesh(Blockable->RefugeMesh->GetStaticMesh());
@@ -321,7 +321,8 @@ bool FJTSPlanetEcologyTest::RunTest(const FString&)
 	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Punch);
 	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Knife);
 	Blockable->ReceiveMeleeHit_Implementation(Collector, EJTSMeleeAttackType::Axe);
-	TestEqual(TEXT("Other attack types cannot damage the nest"), Blockable->Blockade->GetProgress(), 0.f);
+	TestTrue(TEXT("Punches and other melee weapons reduce the marked entrance's durability"), Blockable->Blockade->GetProgress() > 0.f);
+	Blockable->Blockade->ResetTransientState();
 	Melee->StartWorkAttack(Blockable); TickFor(20);
 	const float RetainedProgress = Blockable->Blockade->GetProgress();
 	TestTrue(TEXT("A physical pickaxe contact reduces durability"), RetainedProgress > 0);

@@ -9,7 +9,9 @@
 #include "space/Items/JTSItemTypes.h"
 #include "space/Items/JTSShipLockerTypes.h"
 #include "space/Items/JTSResourceTypes.h"
+#include "space/Ships/JTSStellarExchangeTypes.h"
 
+#include "space/Items/JTSDiscoveryTypes.h"
 #include "JTSExpeditionTypes.generated.h"
 
 class AJTSPlayerState;
@@ -167,6 +169,9 @@ USTRUCT(BlueprintType)
 struct SPACE_API FJTSPlayerSnapshot
 {
 	GENERATED_BODY()
+    UPROPERTY() FName InteriorZoneId;
+    UPROPERTY() FVector InteriorLocalPosition=FVector::ZeroVector;
+    UPROPERTY() FRotator InteriorLocalRotation=FRotator::ZeroRotator;
 
 	UPROPERTY()
 	FString PlayerId;
@@ -249,6 +254,8 @@ USTRUCT(BlueprintType)
 struct SPACE_API FJTSExpeditionSnapshot
 {
 	GENERATED_BODY()
+    UPROPERTY() bool bHasSpacecraftHull=false;
+    UPROPERTY() float SpacecraftHull=0;
 
 	UPROPERTY()
 	FString ExpeditionId;
@@ -282,6 +289,13 @@ struct SPACE_API FJTSExpeditionSnapshot
 
 	UPROPERTY()
 	FJTSMaterialGraph MaterialProcessingGraph;
+	/** Explicit flag distinguishes a valid empty loadout from a pre-dock save. */
+	UPROPERTY() bool bHasShipDockLoadout = false;
+	UPROPERTY() TArray<FJTSAnalyzedTypeRecord> AnalyzedTypes;
+	UPROPERTY() FJTSStoredAnalysisSample AnalysisSample;
+	UPROPERTY() TArray<FJTSItemInstance> ScannerCargo;
+	UPROPERTY() TArray<FName> InstalledShipDockIds;
+	UPROPERTY() FJTSStellarExchangeSnapshot StellarExchange;
 
 	UPROPERTY()
 	TArray<FJTSPlayerSnapshot> Players;
@@ -297,6 +311,10 @@ struct SPACE_API FJTSExpeditionSnapshot
 	/** Recover unclaimed loot after loading without respawning its boss. */
 	UPROPERTY()
 	TSet<FName> DefeatedEncounterIds;
+	UPROPERTY() TSet<FName> LoadedCoordinateIds;
+	UPROPERTY() TSet<FName> FacilityFlagIds;
+	UPROPERTY() TSet<FName> ReadLogIds;
+	UPROPERTY() TSet<FName> MerchantStateIds;
 
 	/** UTC ticks written by the authoritative host whenever this snapshot is persisted. */
 	UPROPERTY()

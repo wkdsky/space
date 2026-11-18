@@ -8,6 +8,9 @@
 #include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSWorldPickupActor.h"
+#include "space/Player/JTSCharacter.h"
 
 AJTSSpaceDebugTravelManager::AJTSSpaceDebugTravelManager()
 {
@@ -41,6 +44,29 @@ bool AJTSSpaceDebugTravelManager::CanUse(const AJTSPlayerController* Controller)
 {
 	const auto* State = Controller ? Controller->GetPlayerState<AJTSPlayerState>() : nullptr;
 	return IsAvailable() && State && State->IsExpeditionHost();
+}
+
+const FJTSDebugAccessPermit* AJTSSpaceDebugTravelManager::FindAccessPermit(FName ItemId) const
+{
+	return ItemId.IsNone()?nullptr:AccessPermits.FindByPredicate([ItemId](const auto& Entry){return Entry.ItemId==ItemId;});
+}
+
+void AJTSSpaceDebugTravelManager::GrantAccessPermit(AJTSPlayerController* Controller, FName ItemId)
+{
+	const auto* Entry=FindAccessPermit(ItemId);
+	if (!HasAuthority() || !CanUse(Controller) || !Entry) return;
+	auto* Expedition=GetGameInstance()?GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>():nullptr;
+	if (!Expedition) return;
+	Expedition->RecordImportantItem(ItemId);
+	// This development shortcut programs existing physical devices too; normal play still records at the ship.
+	if (Entry->DeviceItemId!=EJTSItemId::None)
+	{
+		for (TActorIterator<AJTSCharacter> It(GetWorld());It;++It)
+			if (auto* Inventory=It->FindComponentByClass<UJTSInventoryComponent>()) Inventory->RecordItemCredential(Entry->DeviceItemId,ItemId);
+		for (TActorIterator<AJTSWorldPickupActor> It(GetWorld());It;++It) It->RecordItemCredential(Entry->DeviceItemId,ItemId);
+		for (TActorIterator<AJTSPlayerState> It(GetWorld());It;++It) It->RecordLockerItemCredential(Entry->DeviceItemId,ItemId);
+	}
+	Expedition->RequestSave();
 }
 
 FName AJTSSpaceDebugTravelManager::GetPreferredPlanetId() const
@@ -96,6 +122,7 @@ void AJTSSpaceDebugTravelManager::GetLifetimeReplicatedProps(TArray<FLifetimePro
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSSpaceDebugTravelManager, bEnabled);
 	DOREPLIFETIME(AJTSSpaceDebugTravelManager, Destinations);
+	DOREPLIFETIME(AJTSSpaceDebugTravelManager, AccessPermits);
 	DOREPLIFETIME(AJTSSpaceDebugTravelManager, DefaultPlanetId);
 	DOREPLIFETIME(AJTSSpaceDebugTravelManager, Status);
 }

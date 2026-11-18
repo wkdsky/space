@@ -1,4 +1,5 @@
 #include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "Net/UnrealNetwork.h"
 
@@ -11,7 +12,7 @@ namespace
 		TSet<EJTSResourceType> Seen;
 		for (const auto& Q : Quantities)
 		{
-			if (uint8(Q.ResourceType) > uint8(EJTSResourceType::InorganicCarbon)
+			if (uint8(Q.ResourceType) > uint8(EJTSResourceType::HighGradeAlloy)
 				|| Q.HalfUnits <= 0 || Q.HalfUnits > 1000000 || Seen.Contains(Q.ResourceType)) return false;
 			Seen.Add(Q.ResourceType);
 		}
@@ -101,7 +102,7 @@ bool UJTSMaterialProcessorComponent::Preview(const FJTSMaterialGraph& Graph,
 	{ Error = TEXT("流程尚未连通：连接全部节点，且不要形成回路。"); return false; }
 
 	TMap<EJTSResourceType, int64> Working;
-	for (uint8 I = 0; I <= uint8(EJTSResourceType::InorganicCarbon); ++I)
+	for (uint8 I = 0; I <= uint8(EJTSResourceType::HighGradeAlloy); ++I)
 		Working.Add(EJTSResourceType(I), Ship->GetResourceHalfUnits(EJTSResourceType(I)));
 	for (const auto* Node : Programs)
 	{
@@ -136,7 +137,8 @@ bool UJTSMaterialProcessorComponent::Preview(const FJTSMaterialGraph& Graph,
 bool UJTSMaterialProcessorComponent::Submit(APawn* Player, const FJTSMaterialGraph& Graph, bool bExecute, FString& Message)
 {
 	AJTSSpacecraftActor* Ship = Cast<AJTSSpacecraftActor>(GetOwner());
-	if (!Ship || !Ship->HasAuthority() || !IsValid(Player) || !Ship->CanUseShipTerminal(Player))
+	if (!Ship || !Ship->HasAuthority() || !IsValid(Player)
+		|| !Ship->GetDockComponent()->CanUseService(EJTSShipDockService::MaterialProcessing, Player))
 	{ Message = TEXT("请在飞船终端的交互范围内操作。"); return false; }
 	if (!ValidateLayout(Graph, Message)) return false;
 	TMap<EJTSResourceType, int64> Deltas;

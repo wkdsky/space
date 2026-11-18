@@ -28,6 +28,9 @@ public:
 	bool GetActiveWeapon(FJTSStellarWeaponBinding& Out) const;
 	const UJTSStellarLootTable* GetLootTable() const;
 	void ConfigureLootTable(UJTSStellarLootTable* Table);
+	/** Atomic server delivery: merge compatible copies before claiming an empty personal slot. */
+	bool TryStoreItem(const FJTSItemInstance& Item);
+	bool SplitForMutation(int32 Index);
 	bool ConsumeEnergy(float Amount);
 	void RefundEnergy(float Amount);
 	void SetChannelActive(bool bActive) { bChannelActive = bActive; }

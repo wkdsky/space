@@ -139,7 +139,7 @@ void AJTSGameplayGameModeBase::BeginPlay()
 {
 	Super::BeginPlay();
 	if (auto* Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
-		if (auto* State = GetGameState<AJTSGameState>()) State->SetImportantItems(Expedition->GetSnapshot().ImportantItemIds.Array());
+		if (auto* State = GetGameState<AJTSGameState>()) { Expedition->NormalizeCoordinates(); Expedition->SyncProgression(); }
 }
 
 bool AJTSGameplayGameModeBase::GrantImportantItem(FName ItemId, const FText& Notice)
@@ -148,7 +148,7 @@ bool AJTSGameplayGameModeBase::GrantImportantItem(FName ItemId, const FText& Not
 	auto* Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>();
 	auto* State = GetGameState<AJTSGameState>();
 	if (!Expedition || !State || !Expedition->RecordImportantItem(ItemId)) return false;
-	State->SetImportantItems(Expedition->GetSnapshot().ImportantItemIds.Array());
+	{ Expedition->NormalizeCoordinates(); Expedition->SyncProgression(); }
 	if (!Notice.IsEmpty())
 		for (auto It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 			if (auto* PC = Cast<AJTSPlayerController>(It->Get())) PC->ClientShowExpeditionNotice(Notice);

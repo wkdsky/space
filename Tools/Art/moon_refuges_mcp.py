@@ -47,7 +47,7 @@ class Refuges:
 
     def check_protected(self,before):
         after=self.snapshot()
-        assert before==after,'Protected Moon, corpse or nine entrance geometry/transforms changed'
+        assert before==after,'Protected Moon, corpse or seven entrance geometry/transforms changed'
         return True
 
     def inspect(self):
@@ -101,7 +101,7 @@ class Refuges:
         assert self.check_protected(baseline)
         self.require_refuges()
         self.call('Game.Tools.Art.moon_surface_mcp.MoonSurfaceV3Tools','validate_play',stage='repair_configure')
-        return dict(fixed_mirror_mouths=9,rift_fissure_regions=len(cores),rift_residents_per_fissure=[1,2],protected_unchanged=True)
+        return dict(fixed_mirror_mouths=7,rift_fissure_regions=len(cores),rift_residents_per_fissure=[1,2],protected_unchanged=True)
 
     def require_refuges(self):
         targets=self.find('Moon_Nest_')+self.find('_Rift_Core')+self.find('_Rift_Fringe')+self.find('_Mirror_Fringe')

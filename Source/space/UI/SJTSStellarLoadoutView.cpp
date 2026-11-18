@@ -126,6 +126,10 @@ int32 SJTSStellarLoadoutView::OnPaint(const FPaintArgs& Args, const FGeometry& G
 		PaintShape(Elements, Layer + 5, Geometry, Center, FVector2D(Radius - 4), bDiamond, Face * Tint, Face * Tint);
 		const auto Item = State ? State->GetSlot(Index) : FJTSItemInstance();
 		if (Item.IsEmpty()) continue;
+		FSlateDrawElement::MakeText(Elements, Layer + 7,
+			Geometry.ToPaintGeometry(FVector2D(44,24), FSlateLayoutTransform(Center+FVector2D(17,-38))),
+			FJTSItemInstance::StackBadge(Item.StackCount), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"),19),
+			ESlateDrawEffect::None,FLinearColor(1,.94f,.70f)*Tint);
 		const auto* Entry = Table ? Table->FindEntry(Item.StellarItemId) : nullptr;
 		FString Name = Entry ? Entry->DisplayName.ToString() : Item.CustomDisplayName.ToString();
 		if (Name.IsEmpty()) Name = Item.StellarItemId.ToString();
@@ -139,5 +143,5 @@ int32 SJTSStellarLoadoutView::OnPaint(const FPaintArgs& Args, const FGeometry& G
 			Geometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(Center - TextSize * 0.5f)),
 			Name, Font, ESlateDrawEffect::None, FLinearColor(0.91f, 0.95f, 1.0f) * Tint);
 	}
-	return Layer + 6;
+	return Layer + 7;
 }

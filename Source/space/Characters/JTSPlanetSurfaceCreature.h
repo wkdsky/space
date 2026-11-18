@@ -5,6 +5,8 @@
 #include "space/Interaction/JTSMeleeTarget.h"
 #include "space/World/JTSPlanetSettlementEnemy.h"
 #include "space/Systems/JTSReplicatedMotionBuffer.h"
+#include "space/Interaction/IInteractable.h"
+#include "space/Items/JTSItemTypes.h"
 #include "JTSPlanetSurfaceCreature.generated.h"
 
 class AJTSPlanetAnchor;
@@ -16,6 +18,7 @@ class UBoxComponent;
 class USkeletalMeshComponent;
 class UAnimSequence;
 class UJTSMirrorDefenseComponent;
+class AJTSWorldPickupActor;
 
 UENUM(BlueprintType)
 enum class EJTSForagerState : uint8
@@ -25,11 +28,13 @@ enum class EJTSForagerState : uint8
 
 /** Small server-owned surface animal. Species, assets and tuning are Blueprint configuration. */
 UCLASS(Blueprintable)
-class SPACE_API AJTSPlanetSurfaceCreature : public AActor, public IJTSPlanetSettlementEnemy, public IJTSMeleeTarget
+class SPACE_API AJTSPlanetSurfaceCreature : public AActor, public IJTSPlanetSettlementEnemy, public IJTSMeleeTarget, public IInteractable
 {
 	GENERATED_BODY()
+    friend class UJTSCreatureTacticsComponent;
 public:
 	AJTSPlanetSurfaceCreature();
+    virtual float TakeDamage(float Damage,const FDamageEvent& Event,AController* Controller,AActor* Causer) override;
 	virtual bool InitializeForSettlement_Implementation(AJTSPlanetAnchor* Planet, FVector HomeLocation, FVector GroundLocation) override;
 	virtual void OnSettlementAttackStarted_Implementation() override;
 	virtual void OnSettlementForceImpact_Implementation(FVector Direction, float Speed) override;
@@ -37,6 +42,7 @@ public:
 	void SetFeedingTarget(AActor* Target);
 	bool BelongsToRefuge(const AJTSPlanetEcologyHabitat* RefugeOwner) const;
 	bool IsAlive() const;
+	FName GetSpecimenId() const { return SpecimenId; }
 	/** Active mirror defence uses the creature leash or the larger mouth-centred alarm. */
 	void GetMirrorThreatArea(FVector& Origin, float& Radius) const;
 	UFUNCTION(BlueprintCallable, Category="Creature|Defense") void BeginEntranceEmergence(const FTransform& MouthPose, const FVector& ExitPoint);
@@ -53,6 +59,12 @@ public:
 	virtual FText GetMeleeTargetDisplayName_Implementation() const override;
 	virtual FText GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const override;
 	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
+	virtual bool CanInteract_Implementation(APawn* Pawn) const override;
+	virtual FText GetInteractionPrompt_Implementation(APawn* Pawn) const override;
+	virtual void Interact_Implementation(APawn* Pawn) override;
+	FVector GetCorpseInteractionLocation() const;
+	/** A dead animal already resting in the scan zone uses the same original-mesh pickup as a carried drop. */
+	AJTSWorldPickupActor* ReleaseCorpseForAnalysis(const FTransform& GroundFrame);
 	virtual void Tick(float DeltaSeconds) override;
 protected:
 	virtual void BeginPlay() override;
@@ -71,6 +83,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSPlanetSurfaceSteeringComponent> Steering;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Creature") TObjectPtr<UJTSMirrorDefenseComponent> MirrorDefense;
 	UPROPERTY(EditDefaultsOnly, Category="Creature") FText DisplayName;
+	/** Stable species identity is authored per Blueprint, independent of body scale. */
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Analysis") FName SpecimenId;
+	UPROPERTY(EditDefaultsOnly, Category="Creature|Analysis", meta=(ClampMin="60")) float CorpseRetentionSeconds=1800;
+	UPROPERTY(Replicated) FJTSItemInstance CorpseSample;
+	bool bCorpseCollected=false;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Appearance", meta=(ClampMin="0.1")) float BodyScale = 1;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Motion", meta=(ClampMin="1")) float WalkSpeed = 65;
 	UPROPERTY(EditDefaultsOnly, Category="Creature|Motion", meta=(ClampMin="1")) float FleeSpeed = 210;

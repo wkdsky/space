@@ -34,6 +34,15 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	FText GetInteractionPrompt(APawn* InteractingPawn) const;
 
+	/** Presentation for the same target that receives E. Blueprint may configure the label and anchor. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	FText GetInteractionLabel() const;
+	virtual FText GetInteractionLabel_Implementation() const { return FText::GetEmpty(); }
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	FVector GetInteractionPromptAnchor() const;
+	virtual FVector GetInteractionPromptAnchor_Implementation() const;
+
 	/** Performs this actor's interaction behavior. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void Interact(APawn* InteractingPawn);

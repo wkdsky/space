@@ -1,4 +1,6 @@
 #include "space/World/JTSMoonResourceSpawner.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/World/JTSPlanetSurfaceGameplay.h"
 
 #include "Engine/World.h"
 #include "space/World/JTSPlanetDistributionData.h"
@@ -218,7 +220,7 @@ AJTSPlanetAnchor* AJTSMoonResourceSpawner::GetOwningPlanet() const
 	return OwningPlanet.Get();
 }
 
-void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController)
+void AJTSMoonResourceSpawner::SetSurfaceGameplayController(AActor* InSurfaceGameplayController)
 {
 	SurfaceGameplayController = InSurfaceGameplayController;
 }
@@ -426,13 +428,20 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			if (const APlayerController* PC = It->Get(); IsValid(PC) && IsValid(PC->GetPawn()))
 				PlayerLocations.Add(PC->GetPawn()->GetActorLocation());
 
-	const auto FindRealSurfaceCandidate = [Planet, Origin, SafeRadius, &RandomStream](FVector& OutCandidateLocation)
+	const auto FindRealSurfaceCandidate = [this, Planet, Origin, SafeRadius, &RandomStream](FVector& OutCandidateLocation)
 	{
 		if (!IsValid(Planet))
 		{
 			return false;
 		}
 
+        if (AJTSInteriorZone::FindAt(GetWorld(),Origin))
+        {
+            const float Angle=RandomStream.FRandRange(0,UE_TWO_PI);
+            const float Reach=SafeRadius*FMath::Sqrt(RandomStream.FRand());
+            OutCandidateLocation=Origin+GetActorForwardVector()*FMath::Cos(Angle)*Reach+GetActorRightVector()*FMath::Sin(Angle)*Reach;
+            return AJTSInteriorZone::FindAt(GetWorld(),OutCandidateLocation)!=nullptr;
+        }
 		const FVector CapCenterDirection = Planet->GetRadialUpVector(Origin);
 		const float MaximumAngle = FMath::Min(UE_PI, Planet->ArcDistanceToAngleRadians(SafeRadius));
 		const float CosineOfAngle = FMath::Lerp(1.0f, FMath::Cos(MaximumAngle), RandomStream.FRand());
@@ -512,7 +521,7 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			: Kind == EJTSMoonResourceKind::LargeMetalRock ? OreDepositYieldUnits
 			: Kind == EJTSMoonResourceKind::MediumCrystalRock ? MediumCrystalYieldUnits
 			: Kind == EJTSMoonResourceKind::LargeCrystalRock ? LargeCrystalYieldUnits : 0;
-		const EJTSResourceType ResourceType = EJTSResourceType::Rock;
+		const EJTSResourceType ResourceType = bOverridePrimaryResource?PrimaryResource:EJTSResourceType::Rock;
 		EJTSMoonResourceNodeSize NodeSize = EJTSMoonResourceNodeSize::MediumRock;
 		switch (Kind)
 		{
@@ -530,7 +539,7 @@ int32 AJTSMoonResourceSpawner::GenerateResourcesInCoverage(FJTSMoonResourceCover
 			BaseResourceScale.Z * RandomStream.FRandRange(MinimumScaleMultiplier, MaximumScaleMultiplier));
 		FRotator ResourceRotation(0.0f, RandomStream.FRandRange(0.0f, 360.0f), 0.0f);
 		FJTSPlanetSurfaceFrame SurfaceFrame;
-		if (Planet->GetSurfaceFrameAt(GroundLocation, FVector::ForwardVector, SurfaceFrame))
+		if (AJTSInteriorZone::GroundFrame(Planet,GroundLocation,FVector::ForwardVector,SurfaceFrame))
 		{
 			const float YawRadians = FMath::DegreesToRadians(ResourceRotation.Yaw);
 			const FVector SurfaceForward = FQuat(SurfaceFrame.Up, YawRadians).RotateVector(SurfaceFrame.Forward);
@@ -663,7 +672,7 @@ AJTSMoonResourceActor* AJTSMoonResourceSpawner::SpawnMiningNode(
 	{
 		Resource->PlaceOnPlanetSurface(Planet, GroundLocation, ResourceRotation.Vector());
 	}
-	if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
+	if (auto* Controller = Cast<IJTSPlanetSurfaceGameplay>(SurfaceGameplayController.Get()))
 	{
 		Controller->RegisterSurfaceRuntimeActor(Resource);
 	}
@@ -680,7 +689,7 @@ AJTSWorldPickupActor* AJTSMoonResourceSpawner::SpawnInitialPickup(const FVector&
 		this, AuthoredPose, VisualVariant);
 	if (IsValid(Pickup))
 	{
-		if (AJTSMoonSurfaceController* const Controller = SurfaceGameplayController.Get())
+		if (auto* Controller = Cast<IJTSPlanetSurfaceGameplay>(SurfaceGameplayController.Get()))
 		{
 			Controller->RegisterSurfaceRuntimeActor(Pickup);
 		}
@@ -693,6 +702,12 @@ bool AJTSMoonResourceSpawner::ResolveGroundLocation(const FVector& CandidateLoca
 {
 	if (AJTSPlanetAnchor* const Planet = OwningPlanet.Get())
 	{
+        if (AJTSInteriorZone::FindAt(GetWorld(),CandidateLocation))
+        {
+            FJTSPlanetSurfaceHit H;
+            if (!AJTSInteriorZone::ProjectFloor(Planet,CandidateLocation,H)) return false;
+            OutGroundLocation=H.ImpactPoint; return true;
+        }
 		const FVector RadialUp = Planet->GetRadialUpVector(CandidateLocation);
 		FJTSPlanetSurfaceHit SurfaceHit;
 		const float ProbeDistance = FMath::Max(0.0f, GroundTraceStartHeight) + FMath::Max(0.0f, GroundTraceDistance);

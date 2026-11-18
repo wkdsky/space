@@ -331,7 +331,7 @@ def build():
         asset(refuge(f'SM_MS3_MirrorRefuge_{i}',True,400+i))
         asset(refuge(f'SM_MS3_RiftRefuge_{i}',False,500+i))
     old=json.loads(Path('D:/projects/space/SourceArt/MoonAntNests/moon_ant_nest_placements.json').read_text())['placements']
-    for i,item in enumerate(old):
+    for i,item in enumerate(old[:7]):
         mirror=True;kind='MirrorSkimmer'
         # Keep the original floor-aligned coordinate system and exact entrance origin.
         name=asset(refuge(f'SM_MS3_FixedNest_{i+1:02d}',mirror,1600+i))

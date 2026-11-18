@@ -7,7 +7,7 @@ class APawn;
 class UNiagaraSystem;
 class AJTSPlanetSurfaceCreature;
 
-/** Server-owned pickaxe durability, persistent entrance identity, and its defense cohort. */
+/** Server-owned entrance durability, persistent entrance identity, and its defense cohort. */
 UCLASS(ClassGroup=(Planet), meta=(BlueprintSpawnableComponent))
 class SPACE_API UJTSNestBlockadeComponent : public UActorComponent
 {
@@ -18,6 +18,8 @@ public:
 	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0")) float DecayDelay = 12.0f;
 	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.001")) float DecayPerSecond = 0.02f;
 	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.01", ClampMax="1")) float DamagePerStrike = 0.2f;
+	/** Weapon damage equivalent to one authored mining strike. */
+	UPROPERTY(EditAnywhere, Category="Blockade|Work", meta=(ClampMin="0.01")) float DamagePerStrikeReference = 20.f;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="1", ClampMax="32")) int32 DefensePopulation = 10;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="410")) float DefenseLeashDistance = 1800;
 	UPROPERTY(EditAnywhere, Category="Blockade|Defense", meta=(ClampMin="0.08")) float DefenderEmergenceInterval = 0.2f;
@@ -39,6 +41,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Blockade") bool HasRequiredTool(APawn* Pawn) const;
 	bool CanWork(APawn* Pawn) const;
 	bool ApplyStrikeWork(APawn* Pawn);
+	bool ApplyWeaponDamage(float Damage, APawn* Pawn);
 	/** Keeps only actual attackers still inside this entrance's defensive radius. */
 	APawn* FindDefenseAggressor();
 	void RestorePersistentState();

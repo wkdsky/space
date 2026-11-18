@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/World/JTSPlanetLandingManager.h"
+#include "space/Ships/JTSSpacecraftCollisionQuery.h"
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
@@ -583,7 +584,7 @@ bool AJTSPlanetLandingManager::RespawnPlayerAtLandedSpacecraft(APlayerController
 		return false;
 	}
 
-	// Death has no inventory penalty. Transfer the full item payload before replacing the pawn.
+	// Transfer the remaining payload after item-configured death drops, before replacing the pawn.
 	TArray<FJTSItemInstance> CarriedItems;
 	int32 SelectedSlot = 0;
 	bool bHadInventory = false;
@@ -1109,7 +1110,7 @@ bool AJTSPlanetLandingManager::ParkArrivalSpacecraftOnPhysicalGround(
 	GroundObjectQuery.AddObjectTypesToQuery(ECC_WorldStatic);
 	GroundObjectQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
 	FCollisionQueryParams GroundTraceParameters(SCENE_QUERY_STAT(JTSArrivalPhysicalGroundTrace), true, this);
-	GroundTraceParameters.AddIgnoredActor(Spacecraft);
+	JTSSpacecraftCollision::IgnoreSelfAndAttachments(GroundTraceParameters, Spacecraft);
 	GroundTraceParameters.bTraceComplex = true;
 
 	const auto FindGroundHit = [&World, &GroundObjectQuery, &GroundTraceParameters, TraceStart, TraceEnd, SurfaceUp](bool bTraceComplex, FHitResult& OutGroundHit)

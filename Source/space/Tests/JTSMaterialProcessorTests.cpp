@@ -3,6 +3,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
+#include "space/Ships/JTSShipDockActor.h"
+#include "EngineUtils.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSSpaceWorldManager.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -43,8 +46,19 @@ namespace
 			AJTSSpaceWorldManager* Manager = World->SpawnActor<AJTSSpaceWorldManager>();
 			Manager->SetCurrentPlanet(World->SpawnActor<AJTSPlanetAnchor>());
 			Manager->SetSurfaceGameplayReady(true);
+			Ship->SetGroundedPlanet(Manager->GetCurrentPlanet());
+			UJTSShipDockDefinition* Definition = NewObject<UJTSShipDockDefinition>();
+			Definition->ModuleId = TEXT("Material"); Definition->ActorClass = AJTSShipDockActor::StaticClass();
+			Definition->MountTransform = FTransform(FVector(0, 350, 0));
+			Ship->GetDockComponent()->Catalog = {Definition};
+			Ship->GetDockComponent()->RestoreInstalledIds({TEXT("Material")});
+			AJTSShipDockActor* Dock = nullptr;
+			for (TActorIterator<AJTSShipDockActor> It(World); It; ++It) if (It->GetOwner() == Ship) Dock = *It;
+			check(Dock); Dock->Service = EJTSShipDockService::MaterialProcessing; Dock->DeploymentDuration = 0.05f;
+			Dock->SetDeployed(true);
+			World->Tick(LEVELTICK_All, 0.1f); Dock->Tick(0);
 			FActorSpawnParameters P; P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			return World->SpawnActor<AJTSCharacter>(Ship->GetBoardingInteractionCenter(), FRotator::ZeroRotator, P);
+			return World->SpawnActor<AJTSCharacter>(Dock->GetScreenWorldLocation() + Dock->ScreenAnchor->GetRightVector() * 90, FRotator::ZeroRotator, P);
 		}
 	};
 	FJTSMaterialGraph Chain(std::initializer_list<FName> Programs)
@@ -119,7 +133,7 @@ bool FJTSProcessingChainTest::RunTest(const FString&)
 	TestEqual(TEXT("Net output is two food"), Delta.FindRef(EJTSResourceType::Food), int64(4));
 	TestEqual(TEXT("Net water is two, not duplicated three"), Delta.FindRef(EJTSResourceType::Water), int64(4));
 	AJTSCharacter* Player = W.Operator();
-	if (!TestTrue(TEXT("Fixture operator can use terminal"), W.Ship->CanUseShipTerminal(Player))) return false;
+	if (!TestTrue(TEXT("Fixture operator can use deployed processor dock"), W.Ship->GetDockComponent()->CanUseService(EJTSShipDockService::MaterialProcessing, Player))) return false;
 	TestTrue(TEXT("Server commits full chain"), W.Processor->Submit(Player, G, true, Error));
 	TestEqual(TEXT("Two food in shared warehouse"), W.Ship->GetFoodCount(), 2);
 	TestFalse(TEXT("Insufficient corpse rejects repeat"), W.Processor->Submit(Player, G, true, Error));

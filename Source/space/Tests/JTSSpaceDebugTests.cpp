@@ -22,6 +22,7 @@
 #include "space/World/JTSSpaceDebugTravelManager.h"
 #include "space/UI/JTSPrototypeHUDWidget.h"
 #include "space/UI/JTSSpaceDebugWidget.h"
+#include "space/Items/JTSWorldPickupActor.h"
 
 namespace
 {
@@ -91,8 +92,54 @@ bool FJTSDebugTravelAuthorityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Host can use enabled development controls"), Debug->CanUse(Controller));
 	TestFalse(TEXT("An arbitrary planet is never implicitly a debug destination"), Debug->ContainsDestination(TEXT("UnconfiguredPlanet")));
 	TestFalse(TEXT("None is never a valid destination"), Debug->ContainsDestination(NAME_None));
+	auto* Permits = FindFProperty<FArrayProperty>(Debug->GetClass(), TEXT("AccessPermits"))->ContainerPtrToValuePtr<TArray<FJTSDebugAccessPermit>>(Debug);
+	FJTSDebugAccessPermit Permit; Permit.ItemId = TEXT("TestPlanetAccess"); Permit.DeviceItemId = EJTSItemId::PortableCommunicator;
+	Permits->Add(Permit);
+	TestNotNull(TEXT("Configured planet permit is available"), Debug->FindAccessPermit(Permit.ItemId));
+	TestNull(TEXT("Arbitrary permit cannot be granted"), Debug->FindAccessPermit(TEXT("UnconfiguredPermit")));
+	TestNull(TEXT("None is never a permit"), Debug->FindAccessPermit(NAME_None));
 	FindFProperty<FBoolProperty>(Debug->GetClass(), TEXT("bEnabled"))->SetPropertyValue_InContainer(Debug, false);
 	TestFalse(TEXT("Disabled controls reject the host as well"), Debug->CanUse(Controller));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSDebugDeviceCredentialTest, "JTS.Debug.PhysicalDeviceCredentials",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSDebugDeviceCredentialTest::RunTest(const FString& Parameters)
+{
+	FDebugTestWorld Fixture;
+	auto* Character = Fixture.World->SpawnActor<AJTSCharacter>();
+	auto* Inventory = Character->GetInventoryComponent();
+	Inventory->TryAddItemById(EJTSItemId::PortableCommunicator);
+	Inventory->TryAddItemById(EJTSItemId::WaistLamp);
+	const auto Device = Inventory->GetItemAtSlot(0);
+	const auto Selected = Inventory->GetSelectedQuickbarSlot();
+	const FName Permit(TEXT("TestPlanetAccess"));
+	TestTrue(TEXT("Already carried device receives the permit"), Inventory->RecordItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	TestEqual(TEXT("Programming preserves physical identity"), Inventory->GetItemAtSlot(0).InstanceId, Device.InstanceId);
+	TestEqual(TEXT("Programming preserves selection"), Inventory->GetSelectedQuickbarSlot(), Selected);
+	TestTrue(TEXT("Other item types remain unchanged"), Inventory->GetItemAtSlot(1).CredentialIds.IsEmpty());
+	TestFalse(TEXT("Repeated grant cannot duplicate payload"), Inventory->RecordItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	TestEqual(TEXT("One credential recorded"), Inventory->GetItemAtSlot(0).CredentialIds.Num(), 1);
+	TestFalse(TEXT("Empty credential rejected"), Inventory->RecordItemCredential(EJTSItemId::PortableCommunicator, NAME_None));
+	Character->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client cannot program a carried device"), Inventory->RecordItemCredential(EJTSItemId::PortableCommunicator, TEXT("ClientPermit")));
+	Character->SetRole(ROLE_Authority);
+	auto* Pickup = Fixture.World->SpawnActor<AJTSWorldPickupActor>(); Pickup->InitializeItemInstance(Device);
+	TestTrue(TEXT("Dropped device receives the permit"), Pickup->RecordItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	TestFalse(TEXT("Dropped payload deduplicates grants"), Pickup->RecordItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	Pickup->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client cannot program a dropped device"), Pickup->RecordItemCredential(EJTSItemId::PortableCommunicator, TEXT("ClientPermit")));
+	Pickup->SetRole(ROLE_Authority);
+	auto* State = Fixture.World->SpawnActor<AJTSPlayerState>(); State->TryStorePurchasedItem(Device);
+	const auto LockerBefore = State->GetShipLockerSlot(0);
+	TestTrue(TEXT("Stored device receives the permit"), State->RecordLockerItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	TestEqual(TEXT("Locker retains item identity"), State->GetShipLockerSlot(0).StandardItem.InstanceId, Device.InstanceId);
+	TestEqual(TEXT("Locker retains its transfer token"), State->GetShipLockerSlot(0).SlotToken, LockerBefore.SlotToken);
+	TestFalse(TEXT("Stored payload deduplicates grants"), State->RecordLockerItemCredential(EJTSItemId::PortableCommunicator, Permit));
+	State->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client cannot program a stored device"), State->RecordLockerItemCredential(EJTSItemId::PortableCommunicator, TEXT("ClientPermit")));
+	State->SetRole(ROLE_Authority);
 	return true;
 }
 

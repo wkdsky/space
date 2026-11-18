@@ -208,7 +208,10 @@ void UJTSInventoryComponent::ServerMoveInventorySlot_Implementation(int32 FromSl
 		|| !ItemSlots.IsValidIndex(FromSlot) || !ItemSlots.IsValidIndex(ToSlot)
 		|| ItemSlots[FromSlot].IsEmpty() || ItemSlots[FromSlot].InstanceId != ExpectedFromId
 		|| ItemSlots[ToSlot].InstanceId != ExpectedToId) return;
-	ItemSlots.Swap(FromSlot, ToSlot);
+	if (ItemSlots[FromSlot].IsStellar() && ItemSlots[ToSlot].CanStackWith(ItemSlots[FromSlot])
+		&& ItemSlots[ToSlot].StackCount<=MAX_int32-ItemSlots[FromSlot].StackCount)
+	{ ItemSlots[ToSlot].StackCount+=ItemSlots[FromSlot].StackCount; ItemSlots[FromSlot].Clear(); }
+	else ItemSlots.Swap(FromSlot, ToSlot);
 	if (SelectedQuickbarSlot == FromSlot) SelectedQuickbarSlot = ToSlot;
 	else if (SelectedQuickbarSlot == ToSlot) SelectedQuickbarSlot = FromSlot;
 	QuickbarPageIndex = SelectedQuickbarSlot / MaximumQuickbarSlots;
@@ -271,6 +274,19 @@ bool UJTSInventoryComponent::TryAddItem(const FJTSItemInstance& Item, int32& Out
 	}
 	if (OutRemaining != InitialRemaining)
 	{
+		// A collected specimen is carried visibly, including a compatible stack already in the pack.
+		if (Item.ItemId == EJTSItemId::MoonAntCorpse)
+		{
+			for (int32 Index = 0; Index < GetInventoryCapacity(); ++Index)
+				if (ItemSlots[Index].CanStackWith(Item))
+				{
+					SelectedQuickbarSlot = Index;
+					QuickbarPageIndex = Index / MaximumQuickbarSlots;
+					if (auto* Pawn = Cast<APawn>(GetOwner()))
+						if (auto* State = Pawn->GetPlayerState<AJTSPlayerState>()) State->GetStellarLoadout()->SelectWeapon(INDEX_NONE);
+					break;
+				}
+		}
 		NotifyInventoryChanged();
 	}
 	return OutRemaining == 0;
@@ -316,15 +332,56 @@ int32 UJTSInventoryComponent::GetItemCount(EJTSItemId ItemId) const
 	return Result;
 }
 
+bool UJTSInventoryComponent::RecordActiveCredentials(const TArray<FName>& Credentials)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ItemSlots.IsValidIndex(SelectedQuickbarSlot)) return false;
+	auto& Item = ItemSlots[SelectedQuickbarSlot];
+	if (Item.IsEmpty()) return false;
+	for (FName Id : Credentials) if (!Id.IsNone()) Item.CredentialIds.AddUnique(Id);
+	NotifyInventoryChanged();
+	return true;
+}
+
+bool UJTSInventoryComponent::RecordItemCredential(EJTSItemId ItemId, FName CredentialId)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || ItemId==EJTSItemId::None || CredentialId.IsNone()) return false;
+	bool Changed=false;
+	for (auto& Item:ItemSlots)
+		if (!Item.IsEmpty() && Item.ItemId==ItemId && !Item.CredentialIds.Contains(CredentialId))
+		{ Item.CredentialIds.Add(CredentialId); Changed=true; }
+	if (Changed) NotifyInventoryChanged();
+	return Changed;
+}
+
 int32 UJTSInventoryComponent::GetEffectiveStackLimit(const EJTSItemId ItemId) const
 {
+	if (ItemId == EJTSItemId::StellarText || ItemId == EJTSItemId::StellarWeapon) return MAX_int32;
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
 	if (!IsValid(Definition) || !Definition->IsStackable())
 	{
 		return 1;
 	}
 
-	return FJTSPlayerProgressionRules::ItemStackLimit;
+	// Existing resource definitions predate per-item stack limits and keep MaxStackSize=1.
+	EJTSResourceType ResourceType;
+	if (UJTSItemDefinitionLibrary::TryGetResourceType(ItemId, ResourceType))
+	{
+		return FJTSPlayerProgressionRules::ItemStackLimit;
+	}
+	return FMath::Clamp(Definition->MaxStackSize, 1, FJTSPlayerProgressionRules::ItemStackLimit);
+}
+
+bool UJTSInventoryComponent::TryConsumeActiveItem(EJTSItemId ItemId, int32 Count)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || Count <= 0 || ItemId == EJTSItemId::None
+		|| !ItemSlots.IsValidIndex(SelectedQuickbarSlot)) return false;
+	auto& Item = ItemSlots[SelectedQuickbarSlot];
+	if (Item.IsEmpty() || Item.ItemId != ItemId || Item.StackCount < Count) return false;
+	Item.StackCount -= Count;
+	if (Item.StackCount == 0) Item.Clear();
+	ClearWaistLampIfAbsent();
+	NotifyInventoryChanged();
+	return true;
 }
 
 bool UJTSInventoryComponent::TryRemoveItem(EJTSItemId ItemId, int32 Count)
@@ -458,6 +515,17 @@ bool UJTSInventoryComponent::TryExchangeItemAtSlot(int32 SlotIndex, FGuid Expect
 	ClearWaistLampIfAbsent();
 	NotifyInventoryChanged();
 	return true;
+}
+
+void UJTSInventoryComponent::DropDeathItems()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority()) return;
+	for (int32 Index = 0; Index < ItemSlots.Num(); ++Index)
+	{
+		const auto* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemSlots[Index].ItemId);
+		if (!ItemSlots[Index].IsEmpty() && Definition && Definition->bDropOnDeath)
+			DropItemQuantityAtSlot(Index, ItemSlots[Index].StackCount);
+	}
 }
 
 bool UJTSInventoryComponent::DropItemAtSlot(int32 SlotIndex)
@@ -686,18 +754,25 @@ bool UJTSInventoryComponent::InsertIntoSlots(TArray<FJTSItemInstance>& InOutSlot
 		for (int32 SlotIndex = 0; SlotIndex < Capacity && OutRemaining > 0; ++SlotIndex)
 		{
 			FJTSItemInstance& Existing = InOutSlots[SlotIndex];
-			if (Existing.ItemId != Item.ItemId || Existing.IsEmpty() || Existing.StackCount >= StackLimit)
+			if (!Existing.CanStackWith(Item) || Existing.StackCount >= StackLimit)
 			{
 				continue;
 			}
 			const int32 Added = FMath::Min(StackLimit - Existing.StackCount, OutRemaining);
 			Existing.StackCount += Added;
+			for(FName Source:Item.ObservedPlanetIds) Existing.ObservedPlanetIds.AddUnique(Source);
+			if(Item.SampleSpanCm>Existing.SampleSpanCm)
+			{
+				Existing.SampleSpanCm=Item.SampleSpanCm;
+				Existing.SampleVisualVariant=Item.SampleVisualVariant;
+				Existing.CorpsePartIndex=Item.CorpsePartIndex;
+			}
 			OutRemaining -= Added;
 		}
 	}
 
 	const int32 QuickbarCapacity = FMath::Min(MaximumQuickbarSlots, Capacity);
-	const bool bPreferQuickbar = Definition->IsHoldable() && !Definition->IsStackable();
+	const bool bPreferQuickbar = Definition->IsHoldable() && (!Definition->IsStackable() || Item.ItemId == EJTSItemId::MoonAntCorpse);
 	auto FillEmptySlotRange = [&InOutSlots, &Item, &OutRemaining, StackLimit](const int32 StartIndex, const int32 EndIndex)
 	{
 		for (int32 SlotIndex = StartIndex; SlotIndex < EndIndex && OutRemaining > 0; ++SlotIndex)
@@ -791,4 +866,11 @@ void UJTSInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(UJTSInventoryComponent, SelectedQuickbarSlot);
 	DOREPLIFETIME_CONDITION(UJTSInventoryComponent, QuickbarPageIndex, COND_OwnerOnly);
 	DOREPLIFETIME(UJTSInventoryComponent, bWaistLampEquipped);
+}
+
+bool UJTSInventoryComponent::CanAddItemInstance(const FJTSItemInstance& Item) const
+{
+	if(Item.IsEmpty() || !UJTSItemDefinitionLibrary::IsGameplayItemAvailable(Item.ItemId)) return false;
+	auto Simulated=ItemSlots; int32 Remaining=Item.StackCount;
+	return InsertIntoSlots(Simulated,Item,GetInventoryCapacity(),Remaining) && Remaining==0;
 }

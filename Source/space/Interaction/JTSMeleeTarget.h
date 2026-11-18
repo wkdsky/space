@@ -30,6 +30,16 @@ class SPACE_API IJTSMeleeTarget
 	GENERATED_BODY()
 
 public:
+	/** A visible target can explain a missing prerequisite without playing an ineffective swing. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Melee")
+	bool BlocksAttackInitiation(APawn* AttackingPawn) const;
+	virtual bool BlocksAttackInitiation_Implementation(APawn* AttackingPawn) const { return false; }
+
+	/** Damage prerequisites do not suppress the player's attack animation. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Melee")
+	bool BlocksDamage(APawn* AttackingPawn) const;
+	virtual bool BlocksDamage_Implementation(APawn* AttackingPawn) const { return false; }
+
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Melee")
 	bool CanReceiveMeleeHit(APawn* AttackingPawn) const;
 

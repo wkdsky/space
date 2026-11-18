@@ -10,6 +10,15 @@
 
 class UJTSItemDefinition;
 
+/** Project-selected definitions for new utility items; no level or asset choices in runtime rules. */
+UCLASS(Config=Game, DefaultConfig)
+class SPACE_API UJTSItemDefinitionSettings : public UObject
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(Config, EditAnywhere) TMap<EJTSItemId, TSoftObjectPtr<UJTSItemDefinition>> DefinitionOverrides;
+};
+
 /** Central item-definition lookup. Data Assets are preferred; native defaults keep saved prototypes playable if an asset is absent. */
 UCLASS()
 class SPACE_API UJTSItemDefinitionLibrary : public UBlueprintFunctionLibrary

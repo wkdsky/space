@@ -28,6 +28,7 @@ namespace
 		FJTSItemInstance Carried = Slot.StellarCoreId.IsNone()
 			? LootTable->MakeTextItem(Slot.StellarItemId)
 			: LootTable->MakeWeaponItem(Slot.StellarCoreId, Slot.StellarItemId);
+		Carried.StackCount = Slot.StellarStackCount;
 		Carried.StellarCoreLevel = Slot.StellarCoreLevel;
 		Carried.InstanceId = Slot.StellarInstanceId.IsValid() ? Slot.StellarInstanceId : Slot.SlotToken;
 		Carried.StellarAttachmentInstanceId = Slot.StellarAttachmentInstanceId;
@@ -41,6 +42,7 @@ namespace
 			|| Item.ItemId == EJTSItemId::StellarWeapon;
 		Slot.StandardItem = bStellar ? FJTSItemInstance() : Item;
 		Slot.StellarItemId = bStellar ? Item.StellarItemId : NAME_None;
+		Slot.StellarStackCount = bStellar ? Item.StackCount : 1;
 		Slot.StellarCoreId = Item.ItemId == EJTSItemId::StellarWeapon
 			? Item.StellarCoreId : NAME_None;
 		Slot.StellarCoreLevel = bStellar ? FMath::Max(1, Item.StellarCoreLevel) : 1;
@@ -57,6 +59,18 @@ AJTSPlayerState::AJTSPlayerState()
 	bReplicates = true;
 	ShipLockerSlots.SetNum(ShipLockerCapacity);
 	StellarLoadout = CreateDefaultSubobject<UJTSStellarLoadoutComponent>(TEXT("StellarLoadout"));
+}
+
+bool AJTSPlayerState::SplitStellarLockerForMutation(int32 Index)
+{
+	if (ShipLockerSlots[Index].StellarStackCount<=1) return true;
+	for (int32 I=0;I<ShipLockerSlots.Num();++I) if (ShipLockerSlots[I].IsEmpty())
+	{
+		ShipLockerSlots[I]=ShipLockerSlots[Index]; --ShipLockerSlots[I].StellarStackCount;
+		ShipLockerSlots[I].SlotToken=FGuid::NewGuid(); ShipLockerSlots[I].StellarInstanceId=FGuid::NewGuid();
+		ShipLockerSlots[Index].StellarStackCount=1; return true;
+	}
+	return false;
 }
 
 bool AJTSPlayerState::TryReplaceStellarLockerSlot(int32 Index, FGuid ExpectedToken, const FJTSItemInstance& Replacement)
@@ -98,9 +112,18 @@ bool AJTSPlayerState::TryStorePurchasedItem(const FJTSItemInstance& Item)
 {
 	if (!HasAuthority() || Item.IsEmpty()) return false;
 	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	if (Item.IsStellar()) for (auto& Existing:ShipLockerSlots)
+		if (!Existing.bPendingStellarReveal && Existing.StackItem().CanStackWith(Item)
+			&& Existing.StackItem().StackCount<=MAX_int32-Item.StackCount)
+		{
+			if (!Existing.StandardItem.IsEmpty()) Existing.StandardItem.StackCount+=Item.StackCount;
+			else Existing.StellarStackCount+=Item.StackCount;
+			Existing.SlotToken=FGuid::NewGuid(); OnRep_ShipLockerSlots(); ForceNetUpdate(); return true;
+		}
 	for (FJTSShipLockerSlot& Slot : ShipLockerSlots)
 	{
 		if (!Slot.IsEmpty()) continue;
+		if (Item.IsStellar()) { AssignItemToLockerSlot(Slot,Item); OnRep_ShipLockerSlots(); ForceNetUpdate(); return true; }
 		Slot.StandardItem = Item;
 		Slot.StellarItemId = NAME_None;
 		Slot.StellarCoreLevel = 1;
@@ -119,6 +142,10 @@ bool AJTSPlayerState::TryStoreStellarItem(FName ItemId)
 {
 	if (!HasAuthority() || ItemId.IsNone()) return false;
 	ShipLockerSlots.SetNum(ShipLockerCapacity);
+	for (auto& Existing : ShipLockerSlots)
+		if (!Existing.bPendingStellarReveal && Existing.StellarItemId==ItemId && Existing.StellarCoreId.IsNone()
+			&& Existing.StellarCoreLevel==1 && FJTSStellarProgression::SumPoints(Existing.StellarPoints)==0 && Existing.StellarStackCount<MAX_int32)
+		{ ++Existing.StellarStackCount; Existing.SlotToken=FGuid::NewGuid(); OnRep_ShipLockerSlots(); ForceNetUpdate(); return true; }
 	for (FJTSShipLockerSlot& Slot : ShipLockerSlots)
 	{
 		if (!Slot.IsEmpty()) continue;
@@ -192,7 +219,10 @@ bool AJTSPlayerState::TryMoveShipLockerSlot(int32 FromSlotIndex, FGuid ExpectedF
 	{
 		return false;
 	}
-	Swap(From, To);
+	if (!From.StellarItemId.IsNone() && To.StackItem().CanStackWith(From.StackItem())
+		&& To.StellarStackCount<=MAX_int32-From.StellarStackCount)
+	{ To.StellarStackCount+=From.StellarStackCount; From.Clear(); }
+	else Swap(From, To);
 	From.SlotToken = From.IsEmpty() ? FGuid() : FGuid::NewGuid();
 	To.SlotToken = To.IsEmpty() ? FGuid() : FGuid::NewGuid();
 	OnRep_ShipLockerSlots();
@@ -222,13 +252,23 @@ bool AJTSPlayerState::TryCombineStellarSlots(int32 CoreSlotIndex, FGuid Expected
 	{
 		return false;
 	}
-	Core.StellarPoints = Attachment.StellarPoints;
-	Core.StellarInstanceId = Core.StellarInstanceId.IsValid() ? Core.StellarInstanceId : Core.SlotToken;
-	Core.StellarAttachmentInstanceId = Attachment.StellarInstanceId.IsValid() ? Attachment.StellarInstanceId : Attachment.SlotToken;
-	Core.StellarCoreId = Core.StellarItemId;
-	Core.StellarItemId = Attachment.StellarItemId;
-	Core.SlotToken = FGuid::NewGuid();
-	Attachment.Clear();
+	FJTSShipLockerSlot Combined=Core;
+	Combined.StellarStackCount=1; Combined.StellarPoints=Attachment.StellarPoints;
+	Combined.StellarCoreId=Core.StellarItemId; Combined.StellarItemId=Attachment.StellarItemId;
+	Combined.StellarAttachmentInstanceId=Attachment.StellarInstanceId;
+	int32 RemainderSlot=INDEX_NONE;
+	if (Core.StellarStackCount>1)
+	{
+		for (int32 I=0;I<ShipLockerSlots.Num();++I) if (ShipLockerSlots[I].IsEmpty()) { RemainderSlot=I; break; }
+		if (RemainderSlot==INDEX_NONE && Attachment.StellarStackCount==1) RemainderSlot=CoreSlotIndex+1;
+		if (RemainderSlot==INDEX_NONE) return false;
+	}
+	FJTSShipLockerSlot Remainder=Core; --Remainder.StellarStackCount;
+	Remainder.StellarInstanceId=FGuid::NewGuid(); Remainder.SlotToken=FGuid::NewGuid();
+	if (--Attachment.StellarStackCount<=0) Attachment.Clear(); else Attachment.SlotToken=FGuid::NewGuid();
+	if (RemainderSlot!=INDEX_NONE) ShipLockerSlots[RemainderSlot]=Remainder;
+	Core=Combined; Core.SlotToken=FGuid::NewGuid();
+
 	OnRep_ShipLockerSlots();
 	ForceNetUpdate();
 	return true;
@@ -328,6 +368,17 @@ void AJTSPlayerState::RestoreShipLockerSlots(const TArray<FJTSShipLockerSlot>& S
 	ForceNetUpdate();
 }
 
+bool AJTSPlayerState::RecordLockerItemCredential(EJTSItemId ItemId, FName CredentialId)
+{
+	if (!HasAuthority() || ItemId==EJTSItemId::None || CredentialId.IsNone()) return false;
+	bool Changed=false;
+	for (auto& Slot:ShipLockerSlots)
+		if (!Slot.StandardItem.IsEmpty() && Slot.StandardItem.ItemId==ItemId && !Slot.StandardItem.CredentialIds.Contains(CredentialId))
+		{ Slot.StandardItem.CredentialIds.Add(CredentialId); Changed=true; }
+	if (Changed) { OnRep_ShipLockerSlots();ForceNetUpdate(); }
+	return Changed;
+}
+
 void AJTSPlayerState::RestoreStellarFirmwareUnits(int32 SavedUnits)
 {
 	if (!HasAuthority()) return;
@@ -365,6 +416,7 @@ bool AJTSPlayerState::TryApplyStellarPoints(int32 SlotIndex, FGuid ExpectedToken
 	{
 		return false;
 	}
+	if (!SplitStellarLockerForMutation(SlotIndex)) return false;
 	Slot.StellarPoints = FJTSStellarProgression::SumPoints(Requested) > 0 ? Requested : TArray<uint8>();
 	OnRep_ShipLockerSlots();
 	ForceNetUpdate();
@@ -389,7 +441,7 @@ bool AJTSPlayerState::TryUpgradeStellarCore(int32 SlotIndex, FGuid ExpectedToken
 		if (Candidate.bPendingStellarReveal || !Candidate.StandardItem.IsEmpty()
 			|| !Candidate.StellarCoreId.IsNone()) return 0;
 		const FJTSStellarLootEntry* const Entry = LootTable->FindEntry(Candidate.StellarItemId);
-		return Entry ? Entry->FirmwareUnits : 0;
+		return Entry ? Entry->FirmwareUnits * Candidate.StellarStackCount : 0;
 	};
 	if (FirmwareSlotIndex != INDEX_NONE
 		&& (!ShipLockerSlots.IsValidIndex(FirmwareSlotIndex) || FirmwareSlotIndex == SlotIndex
@@ -400,7 +452,7 @@ bool AJTSPlayerState::TryUpgradeStellarCore(int32 SlotIndex, FGuid ExpectedToken
 	{
 		if (Index != SlotIndex) Available += FirmwareUnitsOf(ShipLockerSlots[Index]);
 	}
-	if (Available < Cost) return false;
+	if (Available < Cost || !SplitStellarLockerForMutation(SlotIndex)) return false;
 	if (FirmwareSlotIndex != INDEX_NONE)
 	{
 		StellarFirmwareUnits += FirmwareUnitsOf(ShipLockerSlots[FirmwareSlotIndex]);

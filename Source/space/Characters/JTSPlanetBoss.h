@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "space/Interaction/JTSMeleeTarget.h"
+#include "space/Interaction/IInteractable.h"
+#include "space/Items/JTSItemTypes.h"
 #include "space/Components/JTSBossCombatComponent.h"
 #include "space/Systems/JTSReplicatedMotionBuffer.h"
 #include "JTSPlanetBoss.generated.h"
@@ -28,7 +30,7 @@ struct FJTSBossHitZone
 
 /** Asset-independent surface boss presentation and damage receiver. */
 UCLASS(Blueprintable)
-class SPACE_API AJTSPlanetBoss : public AActor, public IJTSMeleeTarget
+class SPACE_API AJTSPlanetBoss : public AActor, public IJTSMeleeTarget, public IInteractable
 {
 	GENERATED_BODY()
 public:
@@ -39,7 +41,12 @@ public:
 	virtual float TakeDamage(float Damage, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
 	virtual bool CanReceiveMeleeHit_Implementation(APawn* Pawn) const override;
 	virtual void ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type) override;
-	virtual FText GetMeleeTargetDisplayName_Implementation() const override { return DisplayName; }
+	virtual FText GetMeleeTargetDisplayName_Implementation() const override;
+	virtual bool CanInteract_Implementation(APawn* Pawn) const override;
+	virtual FText GetInteractionPrompt_Implementation(APawn* Pawn) const override;
+	virtual void Interact_Implementation(APawn* Pawn) override;
+	virtual float GetInteractionHoldDuration_Implementation(APawn*) const override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual FText GetMeleeTargetPrompt_Implementation(APawn* Pawn) const override;
 	virtual FVector GetMeleeTargetAnchorWorldLocation_Implementation() const override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<USkeletalMeshComponent> Mesh;
@@ -47,6 +54,8 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UJTSBossCombatComponent> Combat;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UJTSPlanetSurfaceSteeringComponent> Steering;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Boss") FText DisplayName;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Analysis") FName SpecimenId;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Analysis") float CorpseRetentionSeconds = 1800;
 	UPROPERTY(EditDefaultsOnly, Category="Boss") float HudRange = 8000;
 	UPROPERTY(EditDefaultsOnly, Category="Boss") float ExtraPlayerHealth = 180;
 	UPROPERTY(EditDefaultsOnly, Category="Boss|Damage") TArray<FJTSBossHitZone> HitZones;
@@ -56,6 +65,10 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnRep_ReplicatedMovement() override;
 private:
+	void SeparateCorpse();
+	UFUNCTION() void OnRep_CorpseSeparated();
+	UPROPERTY(ReplicatedUsing=OnRep_CorpseSeparated) bool bCorpseSeparated=false;
+	FTimerHandle CorpseSeparationTimer;
 	UFUNCTION() void OnDied(AController* InstigatorController, AActor* Causer);
 	UFUNCTION() void OnDamaged(float Current, float Maximum, float Damage, AActor* Causer);
 	UPROPERTY() TArray<TObjectPtr<UBoxComponent>> DamageBodies;

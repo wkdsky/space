@@ -1,4 +1,12 @@
 #include "space/Characters/JTSPlanetSurfaceCreature.h"
+#include "space/Components/JTSCreatureTacticsComponent.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/Items/JTSWorldPickupActor.h"
+#include "space/Components/JTSDiscoveryComponent.h"
+#include "space/Components/JTSCorpseMeshComponent.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Player/JTSCharacter.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
@@ -20,6 +28,7 @@
 
 AJTSPlanetSurfaceCreature::AJTSPlanetSurfaceCreature()
 {
+    CreateDefaultSubobject<UJTSCreatureTacticsComponent>(TEXT("Tactics"));
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 	bReplicates = true;
@@ -98,7 +107,7 @@ bool AJTSPlanetSurfaceCreature::InitializeForSettlement_Implementation(AJTSPlane
 {
 	if (!HasAuthority() || !IsValid(Planet)) return false;
 	FJTSPlanetSurfaceHit SpawnSurface;
-	if (!Planet->ProjectPointToSurface(GroundLocation, SpawnSurface) || !Steering->IsWalkable(Planet, SpawnSurface)) return false;
+	if (!AJTSInteriorZone::ProjectGameplayGround(Planet, GroundLocation, SpawnSurface) || !Steering->IsWalkable(Planet, SpawnSurface)) return false;
 	ActivePlanet = Planet;
 	Home = bDefendsNest ? HomeLocation : GroundLocation;
 	Refuge = HomeLocation;
@@ -125,7 +134,7 @@ void AJTSPlanetSurfaceCreature::SetHabitat(AJTSPlanetEcologyHabitat* InHabitat, 
 		&& (!InHabitat || !InHabitat->bStationaryFeeding))
 	{
 		FJTSPlanetSurfaceFrame Frame;
-		if (ActivePlanet->GetSurfaceFrameAt(Refuge, RefugeActor->GetActorForwardVector(), Frame))
+		if (AJTSInteriorZone::GroundFrame(ActivePlanet.Get(), Refuge, RefugeActor->GetActorForwardVector(), Frame))
 			SetActorLocationAndRotation(Frame.Location, Frame.Transform.GetRotation(), false);
 	}
 }
@@ -138,7 +147,7 @@ void AJTSPlanetSurfaceCreature::SetFeedingTarget(AActor* Target)
 	FeedingTarget->OnDestroyed.AddDynamic(this, &ThisClass::OnFeedingTargetDestroyed);
 	bReturningFromFeeding = false;
 	FJTSPlanetSurfaceFrame Frame;
-	if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), Target->GetActorLocation() - GetActorLocation(), Frame))
+	if (AJTSInteriorZone::GroundFrame(ActivePlanet.Get(), GetActorLocation(), Target->GetActorLocation() - GetActorLocation(), Frame))
 		SetActorRotation(Frame.Transform.GetRotation());
 	SetState(EJTSForagerState::Feed, FMath::FRandRange(4.0f, 9.0f));
 }
@@ -170,7 +179,8 @@ void AJTSPlanetSurfaceCreature::OnRep_State()
 {
 	const bool bUnderground = State == EJTSForagerState::Hidden;
 	Mesh->SetVisibility(!bUnderground);
-	Body->SetCollisionEnabled(bUnderground || State == EJTSForagerState::Dead ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
+	Body->SetCollisionEnabled(bUnderground ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
+	if(State==EJTSForagerState::Dead) { Body->SetCollisionResponseToAllChannels(ECR_Ignore); Body->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block); }
 	CombatBody->SetCollisionEnabled(!CombatBodyBone.IsNone() && CombatBody->GetAttachSocketName() == CombatBodyBone
 		&& !bUnderground && State != EJTSForagerState::Dead ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 	const EJTSForagerState AnimationState = State == EJTSForagerState::MirrorRetract || State == EJTSForagerState::MirrorPause
@@ -183,7 +193,15 @@ void AJTSPlanetSurfaceCreature::OnRep_State()
 		Mesh->PlayAnimation(*Clip, bLoop);
 		const float* Rate = AnimationPlayRates.Find(AnimationState);
 		Mesh->SetPlayRate(Rate ? FMath::Max(0.1f, *Rate) : 1.0f);
+		if(State==EJTSForagerState::Dead)
+		{
+			FTimerHandle FreezePose;
+			GetWorldTimerManager().SetTimer(FreezePose,FTimerDelegate::CreateWeakLambda(this,[this]()
+			{ Mesh->bPauseAnims=true; Mesh->VisibilityBasedAnimTickOption=EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered; }),
+				(*Clip)->GetPlayLength()/FMath::Max(.1f,Mesh->GetPlayRate())+.1f,false);
+		}
 	}
+    if (auto* T=FindComponentByClass<UJTSCreatureTacticsComponent>()) T->RefreshPresentation();
 }
 
 APawn* AJTSPlanetSurfaceCreature::FindThreat() const
@@ -228,7 +246,7 @@ bool AJTSPlanetSurfaceCreature::AdvanceMovement(const FVector& Destination, floa
 		// A species cannot wander out of its authored illumination or activity boundary.
 		if (Habitat.IsValid() && !bReturningFromFeeding && !bEntranceDefense && !Habitat->ContainsPoint(Ground, Planet)) return false;
 		FJTSPlanetSurfaceFrame Frame;
-		if (!Planet->GetSurfaceFrameAt(Ground, Heading, Frame)) return false;
+		if (!AJTSInteriorZone::GroundFrame(Planet, Ground, Heading, Frame)) return false;
 		const FQuat Rotation = FQuat::Slerp(GetActorQuat(), Frame.Transform.GetRotation(), FMath::Clamp(StepTime * 9.0f, 0.0f, 1.0f));
 		SetActorLocationAndRotation(Ground, Rotation, false);
 	}
@@ -476,7 +494,7 @@ bool AJTSPlanetSurfaceCreature::UpdateEntranceDefense(double Now, float Dt)
 void AJTSPlanetSurfaceCreature::UpdateMeleePursuit(APawn* Target, double Now, float Dt, int32 Slot, int32 CohortSize)
 {
 	FJTSPlanetSurfaceHit Surface;
-	if (!Target || !ActivePlanet->ProjectPointToSurface(Target->GetActorLocation(), Surface)) return;
+	if (!Target || !AJTSInteriorZone::ProjectGameplayGround(ActivePlanet.Get(), Target->GetActorLocation(), Surface)) return;
 	// The actual mesh surface and capsule height both matter, especially in deep craters.
 	const bool bInReach = FVector::DistSquared(GetActorLocation(), Surface.ImpactPoint) < FMath::Square(AttackReach)
 		&& FVector::DistSquared(GetActorLocation(), Target->GetActorLocation()) < FMath::Square(AttackReach + Target->GetSimpleCollisionHalfHeight());
@@ -489,7 +507,7 @@ void AJTSPlanetSurfaceCreature::UpdateMeleePursuit(APawn* Target, double Now, fl
 		if (!GetWorld()->LineTraceSingleByChannel(Hit, AttackOrigin, Target->GetActorLocation(), ECC_Visibility, Params))
 		{
 			FJTSPlanetSurfaceFrame Frame;
-			if (ActivePlanet->GetSurfaceFrameAt(GetActorLocation(), Surface.ImpactPoint - GetActorLocation(), Frame))
+			if (AJTSInteriorZone::GroundFrame(ActivePlanet.Get(), GetActorLocation(), Surface.ImpactPoint - GetActorLocation(), Frame))
 				SetActorRotation(Frame.Transform.GetRotation());
 			if (Now >= NextAttack)
 			{
@@ -505,7 +523,7 @@ void AJTSPlanetSurfaceCreature::UpdateMeleePursuit(APawn* Target, double Now, fl
 	const float Angle = (Slot % FMath::Max(1, CohortSize)) * 2 * PI / FMath::Max(1, CohortSize);
 	FJTSPlanetSurfaceHit Approach;
 	const FVector Offset = (Forward * FMath::Cos(Angle) + Right * FMath::Sin(Angle)) * AttackReach * 0.7f;
-	const FVector GoalPoint = ActivePlanet->ProjectPointToSurface(Surface.ImpactPoint + Offset, Approach) ? Approach.ImpactPoint : Surface.ImpactPoint;
+	const FVector GoalPoint = AJTSInteriorZone::ProjectGameplayGround(ActivePlanet.Get(), Surface.ImpactPoint + Offset, Approach) ? Approach.ImpactPoint : Surface.ImpactPoint;
 	// Attack as soon as contact is valid; a moving target must never require an exact formation slot.
 	if (State != EJTSForagerState::Walk) SetState(EJTSForagerState::Walk, 20);
 	MoveTowards(GoalPoint, FleeSpeed, Dt);
@@ -522,6 +540,7 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 	Body->ComponentVelocity = FVector::ZeroVector;
 	SetActorTickEnabled(false);
 	if (IsHidden()) return;
+    if (auto* T=FindComponentByClass<UJTSCreatureTacticsComponent>(); T && T->Update(ActivePlanet.Get(),Dt)) return;
 	if (bColonySheltered && !bEntranceDefense)
 	{
 		if (State == EJTSForagerState::Burrow && Now >= StateEnd) SetState(EJTSForagerState::Hidden, 0);
@@ -575,7 +594,7 @@ void AJTSPlanetSurfaceCreature::UpdateBehavior()
 				if (State == EJTSForagerState::Hidden || State == EJTSForagerState::Burrow)
 				{
 					FJTSPlanetSurfaceFrame Frame;
-					if (ActivePlanet->GetSurfaceFrameAt(Refuge, RefugeActor->GetActorForwardVector(), Frame))
+					if (AJTSInteriorZone::GroundFrame(ActivePlanet.Get(), Refuge, RefugeActor->GetActorForwardVector(), Frame))
 						SetActorLocationAndRotation(Frame.Location, Frame.Transform.GetRotation(), false);
 					SetState(EJTSForagerState::Emerge, 0);
 				}
@@ -729,15 +748,33 @@ void AJTSPlanetSurfaceCreature::OnDied(AController* InstigatorController, AActor
 	if (auto* Mouth = Cast<AJTSPlanetEcologyHabitat>(RefugeActor.Get())) Mouth->Blockade->UnregisterResident(this, true);
 	GetWorldTimerManager().ClearTimer(BehaviorTimer);
 	SetState(EJTSForagerState::Dead, 0);
-	SetLifeSpan(8);
+	CorpseSample=UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::MoonAntCorpse,1);
+	CorpseSample.SpecimenId=SpecimenId;
+	float Span=Mesh->Bounds.BoxExtent.GetMax()*2.f;
+	if(const auto* D=UJTSDiscoveryComponent::Find(this)) if(const auto* Catalog=D->GetCatalog())
+		if(const auto* Entry=Catalog->Find(CorpseSample.ItemId,SpecimenId))
+		{
+			const auto Bounds=UJTSCorpseMeshComponent::GetPartBounds(*Entry,GetWorld());
+			if(!Bounds.IsEmpty()) Span=Bounds[0].GetSize().GetMax();
+		}
+	UJTSDiscoveryComponent::StampPickup(this,CorpseSample,Span,0);
+	MovementSpeed=0;
+	// Preserve the authored pose for a long trip back to the ship.
+	SetLifeSpan(FMath::Max(60.f,CorpseRetentionSeconds)); ForceNetUpdate();
 }
 
 bool AJTSPlanetSurfaceCreature::CanReceiveMeleeHit_Implementation(APawn* AttackingPawn) const { return !Health->IsDead() && State != EJTSForagerState::Hidden; }
 void AJTSPlanetSurfaceCreature::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
 {
-	if (HasAuthority() && CanReceiveMeleeHit_Implementation(Pawn)) Health->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 10 : 24, Pawn ? Pawn->GetController() : nullptr, Pawn);
+    const auto* T=FindComponentByClass<UJTSCreatureTacticsComponent>();
+    if (HasAuthority() && CanReceiveMeleeHit_Implementation(Pawn)) Health->ApplyDamage((Type==EJTSMeleeAttackType::Punch?10:24)*(T?T->DamageMultiplier():1),Pawn?Pawn->GetController():nullptr,Pawn);
 }
-FText AJTSPlanetSurfaceCreature::GetMeleeTargetDisplayName_Implementation() const { return DisplayName; }
+float AJTSPlanetSurfaceCreature::TakeDamage(float Damage,const FDamageEvent& Event,AController* Controller,AActor* Causer)
+{
+    const auto* T=FindComponentByClass<UJTSCreatureTacticsComponent>();
+    return Super::TakeDamage(Damage*(T?T->DamageMultiplier():1),Event,Controller,Causer);
+}
+FText AJTSPlanetSurfaceCreature::GetMeleeTargetDisplayName_Implementation() const { return UJTSDiscoveryComponent::DisplayName(this,EJTSItemId::MoonAntCorpse,SpecimenId); }
 FText AJTSPlanetSurfaceCreature::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("攻击")); }
 FVector AJTSPlanetSurfaceCreature::GetMeleeTargetAnchorWorldLocation_Implementation() const
 {
@@ -766,4 +803,47 @@ void AJTSPlanetSurfaceCreature::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSPlanetSurfaceCreature, State);
+	DOREPLIFETIME(AJTSPlanetSurfaceCreature, CorpseSample);
+}
+
+bool AJTSPlanetSurfaceCreature::CanInteract_Implementation(APawn* Pawn) const
+{
+	return IsValid(Pawn) && State==EJTSForagerState::Dead && !bCorpseCollected && !CorpseSample.IsEmpty()
+		&& Pawn->GetWorld()==GetWorld()
+		&& FVector::DistSquared(Pawn->GetActorLocation(),GetCorpseInteractionLocation())<=FMath::Square(350.f);
+}
+FVector AJTSPlanetSurfaceCreature::GetCorpseInteractionLocation() const
+{ return Mesh->Bounds.Origin; }
+AJTSWorldPickupActor* AJTSPlanetSurfaceCreature::ReleaseCorpseForAnalysis(const FTransform& GroundFrame)
+{
+	if(!HasAuthority() || State!=EJTSForagerState::Dead || bCorpseCollected || CorpseSample.IsEmpty() || !Mesh->bPauseAnims) return nullptr;
+	const FVector Up=GroundFrame.GetUnitAxis(EAxis::Z);
+	const FVector Ground=GetActorLocation()-Up*FVector::DotProduct(GetActorLocation()-GroundFrame.GetLocation(),Up);
+	const FTransform Pose(GetActorRotation(),Ground);
+	auto* Pickup=GetWorld()->SpawnActorDeferred<AJTSWorldPickupActor>(AJTSWorldPickupActor::StaticClass(),Pose,nullptr,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if(!Pickup) return nullptr;
+	Pickup->InitializeItemInstance(CorpseSample); Pickup->FinishSpawning(Pose);
+	if(auto* Planet=ActivePlanet.Get()) Pickup->PlaceOnPlanetSurface(Planet,Ground,GetActorForwardVector());
+	else Pickup->AdjustToGround(Ground);
+	Pickup->SetLifeSpan(FMath::Max(60.f,GetLifeSpan()));
+	bCorpseCollected=true; Destroy(); return Pickup;
+}
+FText AJTSPlanetSurfaceCreature::GetInteractionPrompt_Implementation(APawn* Pawn) const
+{ return CanInteract_Implementation(Pawn)?FText::FromString(TEXT("[E] 携带样本")):FText::GetEmpty(); }
+void AJTSPlanetSurfaceCreature::Interact_Implementation(APawn* Pawn)
+{
+	if(!HasAuthority() || !CanInteract_Implementation(Pawn)) return;
+	const auto* H=Pawn->FindComponentByClass<UJTSHealthComponent>(); if(H && H->IsDead()) return;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(CorpseCollection),false,Pawn);
+	FHitResult Hit;
+	const FVector Target=GetCorpseInteractionLocation();
+	if(GetWorld()->LineTraceSingleByChannel(Hit,Pawn->GetPawnViewLocation(),Target,ECC_Visibility,Query)
+		&& Hit.GetActor()!=this && FVector::DistSquared(Hit.ImpactPoint,Target)>FMath::Square(18.f)) return;
+	auto* I=Pawn->FindComponentByClass<UJTSInventoryComponent>();
+	if(!I || !I->CanAddItemInstance(CorpseSample)) return;
+	bCorpseCollected=true; int32 Remaining=0;
+	if(!I->TryAddItem(CorpseSample,Remaining) || Remaining!=0) { bCorpseCollected=false; return; }
+	if(auto* D=UJTSDiscoveryComponent::Find(this)) D->ObservePickup(CorpseSample);
+	if(auto* C=Cast<AJTSCharacter>(Pawn)) C->TryDepositCarriedResourcesToNearbySpacecraft();
+	Destroy();
 }

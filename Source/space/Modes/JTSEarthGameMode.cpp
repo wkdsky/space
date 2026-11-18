@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/Modes/JTSEarthGameMode.h"
+#include "space/Components/JTSShipDockComponent.h"
 
 #include "EngineUtils.h"
 #include "Engine/World.h"
@@ -307,6 +308,7 @@ void AJTSEarthGameMode::StartLaunchSequence()
 
 	bLaunchSequenceStarted = true;
 	JTSGameState->SetGameplayPhase(EJTSGameplayPhase::Launching);
+	for (TActorIterator<AJTSSpacecraftActor> It(World); It; ++It) It->GetDockComponent()->NotifyTakeoff();
 
 	const float SequenceDuration = GetLaunchSequenceDuration();
 	if (SequenceDuration <= 0.0f)

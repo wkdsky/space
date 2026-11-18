@@ -49,7 +49,9 @@ void UJTSBossHealthWidget::NativeTick(const FGeometry& Geometry, float Dt)
 	Frame->SetVisibility(bNear && DeathTime < 4 ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	if (Boss.IsValid())
 	{
-		NameText->SetText(Boss->DisplayName);
+		NameText->SetText(Boss->GetMeleeTargetDisplayName_Implementation());
 		Bar->SetPercent(Boss->Health->GetHealthNormalized());
 	}
 }
+
+void UJTSBossHealthWidget::SetBoss(AJTSPlanetBoss* InBoss) { Boss=InBoss; }

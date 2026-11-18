@@ -139,6 +139,7 @@ public:
 	bool TryTakeShipLockerItem(int32 SlotIndex, FGuid ExpectedToken, class UJTSInventoryComponent* Inventory,
 		const class UJTSStellarLootTable* LootTable);
 	void RestoreShipLockerSlots(const TArray<FJTSShipLockerSlot>& SavedSlots);
+	bool RecordLockerItemCredential(EJTSItemId ItemId, FName CredentialId);
 
 	/** Core kinds this player has ever rolled (design U). Persisted per player; trades never add to it. */
 	const TArray<FName>& GetDiscoveredStellarCoreIds() const { return DiscoveredStellarCoreIds; }
@@ -174,6 +175,7 @@ public:
 	virtual void OverrideWith(APlayerState* PlayerState) override;
 
 private:
+	bool SplitStellarLockerForMutation(int32 Index);
 	UPROPERTY(ReplicatedUsing=OnRep_NetworkState) FJTSAvatarAppearance Appearance;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stellar", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<class UJTSStellarLoadoutComponent> StellarLoadout;

@@ -49,7 +49,7 @@ def configure():
     world = surface.editor_world()
     actors = list(surface.actors().values())
     nests = {a.get_actor_label(): a.get_actor_transform() for a in actors if a.get_actor_label().startswith('Moon_Nest_')}
-    assert len(nests) == 9
+    assert len(nests) == 7
     resources = [a for a in actors if isinstance(a, unreal.JTSMoonResourceSpawner)]
     for spawner in resources:
         _configure_resources(spawner)

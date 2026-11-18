@@ -14,8 +14,20 @@ class APawn;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UJTSCorpseMeshComponent;
+class UBoxComponent;
+class UMaterialBillboardComponent;
 class AJTSPlanetAnchor;
 struct FHitResult;
+
+USTRUCT()
+struct FJTSShipCollectionEffect
+{
+	GENERATED_BODY()
+	UPROPERTY() TObjectPtr<UMaterialInterface> Material;
+	UPROPERTY() double StartedAt = 0;
+	UPROPERTY() float Duration = .85f;
+};
 
 /** One manually collected Moon world item. It can represent resources or a unique equipment item. */
 UCLASS()
@@ -61,6 +73,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Pickup")
 	FJTSItemInstance GetItemInstance() const;
+	bool IsAvailableForShipScan() const { return !bPickupConsumed && !bIsDropping && !IsActorBeingDestroyed() && !ItemInstance.IsEmpty(); }
+	bool ReserveForShipScan();
+	void CancelShipScanReservation();
+	void CompleteShipCollection(UMaterialInterface* Material);
 
 	/** Bounds-based points used for forgiving target acquisition and world-space prompt placement. */
 	UFUNCTION(BlueprintPure, Category = "Pickup|Interaction")
@@ -75,6 +91,8 @@ public:
 
 	/** Assigns an inventory payload. ItemType remains populated for old Blueprints. */
 	void InitializeItemInstance(const FJTSItemInstance& NewItem);
+	/** Server-only credential write preserves drop motion and consumption state. */
+	bool RecordItemCredential(EJTSItemId ItemId, FName CredentialId);
 
 	/** World-space visual extent used by ground-placement helpers. */
 	virtual FVector GetVisualBoundsExtent() const;
@@ -104,6 +122,12 @@ protected:
 	UStaticMeshComponent* GetPickupMeshComponent() const;
 
 private:
+	UFUNCTION() void OnRep_CollectionEffect();
+	UPROPERTY(ReplicatedUsing=OnRep_CollectionEffect) FJTSShipCollectionEffect CollectionEffect;
+	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> CollectionMaterials;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UJTSCorpseMeshComponent> OriginalCorpseVisual;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> CorpseTarget;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UMaterialBillboardComponent> PickupGlint;
 	UFUNCTION()
 	void OnRep_ItemState();
 
@@ -113,13 +137,15 @@ private:
 	UFUNCTION()
 	void OnRep_SurfacePresentation();
 
-	/** Starts the lightweight non-physics drop movement used only by SpawnGameplayDrop. */
+public:
+	/** Starts a server-authoritative ballistic ejection using the resolved planetary gravity. */
 	void StartDropMotion(
 		const FVector& InitialVelocity,
 		const FVector& GravityAcceleration,
 		const FVector& SafeGroundLocation,
 		AActor* SourceActor,
 		APawn* SafetyPawn);
+private:
 	bool TryPickup(APawn* InteractingPawn, FString& OutFailureReason);
 	bool IsResourceItem() const;
 	float GetVisualSupportDistance(const FVector& GravityDirection) const;

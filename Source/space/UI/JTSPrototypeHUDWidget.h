@@ -59,6 +59,7 @@ protected:
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+    virtual int32 NativePaint(const FPaintArgs& Args,const FGeometry& G,const FSlateRect& C,FSlateWindowElementList& E,int32 Layer,const FWidgetStyle& S,bool bEnabled) const override;
 
 private:
 	UPROPERTY(Transient) TObjectPtr<class UJTSSpaceDebugWidget> SpaceDebugWidget;
@@ -81,6 +82,7 @@ private:
 	void RefreshPlayerStamina(float CurrentStamina, float MaxStamina);
 	void UpdatePlayerStaminaBarPosition(AJTSCharacter* Character);
 	void RefreshShipResourcesSidebar();
+	void UpdateShipResourcePulses(float DeltaSeconds);
 	void RefreshResultView(EJTSGameplayPhase NewGameplayPhase);
 	void RefreshAvatarSelection();
 	void RefreshBoardingProgress();
@@ -272,6 +274,11 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> ShipResourceAmountTexts;
+
+	// Local presentation only: compare replicated totals, never predict storage mutations.
+	TArray<int64> PreviousShipResourceAmounts;
+	TArray<float> ShipResourcePulseTimes;
+	TArray<bool> ShipResourceEntryPulses;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> PlayerCardPanel;

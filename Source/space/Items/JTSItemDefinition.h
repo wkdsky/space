@@ -72,6 +72,12 @@ struct SPACE_API FJTSHeldItemPresentation
 	/** Holds a second mirrored copy in the off hand (dual pistols). Ranged shots then alternate muzzles. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Held Item")
 	bool bDualWield = false;
+
+	/** Original corpse dimensions; anything that cannot fit a single grip is cradled. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Corpse Carry", meta=(ClampMin="1"))
+	float OneHandCorpseMaxSpan = 45.f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Corpse Carry", meta=(ClampMin="1"))
+	float OneHandCorpseMaxGripWidth = 22.f;
 };
 
 /** Per-weapon ranged behavior that goes beyond one hitscan ray. A zero field means the feature is off. */
@@ -197,6 +203,9 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation", meta = (ClampMin = "1.0"))
 	float WorldPickupWidth = 32.0f;
+	/** Optional camera-facing, intermittently sparkling pickup marker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="World Pickup") TObjectPtr<UMaterialInterface> PickupGlintMaterial;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="World Pickup") float PickupGlintSize = 18;
 
 	/** Short purpose tags shown on shop cards and used for future recommendation/sorting work. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Presentation")
@@ -214,6 +223,10 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory", meta = (ClampMin = "1"))
 	int32 MaxStackSize = 1;
+
+	/** Mission supplies can stay at the death location instead of travelling with the respawned pawn. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
+	bool bDropOnDeath = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
 	float DefaultDurability = -1.0f;

@@ -1,4 +1,5 @@
 #include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
+#include "space/World/JTSInteriorZone.h"
 
 #include "Engine/World.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -10,7 +11,7 @@ UJTSPlanetSurfaceSteeringComponent::UJTSPlanetSurfaceSteeringComponent()
 
 bool UJTSPlanetSurfaceSteeringComponent::IsWalkable(const AJTSPlanetAnchor* Planet, const FJTSPlanetSurfaceHit& Hit) const
 {
-	return IsValid(Planet) && Planet->IsSurfacePlacementAllowed(Hit) && FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(),
+	return IsValid(Planet) && (AJTSInteriorZone::FindAt(GetWorld(),Hit.ImpactPoint) || Planet->IsSurfacePlacementAllowed(Hit)) && FVector::DotProduct(Hit.ImpactNormal.GetSafeNormal(),
 		Planet->GetRadialUpVector(Hit.ImpactPoint)) >= FMath::Cos(FMath::DegreesToRadians(MaxSlopeDegrees));
 }
 
@@ -20,9 +21,12 @@ bool UJTSPlanetSurfaceSteeringComponent::Probe(AJTSPlanetAnchor* Planet, const F
 	// Sample the entire short segment: a distant valid point must not hop over an invalid wall or cliff.
 	const int32 Steps = FMath::Max(1, FMath::CeilToInt(Distance / 25.0f));
 	FVector Previous = Ground;
+	const bool bIndoors=AJTSInteriorZone::FindAt(GetWorld(),Ground)!=nullptr;
 	for (int32 I = 1; I <= Steps; ++I)
 	{
-		if (!Planet->ProjectPointToSurface(Ground + Heading * (Distance * I / Steps), OutHit)
+		const FVector Sample=Ground+Heading*(Distance*I/Steps);
+		if ((bIndoors && !AJTSInteriorZone::FindAt(GetWorld(),Sample))
+			|| !AJTSInteriorZone::ProjectGameplayGround(Planet,Sample, OutHit)
 			|| !IsWalkable(Planet, OutHit)) return false;
 		const FVector Up = Planet->GetRadialUpVector(Previous);
 		if (FMath::Abs(FVector::DotProduct(OutHit.ImpactPoint - Previous, Up))

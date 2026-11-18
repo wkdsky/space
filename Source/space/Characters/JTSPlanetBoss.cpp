@@ -1,4 +1,5 @@
 #include "space/Characters/JTSPlanetBoss.h"
+#include "space/Components/JTSBossPhaseComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Components/BoxComponent.h"
@@ -14,6 +15,16 @@
 #include "space/Components/JTSBossDeathPresentationComponent.h"
 #include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
 #include "space/UI/JTSBossHealthWidget.h"
+#include "space/Components/JTSDiscoveryComponent.h"
+#include "space/Components/JTSCorpseMeshComponent.h"
+#include "space/Items/JTSWorldPickupActor.h"
+#include "space/World/JTSPlanetAnchor.h"
+#include "EngineUtils.h"
+#include "TimerManager.h"
+#include "space/Components/JTSInventoryComponent.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
+#include "space/Player/JTSCharacter.h"
+#include "Net/UnrealNetwork.h"
 
 AJTSPlanetBoss::AJTSPlanetBoss()
 {
@@ -30,6 +41,7 @@ AJTSPlanetBoss::AJTSPlanetBoss()
 	Mesh->SetCanEverAffectNavigation(false);
 	Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	Mesh->bEnableUpdateRateOptimizations = false;
+	CreateDefaultSubobject<UJTSBossPhaseComponent>(TEXT("Phases"));
 	Health = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("Health"));
 	Combat = CreateDefaultSubobject<UJTSBossCombatComponent>(TEXT("Combat"));
 	CreateDefaultSubobject<UJTSBossEmergenceFeedbackComponent>(TEXT("EmergenceFeedback"));
@@ -102,6 +114,7 @@ void AJTSPlanetBoss::InitializeOnPlanet(AJTSPlanetAnchor* Planet)
 float AJTSPlanetBoss::TakeDamage(float Damage, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
 	if (!HasAuthority() || Health->IsDead() || !Combat->IsDamageable() || Damage <= 0) return 0;
+    if (auto* P=FindComponentByClass<UJTSBossPhaseComponent>()) { if (!P->AllowsDamageFrom(Causer)) return 0; P->DamageArmor(Damage); }
 	float Multiplier = 1;
 	const UPrimitiveComponent* HitComponent = nullptr;
 	if (Event.IsOfType(FPointDamageEvent::ClassID))
@@ -122,7 +135,9 @@ float AJTSPlanetBoss::TakeDamage(float Damage, const FDamageEvent& Event, AContr
 		}
 		if (Distance < Best) { Best = Distance; Multiplier = HitZones[Index].DamageMultiplier; }
 	}
-	if (Combat->IsVulnerable()) Multiplier *= 1.35f;
+    const auto* Phase=FindComponentByClass<UJTSBossPhaseComponent>();
+    if (Combat->IsVulnerable() && (!Phase || Phase->Phases.IsEmpty())) Multiplier *= 1.35f;
+	if (const auto* Phases=FindComponentByClass<UJTSBossPhaseComponent>()) Multiplier*=Phases->GetDamageMultiplier();
 	return Super::TakeDamage(Damage * Multiplier, Event, EventInstigator, Causer);
 }
 
@@ -142,22 +157,75 @@ void AJTSPlanetBoss::RefreshAction()
 	if (Action == EJTSBossAction::Death)
 	{
 		for (UBoxComponent* Body : DamageBodies) Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Mesh->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
 		FindComponentByClass<UJTSBossDeathPresentationComponent>()->BeginDeath();
+		OnRep_CorpseSeparated();
 	}
 	FindComponentByClass<UJTSBossEmergenceFeedbackComponent>()->RefreshAction();
 }
 
-void AJTSPlanetBoss::OnDied(AController*, AActor*) { Combat->Die(); }
+void AJTSPlanetBoss::OnDied(AController*, AActor*)
+{
+	if(!HasAuthority()) return;
+	Combat->Die(); ForceNetUpdate();
+	GetWorldTimerManager().SetTimer(CorpseSeparationTimer,this,&ThisClass::SeparateCorpse,
+		FMath::Max(.1f,Combat->GetActionDuration()+.1f),false);
+}
+FText AJTSPlanetBoss::GetMeleeTargetDisplayName_Implementation() const
+{ const auto* P=FindComponentByClass<UJTSBossPhaseComponent>(); return P && !P->Phases.IsEmpty()?DisplayName:UJTSDiscoveryComponent::DisplayName(this,EJTSItemId::MoonAntCorpse,SpecimenId); }
+bool AJTSPlanetBoss::CanInteract_Implementation(APawn* Pawn) const
+{
+    const auto* P=FindComponentByClass<UJTSBossPhaseComponent>(); return P && P->CanFlip(Pawn);
+}
+FText AJTSPlanetBoss::GetInteractionPrompt_Implementation(APawn* Pawn) const
+{ return NSLOCTEXT("JTS","FlipBoss","[E] 合力掀翻（单人长按 3 秒）"); }
+float AJTSPlanetBoss::GetInteractionHoldDuration_Implementation(APawn*) const { const auto* P=FindComponentByClass<UJTSBossPhaseComponent>(); return P?P->FlipHoldSeconds():0; }
+void AJTSPlanetBoss::Interact_Implementation(APawn* Pawn) { if (auto* P=FindComponentByClass<UJTSBossPhaseComponent>()) P->ContributeFlip(Pawn); }
+void AJTSPlanetBoss::SeparateCorpse()
+{
+	if(!HasAuthority() || bCorpseSeparated || !Health->IsDead()) return;
+	const auto* Discovery=UJTSDiscoveryComponent::Find(this);
+	const auto* Catalog=Discovery?Discovery->GetCatalog():nullptr;
+	const auto* Entry=Catalog?Catalog->Find(EJTSItemId::MoonAntCorpse,SpecimenId):nullptr;
+	if(!Entry) return;
+	const auto Parts=UJTSCorpseMeshComponent::GetPartBounds(*Entry,GetWorld());
+	if(Parts.IsEmpty()) return;
+	AJTSPlanetAnchor* Planet=Combat->GetPlanet();
+	TArray<AJTSWorldPickupActor*> Spawned;
+	for(int32 Index=0;Index<Parts.Num();++Index)
+	{
+		auto Sample=UJTSItemDefinitionLibrary::MakeInstance(EJTSItemId::MoonAntCorpse,1);
+		Sample.SpecimenId=SpecimenId; Sample.CorpsePartIndex=Index;
+		UJTSDiscoveryComponent::StampPickup(this,Sample,Parts[Index].GetSize().GetMax(),0);
+		const FTransform Pose(Mesh->GetComponentQuat(),Mesh->GetComponentTransform().TransformPosition(Parts[Index].GetCenter()));
+		auto* Part=GetWorld()->SpawnActorDeferred<AJTSWorldPickupActor>(AJTSWorldPickupActor::StaticClass(),Pose,Planet,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if(!Part) { for(auto* P:Spawned) P->Destroy(); return; }
+		Part->InitializeItemInstance(Sample); Part->FinishSpawning(Pose);
+		if(Planet) Part->PlaceOnPlanetSurface(Planet,Pose.GetLocation(),Mesh->GetForwardVector());
+		Part->SetLifeSpan(FMath::Max(60.f,CorpseRetentionSeconds)); Spawned.Add(Part);
+	}
+	bCorpseSeparated=true; OnRep_CorpseSeparated(); ForceNetUpdate();
+}
+void AJTSPlanetBoss::OnRep_CorpseSeparated()
+{
+	if(!bCorpseSeparated) return;
+	Mesh->SetVisibility(false); Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+void AJTSPlanetBoss::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{ Super::GetLifetimeReplicatedProps(OutLifetimeProps); DOREPLIFETIME(AJTSPlanetBoss,bCorpseSeparated); }
 void AJTSPlanetBoss::OnDamaged(float, float, float Damage, AActor*) { Combat->ReactToDamage(Damage); }
 bool AJTSPlanetBoss::CanReceiveMeleeHit_Implementation(APawn*) const { return !Health->IsDead() && Combat->IsDamageable(); }
 void AJTSPlanetBoss::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
 {
 	if (HasAuthority()) UGameplayStatics::ApplyDamage(this, Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn, nullptr);
 }
-FText AJTSPlanetBoss::GetMeleeTargetPrompt_Implementation(APawn*) const { return FText::FromString(TEXT("攻击镜虫首领")); }
+FText AJTSPlanetBoss::GetMeleeTargetPrompt_Implementation(APawn*) const { return FText::FromString(TEXT("攻击")); }
 FVector AJTSPlanetBoss::GetMeleeTargetAnchorWorldLocation_Implementation() const { return Mesh->GetSocketLocation(TEXT("head")); }
 void AJTSPlanetBoss::EndPlay(const EEndPlayReason::Type Reason)
 {
+	GetWorldTimerManager().ClearTimer(CorpseSeparationTimer);
 	for (UJTSBossHealthWidget* Hud : HudWidgets) if (Hud) Hud->RemoveFromParent();
 	Super::EndPlay(Reason);
 }

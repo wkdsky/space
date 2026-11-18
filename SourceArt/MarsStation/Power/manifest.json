@@ -1,0 +1,119 @@
+{
+  "SM_MP_Power_CombinerBase": {
+    "triangles": 44,
+    "dimensions_m": [
+      1.6,
+      2,
+      0.15
+    ]
+  },
+  "SM_MP_Power_CombinerBody": {
+    "triangles": 1144,
+    "dimensions_m": [
+      0.8,
+      1.2,
+      1.6
+    ],
+    "front_axis": "+X"
+  },
+  "SM_MP_Power_CombinerDoor": {
+    "triangles": 281,
+    "hinge_local_m": [
+      0.44,
+      0.57,
+      0.15
+    ],
+    "closed_yaw": 0,
+    "fault_yaw": 55
+  },
+  "SM_MP_Power_StatusLens": {
+    "triangles": 76
+  },
+  "SM_MP_Power_SectorA": {
+    "triangles": 88
+  },
+  "SM_MP_Power_SectorB": {
+    "triangles": 856
+  },
+  "SM_MP_Power_SectorC": {
+    "triangles": 776
+  },
+  "SM_MP_Power_CoreModule": {
+    "triangles": 358,
+    "dimensions_m": [
+      0.15,
+      0.45,
+      0.3
+    ],
+    "grip_m": [
+      0,
+      0,
+      0.283
+    ],
+    "pickable": true
+  },
+  "SM_MP_Power_CoreBurnt": {
+    "triangles": 358,
+    "dimensions_m": [
+      0.15,
+      0.45,
+      0.3
+    ],
+    "grip_m": [
+      0,
+      0,
+      0.283
+    ],
+    "pickable": false
+  },
+  "SM_MP_Power_SupplyRack": {
+    "triangles": 8628,
+    "dimensions_m": [
+      0.6,
+      1.6,
+      1.8
+    ],
+    "slot_centres_m": [
+      [
+        0.1,
+        -0.6,
+        0.66
+      ],
+      [
+        0.1,
+        -0.19999999999999996,
+        0.66
+      ],
+      [
+        0.1,
+        0.20000000000000007,
+        0.66
+      ],
+      [
+        0.1,
+        0.6000000000000002,
+        0.66
+      ]
+    ]
+  },
+  "SM_MP_Power_ColumnJunction": {
+    "triangles": 89,
+    "dimensions_m": [
+      0.2,
+      0.3,
+      0.4
+    ]
+  },
+  "SM_MP_Power_WallJunction": {
+    "triangles": 89,
+    "dimensions_m": [
+      0.3,
+      0.6,
+      0.8
+    ]
+  },
+  "SM_MP_Power_CableMarker": {
+    "triangles": 88,
+    "height_m": 0.8
+  }
+}

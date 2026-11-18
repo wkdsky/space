@@ -107,15 +107,23 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	bool CanAddItem(EJTSItemId ItemId, int32 Count = 1) const;
+	bool CanAddItemInstance(const FJTSItemInstance& Item) const;
 
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	int32 GetItemCount(EJTSItemId ItemId) const;
 
-	/** Stackable items use a fixed cap of 99; unique equipment always occupies one slot. */
+	/** Trusted dock interaction only; there is no client RPC for writing permits. */
+	bool RecordActiveCredentials(const TArray<FName>& Credentials);
+	/** Server-only payload update, including communicators carried in an unselected slot. */
+	bool RecordItemCredential(EJTSItemId ItemId, FName CredentialId);
+
+	/** Authored stack limits are capped at 99; unique equipment always occupies one slot. */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	int32 GetEffectiveStackLimit(EJTSItemId ItemId) const;
 
 	bool TryRemoveItem(EJTSItemId ItemId, int32 Count);
+	/** Authority-only: consume exclusively from the currently held physical stack. */
+	bool TryConsumeActiveItem(EJTSItemId ItemId, int32 Count);
 	/** Server-only exact-slot transfer; preserves the instance payload for ship storage. */
 	bool TryExtractItemAtSlot(int32 SlotIndex, FGuid ExpectedInstanceId, FJTSItemInstance& OutItem);
 	/** Server-only exact-slot replacement used by an atomic ship locker exchange. */
@@ -129,6 +137,8 @@ public:
 	/** Drops the complete slot payload after the server successfully creates a matching world pickup. */
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	bool DropItemAtSlot(int32 SlotIndex);
+	/** Authority-only death hook; uses each definition's opt-in drop policy. */
+	void DropDeathItems();
 
 	UFUNCTION(Server, Reliable)
 	void ServerDropItemAtSlot(int32 SlotIndex);

@@ -1,0 +1,700 @@
+{
+  "Dome_Glazing": {
+    "mesh": "SM_MP_Dome_Glazing",
+    "triangles": 517,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Dome_Ribs": {
+    "mesh": "SM_MP_Dome_Ribs",
+    "triangles": 11932,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Dome_Footing": {
+    "mesh": "SM_MP_Dome_Footing",
+    "triangles": 5456,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Solar_Tracker": {
+    "mesh": "SM_MP_Solar_Tracker",
+    "triangles": 4936,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Combiner": {
+    "mesh": "SM_MP_Combiner",
+    "triangles": 6900,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Lift_Console": {
+    "mesh": "SM_MP_Lift_Console",
+    "triangles": 8702,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Status_Light": {
+    "mesh": "SM_MP_Status_Light",
+    "triangles": 44,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Deck_Tile": {
+    "mesh": "SM_MP_Deck_Tile",
+    "triangles": 256,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Door_Frame": {
+    "mesh": "SM_MP_Door_Frame",
+    "triangles": 3040,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Grow_Bed": {
+    "mesh": "SM_MP_Grow_Bed",
+    "triangles": 2444,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Nursery_Rack": {
+    "mesh": "SM_MP_Nursery_Rack",
+    "triangles": 7728,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Water_Recycler": {
+    "mesh": "SM_MP_Water_Recycler",
+    "triangles": 3860,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Lab_Bench": {
+    "mesh": "SM_MP_Lab_Bench",
+    "triangles": 2172,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Seed_Rack": {
+    "mesh": "SM_MP_Seed_Rack",
+    "triangles": 748,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Mycelium_Vat": {
+    "mesh": "SM_MP_Mycelium_Vat",
+    "triangles": 4272,
+    "collision": "simple",
+    "material_slots": 3
+  },
+  "Soil_Processor": {
+    "mesh": "SM_MP_Soil_Processor",
+    "triangles": 5364,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Survey_Rover": {
+    "mesh": "SM_MP_Survey_Rover",
+    "triangles": 1084,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Weather_Mast": {
+    "mesh": "SM_MP_Weather_Mast",
+    "triangles": 700,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Rescue_Antenna": {
+    "mesh": "SM_MP_Rescue_Antenna",
+    "triangles": 2548,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Corridor_Rib": {
+    "mesh": "SM_MP_Corridor_Rib",
+    "triangles": 176,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Pipe_Run": {
+    "mesh": "SM_MP_Pipe_Run",
+    "triangles": 144,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Wall_Light": {
+    "mesh": "SM_MP_Wall_Light",
+    "triangles": 88,
+    "collision": "none",
+    "material_slots": 2
+  },
+  "Bench": {
+    "mesh": "SM_MP_Bench",
+    "triangles": 176,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Cargo_Crate": {
+    "mesh": "SM_MP_Cargo_Crate",
+    "triangles": 220,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Wreck_Salvage": {
+    "mesh": "SM_MP_Wreck_Salvage",
+    "triangles": 616,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Security_Camera": {
+    "mesh": "SM_MP_Security_Camera",
+    "triangles": 216,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Supervisor_Badge": {
+    "mesh": "SM_MP_Supervisor_Badge",
+    "triangles": 3400,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Data_Pad": {
+    "mesh": "SM_MP_Data_Pad",
+    "triangles": 160,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Tracking_Collar": {
+    "mesh": "SM_MP_Tracking_Collar",
+    "triangles": 760,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Logistics_Chip": {
+    "mesh": "SM_MP_Logistics_Chip",
+    "triangles": 2448,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Noctis_Headframe": {
+    "mesh": "SM_MP_Noctis_Headframe",
+    "triangles": 3692,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Robot_Nest": {
+    "mesh": "SM_MP_Robot_Nest",
+    "triangles": 4776,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Assembly_Point": {
+    "mesh": "SM_MP_Assembly_Point",
+    "triangles": 432,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Furnace_Bank": {
+    "mesh": "SM_MP_Furnace_Bank",
+    "triangles": 3320,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Woodlouse": {
+    "mesh": "SM_MP_Woodlouse",
+    "triangles": 2160,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Dust_Moth": {
+    "mesh": "SM_MP_Dust_Moth",
+    "triangles": 236,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Icegill": {
+    "mesh": "SM_MP_Icegill",
+    "triangles": 1217,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Burrow_Worm": {
+    "mesh": "SM_MP_Burrow_Worm",
+    "triangles": 3320,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Heavy_Miner": {
+    "mesh": "SM_MP_Heavy_Miner",
+    "triangles": 2420,
+    "collision": "none",
+    "material_slots": 2
+  },
+  "Fast_Miner": {
+    "mesh": "SM_MP_Fast_Miner",
+    "triangles": 2420,
+    "collision": "none",
+    "material_slots": 2
+  },
+  "Feign_Miner": {
+    "mesh": "SM_MP_Feign_Miner",
+    "triangles": 2420,
+    "collision": "none",
+    "material_slots": 2
+  },
+  "Fuel_Depot": {
+    "mesh": "SM_MP_Fuel_Depot",
+    "triangles": 1968,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Telescope": {
+    "mesh": "SM_MP_Telescope",
+    "triangles": 200,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Jummt_Sofa": {
+    "mesh": "SM_MP_Jummt_Sofa",
+    "triangles": 264,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Jummt_TV": {
+    "mesh": "SM_MP_Jummt_TV",
+    "triangles": 1892,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Jummt_Suit": {
+    "mesh": "SM_MP_Jummt_Suit",
+    "triangles": 736,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "palette": {
+    "Ceramic": [
+      0.77,
+      0.8,
+      0.74,
+      1
+    ],
+    "Orange": [
+      0.9,
+      0.25,
+      0.045,
+      1
+    ],
+    "Graphite": [
+      0.035,
+      0.055,
+      0.06,
+      1
+    ],
+    "Metal": [
+      0.28,
+      0.35,
+      0.34,
+      1
+    ],
+    "Cell": [
+      0.018,
+      0.08,
+      0.17,
+      1
+    ],
+    "CellLine": [
+      0.18,
+      0.43,
+      0.52,
+      1
+    ],
+    "Green": [
+      0.13,
+      0.28,
+      0.11,
+      1
+    ],
+    "Leaf": [
+      0.29,
+      0.43,
+      0.17,
+      1
+    ],
+    "Soil": [
+      0.12,
+      0.07,
+      0.035,
+      1
+    ],
+    "Water": [
+      0.07,
+      0.3,
+      0.31,
+      1
+    ],
+    "Glass": [
+      0.48,
+      0.72,
+      0.68,
+      0.16
+    ],
+    "Glow": [
+      0.24,
+      0.83,
+      0.59,
+      1
+    ],
+    "Amber": [
+      1,
+      0.35,
+      0.055,
+      1
+    ],
+    "Red": [
+      0.8,
+      0.055,
+      0.022,
+      1
+    ],
+    "Bone": [
+      0.52,
+      0.44,
+      0.25,
+      1
+    ],
+    "Shell": [
+      0.21,
+      0.26,
+      0.15,
+      1
+    ],
+    "Belly": [
+      0.55,
+      0.27,
+      0.13,
+      1
+    ],
+    "Fungus": [
+      0.56,
+      0.53,
+      0.35,
+      1
+    ]
+  },
+  "Vault_Door": {
+    "mesh": "SM_MP_Vault_Door",
+    "triangles": 3544,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Vault_Frame": {
+    "mesh": "SM_MP_Vault_Frame",
+    "triangles": 3356,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Freight_Cage": {
+    "mesh": "SM_MP_Freight_Cage",
+    "triangles": 3708,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Rock_Arch": {
+    "mesh": "SM_MP_Rock_Arch",
+    "triangles": 16,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Empty_Spherical_Liner": {
+    "mesh": "SM_MP_Empty_Spherical_Liner",
+    "triangles": 608,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Ice_Drill": {
+    "mesh": "SM_MP_Ice_Drill",
+    "triangles": 604,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Dismantled_Habitat": {
+    "mesh": "SM_MP_Dismantled_Habitat",
+    "triangles": 3600,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Ice_Shards": {
+    "mesh": "SM_MP_Ice_Shards",
+    "triangles": 48,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Half_Sprout": {
+    "mesh": "SM_MP_Half_Sprout",
+    "triangles": 16,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Port_Tank_Farm": {
+    "mesh": "SM_MP_Port_Tank_Farm",
+    "triangles": 8228,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Core_Pod": {
+    "mesh": "SM_MP_Core_Pod",
+    "triangles": 2804,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Asteroid_Shard": {
+    "mesh": "SM_MP_Asteroid_Shard",
+    "triangles": 320,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Asteroid_Porous": {
+    "mesh": "SM_MP_Asteroid_Porous",
+    "triangles": 320,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Asteroid_Crescent": {
+    "mesh": "SM_MP_Asteroid_Crescent",
+    "triangles": 320,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Light_Sail_Ray": {
+    "mesh": "SM_MP_Light_Sail_Ray",
+    "triangles": 1052,
+    "collision": "complex",
+    "material_slots": 2
+  },
+  "Fractured_Seam": {
+    "mesh": "SM_MP_Fractured_Seam",
+    "triangles": 992,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Dust_Plume": {
+    "mesh": "SM_MP_Dust_Plume",
+    "triangles": 196,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Spore_Cloud": {
+    "mesh": "SM_MP_Spore_Cloud",
+    "triangles": 1200,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Empty_Suit": {
+    "mesh": "SM_MP_Empty_Suit",
+    "triangles": 604,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Log_Pedestal": {
+    "mesh": "SM_MP_Log_Pedestal",
+    "triangles": 160,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Interior_Panel": {
+    "mesh": "SM_MP_Interior_Panel",
+    "triangles": 1040,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Foundation_Support": {
+    "mesh": "SM_MP_Foundation_Support",
+    "triangles": 448,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Access_Frame": {
+    "mesh": "SM_MP_Access_Frame",
+    "triangles": 6368,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Access_Leaf": {
+    "mesh": "SM_MP_Access_Leaf",
+    "triangles": 604,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Access_Reader": {
+    "mesh": "SM_MP_Access_Reader",
+    "triangles": 988,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Access_Status": {
+    "mesh": "SM_MP_Access_Status",
+    "triangles": 44,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Incident_Clipboard": {
+    "mesh": "SM_MP_Incident_Clipboard",
+    "triangles": 8340,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Station_PowerBox": {
+    "mesh": "SM_MP_Station_PowerBox",
+    "triangles": 5248,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Station_ReadyIndicator": {
+    "mesh": "SM_MP_Station_ReadyIndicator",
+    "triangles": 132,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Station_LiftPanel": {
+    "mesh": "SM_MP_Station_LiftPanel",
+    "triangles": 1596,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Station_TrenchRun": {
+    "mesh": "SM_MP_Station_TrenchRun",
+    "triangles": 300,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Station_TrenchTrunk": {
+    "mesh": "SM_MP_Station_TrenchTrunk",
+    "triangles": 300,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Station_Collector": {
+    "mesh": "SM_MP_Station_Collector",
+    "triangles": 3360,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Station_LiftShaft": {
+    "mesh": "SM_MP_Station_LiftShaft",
+    "triangles": 3080,
+    "collision": "complex",
+    "material_slots": 2
+  },
+  "Station_LiftCab": {
+    "mesh": "SM_MP_Station_LiftCab",
+    "triangles": 1556,
+    "collision": "complex",
+    "material_slots": 2
+  },
+  "Station_LiftDoorFrame": {
+    "mesh": "SM_MP_Station_LiftDoorFrame",
+    "triangles": 2192,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Station_LiftDoorLeaf": {
+    "mesh": "SM_MP_Station_LiftDoorLeaf",
+    "triangles": 484,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Station_LiftFeed": {
+    "mesh": "SM_MP_Station_LiftFeed",
+    "triangles": 556,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Flow_Communicator": {
+    "mesh": "SM_MP_Flow_Communicator",
+    "triangles": 3884,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Flow_CommsDock": {
+    "mesh": "SM_MP_Flow_CommsDock",
+    "triangles": 2716,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Flow_Status": {
+    "mesh": "SM_MP_Flow_Status",
+    "triangles": 44,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Flow_ServiceFolder": {
+    "mesh": "SM_MP_Flow_ServiceFolder",
+    "triangles": 13184,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Flow_EntryVestibule": {
+    "mesh": "SM_MP_Flow_EntryVestibule",
+    "triangles": 3740,
+    "collision": "complex",
+    "material_slots": 2
+  },
+  "Flow_GateReader": {
+    "mesh": "SM_MP_Flow_GateReader",
+    "triangles": 3152,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Flow_Combiner": {
+    "mesh": "SM_MP_Flow_Combiner",
+    "triangles": 6028,
+    "collision": "simple",
+    "material_slots": 2
+  },
+  "Flow_BreachBarrier": {
+    "mesh": "SM_MP_Flow_BreachBarrier",
+    "triangles": 4942,
+    "collision": "simple",
+    "material_slots": 1
+  },
+  "Flow_DomeRibs": {
+    "mesh": "SM_MP_Flow_DomeRibs",
+    "triangles": 10024,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Flow_DomeSeal": {
+    "mesh": "SM_MP_Flow_DomeSeal",
+    "triangles": 269,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Flow_DomeGlazing": {
+    "mesh": "SM_MP_Flow_DomeGlazing",
+    "triangles": 269,
+    "collision": "none",
+    "material_slots": 1
+  },
+  "Flow_DomeFooting": {
+    "mesh": "SM_MP_Flow_DomeFooting",
+    "triangles": 8096,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Flow_ConcreteFoundation": {
+    "mesh": "SM_MP_Flow_ConcreteFoundation",
+    "triangles": 380,
+    "collision": "complex",
+    "material_slots": 1
+  },
+  "Flow_EntryRamp": {
+    "mesh": "SM_MP_Flow_EntryRamp",
+    "triangles": 12,
+    "collision": "complex",
+    "material_slots": 1
+  }
+}

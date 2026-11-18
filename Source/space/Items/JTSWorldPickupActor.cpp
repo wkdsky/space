@@ -1,4 +1,11 @@
 #include "space/Items/JTSWorldPickupActor.h"
+#include "space/Components/JTSStellarLoadoutComponent.h"
+#include "space/Player/JTSPlayerState.h"
+#include "Components/MaterialBillboardComponent.h"
+#include "GameFramework/GameStateBase.h"
+#include "space/Components/JTSDiscoveryComponent.h"
+#include "space/Components/JTSCorpseMeshComponent.h"
+#include "Components/BoxComponent.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -558,6 +565,13 @@ AJTSWorldPickupActor::AJTSWorldPickupActor()
 	PickupMesh->SetCanEverAffectNavigation(false);
 	PickupMesh->SetCastShadow(true);
 	PickupMesh->bCastDynamicShadow = true;
+	PickupGlint=CreateDefaultSubobject<UMaterialBillboardComponent>(TEXT("PickupGlint")); PickupGlint->SetupAttachment(SceneRoot);
+	PickupGlint->SetCollisionEnabled(ECollisionEnabled::NoCollision); PickupGlint->SetVisibility(false);
+	OriginalCorpseVisual=CreateDefaultSubobject<UJTSCorpseMeshComponent>(TEXT("OriginalCorpseMesh")); OriginalCorpseVisual->SetupAttachment(SceneRoot);
+	CorpseTarget=CreateDefaultSubobject<UBoxComponent>(TEXT("CorpseTarget")); CorpseTarget->SetupAttachment(SceneRoot);
+	CorpseTarget->SetCollisionEnabled(ECollisionEnabled::NoCollision); CorpseTarget->SetGenerateOverlapEvents(false);
+	CorpseTarget->SetCanEverAffectNavigation(false); CorpseTarget->SetCollisionObjectType(ECC_WorldDynamic);
+	CorpseTarget->SetCollisionResponseToAllChannels(ECR_Ignore); CorpseTarget->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
 	PickupMesh->SetHiddenInGame(false);
 	PickupMesh->SetVisibility(true, true);
 
@@ -595,11 +609,9 @@ EJTSWorldPickupItemType AJTSWorldPickupActor::GetItemType() const
 
 FText AJTSWorldPickupActor::GetItemDisplayName() const
 {
-	return ItemInstance.IsEmpty()
-		? UJTSItemDefinitionLibrary::GetItemDisplayName(ItemTypeToItemId(ItemType))
-		: ItemInstance.CustomDisplayName.IsEmpty()
-			? UJTSItemDefinitionLibrary::GetItemDisplayName(ItemInstance.ItemId)
-			: ItemInstance.CustomDisplayName;
+	const EJTSItemId Id=ItemInstance.IsEmpty()?ItemTypeToItemId(ItemType):ItemInstance.ItemId;
+	if(!UJTSDiscoveryComponent::IsKnown(this,Id,ItemInstance.SpecimenId) || ItemInstance.CustomDisplayName.IsEmpty()) return UJTSDiscoveryComponent::DisplayName(this,Id,ItemInstance.SpecimenId);
+	return ItemInstance.CustomDisplayName;
 }
 
 FJTSItemInstance AJTSWorldPickupActor::GetItemInstance() const
@@ -609,6 +621,7 @@ FJTSItemInstance AJTSWorldPickupActor::GetItemInstance() const
 
 FVector AJTSWorldPickupActor::GetInteractionTargetWorldLocation() const
 {
+	if(OriginalCorpseVisual->IsVisible()) return OriginalCorpseVisual->Bounds.Origin;
 	if (IsValid(PickupMesh) && PickupMesh->IsRegistered())
 	{
 		return PickupMesh->Bounds.Origin;
@@ -619,6 +632,10 @@ FVector AJTSWorldPickupActor::GetInteractionTargetWorldLocation() const
 
 FVector AJTSWorldPickupActor::GetInteractionAnchorWorldLocation() const
 {
+	if(OriginalCorpseVisual->IsVisible())
+	{
+		FVector Top; if(JTSSurfacePlacementBounds::GetVisualTopCenter(OriginalCorpseVisual,SurfaceUp,22.f,Top)) return Top;
+	}
 	if (IsValid(PickupMesh) && PickupMesh->IsRegistered())
 	{
 		FVector TopCenter;
@@ -651,6 +668,7 @@ void AJTSWorldPickupActor::InitializeItemInstance(const FJTSItemInstance& NewIte
 	}
 
 	ItemInstance = NewItem;
+	if(ItemInstance.SampleSpanCm>0) SurfaceVisualVariant = ItemInstance.SampleVisualVariant;
 	if (!ItemInstance.InstanceId.IsValid())
 	{
 		ItemInstance.InstanceId = FGuid::NewGuid();
@@ -660,8 +678,16 @@ void AJTSWorldPickupActor::InitializeItemInstance(const FJTSItemInstance& NewIte
 	ApplyItemAppearance();
 }
 
+bool AJTSWorldPickupActor::RecordItemCredential(EJTSItemId ItemId, FName CredentialId)
+{
+	if (!HasAuthority() || bPickupConsumed || ItemInstance.IsEmpty() || ItemInstance.ItemId!=ItemId
+		|| CredentialId.IsNone() || ItemInstance.CredentialIds.Contains(CredentialId)) return false;
+	ItemInstance.CredentialIds.Add(CredentialId);ForceNetUpdate();return true;
+}
+
 FVector AJTSWorldPickupActor::GetVisualBoundsExtent() const
 {
+	if(OriginalCorpseVisual->IsVisible()) return OriginalCorpseVisual->Bounds.BoxExtent;
 	if (IsValid(PickupMesh) && PickupMesh->IsRegistered())
 	{
 		const float BoundsScale = FMath::Max(FMath::Abs(PickupMesh->BoundsScale), KINDA_SMALL_NUMBER);
@@ -682,6 +708,12 @@ float AJTSWorldPickupActor::GetVisualSupportDistance(const FVector& GravityDirec
 	if (!SafeGravityDirection.Normalize())
 	{
 		SafeGravityDirection = FVector::DownVector;
+	}
+	if(OriginalCorpseVisual->IsVisible())
+	{
+		FJTSSurfaceVisualProjectionBounds Bounds;
+		if(JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(OriginalCorpseVisual,GetActorLocation(),-SafeGravityDirection,Bounds))
+			return Bounds.GetRootToLowestSupport()+3.f;
 	}
 	return FMath::Abs(SafeGravityDirection.X) * VisualExtent.X
 		+ FMath::Abs(SafeGravityDirection.Y) * VisualExtent.Y
@@ -733,10 +765,11 @@ void AJTSWorldPickupActor::PlaceOnPlanetSurface(
 	SurfaceUp = SurfaceFrame.Up.GetSafeNormal();
 	SetActorRotation(SurfaceFrame.Transform.Rotator(), ETeleportType::TeleportPhysics);
 	ApplyItemAppearance();
-	PickupMesh->UpdateBounds();
+	UPrimitiveComponent* Visual=OriginalCorpseVisual->IsVisible()?static_cast<UPrimitiveComponent*>(OriginalCorpseVisual):PickupMesh.Get();
+	Visual->UpdateBounds();
 	FJTSSurfaceVisualProjectionBounds VisualBounds;
 	const float VisualSupportDistance = JTSSurfacePlacementBounds::AccumulateVisualProjectionBounds(
-		PickupMesh,
+		Visual,
 		GetActorLocation(),
 		SurfaceUp,
 		VisualBounds)
@@ -863,6 +896,7 @@ void AJTSWorldPickupActor::BeginPlay()
 		InitializeItem(ItemType);
 	}
 	ApplyItemAppearance();
+	OnRep_CollectionEffect();
 
 	if (UJTSWorldPickupRegistrySubsystem* const Registry = GetWorld() != nullptr
 		? GetWorld()->GetSubsystem<UJTSWorldPickupRegistrySubsystem>()
@@ -898,6 +932,15 @@ void AJTSWorldPickupActor::OnConstruction(const FTransform& Transform)
 void AJTSWorldPickupActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if(CollectionEffect.StartedAt>0)
+	{
+		const auto* State=GetWorld()->GetGameState();
+		const double Now=State?State->GetServerWorldTimeSeconds():GetWorld()->GetTimeSeconds();
+		const float P=FMath::Clamp(float((Now-CollectionEffect.StartedAt)/CollectionEffect.Duration),0.f,1.f);
+		for(UMaterialInstanceDynamic* Material:CollectionMaterials) Material->SetScalarParameterValue(TEXT("Progress"),P);
+		if(P>=1) { SetActorHiddenInGame(true); SetActorTickEnabled(false); if(HasAuthority()) Destroy(); }
+		return;
+	}
 	if (!HasAuthority())
 	{
 		SetActorTickEnabled(false);
@@ -963,22 +1006,57 @@ void AJTSWorldPickupActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(AJTSWorldPickupActor, bIsDropping);
 	DOREPLIFETIME(AJTSWorldPickupActor, bPickupConsumed);
 	DOREPLIFETIME(AJTSWorldPickupActor, bUsesRealPlanetSurface);
+	DOREPLIFETIME(AJTSWorldPickupActor, CollectionEffect);
+}
+
+bool AJTSWorldPickupActor::ReserveForShipScan()
+{
+	if(!HasAuthority() || !IsAvailableForShipScan()) return false;
+	bPickupConsumed=true; return true;
+}
+void AJTSWorldPickupActor::CancelShipScanReservation()
+{ if(HasAuthority() && CollectionEffect.StartedAt<=0) bPickupConsumed=false; }
+void AJTSWorldPickupActor::CompleteShipCollection(UMaterialInterface* Material)
+{
+	if(!HasAuthority() || !bPickupConsumed) return;
+	const auto* State=GetWorld()->GetGameState();
+	CollectionEffect.Material=Material;
+	CollectionEffect.StartedAt=FMath::Max(.001,State?State->GetServerWorldTimeSeconds():double(GetWorld()->GetTimeSeconds()));
+	SetActorEnableCollision(false); OnRep_CollectionEffect(); ForceNetUpdate();
+}
+void AJTSWorldPickupActor::OnRep_CollectionEffect()
+{
+	if(CollectionEffect.StartedAt<=0) return;
+	PickupGlint->SetVisibility(false);
+	SetActorEnableCollision(false); SetActorTickEnabled(true);
+	CollectionMaterials.Reset();
+	if(CollectionEffect.Material && GetNetMode()!=NM_DedicatedServer)
+	{
+		TInlineComponentArray<UMeshComponent*> Meshes(this);
+		for(auto* Mesh:Meshes) if(Mesh->IsVisible()) for(int32 Index=0;Index<Mesh->GetNumMaterials();++Index)
+		{
+			auto* MID=UMaterialInstanceDynamic::Create(CollectionEffect.Material,this);
+			Mesh->SetMaterial(Index,MID); CollectionMaterials.Add(MID);
+		}
+	}
 }
 
 void AJTSWorldPickupActor::OnRep_ItemState()
 {
 	ApplyItemAppearance();
+	OnRep_CollectionEffect();
 }
 
 void AJTSWorldPickupActor::OnRep_DropState()
 {
 	// Movement is replicated by the server; clients never simulate a second drop trajectory.
-	SetActorTickEnabled(false);
+	SetActorTickEnabled(CollectionEffect.StartedAt>0);
 }
 
 void AJTSWorldPickupActor::OnRep_SurfacePresentation()
 {
 	ApplyItemAppearance();
+	OnRep_CollectionEffect();
 }
 
 bool AJTSWorldPickupActor::TraceDropGround(
@@ -1122,6 +1200,12 @@ bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailure
 		return false;
 	}
 
+	if (ItemInstance.IsStellar())
+	{
+		auto* PS=InteractingPawn->GetPlayerState<AJTSPlayerState>();
+		if (PS && PS->GetStellarLoadout()->TryStoreItem(ItemInstance)) return true;
+		OutFailureReason=TEXT("InventoryFull"); return false;
+	}
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemInstance.ItemId);
 	if (!IsValid(Definition))
 	{
@@ -1135,17 +1219,25 @@ bool AJTSWorldPickupActor::TryPickup(APawn* InteractingPawn, FString& OutFailure
 		OutFailureReason = TEXT("InventoryUnavailable");
 		return false;
 	}
-	if (!Inventory->CanAddItem(ItemInstance.ItemId, ItemInstance.StackCount))
+	if (!Inventory->CanAddItemInstance(ItemInstance))
 	{
 		OutFailureReason = TEXT("InventoryFull");
 		return false;
 	}
+	int32 VisualVariant=FMath::Max(0,SurfaceVisualVariant);
+	if(Definition)
+	{
+		const int32 Selected=Definition->WorldPickupMeshVariants.IndexOfByKey(PickupMesh->GetStaticMesh());
+		if(Selected!=INDEX_NONE) VisualVariant=Selected;
+	}
+	UJTSDiscoveryComponent::StampPickup(this,ItemInstance,GetVisualBoundsExtent().GetMax()*2.f,VisualVariant);
 	int32 Remaining = ItemInstance.StackCount;
 	if (!Inventory->TryAddItem(ItemInstance, Remaining) || Remaining != 0)
 	{
 		OutFailureReason = TEXT("InventoryFull");
 		return false;
 	}
+	if(auto* Discovery=UJTSDiscoveryComponent::Find(this)) Discovery->ObservePickup(ItemInstance);
 	return true;
 }
 
@@ -1162,8 +1254,22 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		return;
 	}
 
+	if(OriginalCorpseVisual->SetSample(ItemInstance))
+	{
+		PickupMesh->SetVisibility(false); OriginalCorpseVisual->PlaceAt(FVector::ZeroVector,false);
+		OriginalCorpseVisual->UpdateBounds(); CorpseTarget->SetBoxExtent(OriginalCorpseVisual->GetSourceBounds().GetExtent().ComponentMax(FVector(2)));
+		CorpseTarget->SetCollisionEnabled(ECollisionEnabled::QueryOnly); return;
+	}
+	CorpseTarget->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this,
 		ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId);
+	PickupGlint->Elements.Reset();
+	PickupGlint->SetVisibility(Definition && Definition->PickupGlintMaterial && !bPickupConsumed);
+	if (Definition && Definition->PickupGlintMaterial)
+	{
+		PickupGlint->AddElement(Definition->PickupGlintMaterial,nullptr,false,Definition->PickupGlintSize,Definition->PickupGlintSize,nullptr);
+		PickupGlint->SetRelativeLocation(FVector(0,0,Definition->WorldPickupWidth*.18f));
+	}
 	if (Definition && IsValid(Definition->WorldPickupMesh))
 	{
 		UStaticMesh* Mesh = Definition->WorldPickupMesh.Get();
@@ -1181,7 +1287,8 @@ void AJTSWorldPickupActor::ConfigureAppearance()
 		PickupMaterial = nullptr;
 		AppliedPresentationMaterial = nullptr;
 		const FBox Bounds = Mesh->GetBoundingBox();
-		const float Scale = FMath::Max(1.0f, Definition->WorldPickupWidth) / FMath::Max(1.0f, Bounds.GetSize().GetAbs().GetMax());
+		const float Width=ItemInstance.SampleSpanCm>0?ItemInstance.SampleSpanCm:Definition->WorldPickupWidth;
+		const float Scale = FMath::Max(1.0f, Width) / FMath::Max(1.0f, Bounds.GetSize().GetAbs().GetMax());
 		PickupMesh->SetRelativeScale3D(FVector(Scale));
 		PickupMesh->SetRelativeLocation(-Bounds.GetCenter() * Scale);
 		PickupMesh->SetHiddenInGame(false);
@@ -1278,6 +1385,7 @@ void AJTSWorldPickupActor::ApplyItemAppearance()
 	}
 
 	ConfigureAppearance();
+	if(OriginalCorpseVisual->IsVisible()) return;
 	if (const UJTSItemDefinition* Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this,
 		ItemInstance.IsEmpty() ? ItemTypeToItemId(ItemType) : ItemInstance.ItemId);
 		Definition && IsValid(Definition->WorldPickupMesh))

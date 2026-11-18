@@ -107,7 +107,7 @@ def mouth_rim(name,seed):
     rear=[(-.34,-.53),(-.65,-.75),(-1.05,-.49),(-1.14,.10),(-.93,.62),(-.52,.67),(-.40,.24)]
     top=[(x,y,rng.uniform(.18,.34)) for x,y in rear]
     bottom=[(x+.06,y,-.11) for x,y in rear];n=len(rear)
-    # The nine fixed mouths already abut a crater wall. Its surviving bedrock
+    # The seven fixed mouths already abut a crater wall. Its surviving bedrock
     # supplies the roof; adding another cap there would read as a fitted lid.
     if 'FixedNest' not in name:
         b.add(bottom+top,[tuple(range(n-1,-1,-1)),tuple(range(n,n*2))]+
@@ -145,7 +145,7 @@ def build():
     for i in range(4):
         specs += [(f'RiftRim_{i}',rim,500+i),(f'RiftCutVolume_{i}',volume,500+i),
                   (f'MirrorRefuge_{i}',mouth_rim,400+i),(f'MirrorCutVolume_{i}',mouth_volume,400+i)]
-    for i in range(9):
+    for i in range(7):
         specs += [(f'FixedNest_{i+1:02d}',mouth_rim,1600+i),(f'FixedCutVolume_{i+1:02d}',mouth_volume,1600+i)]
     for suffix,fn,seed in specs:
         name='SM_MS3_'+suffix;old=bpy.data.objects.get(name)

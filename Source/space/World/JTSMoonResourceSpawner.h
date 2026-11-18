@@ -88,6 +88,9 @@ class SPACE_API AJTSMoonResourceSpawner : public AActor
 
 public:
 	AJTSMoonResourceSpawner();
+    /** Content override; legacy Moon ranges retain their existing resource kinds. */
+    UPROPERTY(EditAnywhere,Category="Resources") bool bOverridePrimaryResource=false;
+    UPROPERTY(EditAnywhere,Category="Resources",meta=(EditCondition="bOverridePrimaryResource")) EJTSResourceType PrimaryResource=EJTSResourceType::Rock;
 	UPROPERTY(EditAnywhere, Category="Moon|Resources|Distribution") TObjectPtr<UJTSPlanetDistributionData> DistributionData;
 	void ClearGeneratedResources();
 
@@ -168,7 +171,7 @@ public:
 	AJTSPlanetAnchor* GetOwningPlanet() const;
 
 	/** Registers generated resources and pickups with the active real-surface controller. */
-	void SetSurfaceGameplayController(AJTSMoonSurfaceController* InSurfaceGameplayController);
+	void SetSurfaceGameplayController(AActor* InSurfaceGameplayController);
 
 protected:
 	virtual void BeginPlay() override;
@@ -251,7 +254,7 @@ private:
 	/** Initialization-time landmark cache supplied by AJTSMoonSurfaceController before GenerateResources. */
 	TWeakObjectPtr<AJTSSpacecraftActor> SpacecraftLandmark;
 	TWeakObjectPtr<AJTSPlanetAnchor> OwningPlanet;
-	TWeakObjectPtr<AJTSMoonSurfaceController> SurfaceGameplayController;
+	TWeakObjectPtr<AActor> SurfaceGameplayController;
 	TArray<TWeakObjectPtr<AJTSMoonCorpseActor>> CorpseLandmarks;
 	TArray<TWeakObjectPtr<AJTSMoonAntNestActor>> MoonAntNestLandmarks;
 	TSharedPtr<FJTSMoonResourceCoverage> RuntimeCoverage;

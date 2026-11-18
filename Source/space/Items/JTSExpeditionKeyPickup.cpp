@@ -6,6 +6,7 @@
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Modes/JTSGameplayGameModeBase.h"
 #include "space/Player/JTSCharacter.h"
+#include "space/Ships/JTSSpacecraftActor.h"
 
 AJTSExpeditionKeyPickup::AJTSExpeditionKeyPickup()
 {
@@ -40,5 +41,9 @@ void AJTSExpeditionKeyPickup::Interact_Implementation(APawn* Pawn)
 	FHitResult Hit;
 	if (GetWorld()->LineTraceSingleByChannel(Hit, Pawn->GetPawnViewLocation(), GetActorLocation(), ECC_Visibility, Query)) return;
 	auto* Mode = GetWorld()->GetAuthGameMode<AJTSGameplayGameModeBase>();
-	if (Mode && Mode->GrantImportantItem(ImportantItemId, PickupNotice)) { bCollected = true; Destroy(); }
+    if (Mode && Mode->GrantImportantItem(ImportantItemId, PickupNotice))
+    {
+        if (const auto* S=GetWorld()->GetGameState<AJTSGameState>(); S && S->GetActiveSpacecraft()) S->GetActiveSpacecraft()->DepositResourceAmounts(ResourceReward);
+        bCollected=true; Destroy();
+    }
 }

@@ -41,6 +41,10 @@
 #include "space/Weapons/JTSStellarAreaField.h"
 #include "space/Weapons/JTSStellarDrone.h"
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/World/JTSPlanetSurfaceAttachment.h"
+#include "space/Components/JTSNestBlockadeComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/UI/JTSStellarAttachmentDialog.h"
 #include "space/Tests/JTSMoonAntTestHabitat.h"
@@ -1051,6 +1055,29 @@ namespace
 		}
 		void Step(float Seconds) { W.Step(Seconds,Weapon); }
 	};
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarNestSurfaceWeaponsTest,"JTS.Stellar.Targets.NestSurfaceWeapons",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FStellarNestSurfaceWeaponsTest::RunTest(const FString&)
+{
+	for (FName Attachment : {FName("FocusTube"),FName("DisassemblyTube"),FName("JetTube")})
+	{
+		FAbilityRig R(Attachment);
+		const FTransform NestPose(FVector(300,0,64));
+		auto* Nest=R.W.World->SpawnActorDeferred<AJTSPlanetEcologyHabitat>(AJTSPlanetEcologyHabitat::StaticClass(),NestPose,nullptr,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Nest->bCanBlockEntrance=true; Nest->bRequiresSpecimenAnalysis=false;
+		Nest->RefugeMesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
+		Nest->FinishSpawning(NestPose);
+		auto* Proxy=R.W.World->SpawnActor<AJTSPlanetSurfaceAttachment>(FVector(240,0,64),FRotator::ZeroRotator);
+		Proxy->AttachToActor(Nest,FAttachmentTransformRules::KeepWorldTransform);
+		auto* Box=NewObject<UBoxComponent>(Proxy); Box->SetupAttachment(Proxy->GetRootComponent()); Proxy->AddInstanceComponent(Box);
+		Box->SetBoxExtent(FVector(20)); Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly); Box->SetCollisionObjectType(ECC_WorldDynamic);
+		Box->SetCollisionResponseToAllChannels(ECR_Ignore); Box->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block); Box->RegisterComponent();
+		Proxy->DispatchBeginPlay();
+		R.Input(true,false); R.Step(.9f); R.Input(false,false);
+		TestTrue(FString::Printf(TEXT("%s damages the entrance through its actual surface proxy"),*Attachment.ToString()),Nest->Blockade->GetProgress()>0.f);
+		TestFalse(TEXT("Structural durability never kills the legacy targeting health"),Nest->FindComponentByClass<UJTSHealthComponent>()->IsDead());
+	}
+	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStellarAllAbilitiesTest,"JTS.Stellar.Abilities.AllTwelveCombatDefinitions",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FStellarAllAbilitiesTest::RunTest(const FString&)

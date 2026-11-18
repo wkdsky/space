@@ -1,3 +1,5 @@
+#include "space/Player/JTSCharacter.h"
+#include "space/Components/JTSInteriorStateComponent.h"
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "JTSCharacter.h"
@@ -63,6 +65,7 @@
 
 AJTSCharacter::AJTSCharacter()
 {
+	CreateDefaultSubobject<UJTSInteriorStateComponent>(TEXT("InteriorState"));
 	PrimaryActorTick.bCanEverTick = true;
 	AvatarAppearance = CreateDefaultSubobject<UJTSAvatarAppearanceComponent>(TEXT("AvatarAppearance"));
 
@@ -3040,6 +3043,7 @@ void AJTSCharacter::HandleHealthDeath(AController* InstigatorController, AActor*
 
 	if (HasAuthority())
 	{
+		if (InventoryComponent) InventoryComponent->DropDeathItems();
 		if (AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>())
 		{
 			State->SetExpeditionStatus(EJTSPlayerExpeditionStatus::Dead);

@@ -307,6 +307,7 @@ void UJTSMeleeComponent::BeginAttack(EJTSAttackType AttackType)
 		EndAttackState();
 		return;
 	}
+	if(GetAttackBlockerInAim()) { EndAttackState(); return; }
 
 	const bool bIsComboContinuation = bIsAttacking && AttackType == EJTSAttackType::Punch;
 	if (auto* Facing = GetOwner()->FindComponentByClass<UJTSCombatFacingComponent>())
@@ -573,7 +574,22 @@ bool UJTSMeleeComponent::TryAttack()
 
 AActor* UJTSMeleeComponent::GetCurrentMeleeTarget() const
 {
+	if(AActor* Blocker=GetAttackBlockerInAim()) return Blocker;
 	return CurrentMeleeTarget.Get();
+}
+
+AActor* UJTSMeleeComponent::GetAttackBlockerInAim() const
+{
+	auto* Pawn=Cast<APawn>(GetOwner());
+	FVector Origin,Direction;
+	if(!Pawn || !GetPlayerAimView(Pawn,Origin,Direction)) return nullptr;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(AttackPrerequisite),false,Pawn);
+	AddOwnerAndAttachedActorsToIgnoreList(Query,Pawn);
+	FHitResult Hit;
+	if(!GetWorld()->LineTraceSingleByChannel(Hit,Origin,Origin+Direction*1200.f,ECC_Visibility,Query)) return nullptr;
+	for(AActor* Target=Hit.GetActor();IsValid(Target);Target=Target->GetAttachParentActor())
+		if(Target->Implements<UJTSMeleeTarget>() && IJTSMeleeTarget::Execute_BlocksAttackInitiation(Target,Pawn)) return Target;
+	return nullptr;
 }
 
 bool UJTSMeleeComponent::IsUnarmedComboActive() const

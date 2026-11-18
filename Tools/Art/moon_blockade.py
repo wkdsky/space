@@ -110,7 +110,7 @@ def _configure():
     actors = _actors()
     planet = next(a for a in actors if isinstance(a, unreal.JTSPlanetAnchor) and str(a.get_planet_id()) == 'Moon')
     nests = sorted([a for a in actors if a.get_actor_label().startswith('Moon_Nest_')], key=lambda a: a.get_actor_label())
-    assert len(nests) == 9
+    assert len(nests) == 7
     before = {a.get_actor_label(): a.get_actor_transform() for a in nests}
     data = unreal.load_asset(DATA)
     assert isinstance(data, unreal.JTSMoonSurfaceGameplayData)
@@ -276,7 +276,7 @@ def _probe(visual_only=False, tool_checks=False):
     assert expedition.begin_new_expedition_in_slot(1, 'Temporary Moon blockade validation')
     nests = sorted([a for a in unreal.GameplayStatics.get_all_actors_of_class(world, unreal.JTSPlanetEcologyHabitat)
                     if a.get_editor_property('can_block_entrance')], key=lambda a: a.get_actor_label())
-    assert len(nests) == 9
+    assert len(nests) == 7
     saved, old_target = pawn.get_actor_transform(), pc.get_view_target()
     movement = pawn.character_movement
     mode = movement.get_editor_property('movement_mode')

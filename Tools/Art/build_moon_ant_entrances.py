@@ -1,4 +1,4 @@
-"""Build nine small faceted mouths fitted to the detected crater foot edges."""
+"""Build seven small faceted mouths fitted to the detected crater foot edges."""
 import bpy
 import json
 import math
@@ -25,8 +25,8 @@ placements=[]
 inner=[(-.34,0),(.34,0),(.375,.10),(.31,.29),(.16,.425),(-.065,.45),(-.265,.365),(-.375,.20)]
 outer=[(-.46,-.025),(.465,-.025),(.495,.11),(.405,.355),(.215,.535),(-.085,.57),(-.35,.445),(-.49,.235)]
 
-for nest in range(9):
-    distance=(start+nest*total/9)%total
+for nest in range(7):
+    distance=(start+nest*total/7)%total
     i=0
     while distance>lengths[i]:distance-=lengths[i];i+=1
     # A mouth occupies less than a metre; keep it away from three-face vertices.
@@ -82,7 +82,7 @@ for nest in range(9):
         "opening_width_cm":75,"opening_height_cm":45})
     obj.hide_render=True
 
-(root/"moon_ant_nest_placements.json").write_text(json.dumps({"count":9,"foot_perimeter_world_m":total*82/100,
+(root/"moon_ant_nest_placements.json").write_text(json.dumps({"count":7,"foot_perimeter_world_m":total*82/100,
     "placements":placements},indent=2))
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"MoonAntNestEntrances.blend"))
 print("ANT_ENTRANCES_BUILT",[(p["name"],p["edge_vertices"],round(p["slope_break_degrees"],2)) for p in placements])

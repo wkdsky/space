@@ -2,6 +2,8 @@
 
 #include "space/UI/JTSShopWidget.h"
 #include "space/UI/JTSMaterialProcessorWidget.h"
+#include "space/UI/JTSStellarExchangeWidget.h"
+#include "space/Ships/JTSShipDockActor.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -139,6 +141,8 @@ namespace
 		case EJTSResourceType::Ore: return TEXT("矿物");
 		case EJTSResourceType::Crystal: return TEXT("矿物");
 		case EJTSResourceType::InorganicCarbon: return TEXT("无机碳");
+		case EJTSResourceType::ManufacturedPart: return TEXT("人造构件");
+		case EJTSResourceType::HighGradeAlloy: return TEXT("高品位合金");
 		case EJTSResourceType::Fuel: return TEXT("燃料");
 		case EJTSResourceType::Water: return TEXT("水");
 		case EJTSResourceType::Food: return TEXT("食物");
@@ -186,6 +190,8 @@ TSharedRef<SWidget> UJTSShopWidget::RebuildWidget()
 
 FReply UJTSShopWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
+	if(bShopOpen && InKeyEvent.GetKey()==EKeys::J)
+	{ if(auto* PC=Cast<AJTSPlayerController>(GetOwningPlayer())) PC->ToggleFieldGuide(); return FReply::Handled(); }
 	if (bShopOpen && InKeyEvent.GetKey() == EKeys::Tab)
 	{
 		ToggleShopPage();
@@ -233,6 +239,8 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 	BuildWidgetTree();
 	SetIsFocusable(true);
 	ActiveSpacecraft = Spacecraft;
+	ActiveDock.Reset(); bDockSession = false; bPhysicalConsoleSession = false;
+	if (TerminalTitle) TerminalTitle->SetText(FText::FromString(TEXT("飞船终端")));
 	if (MaterialPanel) MaterialPanel->SetContext(Spacecraft, Cast<AJTSPlayerController>(GetOwningPlayer()));
 	ResetLockerDrag();
 	LastDisplayedResourceAmounts.Reset();
@@ -258,6 +266,19 @@ bool UJTSShopWidget::OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft)
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	RefreshAll();
 	return true;
+}
+
+bool UJTSShopWidget::OpenForDock(AJTSShipDockActor* Dock)
+{
+	if (!IsValid(Dock) || !OpenForSpacecraft(Dock->GetSpacecraft())) return false;
+	ActiveDock = Dock; bPhysicalConsoleSession = true;
+	bShowingStellarPage = Dock->GetService() == EJTSShipDockService::StellarExchange;
+	if (SharedStellarPanel) SharedStellarPanel->SetShip(Dock->GetSpacecraft(), true);
+	bDockSession = Dock->GetService() != EJTSShipDockService::ShipTerminal;
+	bShowingMaterialPage = Dock->GetService() == EJTSShipDockService::MaterialProcessing;
+	bShowingWeaponPage = Dock->GetService() == EJTSShipDockService::WeaponModification;
+	if (TerminalTitle) TerminalTitle->SetText(Dock->DisplayName);
+	RefreshAll(); return true;
 }
 
 void UJTSShopWidget::CloseShop()
@@ -330,6 +351,11 @@ void UJTSShopWidget::SetStatus(const FString& Message, bool bError)
 
 void UJTSShopWidget::NotifyStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex)
 {
+	if (Result == EJTSStellarRollResult::Succeeded && ItemId.IsNone())
+	{
+		SetStatus(TEXT("拉杆已启动，奖励优先进入你的星际格，满格则弹到地面"), false);
+		return;
+	}
 	bRollResultReceived = true;
 	RolledStellarItemId = ItemId;
 	RolledLockerSlotIndex = SlotIndex;
@@ -502,7 +528,7 @@ void UJTSShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	{
 		return;
 	}
-	if (!ActiveSpacecraft.IsValid())
+	if (!ActiveSpacecraft.IsValid() || (bPhysicalConsoleSession && (!ActiveDock.IsValid() || !ActiveDock->CanUseDock(GetOwningPlayerPawn()))))
 	{
 		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 		{
@@ -747,23 +773,28 @@ void UJTSShopWidget::BuildWidgetTree()
 	UCanvasPanel* const FrameCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipSupplyFrameCanvas"));
 	ShopFrame->SetContent(FrameCanvas);
 
-	AddCanvas(FrameCanvas, MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端"), 32.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(360.0f, 46.0f));
+	TerminalTitle = MakeText(WidgetTree, TEXT("ShipSupplyTitle"), TEXT("飞船终端"), 32.0f, FLinearColor(0.92f, 0.97f, 1.0f, 1.0f));
+	AddCanvas(FrameCanvas, TerminalTitle, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 24.0f), FVector2D(560.0f, 46.0f));
 
 	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyClose"));
 	CloseButton->SetBackgroundColor(FLinearColor(0.16f, 0.22f, 0.30f, 1.0f));
 	CloseButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyCloseLabel"), TEXT("关闭"), 13.0f));
 	CloseButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleCloseClicked);
 	AddCanvas(FrameCanvas, CloseButton, FAnchors(1.0f, 0.0f), FVector2D(-30.0f, 25.0f), FVector2D(120.0f, 36.0f), FVector2D(1.0f, 0.0f));
+	UButton* Guide=WidgetTree->ConstructWidget<UButton>();
+	Guide->SetContent(MakeButtonLabel(WidgetTree,TEXT("FieldGuideLabel"),TEXT("图鉴 / 收纳"),13));
+	Guide->OnClicked.AddDynamic(this,&ThisClass::HandleFieldGuideClicked);
+	AddCanvas(FrameCanvas,Guide,FAnchors(1,0),FVector2D(-164,25),FVector2D(138,36),FVector2D(1,0));
 
 	SupplyTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipSupplyTab"));
 	SupplyTabButton->SetBackgroundColor(FLinearColor(0.08f, 0.29f, 0.43f, 1.0f));
-	SupplyTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyTabLabel"), TEXT("普通商店"), 16.0f));
+	SupplyTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipSupplyTabLabel"), TEXT("商店"), 16.0f));
 	SupplyTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleSupplyTabClicked);
 	AddCanvas(FrameCanvas, SupplyTabButton, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
 	StellarTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipStellarTab"));
 	StellarTabButton->SetBackgroundColor(FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
-	StellarTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarTabLabel"), TEXT("星际商店"), 16.0f));
+	StellarTabButton->SetContent(MakeButtonLabel(WidgetTree, TEXT("ShipStellarTabLabel"), TEXT("阿尔法快乐拉杆（活动专用）"), 16.0f));
 	StellarTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleStellarTabClicked);
 	AddCanvas(FrameCanvas, StellarTabButton, FAnchors(0.0f, 0.0f), FVector2D(206.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
@@ -772,7 +803,7 @@ void UJTSShopWidget::BuildWidgetTree()
 	AbilityTabLabel = MakeButtonLabel(WidgetTree, TEXT("ShipAbilityTabLabel"), TEXT("能力"), 16.0f);
 	AbilityTabButton->SetContent(AbilityTabLabel);
 	AbilityTabButton->OnClicked.AddDynamic(this, &UJTSShopWidget::HandleAbilityTabClicked);
-	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(558.0f, 84.0f), FVector2D(168.0f, 40.0f));
+	AddCanvas(FrameCanvas, AbilityTabButton, FAnchors(0.0f, 0.0f), FVector2D(206.0f, 84.0f), FVector2D(168.0f, 40.0f));
 
 	WeaponTabButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipWeaponTab"));
 	WeaponTabButton->SetBackgroundColor(FLinearColor(0.10f, 0.16f, 0.25f, 1.0f));
@@ -807,6 +838,8 @@ void UJTSShopWidget::BuildWidgetTree()
 	AddCanvas(FrameCanvas, StellarPanel, FAnchors(0.0f, 0.0f), FVector2D(30.0f, 138.0f), FVector2D(620.0f, 520.0f));
 	UCanvasPanel* const StellarCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("ShipStellarCanvas"));
 	StellarPanel->SetContent(StellarCanvas);
+	SharedStellarPanel = WidgetTree->ConstructWidget<UJTSStellarExchangeWidget>(UJTSStellarExchangeWidget::StaticClass(), TEXT("SharedStellarExchange"));
+	AddCanvas(FrameCanvas, SharedStellarPanel, FAnchors(0.f,0.f), FVector2D(30,138), FVector2D(620,520));
 	AddCanvas(StellarCanvas, MakeText(WidgetTree, TEXT("ShipStellarTitle"), TEXT("星际联盟遥感"), 23.0f, FLinearColor(0.83f, 0.92f, 1.0f, 1.0f)), FAnchors(0.0f, 0.0f), FVector2D(28.0f, 25.0f), FVector2D(270.0f, 35.0f));
 	DebugStellarItemsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ShipDebugStellarItems"));
 	DebugStellarItemsButton->SetBackgroundColor(FLinearColor(0.13f, 0.22f, 0.27f, 1.0f));
@@ -1143,6 +1176,12 @@ void UJTSShopWidget::RefreshAbilities()
 
 void UJTSShopWidget::RefreshPageVisibility()
 {
+	for (UButton* Button : {SupplyTabButton.Get(), StellarTabButton.Get(), AbilityTabButton.Get()})
+		if (Button) Button->SetVisibility(bDockSession ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (StellarTabButton) StellarTabButton->SetVisibility(ESlateVisibility::Collapsed);
+	if (SharedStellarPanel) SharedStellarPanel->SetVisibility(bShowingStellarPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (WeaponTabButton) WeaponTabButton->SetVisibility(ESlateVisibility::Collapsed);
+	if (MaterialTabButton) MaterialTabButton->SetVisibility(ESlateVisibility::Collapsed);
 	auto SetVisibilityIfChanged = [](UWidget* Widget, ESlateVisibility NewVisibility)
 	{
 		if (Widget && Widget->GetVisibility() != NewVisibility) Widget->SetVisibility(NewVisibility);
@@ -1154,8 +1193,7 @@ void UJTSShopWidget::RefreshPageVisibility()
 	}
 	if (StellarPanel != nullptr)
 	{
-		SetVisibilityIfChanged(StellarPanel, !bShowingMaterialPage && !bShowingAbilityPage && !bShowingWeaponPage && bShowingStellarPage
-			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		SetVisibilityIfChanged(StellarPanel, ESlateVisibility::Collapsed);
 	}
 	if (WeaponPage != nullptr)
 	{
@@ -1214,12 +1252,9 @@ void UJTSShopWidget::RefreshPageVisibility()
 
 void UJTSShopWidget::ToggleShopPage()
 {
-	// Supply -> stellar -> weapon -> ability -> material processor -> supply.
-	if (bShowingMaterialPage) { bShowingMaterialPage = false; }
-	else if (bShowingAbilityPage) { bShowingAbilityPage = false; bShowingMaterialPage = true; }
-	else if (bShowingWeaponPage) { bShowingWeaponPage = false; bShowingAbilityPage = true; }
-	else if (bShowingStellarPage) { bShowingStellarPage = false; bShowingWeaponPage = true; }
-	else bShowingStellarPage = true;
+	if (bDockSession) return;
+	bShowingStellarPage = false;
+	bShowingAbilityPage = !bShowingAbilityPage;
 	RefreshAll();
 }
 
@@ -1657,7 +1692,8 @@ void UJTSShopWidget::RefreshShipLocker()
 		{
 			const bool bUpgradeable = !bConcealed && !LockerEntry.StandardItem.IsEmpty()
 				&& FJTSWeaponProgression::IsUpgradeable(LockerEntry.StandardItem.ItemId);
-			const FString BadgeText = bUpgradeable
+			const FString BadgeText = !bConcealed && !LockerEntry.StellarItemId.IsNone()
+				? FJTSItemInstance::StackBadge(LockerEntry.StellarStackCount) : bUpgradeable
 				? FString::FromInt(FJTSWeaponProgression::SumPoints(LockerEntry.StandardItem.WeaponPoints)) : FString();
 			if (LockerSlotBadges[Index]->GetText().ToString() != BadgeText)
 			{
@@ -2002,6 +2038,9 @@ void UJTSShopWidget::HandleCloseClicked()
 		Controller->CloseSpaceShop();
 	}
 }
+
+void UJTSShopWidget::HandleFieldGuideClicked()
+{ if(auto* PC=Cast<AJTSPlayerController>(GetOwningPlayer())) PC->ToggleFieldGuide(); }
 
 void UJTSShopWidget::OpenAttachmentDialog(int32 LockerSlotIndex)
 {

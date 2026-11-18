@@ -77,5 +77,7 @@ q = unreal.Quat(*fit["actor_transform"]["rotation"])
 corpse.set_actor_rotation(q.rotator(), False)
 corpse.set_actor_location(unreal.Vector(*fit["actor_transform"]["location"]), False, False)
 assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
-(root / "moon_ant_ecology_balance.json").write_text(json.dumps(balance, indent=2), encoding="utf-8")
+qa=root.parents[1]/'Saved/MoonAntNests'
+qa.mkdir(parents=True,exist_ok=True)
+(qa / "moon_ant_ecology_balance.json").write_text(json.dumps(balance, indent=2), encoding="utf-8")
 print("MOON_ANT_ECOLOGY_CONFIGURED", balance)

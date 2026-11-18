@@ -56,5 +56,7 @@ with unreal.ScopedEditorTransaction("Randomize Moon ant entrance shapes"):
                      "rim_width": component.get_editor_property("rim_width"), "shape": values})
 assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
 report = {"assignment_seed": seed, "count": len(rows), "randomized_once_and_saved": True, "nests": rows}
-(root / "moon_ant_entrance_shapes.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+qa=root.parents[1]/'Saved/MoonAntNests'
+qa.mkdir(parents=True,exist_ok=True)
+(qa / "moon_ant_entrance_shapes.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 print("MOON_ANT_ENTRANCE_SHAPES", json.dumps(report))

@@ -15,6 +15,7 @@ class UJTSHealthComponent;
 class UBoxComponent;
 class UJTSPlanetSurfaceScatterComponent;
 class AJTSPlanetSurfaceAttachment;
+class UJTSStellarTargetComponent;
 
 UENUM(BlueprintType)
 enum class EJTSHabitatLight : uint8 { Any, Sunlit, Shadow };
@@ -25,7 +26,17 @@ class SPACE_API AJTSPlanetEcologyHabitat : public AJTSPlanetEnemySettlement, pub
 {
 	GENERATED_BODY()
 public:
+    UPROPERTY(EditDefaultsOnly,Category="Habitat|Analysis") bool bRequiresSpecimenAnalysis=true;
+    void RestoreDestroyedEntrance();
+public:
 	AJTSPlanetEcologyHabitat();
+	/** Species identity is configured by the habitat Blueprint, independent of creature size. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Habitat|Analysis") FName RequiredAnalyzedSpecimen;
+	FName GetRequiredSpecimen() const;
+	bool IsSpeciesAnalyzed() const;
+	virtual bool BlocksAttackInitiation_Implementation(APawn* Pawn) const override;
+	virtual bool BlocksDamage_Implementation(APawn* Pawn) const override;
+	virtual float TakeDamage(float Damage, const FDamageEvent& Event, AController* InstigatorController, AActor* Causer) override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Habitat|Blocking") TObjectPtr<UJTSNestBlockadeComponent> Blockade;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Habitat|Blocking") TObjectPtr<UJTSMiningImpactComponent> MiningImpact;
 	virtual bool CanExecuteInteraction_Implementation(APawn* Pawn) const override;
@@ -94,6 +105,7 @@ protected:
 	virtual void ConfigureSpawnedEnemy_Implementation(AActor* Enemy) override;
 private:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UJTSHealthComponent> EntranceHealth;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UJTSStellarTargetComponent> WeaponTarget;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> EntranceTarget;
 	UPROPERTY(Transient) TObjectPtr<AJTSPlanetSurfaceAttachment> EntranceAttachment;
 	UPROPERTY(ReplicatedUsing=ApplyCollapsed) bool bEntranceManaged = false;

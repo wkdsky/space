@@ -238,6 +238,7 @@ void UJTSStellarWeaponComponent::ServerSetInput_Implementation(bool bPrimary, bo
 	if (!AimPawn || Direction.ContainsNaN() || !FMath::IsNearlyEqual(static_cast<float>(Direction.SizeSquared()), 1.0f, 0.05f)
 		|| FVector::DotProduct(AimPawn->GetBaseAimRotation().Vector(), Direction) < 0.5f) return;
 	ServerUpdateAim_Implementation(Direction);
+	if(const auto* Melee=GetOwner()->FindComponentByClass<UJTSMeleeComponent>();Melee && Melee->GetAttackBlockerInAim()) { StopServerChannels(); return; }
 	if (GetWorld()->GetTimeSeconds() - LastHeartbeat > 0.35) return;
 	if (auto* Ranged = GetOwner()->FindComponentByClass<UJTSRangedWeaponComponent>()) Ranged->CancelForClimb();
 	const bool bNewField = bPrimary && !bServerPrimary && Def->Mode == EJTSStellarWeaponMode::BlackHole;
@@ -273,6 +274,7 @@ void UJTSStellarWeaponComponent::ServerSetInput_Implementation(bool bPrimary, bo
 
 void UJTSStellarWeaponComponent::ServerPulse()
 {
+	if(const auto* Melee=GetOwner()->FindComponentByClass<UJTSMeleeComponent>();Melee && Melee->GetAttackBlockerInAim()) { StopServerChannels(); return; }
 	FJTSStellarWeaponBinding Current;
 	const auto* Def = ResolveDefinition(Current);
 	auto* Loadout = GetLoadout();
@@ -400,10 +402,17 @@ void UJTSStellarWeaponComponent::FocusShot(const FJTSStellarWeaponDefinition& De
 		if (!bHit) break;
 		LastHit = Hit.ImpactPoint;
 		AActor* Target = Hit.GetActor();
-		const auto* Component = IsValid(Target) ? Target->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
+		const UJTSStellarTargetComponent* Component = nullptr;
+		while (IsValid(Target))
+		{
+			Component = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+			if (Component) break;
+			Target = Target->GetAttachParentActor();
+		}
 		if (!Component || !Component->IsAliveTarget()) break;
 		ApplyHit(Target, &Hit, FMath::Pow(0.8f, Pass));
 		LastTargetHit = Hit.ImpactPoint;
+		Params.AddIgnoredActor(Hit.GetActor());
 		Params.AddIgnoredActor(Target);
 		Start = Hit.ImpactPoint + AimDirection * 2;
 	}

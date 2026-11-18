@@ -182,7 +182,8 @@ def preview(kind='SpireSoldier',clip='Idle',frame=1):
     scene.camera.location=(1.05,-1.25,.79)
     scene.camera.rotation_euler=(Vector((.04,0,.12))-scene.camera.location).to_track_quat('-Z','Y').to_euler()
     scene.render.resolution_x=1100;scene.render.resolution_y=900
-    scene.render.filepath=str(OUT/(kind+'_'+clip+'.png'))
+    (OUT/'Previews').mkdir(parents=True,exist_ok=True)
+    scene.render.filepath=str(OUT/'Previews'/(kind+'_'+clip+'.png'))
     bpy.ops.render.render(write_still=True)
     return scene.render.filepath
 

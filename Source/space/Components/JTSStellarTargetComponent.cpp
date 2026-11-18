@@ -1,5 +1,6 @@
 #include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Interaction/JTSMeleeTarget.h"
 #include "space/Weapons/JTSStellarStatusEffectActor.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
@@ -17,6 +18,7 @@ UJTSStellarTargetComponent::UJTSStellarTargetComponent()
 
 bool UJTSStellarTargetComponent::IsAliveTarget() const
 {
+	if (GetOwner()->Implements<UJTSMeleeTarget>() && IJTSMeleeTarget::Execute_BlocksDamage(GetOwner(),nullptr)) return false;
 	const auto* Health = GetOwner()->FindComponentByClass<UJTSHealthComponent>();
 	const auto* Pawn = Cast<APawn>(GetOwner());
 	return Health && !Health->IsDead() && !(Pawn && Pawn->IsPlayerControlled());
@@ -202,8 +204,8 @@ void UJTSStellarTargetComponent::ExecuteIgnition(APawn* Source)
 {
 	auto* Health = GetOwner()->FindComponentByClass<UJTSHealthComponent>();
 	if (!Health || Health->IsDead()) return;
-	const bool bExecute = Tier == EJTSStellarTargetTier::Normal
-		|| (Tier == EJTSStellarTargetTier::Elite && Health->GetHealthNormalized() <= 0.15f);
+	const bool bExecute = !Health->IsInvulnerable() && (Tier == EJTSStellarTargetTier::Normal
+		|| (Tier == EJTSStellarTargetTier::Elite && Health->GetHealthNormalized() <= 0.15f));
 	if (bExecute) Health->ApplyDamage(Health->GetHealth(), Source ? Source->GetController() : nullptr, Source, true);
 	else UGameplayStatics::ApplyDamage(GetOwner(), ResistantIgnitionDamage,
 		Source ? Source->GetController() : nullptr, Source, UDamageType::StaticClass());

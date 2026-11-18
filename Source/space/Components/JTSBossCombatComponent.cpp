@@ -1,4 +1,5 @@
 #include "space/Components/JTSBossCombatComponent.h"
+#include "space/World/JTSInteriorZone.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
@@ -26,7 +27,7 @@ float UJTSBossCombatComponent::GetActionElapsed() const { return FMath::Max(0., 
 float UJTSBossCombatComponent::GetActionDuration() const
 {
 	if (Action == EJTSBossAction::Emerge) return EmergenceDuration;
-	if (Action == EJTSBossAction::Stagger) return .9f;
+	if (Action == EJTSBossAction::Stagger) return StaggerSeconds;
 	if (Action == EJTSBossAction::Death) return 3.2f;
 	if (const auto* Attack = Attacks.Find(Action)) return Attack->Duration();
 	return 0;
@@ -63,7 +64,7 @@ void UJTSBossCombatComponent::BeginAction(EJTSBossAction NewAction)
 		{
 			const FVector Offset = FVector::VectorPlaneProject(AttackAim - AttackOrigin, Planet->GetRadialUpVector(AttackOrigin)).GetClampedToMaxSize(NewAction == EJTSBossAction::Leap ? 1900 : 1500);
 			FJTSPlanetSurfaceHit Hit;
-			if (Planet->ProjectPointToSurface(AttackOrigin + Offset, Hit)) AttackAim = Hit.ImpactPoint;
+			if (AJTSInteriorZone::ProjectGameplayGround(Planet, AttackOrigin + Offset, Hit)) AttackAim = Hit.ImpactPoint;
 		}
 		Boss->RefreshAction();
 		Boss->ForceNetUpdate();
@@ -89,7 +90,7 @@ float UJTSBossCombatComponent::Face(const FVector& Point, float Dt)
 {
 	if (!Boss.IsValid() || !Planet) return 0;
 	FJTSPlanetSurfaceFrame Frame;
-	if (!Planet->GetSurfaceFrameAt(Boss->GetActorLocation(), Boss->GetActorForwardVector(), Frame)) return 0;
+	if (!AJTSInteriorZone::GroundFrame(Planet, Boss->GetActorLocation(), Boss->GetActorForwardVector(), Frame)) return 0;
 	const FVector Desired = FVector::VectorPlaneProject(Point - Boss->GetActorLocation(), Frame.Up).GetSafeNormal();
 	if (Desired.IsNearlyZero()) return 0;
 	// Local yaw on a sphere must never interpolate world Euler pitch or roll.
@@ -112,6 +113,12 @@ void UJTSBossCombatComponent::Move(const FVector& Direction, float Speed, float 
 		// The steering component probes the real spherical mesh, including slope and cliff constraints.
 		Boss->SetActorLocationAndRotation(Ground, Planet->MakeSurfaceAlignedRotation(Ground, Boss->GetActorForwardVector()));
 	}
+    else if (Action==EJTSBossAction::Charge && bStaggerOnChargeObstacle) HoldStagger(6);
+}
+void UJTSBossCombatComponent::HoldStagger(float Seconds)
+{
+    if (!GetOwner()->HasAuthority()) return;
+    StaggerSeconds=FMath::Max(.1f,Seconds); BeginAction(EJTSBossAction::Stagger);
 }
 void UJTSBossCombatComponent::ChooseAttack(APawn* Pawn)
 {
@@ -204,7 +211,7 @@ void UJTSBossCombatComponent::Update()
 			if (Action == EJTSBossAction::Leap && !bImpactApplied)
 			{
 				FJTSPlanetSurfaceHit Ground;
-				if (Planet->ProjectPointToSurface(FMath::Lerp(AttackOrigin, AttackAim, Phase), Ground))
+				if (AJTSInteriorZone::ProjectGameplayGround(Planet, FMath::Lerp(AttackOrigin, AttackAim, Phase), Ground))
 					Boss->SetActorLocationAndRotation(Ground.ImpactPoint + Planet->GetRadialUpVector(Ground.ImpactPoint) * FMath::Sin(PI * Phase) * LeapHeight,
 						Planet->MakeSurfaceAlignedRotation(Ground.ImpactPoint, AttackForward));
 				if (Phase >= 1) { ApplyAttack(1, Previous); bImpactApplied = true; }

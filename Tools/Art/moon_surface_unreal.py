@@ -172,7 +172,7 @@ def import_surface(batch):
 def import_refuges():
     """Reimport only separate refuge assets, with FBX metres converted to UE centimetres."""
     editor_world()
-    names=[f'SM_MS3_RiftRefuge_{i}' for i in range(4)]+[f'SM_MS3_FixedNest_{i+1:02d}' for i in range(9)]
+    names=[f'SM_MS3_RiftRefuge_{i}' for i in range(4)]+[f'SM_MS3_FixedNest_{i+1:02d}' for i in range(7)]
     mapping={n:n.replace('RiftRefuge','RiftFissure').replace('FixedNest','MirrorFixedNest') for n in names}
     import_tasks([fbx_task(ART/'FBX'/(old+'.fbx'),MESHES,new) for old,new in mapping.items()])
     subsystem=unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
@@ -253,8 +253,8 @@ def author_level():
     for row in plan['cracks']:crackactors[row['id']]=static('MoonV3_'+row['id'],row,True)
     for row in plan['food_patches']:foodactors[row['id']]=static('MoonV3_'+row['id'],row,True)
     for row in plan['decorations']:static('MoonV3_'+row['id'],row)
-    # The nine exact original actor origins and rotations are retained in the new recipes.
-    for row in plan['fixed_nests']:
+    # The seven exact original actor origins and rotations are retained in the new recipes.
+    for row in plan['fixed_nests'][:7]:
         b=baseline['BP_MoonAntNestEntrance_C_'+str(row['index']-1)]
         loc=unreal.Vector(**b['location']);rot=unreal.Rotator(**b['rotation'])
         a=spawn(habitat_bp.generated_class(),f'Moon_Nest_{row["index"]:02d}',loc,rot,'FixedCraterNests')
@@ -544,7 +544,7 @@ def validate_play(stage):
         assert rows,'No resident creatures initialized'
         assert counts and max(counts.values())<=2,counts
         mouths=[a for a in unreal.GameplayStatics.get_all_actors_of_class(world,unreal.JTSPlanetEcologyHabitat) if a.get_actor_label().startswith('Moon_Nest_')]
-        assert len(mouths)==9
+        assert len(mouths)==7
         assert all(a.get_editor_property('enemy_class').get_name().startswith('BP_MirrorSkimmer') for a in mouths)
         report=dict(creatures=rows,rift_residents_per_fissure=list(counts.values()),fixed_mirror_mouths=len(mouths))
         (QA/'refuge_validation.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

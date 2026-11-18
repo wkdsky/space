@@ -19,6 +19,11 @@ class AJTSCharacter;
 class AJTSPlayerState;
 class UJTSStellarLootTable;
 class UJTSMaterialProcessorComponent;
+class UJTSShipDockComponent;
+class UJTSStellarExchangeComponent;
+class UJTSShipArmamentComponent;
+class UJTSShipCabinCouplingComponent;
+class UJTSShipScannerComponent;
 class AJTSPlanetAnchor;
 class AJTSPlanetLandingSite;
 class AJTSPlanetSurfaceAnchor;
@@ -58,6 +63,12 @@ class SPACE_API AJTSSpacecraftActor : public APawn, public IInteractable
 
 public:
 	AJTSSpacecraftActor();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Cabin")
+	TObjectPtr<USceneComponent> CabinAssemblyRoot;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Cabin")
+	TObjectPtr<UJTSShipCabinCouplingComponent> CabinCoupling;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Scanner")
+	TObjectPtr<UJTSShipScannerComponent> Scanner;
 
 	/** Transfers all resources carried by a pawn into this spacecraft. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Resources")
@@ -248,6 +259,10 @@ public:
 	/** Starts the minimal SpaceWorld surface takeoff and hands travel-state progression to SpaceWorldManager. */
 	UFUNCTION(BlueprintCallable, Category = "Ship|Surface")
 	bool BeginSurfaceTakeoff();
+	UFUNCTION(BlueprintPure, Category="Ship|Docks")
+	UJTSShipDockComponent* GetDockComponent() const { return DockComponent; }
+	UFUNCTION(BlueprintPure, Category="Ship|Modules") UJTSStellarExchangeComponent* GetStellarExchange() const { return StellarExchange; }
+	UFUNCTION(BlueprintPure, Category="Ship|Modules") UJTSShipArmamentComponent* GetArmament() const { return Armament; }
 
 	UFUNCTION(BlueprintPure, Category = "Ship|Surface")
 	AJTSPlanetAnchor* GetGroundedPlanet() const;
@@ -309,6 +324,9 @@ public:
 	virtual void Interact_Implementation(APawn* InteractingPawn) override;
 	/** Shared server-side gate for actions exposed by the SpaceWorld ship terminal. */
 	bool CanUseShipTerminal(APawn* InteractingPawn) const;
+	UPrimitiveComponent* GetFlightCollisionComponent() const;
+	/** Hull remains a hold-R boarding target; E belongs to the separate physical console. */
+	virtual bool CanExecuteInteraction_Implementation(APawn* InteractingPawn) const override;
 
 	/** Returns the amount of one resource type currently stored in the spacecraft. */
 	UFUNCTION(BlueprintPure, Category = "Ship|Resources")
@@ -726,6 +744,12 @@ private:
 	TMap<EJTSResourceType, int32> StorageHalfUnitRemainders;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship|Resources", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UJTSMaterialProcessorComponent> MaterialProcessor;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Docks", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UJTSShipDockComponent> DockComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Modules", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UJTSStellarExchangeComponent> StellarExchange;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship|Modules", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UJTSShipArmamentComponent> Armament;
 
 	/** Assign the project-specific stellar catalog in BP_Spacecraft. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ship|Shop", meta = (AllowPrivateAccess = "true"))

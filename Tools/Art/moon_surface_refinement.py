@@ -163,7 +163,7 @@ def configure():
         a.modify();sc=a.get_editor_property('surface_scatter')
         sc.set_editor_property('exclusion_actors',[marker]);sc.set_editor_property('exclusion_radius',clearance)
         entries=[e for e in sc.get_editor_property('entries') if not e.get_editor_property('resource_item')]
-        # Only the original nine mouths are destructible. Peripheral fissures remain independent props.
+        # Only the original seven mouths are destructible. Peripheral fissures remain independent props.
         for e in entries:
             e.set_editor_property('destructible',False)
             if e.get_editor_property('refuge'):e.set_editor_property('minimum_spacing',200)
@@ -196,7 +196,7 @@ def configure():
     check_protected()
     assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
     result=dict(protected=True,crater_clearance_cm=clearance,resource_regions=len(resource_regions),carbon_habitats=configured,
-        fixed_nests=9,models=len(manifest()['assets']))
+        fixed_nests=7,models=len(manifest()['assets']))
     (QA/'configuration.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     return result
 
@@ -241,7 +241,7 @@ def validate_runtime():
     for a in rocks+pickups:
         if planet.approximate_surface_arc_distance(marker.get_actor_location(),a.get_actor_location())<radius-1:banned.append(a.get_name())
     assert not banned,banned
-    assert len(mouths)==9,len(mouths)
+    assert len(mouths)==7,len(mouths)
     assert len(carbon)>15,len(carbon)
     assert len(rocks)>20,len(rocks)
     assert all(a.get_editor_property('replicates') for a in carbon+rocks)

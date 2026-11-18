@@ -17,7 +17,7 @@ void UJTSBossDeathPresentationComponent::BeginDeath()
 	auto* Boss = Cast<AJTSPlanetBoss>(GetOwner());
 	if (!Boss || bStarted) return;
 	bStarted = true;
-	const float Lifetime = Boss->Combat->GetActionDuration() + HoldDuration + FadeDuration;
+	const float Lifetime = Boss->Combat->GetActionDuration() + FMath::Max(HoldDuration,Boss->CorpseRetentionSeconds) + FadeDuration;
 	if (Boss->HasAuthority()) Boss->SetLifeSpan(FMath::Max(.1f, Lifetime - Boss->Combat->GetActionElapsed()));
 	if (GetNetMode() == NM_DedicatedServer) return;
 	GetWorld()->GetTimerManager().SetTimer(PresentationTimer, this, &ThisClass::UpdatePresentation, 1.f / 30.f, true);
@@ -36,7 +36,7 @@ void UJTSBossDeathPresentationComponent::UpdatePresentation()
 			Boss->Mesh->SetPosition((*Clip)->GetPlayLength(), false);
 		if (auto* Animation = Boss->Mesh->GetSingleNodeInstance()) Animation->SetPlaying(false);
 	}
-	const float FadeAge = Age - AnimationDuration - HoldDuration;
+	const float FadeAge = Age - AnimationDuration - FMath::Max(HoldDuration,Boss->CorpseRetentionSeconds);
 	if (FadeAge < 0) return;
 	if (FadeInstances.IsEmpty())
 	{

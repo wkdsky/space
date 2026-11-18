@@ -1,6 +1,14 @@
+#include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/UI/JTSExpeditionOverlay.h"
+int32 UJTSPrototypeHUDWidget::NativePaint(const FPaintArgs& A,const FGeometry& G,const FSlateRect& C,FSlateWindowElementList& E,int32 L,const FWidgetStyle& S,bool B) const
+{ return FJTSExpeditionOverlay::Paint(this,G,E,Super::NativePaint(A,G,C,E,L,S,B)); }
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "space/Characters/JTSPlanetSurfaceCreature.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "space/UI/JTSPrototypeHUDWidget.h"
+#include "space/Ships/JTSShipDockActor.h"
 #include "space/Items/JTSMaterialProcessingRecipes.h"
 #include "space/UI/JTSSpaceDebugWidget.h"
 
@@ -74,6 +82,7 @@
 #include "space/World/JTSMoonSurfaceGameplaySettings.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
+#include "space/World/JTSSurfacePlacementBounds.h"
 #include "space/World/JTSSpaceWorldManager.h"
 
 namespace
@@ -277,6 +286,8 @@ void UJTSPrototypeHUDWidget::NativeConstruct()
 
 FReply UJTSPrototypeHUDWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
+	if(InKeyEvent.GetKey()==EKeys::J && !bGameMenuOpen)
+	{ if(auto* PC=Cast<AJTSPlayerController>(GetOwningPlayer())) PC->ToggleFieldGuide(); return FReply::Handled(); }
 	if (auto* PC = Cast<AJTSPlayerController>(GetOwningPlayer()); PC && PC->IsInventoryArrangementMode()
 		&& (InKeyEvent.GetKey() == EKeys::I || InKeyEvent.GetKey() == EKeys::Escape))
 	{
@@ -376,8 +387,8 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 			if (Item.IsEmpty()) return FReply::Handled();
 			DraggedCarriedSlot = SlotIndex;
 			DraggedCarriedInstanceId = Item.InstanceId;
-			DraggedCarriedLabel = Item.CustomDisplayName.IsEmpty()
-				? UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString()
+			DraggedCarriedLabel = (!UJTSDiscoveryComponent::IsKnown(this,Item) || Item.CustomDisplayName.IsEmpty())
+				? UJTSDiscoveryComponent::DisplayName(this,Item).ToString()
 				: Item.CustomDisplayName.ToString();
 			DragStartPosition = InMouseEvent.GetScreenSpacePosition();
 			bCarriedDragPreviewVisible = false;
@@ -397,7 +408,7 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseMove(const FGeometry& InGeometry,
 		if (AJTSPlayerController* const Controller = Cast<AJTSPlayerController>(GetOwningPlayer()))
 		{
 			Controller->UpdateShipCarriedDragPreview(InMouseEvent.GetScreenSpacePosition(),
-				DraggedCarriedLabel, bCarriedDragPreviewVisible);
+				DraggedCarriedLabel, bCarriedDragPreviewVisible, DraggedCarriedSlot);
 		}
 		return FReply::Handled();
 	}
@@ -416,13 +427,14 @@ FReply UJTSPrototypeHUDWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry
 			{
 				if (Controller->IsSpaceShopOpen())
 					Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(), DraggedCarriedSlot, DraggedCarriedInstanceId);
+				else if (Controller->TryPlaceInShipScanZone(InMouseEvent.GetScreenSpacePosition(),DraggedCarriedSlot,DraggedCarriedInstanceId)) {}
 				else if (auto* Character = Cast<AJTSCharacter>(Controller->GetPawn()))
 				{
 					auto* Inventory = Character->GetInventoryComponent();
 					const int32 Target = GetInventorySlotAtScreenPosition(InMouseEvent.GetScreenSpacePosition());
 					if (Target != INDEX_NONE)
 						Inventory->ServerMoveInventorySlot(DraggedCarriedSlot, DraggedCarriedInstanceId, Target, Inventory->GetItemAtSlot(Target).InstanceId);
-					else if ((!SpaceDebugWidget || !SpaceDebugWidget->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+					else if ((!SpaceDebugWidget || !SpaceDebugWidget->IsPointerOverPanel(InMouseEvent.GetScreenSpacePosition()))
 						&& GetStellarSlotAtScreenPosition(InMouseEvent.GetScreenSpacePosition()) == INDEX_NONE)
 						Inventory->ServerDropInventorySlot(DraggedCarriedSlot, DraggedCarriedInstanceId);
 					else Controller->DropCarriedItemInSpaceShop(InMouseEvent.GetScreenSpacePosition(), DraggedCarriedSlot, DraggedCarriedInstanceId);
@@ -469,6 +481,7 @@ void UJTSPrototypeHUDWidget::NativeDestruct()
 void UJTSPrototypeHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	UpdateShipResourcePulses(InDeltaTime);
 
 	if (!BoundGameState.IsValid())
 	{
@@ -965,7 +978,11 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 				ETextJustify::Center);
 			if (SlotBorder != nullptr)
 			{
-				SlotBorder->SetContent(SlotText);
+				auto* Overlay=WidgetTree->ConstructWidget<UOverlay>();
+				auto* NameSlot=Overlay->AddChildToOverlay(SlotText); NameSlot->SetHorizontalAlignment(HAlign_Fill);NameSlot->SetVerticalAlignment(VAlign_Fill);
+				auto* Badge=MakeTextBlock(WidgetTree,*FString::Printf(TEXT("InventoryStellarStack%d"),SlotIndex),TEXT(""),17,FLinearColor(1,.94f,.70f));
+				auto* BadgeSlot=Overlay->AddChildToOverlay(Badge);BadgeSlot->SetHorizontalAlignment(HAlign_Right);BadgeSlot->SetVerticalAlignment(VAlign_Top);
+				Badge->SetVisibility(ESlateVisibility::HitTestInvisible);SlotBorder->SetContent(Overlay);
 			}
 			AddCanvasChild(InventoryCanvas, SlotBorder, FAnchors(0.0f, 0.0f), FVector2D(104.0f * SlotIndex, 0.0f), FVector2D(96.0f, 88.0f));
 			InventorySlotBorders.Add(SlotBorder);
@@ -978,8 +995,12 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 		if (auto* GhostSlot = AddCanvasChild(GameplayLayer, InventoryDragPreview, FAnchors(0, 0), FVector2D::ZeroVector, FVector2D(140, 48))) GhostSlot->SetZOrder(100);
 		InventoryDragPreview->SetVisibility(ESlateVisibility::Collapsed);
 		SpaceDebugWidget = CreateWidget<UJTSSpaceDebugWidget>(GetOwningPlayer());
-		if (auto* DebugSlot = AddCanvasChild(GameplayLayer, SpaceDebugWidget, FAnchors(1, 1), FVector2D(-24, -190), FVector2D(272, 244), FVector2D(1, 1)))
+		if (auto* DebugSlot = GameplayLayer->AddChildToCanvas(SpaceDebugWidget))
+		{
+			DebugSlot->SetAnchors(FAnchors(1,0,1,1));
+			DebugSlot->SetOffsets(FMargin(-396,24,396,24));
 			DebugSlot->SetZOrder(50);
+		}
 		EquipmentHintText = MakeTextBlock(WidgetTree, TEXT("EquipmentHintText"), TEXT(""), 16.0f, FLinearColor(0.95f, 0.98f, 1.0f, 1.0f), ETextJustify::Center);
 		AddCanvasChild(GameplayLayer, EquipmentHintText, FAnchors(0.5f, 1.0f), FVector2D(0.0f, -210.0f), FVector2D(420.0f, 24.0f), FVector2D(0.5f, 1.0f));
 		InteractionPromptText = MakeTextBlock(WidgetTree, TEXT("InteractionPromptText"), TEXT(""), 17.0f, FLinearColor(0.90f, 0.96f, 1.0f, 1.0f), ETextJustify::Center);
@@ -1094,7 +1115,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 					EJTSResourceType::Food,
 					EJTSResourceType::Rock,
 					EJTSResourceType::Ore,
-					EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse};
+					EJTSResourceType::Crystal,
+					EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse, EJTSResourceType::ManufacturedPart, EJTSResourceType::HighGradeAlloy};
 				for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
 				{
 					UHorizontalBox* const ResourceRow = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -1131,6 +1153,8 @@ void UJTSPrototypeHUDWidget::BuildWidgetTree()
 					}
 					if (ResourceRow != nullptr)
 					{
+						ResourceNameText->SetRenderTransformPivot(FVector2D(0.f, .5f));
+						ResourceAmountText->SetRenderTransformPivot(FVector2D(1.f, .5f));
 						ResourceRow->AddChildToHorizontalBox(ResourceNameSize);
 						ResourceRow->AddChildToHorizontalBox(ResourceAmountSize);
 						ResourceRow->SetVisibility(ESlateVisibility::Collapsed);
@@ -1401,6 +1425,10 @@ void UJTSPrototypeHUDWidget::UnbindSpacecraftResources()
 		PreviousSpacecraft->OnShipResourcesChanged.RemoveDynamic(this, &UJTSPrototypeHUDWidget::HandleShipResourcesChanged);
 	}
 	BoundSpacecraftResources.Reset();
+	PreviousShipResourceAmounts.Reset();
+	ShipResourcePulseTimes.Init(1.f, ShipResourceRows.Num());
+	ShipResourceEntryPulses.Init(false, ShipResourceRows.Num());
+	UpdateShipResourcePulses(0.f);
 }
 
 void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
@@ -1411,16 +1439,31 @@ void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
 		EJTSResourceType::Food,
 		EJTSResourceType::Rock,
 		EJTSResourceType::Ore,
-		EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse};
+		EJTSResourceType::Crystal,
+		EJTSResourceType::Organic, EJTSResourceType::InorganicCarbon, EJTSResourceType::MoonAntCorpse, EJTSResourceType::ManufacturedPart, EJTSResourceType::HighGradeAlloy};
 	const AJTSSpacecraftActor* const Spacecraft = BoundSpacecraftResources.IsValid()
 		? BoundSpacecraftResources.Get()
 		: FindSpacecraft();
+	const bool bHasBaseline = PreviousShipResourceAmounts.Num() == UE_ARRAY_COUNT(DisplayedResourceTypes);
+	if (!bHasBaseline)
+	{
+		PreviousShipResourceAmounts.SetNumZeroed(UE_ARRAY_COUNT(DisplayedResourceTypes));
+		ShipResourcePulseTimes.Init(-1.f, UE_ARRAY_COUNT(DisplayedResourceTypes));
+		ShipResourceEntryPulses.Init(false, UE_ARRAY_COUNT(DisplayedResourceTypes));
+	}
 
 	for (int32 ResourceIndex = 0; ResourceIndex < UE_ARRAY_COUNT(DisplayedResourceTypes); ++ResourceIndex)
 	{
 		const int64 ResourceAmount = IsValid(Spacecraft)
 			? Spacecraft->GetResourceHalfUnits(DisplayedResourceTypes[ResourceIndex])
 			: 0;
+		if (bHasBaseline && IsValid(Spacecraft) && ResourceAmount != PreviousShipResourceAmounts[ResourceIndex])
+		{
+			// First acquisition emphasizes the name and number together; later changes pulse only the number.
+			ShipResourceEntryPulses[ResourceIndex] = PreviousShipResourceAmounts[ResourceIndex] <= 0 && ResourceAmount > 0;
+			ShipResourcePulseTimes[ResourceIndex] = 0.f;
+		}
+		PreviousShipResourceAmounts[ResourceIndex] = ResourceAmount;
 		if (ShipResourceRows.IsValidIndex(ResourceIndex) && ShipResourceRows[ResourceIndex] != nullptr)
 		{
 			ShipResourceRows[ResourceIndex]->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -1433,6 +1476,34 @@ void UJTSPrototypeHUDWidget::RefreshShipResourcesSidebar()
 		{
 			ShipResourceAmountTexts[ResourceIndex]->SetText(FText::FromString(JTSMaterialProcessing::FormatHalfUnits(ResourceAmount)));
 		}
+	}
+	UpdateShipResourcePulses(0.f);
+}
+
+void UJTSPrototypeHUDWidget::UpdateShipResourcePulses(float DeltaSeconds)
+{
+	constexpr float Duration = .58f;
+	for (int32 Index = 0; Index < ShipResourceRows.Num(); ++Index)
+	{
+		if (!ShipResourcePulseTimes.IsValidIndex(Index)) continue;
+		float& Time = ShipResourcePulseTimes[Index];
+		if (Time < 0.f) continue;
+		const bool bActive = Time >= 0.f && Time < Duration;
+		const float Remaining = bActive ? 1.f - FMath::Clamp(Time / Duration, 0.f, 1.f) : 0.f;
+		// A single bounded punch, with a cubic ease-out to an exact resting transform.
+		const float Weight = Remaining * Remaining * Remaining;
+		const bool bEntry = ShipResourceEntryPulses.IsValidIndex(Index) && ShipResourceEntryPulses[Index];
+		if (ShipResourceNameTexts.IsValidIndex(Index) && ShipResourceNameTexts[Index])
+		{
+			ShipResourceNameTexts[Index]->SetRenderScale(FVector2D(1.f + (bEntry ? .18f * Weight : 0.f)));
+			ShipResourceNameTexts[Index]->SetRenderTranslation(FVector2D(0.f, bEntry ? -3.f * Weight : 0.f));
+		}
+		if (ShipResourceAmountTexts.IsValidIndex(Index) && ShipResourceAmountTexts[Index])
+		{
+			ShipResourceAmountTexts[Index]->SetRenderScale(FVector2D(1.f + .32f * Weight));
+			ShipResourceAmountTexts[Index]->SetRenderTranslation(FVector2D(0.f, -3.f * Weight));
+		}
+		Time = bActive ? FMath::Min(Duration, Time + FMath::Max(0.f, DeltaSeconds)) : -1.f;
 	}
 }
 
@@ -2163,10 +2234,15 @@ void UJTSPrototypeHUDWidget::RefreshInventorySlots()
 				: FJTSItemInstance();
 			FString SlotLabel = Item.IsEmpty()
 				? TEXT("空")
-				: (Item.CustomDisplayName.IsEmpty()
-					? UJTSItemDefinitionLibrary::GetItemDisplayName(Item.ItemId).ToString()
+				: ((!UJTSDiscoveryComponent::IsKnown(this,Item) || Item.CustomDisplayName.IsEmpty())
+					? UJTSDiscoveryComponent::DisplayName(this,Item).ToString()
 					: Item.CustomDisplayName.ToString());
-			if (!Item.IsEmpty() && Item.StackCount > 1)
+			if (auto* Badge=Cast<UTextBlock>(GetWidgetFromName(*FString::Printf(TEXT("InventoryStellarStack%d"),VisualSlotIndex))))
+			{
+				Badge->SetText(FText::FromString(!Item.IsEmpty() && Item.IsStellar()?FJTSItemInstance::StackBadge(Item.StackCount):FString()));
+				Badge->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"),FMath::RoundToInt(17*Layout.StellarScale)));
+			}
+			if (!Item.IsEmpty() && !Item.IsStellar() && Item.StackCount > 1)
 			{
 				SlotLabel += FString::Printf(TEXT(" x%d"), Item.StackCount);
 			}
@@ -2283,23 +2359,6 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 			}
 			else if (!PlayerCharacter->IsBoarded())
 			{
-				// Combat owns its own context prompt, but shares the same world-to-widget projection path
-				// as normal interaction targets. This keeps LMB feedback separate from [E] interactions.
-				if (const UJTSMeleeComponent* const MeleeComponent = PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>())
-				{
-					if (AActor* const MeleeTarget = MeleeComponent->GetCurrentMeleeTarget())
-					{
-						PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
-						TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
-						PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
-						WorkHabitat = Cast<AJTSPlanetEcologyHabitat>(MeleeTarget);
-						if (WorkHabitat && !WorkHabitat->bCanBlockEntrance) WorkHabitat = nullptr;
-						bUseCompactPrompt = WorkHabitat || MeleeTarget->IsA<AJTSMoonResourceActor>();
-						bHasPromptAnchor = !TargetName.IsEmpty() && (bUseCompactPrompt || !PromptText.IsEmpty());
-					}
-				}
-
-				if (!bHasPromptAnchor)
 				{
 					const UInteractionComponent* const InteractionComponent = PlayerCharacter->FindComponentByClass<UInteractionComponent>();
 					if (InteractionComponent != nullptr)
@@ -2314,6 +2373,11 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 								bUseCompactPrompt = ItemId == EJTSItemId::Rock || ItemId == EJTSItemId::Ore;
 								PromptAnchor = Pickup->GetInteractionAnchorWorldLocation();
 								bHasPromptAnchor = true;
+							}
+							else if (Target->Implements<UJTSMeleeTarget>())
+							{
+								TargetName=IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(Target);
+								PromptAnchor=IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(Target); bHasPromptAnchor=true;
 							}
 							else if (const AJTSExpeditionKeyPickup* const KeyPickup = Cast<AJTSExpeditionKeyPickup>(Target))
 							{
@@ -2348,11 +2412,26 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 								bUseCompactPrompt = true;
 								bHasPromptAnchor = true;
 							}
+							else if (const AJTSShipDockActor* const Dock = Cast<AJTSShipDockActor>(Target))
+							{
+								TargetName = Dock->DisplayName;
+								PromptAnchor = Dock->GetScreenWorldLocation() + Dock->GetActorUpVector() * 48;
+								JTSSurfacePlacementBounds::GetVisualTopCenter(Dock->Screen, Dock->GetActorUpVector(), 18.f, PromptAnchor);
+								bUseCompactPrompt = true;
+								bHasPromptAnchor = true;
+							}
 							else if (const AJTSSpacecraftActor* const Spacecraft = Cast<AJTSSpacecraftActor>(Target))
 							{
 								TargetName = FText::FromString(TEXT("SPACECRAFT"));
 								PromptAnchor = Spacecraft->GetNavigationMarkerWorldLocation();
 								bHasPromptAnchor = true;
+							}
+							else if (!PromptText.IsEmpty())
+							{
+								TargetName = IInteractable::Execute_GetInteractionLabel(Target);
+								PromptAnchor = IInteractable::Execute_GetInteractionPromptAnchor(Target);
+								bUseCompactPrompt = true;
+								bHasPromptAnchor = !TargetName.IsEmpty();
 							}
 						}
 					}
@@ -2372,12 +2451,28 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 						}
 					}
 				}
+				if (!bHasPromptAnchor)
+				{
+					// E feedback must identify the exact selected interaction target. Show melee context only without one.
+					if (const UJTSMeleeComponent* const MeleeComponent = PlayerCharacter->FindComponentByClass<UJTSMeleeComponent>())
+					{
+						if (AActor* const MeleeTarget = MeleeComponent->GetCurrentMeleeTarget())
+						{
+							PromptText = IJTSMeleeTarget::Execute_GetMeleeTargetPrompt(MeleeTarget, PlayerCharacter);
+							TargetName = IJTSMeleeTarget::Execute_GetMeleeTargetDisplayName(MeleeTarget);
+							PromptAnchor = IJTSMeleeTarget::Execute_GetMeleeTargetAnchorWorldLocation(MeleeTarget);
+							WorkHabitat = Cast<AJTSPlanetEcologyHabitat>(MeleeTarget);
+							if (WorkHabitat && !WorkHabitat->bCanBlockEntrance) WorkHabitat = nullptr;
+							bUseCompactPrompt = WorkHabitat || MeleeTarget->IsA<AJTSMoonResourceActor>();
+							bHasPromptAnchor = !TargetName.IsEmpty() && (bUseCompactPrompt || !PromptText.IsEmpty());
+						}
+					}
+				}
 			}
 		}
 	}
 
-	const AJTSCharacter* WorkCharacter = Cast<AJTSCharacter>(GetOwningPlayerPawn());
-	const bool bWorkEnabled = WorkHabitat && WorkHabitat->Blockade->HasRequiredTool(const_cast<AJTSCharacter*>(WorkCharacter));
+	const bool bWorkEnabled = WorkHabitat && WorkHabitat->IsSpeciesAnalyzed();
 	FVector2D PromptScreenPosition = FVector2D::ZeroVector;
 	const bool bProjected = bHasPromptAnchor && ProjectWorldToViewportWidget(PromptAnchor, PromptScreenPosition);
 	const bool bShowPrompt = !TargetName.IsEmpty() && (bUseCenteredPrompt || bProjected);
@@ -2385,7 +2480,7 @@ void UJTSPrototypeHUDWidget::RefreshInteractionPrompt()
 	{
 		const float Durability = WorkHabitat ? WorkHabitat->Blockade->GetDurabilityFraction() : 0;
 		EntranceProgressWidget->SetPercent(Durability);
-		EntranceProgressWidget->SetVisibility(bShowPrompt && WorkHabitat ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		EntranceProgressWidget->SetVisibility(bShowPrompt && bWorkEnabled ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		if (EntranceProgressSlot)
 		{
 			EntranceProgressSlot->SetAnchors(bUseCenteredPrompt ? FAnchors(0.5f,0.5f) : FAnchors(0,0));
@@ -2978,6 +3073,10 @@ FString UJTSPrototypeHUDWidget::ResourceTypeToString(EJTSResourceType ResourceTy
 		return TEXT("有机质");
 	case EJTSResourceType::InorganicCarbon:
 		return TEXT("无机碳");
+	case EJTSResourceType::ManufacturedPart:
+		return TEXT("人造构件");
+	case EJTSResourceType::HighGradeAlloy:
+		return TEXT("高品位合金");
 
 	case EJTSResourceType::MoonAntCorpse:
 		return TEXT("生物尸体");

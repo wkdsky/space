@@ -37,6 +37,9 @@ public:
 	void Initialize(AJTSPlanetAnchor* InPlanet);
 	void Die();
 	void ReactToDamage(float Damage);
+    void HoldStagger(float Seconds);
+    UPROPERTY(EditDefaultsOnly,Category="Boss|Combat") bool bStaggerOnChargeObstacle=false;
+    UPROPERTY(EditDefaultsOnly,Category="Boss|Combat") float StaggerSeconds=.9f;
 	UFUNCTION(BlueprintPure) EJTSBossAction GetAction() const { return Action; }
 	UFUNCTION(BlueprintPure) float GetActionElapsed() const;
 	float GetActionDuration() const;

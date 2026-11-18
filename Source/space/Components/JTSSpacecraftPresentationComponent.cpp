@@ -579,12 +579,18 @@ void UJTSSpacecraftPresentationComponent::ApplyGearPose(const FGearBinding& Leg,
 		// The shin component sits on the knee. Its mesh runs another 34cm down to the ankle,
 		// so sliding the component 28cm back along its own up-axis nests that strut in the thigh.
 		const FVector Down = Leg.DeployedRotation.RotateVector(FVector(0.0f, 0.0f, -1.0f));
-		Location += Down * FMath::Lerp(0.0f, -28.0f, SlideEase);
+		Location += Down * FMath::Lerp(0.0f, -GearShinRetractionTravel, SlideEase);
+	}
+	else if (Leg.bIsFoot)
+	{
+		// Fold the solid pad about its ankle before lifting the complete articulated leg.
+		Rotation.Pitch += GearFootStowPitch * SlideEase;
 	}
 	else if (!Leg.bIsFoot)
 	{
-		Rotation.Roll = Leg.DeployedRotation.Roll + SideSign * 88.0f * HingeEase;
-		Rotation.Yaw = Leg.DeployedRotation.Yaw + YawSign * 22.0f * HingeEase;
+		Rotation.Pitch += GearFoldPitch * HingeEase;
+		Rotation.Roll += SideSign * GearFoldRoll * HingeEase;
+		Rotation.Yaw += YawSign * GearFoldYaw * HingeEase;
 	}
 
 	GearComponent->SetRelativeLocation(Location);

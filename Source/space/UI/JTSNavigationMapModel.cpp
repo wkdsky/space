@@ -1,4 +1,8 @@
 #include "space/UI/JTSNavigationMapModel.h"
+#include "EngineUtils.h"
+#include "space/Components/JTSInteriorStateComponent.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/World/JTSSurfaceWaypoint.h"
 
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -144,6 +148,15 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 			Coordinates.X >= 0 ? TEXT("N") : TEXT("S"), FMath::Abs(Coordinates.Y), Coordinates.Y >= 0 ? TEXT("E") : TEXT("W"));
 		Frame.PlanetName = GroundPlanet->GetNavigationDisplayName().ToString();
 		Frame.Stage = EJTSNavigationMapStage::Surface;
+        if (const auto* S=Character?Character->FindComponentByClass<UJTSInteriorStateComponent>():nullptr; S && S->Zone)
+        { Frame.bIndoor=true; Frame.InteriorName=S->Zone->DisplayName.ToString(); }
+        for (TActorIterator<AJTSSurfaceWaypoint> It(Manager->GetWorld());It;++It)
+            if (It->Planet==GroundPlanet && It->IsDiscovered())
+            {
+                auto& W=Frame.Waypoints.AddDefaulted_GetRef(); W.Name=It->DisplayName.ToString();
+                W.Position=Terrain->Project(It->GetActorLocation(),GroundPlanet->GetPlanetCenter());
+                W.Meters=GroundPlanet->ApproximateSurfaceArcDistance(PlayerLocation,It->GetActorLocation())/100.f;
+            }
 	}
 	if (!IsValid(Ship)) return Frame;
 
@@ -161,7 +174,6 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	for (const auto& Source : UJTSCelestialNavigationLibrary::GatherBodies(Manager, Ship))
 	{
 		// Uncharted nearby bodies normally remain a local focus. A locked discovery is hidden entirely.
-		if (Source.Planet && !Source.Planet->IsNavigationDiscovered()) continue;
 		FMapBody Body;
 		Body.Source = Source;
 		Body.Actor = Source.Planet ? static_cast<const AActor*>(Source.Planet) : Source.VisualActor.Get();
@@ -212,9 +224,7 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	ActiveSystem = Group.Id;
 	Frame.SystemId = Group.Id;
 	Frame.SystemName = Primary.Source.DisplayName.ToString();
-	const double ExitScale = PreviousStage == EJTSNavigationMapStage::System ? 1.0 + Settings.StageHysteresis : 1.0;
-	Frame.Stage = Frame.bGroundMap || bNear ? EJTSNavigationMapStage::Surface
-		: Group.Range <= Group.Extent * ExitScale ? EJTSNavigationMapStage::System : EJTSNavigationMapStage::Interstellar;
+	Frame.Stage = FJTSNavigationStageRules::Classify(Frame.bGroundMap || bNear,Group.Range,Group.Extent,PreviousStage,Settings.StageHysteresis);
 	PreviousStage = Frame.Stage;
 	// The observer is always the origin. Full hull orientation preserves yaw, pitch and roll.
 	const double MapExtent = Group.Extent / FMath::Max(1.2f, Settings.SystemExtentMultiplier) * 1.35;
@@ -225,6 +235,7 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	for (int32 Member : Group.Members)
 	{
 		const auto& Body = Bodies[Member];
+        if (Body.Source.Planet && !Body.Source.Planet->IsNavigationDiscovered()) continue;
 		auto& Contact = Frame.Bodies.AddDefaulted_GetRef();
 		Contact.Id = Body.Actor->GetFName();
 		Contact.Name = Body.Source.DisplayName.ToString();
@@ -248,7 +259,7 @@ FJTSNavigationMapFrame FJTSNavigationMapModel::Build(const AJTSSpaceWorldManager
 	for (const auto& OtherGroup : Groups)
 	{
 		const auto& Star = Bodies[OtherGroup.Primary];
-		if (!OtherGroup.Members.ContainsByPredicate([&](int32 I) { return Bodies[I].Source.bShowOnStarChart; })) continue;
+        if (!OtherGroup.Members.ContainsByPredicate([&](int32 I) { const auto& S=Bodies[I].Source; return S.bShowOnStarChart && (!S.Planet || S.Planet->IsNavigationDiscovered()); })) continue;
 		const FVector Direction = (Star.Center - Observer).GetSafeNormal();
 		const float Bearing = FMath::RadiansToDegrees(FMath::Atan2(FVector::DotProduct(Direction, Ship->GetActorRightVector()),
 			FVector::DotProduct(Direction, Ship->GetActorForwardVector())));

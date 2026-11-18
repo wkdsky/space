@@ -1,4 +1,8 @@
 #include "space/World/JTSPlanetEcologyHabitat.h"
+#include "Engine/GameInstance.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 #include "space/Components/JTSColonyDefenseComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "space/Components/JTSNestBlockadeComponent.h"
@@ -8,6 +12,7 @@
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Components/JTSPlanetSurfaceScatterComponent.h"
 #include "space/Characters/JTSPlanetSurfaceCreature.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -33,6 +38,7 @@ AJTSPlanetEcologyHabitat::AJTSPlanetEcologyHabitat()
 	bMaintainPopulation = false;
 	bReplicates = true;
 	EntranceHealth = CreateDefaultSubobject<UJTSHealthComponent>(TEXT("EntranceHealth"));
+	WeaponTarget = CreateDefaultSubobject<UJTSStellarTargetComponent>(TEXT("WeaponTarget"));
 	EntranceTarget = CreateDefaultSubobject<UBoxComponent>(TEXT("EntranceTarget"));
 	EntranceTarget->ComponentTags.Add(TEXT("InteractionProxy"));
 	EntranceTarget->SetupAttachment(RefugeMesh);
@@ -47,7 +53,7 @@ AJTSPlanetEcologyHabitat::AJTSPlanetEcologyHabitat()
 void AJTSPlanetEcologyHabitat::BeginPlay()
 {
 	Super::BeginPlay();
-	SetCanBeDamaged(bDestructibleEntrance && !bCanBlockEntrance);
+	SetCanBeDamaged(bDestructibleEntrance || bCanBlockEntrance);
 	// Weapon damage must not kill the legacy health component and disable pickaxe targeting.
 	if (HasAuthority()) EntranceHealth->SetInvulnerable(bCanBlockEntrance);
 	RefugeMesh->SetCastShadow(false);
@@ -137,8 +143,8 @@ AJTSPlanetSurfaceCreature* AJTSPlanetEcologyHabitat::SpawnEntranceDefender(int32
 	const FVector Lane(0, ((Index % 3) - 1) * 9.0f, 0);
 	FJTSPlanetSurfaceFrame Frame;
 	FJTSPlanetSurfaceFrame Exit;
-	if (!EcologyPlanet->GetSurfaceFrameAt(MouthPose.TransformPosition(EntranceEmergenceOffset + Lane), Heading, Frame)
-		|| !EcologyPlanet->GetSurfaceFrameAt(MouthPose.TransformPosition(EntranceExitOffset + Lane), Heading, Exit)) return nullptr;
+	if (!AJTSInteriorZone::GroundFrame(EcologyPlanet.Get(), MouthPose.TransformPosition(EntranceEmergenceOffset + Lane), Heading, Frame)
+		|| !AJTSInteriorZone::GroundFrame(EcologyPlanet.Get(), MouthPose.TransformPosition(EntranceExitOffset + Lane), Heading, Exit)) return nullptr;
 	if (auto* Creature = Cast<AJTSPlanetSurfaceCreature>(SpawnSettlementEnemy(Frame.Transform, Frame.Location)))
 	{
 		// ConfigureSpawnedEnemy assigns the refuge and can move ordinary residents. Set the actual mouth pose afterwards.
@@ -153,7 +159,7 @@ AJTSPlanetSurfaceAttachment* AJTSPlanetEcologyHabitat::CreateEntranceAttachment(
 	if (!HasAuthority() || bCollapsed || !Planet || !RefugeMesh->GetStaticMesh() || IsValid(EntranceAttachment)) return nullptr;
 	bEntrancePlacementRejected = false;
 	FJTSPlanetSurfaceHit Hit;
-	if (!Planet->ProjectPointToSurface(RefugeMesh->GetComponentLocation(), Hit) || !Planet->IsSurfacePlacementAllowed(Hit))
+	if (!AJTSInteriorZone::ProjectGameplayGround(Planet, RefugeMesh->GetComponentLocation(), Hit) || !(AJTSInteriorZone::FindAt(GetWorld(),Hit.ImpactPoint) || Planet->IsSurfacePlacementAllowed(Hit)))
 	{
 		bEntrancePlacementRejected = true;
 		ApplyCollapsed();
@@ -174,11 +180,17 @@ AJTSPlanetSurfaceAttachment* AJTSPlanetEcologyHabitat::CreateEntranceAttachment(
 	return EntranceAttachment;
 }
 
+void AJTSPlanetEcologyHabitat::RestoreDestroyedEntrance()
+{
+    if (!HasAuthority() || !bDestructibleEntrance || bCanBlockEntrance) return;
+    bCollapsed=true; SetInitialPopulation(0); ApplyCollapsed(); ForceNetUpdate();
+}
 void AJTSPlanetEcologyHabitat::OnEntranceDestroyed(AController* InstigatorController, AActor* Causer)
 {
 	if (!HasAuthority() || !bDestructibleEntrance || bCanBlockEntrance) return;
 	bCollapsed = true;
 	SetInitialPopulation(0);
+    if (auto* GI=GetGameInstance()) GI->GetSubsystem<UJTSExpeditionSubsystem>()->MarkEntranceBlocked(Blockade->PersistentEntranceId);
 	ApplyCollapsed();
 	ForceNetUpdate();
 }
@@ -193,18 +205,62 @@ bool AJTSPlanetEcologyHabitat::CanReceiveMeleeHit_Implementation(APawn* Pawn) co
 }
 void AJTSPlanetEcologyHabitat::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
 {
-	if (!HasAuthority() || !CanReceiveMeleeHit_Implementation(Pawn)) return;
+	if (!HasAuthority() || !CanReceiveMeleeHit_Implementation(Pawn) || BlocksDamage_Implementation(Pawn)) return;
 	if (bCanBlockEntrance)
 	{
-		if (Type == EJTSMeleeAttackType::Tool) Blockade->ApplyStrikeWork(Pawn);
+		Blockade->ApplyWeaponDamage(Type == EJTSMeleeAttackType::Punch ? 8.f : 20.f, Pawn);
 		return;
 	}
 	EntranceHealth->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn);
 }
-FText AJTSPlanetEcologyHabitat::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("镜虫巢穴")); }
+FName AJTSPlanetEcologyHabitat::GetRequiredSpecimen() const
+{
+	if(!RequiredAnalyzedSpecimen.IsNone()) return RequiredAnalyzedSpecimen;
+	// Existing level-authored entrances inherit the identity of their configured resident class.
+	// No level instance or concrete species reference belongs in native code.
+	if(bCanBlockEntrance || bDestructibleEntrance)
+		if(const auto* Resident=EnemyClass?Cast<AJTSPlanetSurfaceCreature>(EnemyClass->GetDefaultObject()):nullptr) return Resident->GetSpecimenId();
+	return NAME_None;
+}
+bool AJTSPlanetEcologyHabitat::IsSpeciesAnalyzed() const
+{
+    if (!bRequiresSpecimenAnalysis) return true;
+	// This is an explicit research prerequisite even outside SpaceWorld test fixtures;
+	// the general Earth resource bypass must never unlock an unidentified alien nest.
+	const auto* D=UJTSDiscoveryComponent::Find(this);
+	const FName Species=GetRequiredSpecimen();
+	return Species.IsNone() || (D && D->Knows(EJTSItemId::MoonAntCorpse,Species));
+}
+bool AJTSPlanetEcologyHabitat::BlocksAttackInitiation_Implementation(APawn*) const
+{ return false; }
+bool AJTSPlanetEcologyHabitat::BlocksDamage_Implementation(APawn*) const
+{ return bCollapsed || bEntrancePlacementRejected || !(bCanBlockEntrance || bDestructibleEntrance) || !IsSpeciesAnalyzed(); }
+float AJTSPlanetEcologyHabitat::TakeDamage(float Damage,const FDamageEvent& Event,AController* Controller,AActor* Causer)
+{
+	if (!HasAuthority() || BlocksDamage_Implementation(nullptr) || !FMath::IsFinite(Damage) || Damage <= 0) return 0;
+	if (bCanBlockEntrance)
+	{
+		APawn* Pawn = nullptr;
+		if (Controller) Pawn = Controller->GetPawn();
+		else Pawn = Cast<APawn>(Causer);
+		if (!Pawn && Causer) Pawn = Causer->GetInstigator();
+		return Blockade->ApplyWeaponDamage(Damage, Pawn) ? Damage : 0;
+	}
+	return Super::TakeDamage(Damage,Event,Controller,Causer);
+}
+FText AJTSPlanetEcologyHabitat::GetMeleeTargetDisplayName_Implementation() const
+{
+	const FName Species=GetRequiredSpecimen();
+	if(Species.IsNone()) return FText::FromString(TEXT("巢穴"));
+	const FText Name=IsSpeciesAnalyzed()?UJTSDiscoveryComponent::DisplayName(this,EJTSItemId::MoonAntCorpse,Species):FText::FromString(TEXT("???"));
+	const FText NestName = FText::Format(FText::FromString(TEXT("{0}的巢")),Name);
+	return !BlocksDamage_Implementation(nullptr)
+		? FText::Format(FText::FromString(TEXT("{0}（可破坏）")), NestName) : NestName;
+}
 FText AJTSPlanetEcologyHabitat::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const
 {
-	return FText::FromString(Blockade->HasRequiredTool(Pawn) ? TEXT("[左键] 镐击") : TEXT("需要镐子"));
+	if(!IsSpeciesAnalyzed()) return FText::FromString(TEXT("先将其生物样本带到飞船扫描区分析"));
+	return FText::FromString(TEXT("[左键] 攻击"));
 }
 FVector AJTSPlanetEcologyHabitat::GetMeleeTargetAnchorWorldLocation_Implementation() const { return GetInteractionAnchorWorldLocation(); }
 void AJTSPlanetEcologyHabitat::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -249,7 +305,7 @@ bool AJTSPlanetEcologyHabitat::AcceptSpawnPoint_Implementation(FVector Point, AJ
 		[](const auto& Food) { return IsValid(Food) && !Food->IsActorBeingDestroyed(); }))) return false;
 	if (!ContainsPoint(Point, Planet)) return false;
 	FJTSPlanetSurfaceHit Hit;
-	if (!Planet->ProjectPointToSurface(Point, Hit) || !Planet->IsSurfacePlacementAllowed(Hit)) return false;
+	if (!AJTSInteriorZone::ProjectGameplayGround(Planet, Point, Hit) || !(AJTSInteriorZone::FindAt(GetWorld(),Hit.ImpactPoint) || Planet->IsSurfacePlacementAllowed(Hit))) return false;
 	if (bRequireRefuge && !FindRefugeActor(Point)) return false;
 	const float Distance = NormalizedDistance(Point, Planet);
 	// The shared template also validates its marker: this exact point is not a fringe sample.
@@ -295,7 +351,7 @@ AActor* AJTSPlanetEcologyHabitat::FindRefugeActor(FVector Point) const
 		if (EcologyPlanet.IsValid())
 		{
 			FJTSPlanetSurfaceHit Hit;
-			if (!EcologyPlanet->ProjectPointToSurface(GetRefugeSurfaceLocation(Refuge), Hit) || !EcologyPlanet->IsSurfacePlacementAllowed(Hit)) return;
+			if (!AJTSInteriorZone::ProjectGameplayGround(EcologyPlanet.Get(), GetRefugeSurfaceLocation(Refuge), Hit) || !(AJTSInteriorZone::FindAt(GetWorld(),Hit.ImpactPoint) || EcologyPlanet->IsSurfacePlacementAllowed(Hit))) return;
 		}
 		if (!bStationaryFeeding && EcologyPlanet.IsValid() && !ContainsPoint(GetRefugeSurfaceLocation(Refuge), EcologyPlanet.Get())) return;
 		const double Distance = FVector::DistSquared(Point, GetRefugeSurfaceLocation(Refuge));

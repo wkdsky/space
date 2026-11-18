@@ -5,7 +5,7 @@
 bool FJTSStellarLoadoutRules::CanStore(const FJTSItemInstance& Item, const UJTSStellarLootTable* Table)
 {
 	if (Item.IsEmpty()) return true;
-	if (!IsValid(Table) || Item.ItemId != EJTSItemId::StellarText || Item.StackCount != 1
+	if (!IsValid(Table) || Item.ItemId != EJTSItemId::StellarText || Item.StackCount <= 0
 		|| !Item.InstanceId.IsValid()) return false;
 	const auto* Entry = Table->FindEntry(Item.StellarItemId);
 	return Entry && Entry->FirmwareUnits == 0 && (Entry->bCore || !Entry->CompatibleCoreId.IsNone());

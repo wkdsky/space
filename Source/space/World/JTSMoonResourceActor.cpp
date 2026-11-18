@@ -1,4 +1,6 @@
 #include "space/World/JTSMoonResourceActor.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 #include "space/Components/JTSStellarAbilityComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
@@ -142,7 +144,7 @@ int32 AJTSMoonResourceActor::GetCrystalYieldUnits() const
 
 FText AJTSMoonResourceActor::GetInteractionDisplayName() const
 {
-	return FText::FromString(TEXT("石头"));
+	return UJTSDiscoveryComponent::DisplayName(this, UJTSItemDefinitionLibrary::GetItemIdForResource(ResourceType));
 }
 
 FVector AJTSMoonResourceActor::GetInteractionAnchorWorldLocation() const
@@ -260,7 +262,7 @@ void AJTSMoonResourceActor::PlaceOnPlanetSurface(
 	}
 
 	FJTSPlanetSurfaceFrame SurfaceFrame;
-	if (!Planet->GetSurfaceFrameAt(GroundLocation, PreferredForward, SurfaceFrame))
+	if (!AJTSInteriorZone::GroundFrame(Planet, GroundLocation, PreferredForward, SurfaceFrame))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("JTSMoonResourceActor %s could not resolve a real Moon surface frame."), *GetName());
 		return;

@@ -96,8 +96,8 @@ def run(stage):
             hit=box.line_trace_component(aim+mouth.get_actor_forward_vector()*220,aim,True,False,False)
             assert hit,mouth.get_actor_label()
             rows.append(mouth.get_actor_label())
-        assert len(rows)==9
-        return json.dumps(dict(all_nine_cave_openings_targetable=True,mouths=rows))
+        assert len(rows)==7
+        return json.dumps(dict(all_seven_cave_openings_targetable=True,mouths=rows))
     if stage=='editor':
         assert not world
         assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).load_level('/Game/Space/Maps/L_SpaceWorld')
@@ -163,7 +163,7 @@ def run(stage):
         scatter.set_editor_property('entries',entries)
         unreal.BlueprintEditorLibrary.compile_blueprint(feeding);s.save(feeding)
         assert unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
-        return json.dumps(dict(regions=len(cores),fixed_burrow_cuts=9,mirror_scatter_cuts=True,removed_primitive_rocks=removed,tower_height_cm=[95,132]))
+        return json.dumps(dict(regions=len(cores),fixed_burrow_cuts=7,mirror_scatter_cuts=True,removed_primitive_rocks=removed,tower_height_cm=[95,132]))
     if stage=='cuts':
         assert world
         planet=next(a for a in unreal.GameplayStatics.get_all_actors_of_class(world,unreal.JTSPlanetAnchor) if str(a.get_planet_id())=='Moon')
@@ -191,7 +191,7 @@ def run(stage):
             towers.append(dict(name=a.get_name(),height_cm=top))
         assert len(fissures)==16
         assert len(fissures)+len(mouths)==cuts.get_cut_count()
-        assert sum('FixedNest' in m['mesh'] for m in mouths)==9
+        assert sum('FixedNest' in m['mesh'] for m in mouths)==7
         result=dict(fissures=fissures,mouths=mouths,towers=towers,triangles=surface.get_dynamic_mesh().get_triangle_count())
         (s.QA/'true_cut_validation.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
         return json.dumps(result)

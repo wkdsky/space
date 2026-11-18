@@ -296,11 +296,11 @@ def configure():
         feedback(unreal.get_default_object(cls),soil)
         assert unreal.EditorAssetLibrary.save_loaded_asset(unreal.load_asset(path))
     nests=[a for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors() if a.get_actor_label().startswith('Moon_Nest_')]
-    assert len(nests)==9
+    assert len(nests)==7
     for nest in nests: nest.modify(); feedback(nest,True)
     for asset in (texture,material,attenuation,dust,item,spark): assert unreal.EditorAssetLibrary.save_loaded_asset(asset)
     assert unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True,True)
-    return dict(configured=True,nests=9,stroke_seconds=.32)
+    return dict(configured=True,nests=7,stroke_seconds=.32)
 
 
 def run(stage):

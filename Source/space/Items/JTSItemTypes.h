@@ -50,7 +50,11 @@ enum class EJTSItemId : uint8
 	ArcGun UMETA(DisplayName = "Arc Gun"),
 	/** Append-only identity for material recovered from crystal-bearing rocks. */
 	Crystal UMETA(DisplayName = "Crystal"),
-	InorganicCarbon UMETA(DisplayName = "Inorganic Carbon")
+	InorganicCarbon UMETA(DisplayName = "Inorganic Carbon"),
+	ManufacturedPart UMETA(DisplayName = "Manufactured Part"),
+	HighGradeAlloy UMETA(DisplayName = "High Grade Alloy"),
+	PortableCommunicator UMETA(DisplayName = "Portable Communicator"),
+	CombinerCoreModule UMETA(DisplayName = "Combiner Core Module")
 };
 
 /** Item behavior is composed from these capability bits instead of mutually exclusive item classes. */
@@ -187,6 +191,35 @@ struct SPACE_API FJTSItemInstance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	TArray<uint8> WeaponPoints;
 
+	/** Provenance follows actual samples, including stacks picked up before identification. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FName SpecimenId;
+	/** Server-recorded permits travel with this physical device through drops, lockers and saves. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<FName> CredentialIds;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<FName> ObservedPlanetIds;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float SampleSpanCm = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 SampleVisualVariant = 0;
+	/** Original creature geometry part. It changes presentation, never species/stack identity. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 CorpsePartIndex = INDEX_NONE;
+
+	bool IsStellar() const { return ItemId == EJTSItemId::StellarText || ItemId == EJTSItemId::StellarWeapon; }
+	bool CanStackWith(const FJTSItemInstance& Other) const
+	{
+		if (IsEmpty() || Other.IsEmpty() || ItemId != Other.ItemId || SpecimenId != Other.SpecimenId) return false;
+		if (CredentialIds != Other.CredentialIds) return false;
+		if (!IsStellar()) return true;
+		if (StellarItemId != Other.StellarItemId || StellarCoreId != Other.StellarCoreId
+			|| StellarCoreLevel != Other.StellarCoreLevel || Durability != Other.Durability) return false;
+		for (int32 I=0; I<FMath::Max(StellarPoints.Num(),Other.StellarPoints.Num()); ++I)
+			if ((StellarPoints.IsValidIndex(I)?StellarPoints[I]:0) != (Other.StellarPoints.IsValidIndex(I)?Other.StellarPoints[I]:0)) return false;
+		return true;
+	}
+	static FString StackBadge(int32 Count)
+	{
+		if (Count >= 1 && Count <= 20) return FString::Chr(TCHAR(0x2460 + Count - 1));
+		if (Count >= 21 && Count <= 35) return FString::Chr(TCHAR(0x3251 + Count - 21));
+		if (Count >= 36 && Count <= 50) return FString::Chr(TCHAR(0x32b1 + Count - 36));
+		return FString::Printf(TEXT("(%d)"),Count);
+	}
 	bool IsEmpty() const
 	{
 		return ItemId == EJTSItemId::None || StackCount <= 0
@@ -207,6 +240,9 @@ struct SPACE_API FJTSItemInstance
 		StellarPoints.Reset();
 		WeaponBodyLevel = 1;
 		WeaponPoints.Reset();
+		ObservedPlanetIds.Reset(); SpecimenId=NAME_None; SampleSpanCm=0; SampleVisualVariant=0;
+		CorpsePartIndex=INDEX_NONE;
+		CredentialIds.Reset();
 	}
 };
 

@@ -93,7 +93,8 @@ cam.rotation_euler=(Vector((0,0,0.22))-cam.location).to_track_quat("-Z","Y").to_
 cam.data.ortho_scale=2.7
 scene=bpy.context.scene;scene.cycles.samples=24
 scene.render.resolution_x=1100;scene.render.resolution_y=900
-scene.render.filepath=str(root/"Preview_Corpse.png")
+(root/'Previews').mkdir(parents=True,exist_ok=True)
+scene.render.filepath=str(root/'Previews/Preview_Corpse.png')
 bpy.ops.wm.save_as_mainfile(filepath=str(root/"SkeletonAstronaut_Corpse.blend"))
 bpy.ops.render.render(write_still=True)
 data.calc_loop_triangles()
@@ -101,5 +102,7 @@ report={"vertices":len(data.vertices),"triangles":len(data.loop_triangles),"dime
         "materials":[m.name for m in data.materials],"minimum_z_m":min(v.co.z for v in data.vertices),
         "pivot":"XY visual center, Z lowest point", "pose":"Supine, relaxed asymmetric arms and legs",
         "support_regions":support_regions}
-(root/"corpse_pose_report.json").write_text(json.dumps(report,indent=2))
+qa=root.parents[1]/'Saved/SkeletonAstronaut'
+qa.mkdir(parents=True,exist_ok=True)
+(qa/"corpse_pose_report.json").write_text(json.dumps(report,indent=2))
 print("CORPSE_POSE",report)

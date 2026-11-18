@@ -140,7 +140,9 @@ class MoonCorpseAuthoringTools(unreal.ToolsetDefinition):
         result=describe(corpse,anchor)
         result.update({"crater_center_world":vector(center),"nest_data":data.get_path_name(),
                        "nest_outer_radius_cm":600.0,"nest_count":data.get_editor_property("moon_ant_nest_count")})
-        (ROOT/"moon_corpse_corrected_layout.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
+        qa=ROOT.parents[1]/'Saved/SkeletonAstronaut'
+        qa.mkdir(parents=True,exist_ok=True)
+        (qa/"moon_corpse_corrected_layout.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return json.dumps(result)
 
     @toolset_registry.tool_call
@@ -200,7 +202,9 @@ class MoonCorpseAuthoringTools(unreal.ToolsetDefinition):
         controller.modify()
         controller.set_editor_property("placed_corpse_landmark",corpse)
         result=describe(corpse,anchor);result["removed_old_actors"]=removed
-        (ROOT/"moon_corpse_authored.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
+        qa=ROOT.parents[1]/'Saved/SkeletonAstronaut'
+        qa.mkdir(parents=True,exist_ok=True)
+        (qa/"moon_corpse_authored.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return json.dumps(result)
 
     @toolset_registry.tool_call
@@ -225,7 +229,9 @@ class MoonCorpseAuthoringTools(unreal.ToolsetDefinition):
         assert result["alignment_dot"]>0.99999 and result["replicates"]
         result.update({"corpse_count":len(corpses),"repeated_requests_reused_placed_actor":True,
                        "controller_landmark_reference_matches":first==placed})
-        (ROOT/"moon_corpse_pie_validation.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
+        qa=ROOT.parents[1]/'Saved/SkeletonAstronaut'
+        qa.mkdir(parents=True,exist_ok=True)
+        (qa/"moon_corpse_pie_validation.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return json.dumps(result)
 
 _registration=Registration([MoonCorpseAuthoringTools])

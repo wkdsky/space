@@ -1,4 +1,5 @@
 #include "space/World/JTSPlanetEnemySettlement.h"
+#include "space/World/JTSInteriorZone.h"
 
 #include "Components/SphereComponent.h"
 #include "Engine/World.h"
@@ -66,14 +67,14 @@ void AJTSPlanetEnemySettlement::Activate(AJTSPlanetAnchor* Planet, AActor* Surfa
 		return;
 	}
 	FJTSPlanetSurfaceHit CenterHit;
-	if (!Planet->ProjectPointToSurface(GetSettlementLocation(), CenterHit)
+	if (!AJTSInteriorZone::ProjectGameplayGround(Planet, GetSettlementLocation(), CenterHit)
 		|| !AcceptSpawnPoint(CenterHit.ImpactPoint, Planet))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Enemy settlement %s has no accepted real surface at its marker."), *GetName());
 		return;
 	}
 	FJTSPlanetSurfaceFrame CenterFrame;
-	if (!Planet->GetSurfaceFrameAt(CenterHit.ImpactPoint, GetActorForwardVector(), CenterFrame)) return;
+	if (!AJTSInteriorZone::GroundFrame(Planet, CenterHit.ImpactPoint, GetActorForwardVector(), CenterFrame)) return;
 	bActive = true;
 	ActivePlanet = Planet;
 	ActiveSurfaceController = SurfaceController;
@@ -132,9 +133,11 @@ void AJTSPlanetEnemySettlement::SpawnMissingEnemies(int32 SpawnBudget, bool bRep
 	for (int32 Attempt = 0; Attempt < MaxAttempts && Added < Missing; ++Attempt)
 	{
 		FJTSPlanetSurfaceHit Hit;
-		if (!Planet->RandomPointInSurfaceCap(Planet->GetRadialUpVector(SettlementCenter),
-			FMath::Max(0.0f, SpawnRadius), Hit)
-			|| !Planet->IsSurfacePlacementAllowed(Hit)
+		const bool bInside=AJTSInteriorZone::FindAt(GetWorld(),SettlementCenter)!=nullptr;
+        const FVector Candidate=SettlementCenter+GetActorForwardVector()*FMath::FRandRange(-SpawnRadius,SpawnRadius)+GetActorRightVector()*FMath::FRandRange(-SpawnRadius,SpawnRadius);
+        const bool bGround=bInside?AJTSInteriorZone::ProjectFloor(Planet,Candidate,Hit):Planet->RandomPointInSurfaceCap(Planet->GetRadialUpVector(SettlementCenter),FMath::Max(0.0f,SpawnRadius),Hit);
+        if (!bGround
+			|| !(AJTSInteriorZone::FindAt(GetWorld(),Hit.ImpactPoint) || Planet->IsSurfacePlacementAllowed(Hit))
 			|| Planet->ApproximateSurfaceArcDistance(SettlementCenter, Hit.ImpactPoint) > SpawnRadius
 			|| !AcceptSpawnPoint(Hit.ImpactPoint, Planet)) continue;
 		if (PlayerLocations.ContainsByPredicate([&](const FVector& Position)
@@ -152,7 +155,7 @@ void AJTSPlanetEnemySettlement::SpawnMissingEnemies(int32 SpawnBudget, bool bRep
 		const FVector Direction = Planet->ProjectDirectionToSurfaceTangent(
 			Hit.ImpactPoint - SettlementCenter, Hit.ImpactPoint);
 		FJTSPlanetSurfaceFrame Frame;
-		if (!Planet->GetSurfaceFrameAt(Hit.ImpactPoint, Direction, Frame)) continue;
+		if (!AJTSInteriorZone::GroundFrame(Planet, Hit.ImpactPoint, Direction, Frame)) continue;
 		const FTransform SpawnTransform(Frame.Transform.GetRotation(), Frame.Location);
 		AActor* Enemy = SpawnSettlementEnemy(SpawnTransform, Hit.ImpactPoint);
 		if (!Enemy) continue;

@@ -172,6 +172,11 @@ bool UJTSStellarAbilityComponent::Disassemble(const FJTSStellarWeaponDefinition&
 	APawn* Pawn = Cast<APawn>(GetOwner()); const auto& X = Binding.EffectiveLevels; FHitResult Hit;
 	const FVector Point = JTSStellarCombat::AimPoint(Pawn, Direction, Def.RangeCentimeters, &Hit);
 	AActor* Target = Hit.GetActor(); auto* Status = IsValid(Target) ? Target->FindComponentByClass<UJTSStellarTargetComponent>() : nullptr;
+	while (!bEngineering && !Status && IsValid(Target) && Target->GetAttachParentActor())
+	{
+		Target = Target->GetAttachParentActor();
+		Status = Target->FindComponentByClass<UJTSStellarTargetComponent>();
+	}
 	const bool Eligible = bEngineering ? IsValid(Target) && Target->Implements<UJTSDisassemblyTarget>() && IJTSDisassemblyTarget::Execute_CanDisassemble(Target, Pawn) : Status && Status->IsAliveTarget();
 	if (!Eligible) { LockTarget.Reset(); LockSeconds = 0; LockProgress = 0; return true; }
 	if (LockTarget.Get() != Target) { LockTarget = Target; LockSeconds = 0; }
@@ -191,7 +196,7 @@ bool UJTSStellarAbilityComponent::Disassemble(const FJTSStellarWeaponDefinition&
 	const float Budget = Def.BaseDamage * (1 + .05 * X[0]);
 	TSet<AActor*> Visited; Visited.Add(Target);
 	auto* TargetHealth = Target->FindComponentByClass<UJTSHealthComponent>();
-	const bool Execute = TargetHealth && TargetHealth->GetHealth() <= Budget && (Status->GetTier() == EJTSStellarTargetTier::Normal
+	const bool Execute = TargetHealth && !TargetHealth->IsInvulnerable() && TargetHealth->GetHealth() <= Budget && (Status->GetTier() == EJTSStellarTargetTier::Normal
 		|| (Status->GetTier() == EJTSStellarTargetTier::Elite && TargetHealth->GetHealthNormalized() <= .15f));
 	if (Execute) TargetHealth->ApplyDamage(TargetHealth->GetHealth(), Pawn->GetController(), Pawn, true);
 	else UGameplayStatics::ApplyDamage(Target, Budget, Pawn->GetController(), Pawn, UDamageType::StaticClass());

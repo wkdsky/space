@@ -32,7 +32,7 @@ bool UJTSNestBlockadeComponent::CanWork(APawn* Pawn) const
 {
 	const auto* Habitat = Cast<AJTSPlanetEcologyHabitat>(GetOwner());
 	if (!Habitat || !IsValid(Pawn) || Pawn->GetWorld() != GetWorld() || !HasRequiredTool(Pawn)
-		|| !Habitat->bCanBlockEntrance || !Habitat->CanReceiveMeleeHit_Implementation(Pawn)) return false;
+		|| !Habitat->bCanBlockEntrance || Habitat->BlocksDamage_Implementation(Pawn) || !Habitat->CanReceiveMeleeHit_Implementation(Pawn)) return false;
 	if (const auto* Character = Cast<AJTSCharacter>(Pawn); Character && Character->IsBoarded()) return false;
 	if (const auto* Climb = Pawn->FindComponentByClass<UJTSWallClimbComponent>(); Climb && Climb->IsClimbing()) return false;
 	const auto* Strike = Pawn->FindComponentByClass<UJTSMiningStrikeComponent>();
@@ -63,8 +63,16 @@ void UJTSNestBlockadeComponent::ServiceWork()
 bool UJTSNestBlockadeComponent::ApplyStrikeWork(APawn* Pawn)
 {
 	if (!GetOwner()->HasAuthority() || !CanWork(Pawn)) return false;
-	auto* Habitat = CastChecked<AJTSPlanetEcologyHabitat>(GetOwner());
-	Progress = FMath::Min(1.f, Progress + FMath::Clamp(DamagePerStrike, .01f, 1.f));
+	return ApplyWeaponDamage(DamagePerStrikeReference, Pawn);
+}
+bool UJTSNestBlockadeComponent::ApplyWeaponDamage(float Damage, APawn* Pawn)
+{
+	auto* Habitat = Cast<AJTSPlanetEcologyHabitat>(GetOwner());
+	if (!Habitat || !Habitat->HasAuthority() || !Habitat->bCanBlockEntrance
+		|| Habitat->BlocksDamage_Implementation(Pawn) || !IsValid(Pawn) || Pawn->GetWorld() != GetWorld()
+		|| !FMath::IsFinite(Damage) || Damage <= 0.f) return false;
+	if (const auto* Health = Pawn->FindComponentByClass<UJTSHealthComponent>(); Health && Health->IsDead()) return false;
+	Progress = FMath::Min(1.f, Progress + Damage / FMath::Max(.01f, DamagePerStrikeReference) * FMath::Clamp(DamagePerStrike, .01f, 1.f));
 	const double Now = GetWorld()->GetTimeSeconds();
 	LastWork = Now;
 	if (!GetWorld()->GetTimerManager().IsTimerActive(WorkTimer))
@@ -220,7 +228,11 @@ void UJTSNestBlockadeComponent::RestorePersistentState()
 	if (!GetOwner()->HasAuthority() || PersistentEntranceId.IsNone()) return;
 	if (const auto* GameInstance = GetWorld()->GetGameInstance())
 		if (const auto* Expedition = GameInstance->GetSubsystem<UJTSExpeditionSubsystem>(); Expedition && Expedition->IsEntranceBlocked(PersistentEntranceId))
-			CastChecked<AJTSPlanetEcologyHabitat>(GetOwner())->CommitEntranceBlockade();
+            {
+                auto* H=CastChecked<AJTSPlanetEcologyHabitat>(GetOwner());
+                if (H->bCanBlockEntrance) H->CommitEntranceBlockade();
+                else H->RestoreDestroyedEntrance();
+            }
 }
 void UJTSNestBlockadeComponent::MulticastCollapseDust_Implementation()
 {

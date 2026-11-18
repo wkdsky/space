@@ -11,7 +11,7 @@ class SPACE_API UJTSBossHealthWidget : public UUserWidget
 {
 	GENERATED_BODY()
 public:
-	void SetBoss(AJTSPlanetBoss* InBoss) { Boss = InBoss; }
+	void SetBoss(AJTSPlanetBoss* InBoss);
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeTick(const FGeometry& Geometry, float DeltaSeconds) override;

@@ -10,8 +10,9 @@ bool UJTSItemDefinition::HasCapability(EJTSItemCapability Capability) const
 
 bool UJTSItemDefinition::IsStackable() const
 {
-	// The inventory applies the fixed per-slot cap to resource types; equipment stays unique.
-	return PrimaryCategory == EJTSItemCategory::Resources
+	// Stellar copies stack by compatible instance state; ordinary equipment remains unique.
+	return ItemId == EJTSItemId::StellarText || ItemId == EJTSItemId::StellarWeapon
+		|| PrimaryCategory == EJTSItemCategory::Resources
 		|| HasCapability(EJTSItemCapability::StackableResource);
 }
 

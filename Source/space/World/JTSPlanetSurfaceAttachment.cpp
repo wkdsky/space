@@ -1,4 +1,7 @@
 #include "space/World/JTSPlanetSurfaceAttachment.h"
+#include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/Components/JTSDiscoveryComponent.h"
+#include "space/Items/JTSItemDefinitionLibrary.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
@@ -137,17 +140,43 @@ void AJTSPlanetSurfaceAttachment::ApplyAppearance()
 
 bool AJTSPlanetSurfaceAttachment::CanReceiveMeleeHit_Implementation(APawn* Pawn) const
 {
+	if (const auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor())) return Nest->CanReceiveMeleeHit_Implementation(Pawn);
+	if(BlocksAttackInitiation_Implementation(Pawn)) return false;
 	return Appearance.bDestructible && !Health->IsDead();
 }
 
 void AJTSPlanetSurfaceAttachment::ReceiveMeleeHit_Implementation(APawn* Pawn, EJTSMeleeAttackType Type)
 {
+	if (auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor())) { Nest->ReceiveMeleeHit_Implementation(Pawn,Type); return; }
 	if (HasAuthority() && CanReceiveMeleeHit_Implementation(Pawn))
 		Health->ApplyDamage(Type == EJTSMeleeAttackType::Punch ? 8 : 20, Pawn ? Pawn->GetController() : nullptr, Pawn);
 }
 
-FText AJTSPlanetSurfaceAttachment::GetMeleeTargetDisplayName_Implementation() const { return FText::FromString(TEXT("地表构件")); }
-FText AJTSPlanetSurfaceAttachment::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const { return FText::FromString(TEXT("摧毁")); }
+bool AJTSPlanetSurfaceAttachment::BlocksAttackInitiation_Implementation(APawn* Pawn) const
+{
+	const auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor());
+	return Nest && Nest->BlocksAttackInitiation_Implementation(Pawn);
+}
+float AJTSPlanetSurfaceAttachment::TakeDamage(float Damage,const FDamageEvent& Event,AController* Controller,AActor* Causer)
+{
+	if (auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor())) return Nest->TakeDamage(Damage,Event,Controller,Causer);
+	return BlocksAttackInitiation_Implementation(nullptr)?0:Super::TakeDamage(Damage,Event,Controller,Causer);
+}
+bool AJTSPlanetSurfaceAttachment::BlocksDamage_Implementation(APawn* Pawn) const
+{
+	const auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor());
+	return Nest && Nest->BlocksDamage_Implementation(Pawn);
+}
+FText AJTSPlanetSurfaceAttachment::GetMeleeTargetDisplayName_Implementation() const
+{
+	if(const auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor())) return Nest->GetMeleeTargetDisplayName_Implementation();
+	return FText::FromString(TEXT("地表构件"));
+}
+FText AJTSPlanetSurfaceAttachment::GetMeleeTargetPrompt_Implementation(APawn* Pawn) const
+{
+	if(const auto* Nest=Cast<AJTSPlanetEcologyHabitat>(GetAttachParentActor())) return Nest->GetMeleeTargetPrompt_Implementation(Pawn);
+	return FText::FromString(TEXT("摧毁"));
+}
 FVector AJTSPlanetSurfaceAttachment::GetMeleeTargetAnchorWorldLocation_Implementation() const { return DamageTarget->GetComponentLocation(); }
 
 void AJTSPlanetSurfaceAttachment::OnAttachmentDepleted(AController* InstigatorController, AActor* Causer)
@@ -162,7 +191,7 @@ bool AJTSPlanetSurfaceAttachment::CanInteract_Implementation(APawn* Pawn) const
 }
 FText AJTSPlanetSurfaceAttachment::GetInteractionDisplayName() const
 {
-	return Appearance.ResourceItem ? Appearance.ResourceItem->DisplayName : FText::GetEmpty();
+	return Appearance.ResourceItem ? UJTSDiscoveryComponent::DisplayName(this,Appearance.ResourceItem->ItemId) : FText::GetEmpty();
 }
 FVector AJTSPlanetSurfaceAttachment::GetInteractionAnchorWorldLocation() const
 {
@@ -191,7 +220,11 @@ void AJTSPlanetSurfaceAttachment::Interact_Implementation(APawn* Pawn)
 	auto* Inventory = Pawn->FindComponentByClass<UJTSInventoryComponent>();
 	if (!Inventory || !Inventory->CanAddItem(Appearance.ResourceItem->ItemId, Appearance.ResourceUnits)) return;
 	bResourceConsumed = true;
-	if (!Inventory->TryAddItemById(Appearance.ResourceItem->ItemId, Appearance.ResourceUnits)) { bResourceConsumed = false; return; }
+	FJTSItemInstance Sample=UJTSItemDefinitionLibrary::MakeInstance(Appearance.ResourceItem->ItemId,Appearance.ResourceUnits);
+	UJTSDiscoveryComponent::StampPickup(this,Sample,GetComponentsBoundingBox(true).GetSize().GetMax(),0);
+	int32 Remaining=0;
+	if (!Inventory->TryAddItem(Sample,Remaining) || Remaining!=0) { bResourceConsumed = false; return; }
+	if(auto* Discovery=UJTSDiscoveryComponent::Find(this)) Discovery->ObservePickup(Sample);
 	if (auto* Character = Cast<AJTSCharacter>(Pawn)) Character->TryDepositCarriedResourcesToNearbySpacecraft();
 	Destroy();
 }

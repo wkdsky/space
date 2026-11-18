@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "space/World/JTSNavigationStage.h"
 
 class AJTSCharacter;
 class AJTSPlanetAnchor;
@@ -8,7 +9,7 @@ class AJTSSpacecraftActor;
 class AJTSSpaceWorldManager;
 
 /** Presentation only. Flight/landing authority remains with the existing gameplay systems. */
-enum class EJTSNavigationMapStage : uint8 { Surface, System, Interstellar };
+
 
 struct FJTSNavigationMapBody
 {
@@ -52,6 +53,10 @@ struct FJTSNavigationTerrainPatch
 
 struct FJTSNavigationMapFrame
 {
+    struct FWaypoint { FString Name; FVector2D Position; float Meters=0; };
+    TArray<FWaypoint> Waypoints;
+    bool bIndoor=false;
+    FString InteriorName;
 	EJTSNavigationMapStage Stage = EJTSNavigationMapStage::Interstellar;
 	FName SystemId;
 	FString SystemName;

@@ -32,6 +32,7 @@ class SPACE_API UJTSShopWidget : public UUserWidget
 
 public:
 	bool OpenForSpacecraft(AJTSSpacecraftActor* Spacecraft);
+	bool OpenForDock(class AJTSShipDockActor* Dock);
 	void CloseShop();
 	bool IsShopOpen() const;
 	void NotifyPurchaseResult(EJTSShopPurchaseResult Result);
@@ -129,6 +130,7 @@ private:
 	UFUNCTION() void HandleConfirmAbilitiesClicked();
 	UFUNCTION() void HandleResetAbilitiesClicked();
 	UFUNCTION() void HandleCloseClicked();
+	UFUNCTION() void HandleFieldGuideClicked();
 
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> RootCanvas;
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanelSlot> TerminalLayoutSlot;
@@ -136,6 +138,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UBorder> CatalogPanel;
 	UPROPERTY(Transient) TObjectPtr<UBorder> AbilityPanel;
 	UPROPERTY(Transient) TObjectPtr<UBorder> StellarPanel;
+	UPROPERTY(Transient) TObjectPtr<class UJTSStellarExchangeWidget> SharedStellarPanel;
 	UPROPERTY(Transient) TObjectPtr<UBorder> LockerPanel;
 	UPROPERTY(Transient) TObjectPtr<UUniformGridPanel> CatalogGrid;
 	UPROPERTY(Transient) TObjectPtr<UUniformGridPanel> LockerGrid;
@@ -217,5 +220,9 @@ private:
 	int32 ReelDisplayIndex = 0;
 	bool bAbilityCommitPending = false;
 	bool bShopOpen = false;
+	TWeakObjectPtr<class AJTSShipDockActor> ActiveDock;
+	bool bDockSession = false;
+	bool bPhysicalConsoleSession = false;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> TerminalTitle;
 	float RefreshAccumulator = 0.0f;
 };

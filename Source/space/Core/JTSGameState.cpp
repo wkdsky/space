@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/Core/JTSGameState.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 
 void AJTSGameState::SetLaunchDeadline(double Value)
 {
@@ -14,6 +15,7 @@ AJTSGameState::AJTSGameState()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	Discovery=CreateDefaultSubobject<UJTSDiscoveryComponent>(TEXT("Discovery"));
 }
 
 EJTSGameplayPhase AJTSGameState::GetGameplayPhase() const { return GameplayPhase; }
@@ -185,4 +187,8 @@ void AJTSGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AJTSGameState, CurrentPlanetId);
 	DOREPLIFETIME(AJTSGameState, ExpeditionId);
 	DOREPLIFETIME(AJTSGameState, ImportantItemIds);
+	DOREPLIFETIME(AJTSGameState, LoadedCoordinateIds);
+	DOREPLIFETIME(AJTSGameState, FacilityFlagIds);
+	DOREPLIFETIME(AJTSGameState, BlockedEntranceIds);
+	DOREPLIFETIME(AJTSGameState, DefeatedEncounterIds);
 }

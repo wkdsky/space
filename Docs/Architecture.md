@@ -1,47 +1,52 @@
-# 项目架构与联机
+# 架构与联机
 
-本文记录当前采用的系统边界。玩法说明见 [Gameplay.md](Gameplay.md)，月球内容与参数见 [Moon.md](Moon.md)，编译及资产操作见 [Development.md](Development.md)。
+## 职责边界
 
-## 世界与流程
+C++ 提供规则、数据结构、通用接口和 Runtime 能力；Blueprint / Data Asset 配置资源、类、参数和关卡实例。GameMode 决定玩家与飞船的生成位置，不把具体 Actor 或关卡资产引用写死在通用 C++ 中。
 
-当前主流程为 `L_Entry → L_PreLaunchLobby → L_EarthLaunchPrototype → L_SpaceWorld`。SpaceWorld 是持续存在的宇宙玩法空间，由当前 Planet 的地表控制器启动对应玩法。星球切换使用世界管理与 Streaming，不把每个星球设计成依次旅行的独立章节地图。
-
-这是 1–4 人共享的 Expedition。单人也使用同一套服务器规则；Listen Server 与后续 Dedicated Server 共用权威逻辑。服务器拥有阶段、出生、飞船创建及跨地图旅行，Earth 到 SpaceWorld 使用 seamless ServerTravel。开始远征后关闭普通加入；不支持房主迁移。
-
-## 职责分配
-
-| 层级 / 入口 | 当前职责 |
+| 层级 | 当前职责 |
 | --- | --- |
-| `AJTSGameplayGameModeBase` 及派生 GameMode | 准入、准备、阶段、玩家出生、飞船创建、旅行；具体类和参数由 Blueprint 配置 |
-| `AJTSGameState` | 复制公共阶段、截止时间、当前飞船和星球状态 |
-| `AJTSPlayerState` | 复制准备、房主、颜色、登船及个人远征状态；持有个人仓库、星际装备与成长数据 |
-| `UJTSExpeditionSubsystem` | 服务器跨关卡快照、房主存档、恢复玩家与飞船物资 |
-| `UJTSOnlineSessionSubsystem` | UI 使用的唯一 OnlineSubsystem 包装；创建、查找、加入和结束会话 |
-| `UJTSVoiceSubsystem` | Provider 语音接入、音量及空间策略；音频传输和编解码由 Provider 提供 |
-| `AJTSSpaceWorldManager` | 星球注册、当前星球、Streaming、旅行与宇宙状态 |
-| `AJTSPlanetAnchor` | 真实星球中心、表面碰撞查询、径向坐标与着陆所需几何 |
-| `AJTSPlanetLandingManager` / `AJTSPlanetArrivalAnchor` | 首次到达、配置的飞船出生点、安全下船及重生查询 |
-| `AJTSSpacecraftActor` 及飞行 / 包络 / 支撑 / 表现组件 | 驾驶权限与状态、运动、近地安全、足垫支撑、支架和灯光表现 |
-| `AJTSMoonSurfaceController` 及其他 SurfaceController | 具体星球的资源、聚居地、地标及地表玩法启停 |
-| `UJTSPlanetEnemySubsystem` | 服务器 Mass 实体注册、统一模拟、感知 / 路线预算与身体分离 |
-| Character、库存 / 战斗组件、物品 Actor | 玩家移动、输入、交互、装备、战斗和物品自身行为 |
+| `AJTSGameplayGameModeBase` 及派生类 | 服务器玩法初始化、阶段推进、出生、旅行 |
+| `AJTSGameState` | 复制全局阶段、期限、当前飞船和星球状态；承载团队发现记录 |
+| `AJTSPlayerState` | 玩家准备、房主、外观色、登船与远征状态 |
+| `AJTSSpaceWorldManager` | 天体注册、当前星球、流送、旅行与宇宙状态 |
+| `AJTSPlanetAnchor` | 天体中心、真实表面查询、球面重力、着陆依据 |
+| `AJTSSpacecraftActor` 与组件 | 飞行、起落、乘员、仓储和模块能力 |
+| Planet SurfaceController / 生态组件 | 对应星球的资源、聚居地、生物与事件 |
+| Character / 交互组件 | 玩家输入、移动、交互、装备与战斗 |
 
-`UJTSGameInstance` 保留应用入口与本地设置职责；远征快照和房主存档归 `UJTSExpeditionSubsystem`。当前快照保存阶段、地图 / 星球标识、飞船类型与物资、玩家背包、仓库、星际装备 / 能量及成长数据，不能据此假定所有关卡 Actor 的动态状态都会持久化。
+优先沿用 Component、Subsystem、Interface。聚居地生物和范围资源分别复用已有模板，避免把多个系统继续堆进单个 Actor。
 
-## 权威与复制
+## 启动与旅行
 
-客户端通过所属 PlayerController、Pawn 或组件的 owner RPC 提交意图。服务器重新验证当前阶段、身份、距离、视线、物品实例、材料、冷却及目标状态后，才执行交互、库存 / 装备修改、伤害、资源生成、AI、登船和驾驶。
+默认入口为 `/Game/Space/FrontEnd/Maps/L_Entry`，前端使用 MainMenu GameMode。常规流程为 Entry → PreLaunchLobby → EarthLaunchPrototype → SpaceWorld。进入共享远征后，地球收集、发射和跨关卡推进由服务器掌握；Earth → SpaceWorld 使用 seamless travel。
 
-一艘共享飞船最多四名乘员、一个驾驶员。只有当前驾驶员能发送不可靠飞行意图，移动结果由服务器复制。个人背包与个人商店仓库分别保存；飞船资源属于共享 Expedition。
+SpaceWorld 是持续使用的通用宇宙关卡。星球玩法由各自配置控制，不通过不断切换独立单人地图实现。
 
-怪物采用 MassEntity 与 Actor 混合结构：Entity / Fragment 保存模拟状态，World Subsystem 集中调度，Actor 保留碰撞、命中身份、表现和复制。立方体与蚂蚁共用宿主；服务器不运行每只怪物的行为 Actor Tick。客户端快照插值只负责展示，不进行独立 AI 或伤害结算。当前不是完整的 Mass Processor chunk 批处理实现。
+## 1–4 人共享远征
 
-## 球面规则与配置边界
+单人也运行同一套服务器权威规则。Listen Server 与未来 Dedicated Server 共用玩法路径；远征开始后关闭普通加入，不支持房主迁移。
 
-当地向上为 `normalize(Actor位置 - Planet中心)`，重力朝星球中心。地表放置、坡度、移动、攻击范围及起落都依据真实 Mesh Surface，不使用固定 World-Z。跨三角面时，部分朝向采用连续径向上方向，落点仍来自真实碰撞表面。
+客户端通过自己拥有的 Controller / Pawn RPC 提交意图。服务器校验交互距离与目标、背包实例、装备修改、伤害、资源生成、AI、船仓、登船和飞行输入，再修改复制状态。UI 展示结果，不能以客户端本地库存或 Widget 状态作为交易依据。
 
-C++ 负责规则、数据结构、通用接口与运行行为。Blueprint / Data Asset / 关卡实例负责 GameMode 选择、玩家与飞船类、星球参数、网格、材质、声音、地标和生成区域。新增内容优先复用聚居地敌人模板 `AJTSPlanetEnemySettlement` 与球面资源范围模板，使用 Component、Subsystem、Interface 组合职责。
+飞船最多四名乘员、一个驾驶员。只有驾驶员可提交不可靠飞行意图，服务器模拟与复制移动。飞船武器还校验驾驶权限、起落状态和输入时效。
 
-当前普通物品使用 `UJTSItemDefinition + FJTSItemInstance`，近战、远程、采矿和星际能力分别由现有组件 / 目标接口处理。旧方案中提出的通用 Action / Effect 路由、独立 Mining / Resistance / Requirement 组件尚未落地，不作为现有系统入口。
+`UJTSOnlineSessionSubsystem` 是面向 UI 的 OnlineSubsystem 包装层。项目默认 provider 为 NULL；EOS 配置示例不代表已配置线上凭据。语音由 `UJTSVoiceSubsystem` 对接 provider，不维护自定义音频传输或裸 IP 加入界面。
 
-源码按现有 `Modes / Core / Systems / World / Player / Components / Ships / Items / Interaction / Weapons / UI / Animation` 职责维护。开发约束以根目录 [AGENTS.md](../AGENTS.md) 为准。
+## 跨关卡与保存
+
+`UJTSExpeditionSubsystem` 管理服务器远征快照与房主存档。`UJTSGameInstance` 的客户端本地状态不能代替共享远征数据。当前快照包含：
+
+- 地图、星球、阶段、检查点、飞船类，共享资源和材料加工图。
+- 已安装船坞 ID、团队已分析类型、扫描样本与扫描货物。
+- 星际兑换机的待发奖状态及收件人身份。
+- 各玩家背包、30 格个人船柜、星际装配、能量、固件、核心进度、生命与防御成长。
+- 已封堵入口、重要物品与已击败遭遇的标识。
+
+这是按系统恢复的快照，并非所有世界 Actor 的完整序列化。新增可持久化功能时，需要明确写入、跨图恢复、旧存档兼容以及服务器归属。
+
+本机档案、调试偏好和远征槽分别保存于 `Saved/SaveGames`。目录整理时必须保留这些文件，不能把整个 Saved 当成可丢弃缓存。
+
+## 世界与表现
+
+球面移动、贴地、重力和着陆依赖 PlanetAnchor 与真实 Mesh 表面，不能退回固定 World-Z。导航距离、压缩显示与近地实际尺度是不同的数据用途，详见 [SpaceWorld](SpaceWorld.md)。美术演出是否接入玩法、是否联机同步，需要分别说明，不能仅凭预览资产存在就视为完成。

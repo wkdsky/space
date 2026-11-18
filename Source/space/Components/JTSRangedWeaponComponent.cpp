@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/Components/JTSRangedWeaponComponent.h"
+#include "space/Components/JTSMeleeComponent.h"
 
 #include "CollisionQueryParams.h"
 #include "DrawDebugHelpers.h"
@@ -236,6 +237,7 @@ void UJTSRangedWeaponComponent::CancelForClimb()
 
 void UJTSRangedWeaponComponent::StartFire()
 {
+	if(const auto* Melee=GetOwner()->FindComponentByClass<UJTSMeleeComponent>();Melee && Melee->GetAttackBlockerInAim()) return;
 	if (bFireHeld) return;
 	if (!CanUseWeapon()) return;
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
@@ -551,11 +553,10 @@ void UJTSRangedWeaponComponent::FireRay(const FVector& Start, const FVector& Dir
 			}
 			bCritical = CriticalMultiplier > 1.0f + KINDA_SMALL_NUMBER;
 			const float BaseDamage = Stats.DamagePerPellet * Stats.FalloffMultiplier(Travelled) * PierceScale;
-			bDamageable = BaseDamage > 0.0f;
-			bCritical = bCritical && bDamageable;
-			UGameplayStatics::ApplyPointDamage(HitActor, BaseDamage * CriticalMultiplier, Direction, Hit,
+			bDamageable = UGameplayStatics::ApplyPointDamage(HitActor, BaseDamage * CriticalMultiplier, Direction, Hit,
 				Pawn->GetController(), Pawn,
-				bCritical ? UJTSCriticalDamageType::StaticClass() : UDamageType::StaticClass());
+				bCritical ? UJTSCriticalDamageType::StaticClass() : UDamageType::StaticClass()) > 0.f;
+			bCritical = bCritical && bDamageable;
 			if (bDamageable && Stats.ChainTargets > 0) ApplyChain(End, HitActor, BaseDamage, Stats, Definition->ItemId);
 		}
 		MulticastShotTrace(RayStart, End, Normal, Definition->ItemId, bHitSomething, bDamageable, bCritical);
@@ -571,6 +572,7 @@ void UJTSRangedWeaponComponent::FireRay(const FVector& Start, const FVector& Dir
 
 bool UJTSRangedWeaponComponent::FireOnce()
 {
+	if(const auto* Melee=GetOwner()->FindComponentByClass<UJTSMeleeComponent>();Melee && Melee->GetAttackBlockerInAim()) return false;
 	if (GetOwner() == nullptr || !GetOwner()->HasAuthority() || GetWorld() == nullptr || !CanUseWeapon()) return false;
 	const UJTSInventoryComponent* Inventory = GetOwner()->FindComponentByClass<UJTSInventoryComponent>();
 	const UJTSItemDefinition* Definition = GetActiveRangedDefinition();
@@ -678,6 +680,7 @@ void UJTSRangedWeaponComponent::ScheduleHeldFire(const UJTSItemDefinition* Defin
 
 bool UJTSRangedWeaponComponent::TryLocalShot(const UJTSItemDefinition* Definition)
 {
+	if(const auto* Melee=GetOwner()->FindComponentByClass<UJTSMeleeComponent>();Melee && Melee->GetAttackBlockerInAim()) return false;
 	const FJTSRangedWeaponStats Stats = ResolveActiveStats();
 	if (Stats.UsesEnergy())
 	{

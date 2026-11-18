@@ -1,4 +1,9 @@
 #include "space/World/JTSNestBossEncounter.h"
+#include "space/Components/JTSFacilityConditionComponent.h"
+#include "space/World/JTSInteriorZone.h"
+#include "Components/BoxComponent.h"
+#include "space/Player/JTSCharacter.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "ProceduralMeshComponent.h"
@@ -8,6 +13,7 @@
 #include "space/World/JTSPlanetEcologyHabitat.h"
 #include "Engine/GameInstance.h"
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Components/JTSBossPhaseComponent.h"
 #include "space/Items/JTSExpeditionKeyPickup.h"
 #include "space/Systems/JTSExpeditionSubsystem.h"
 
@@ -16,6 +22,7 @@ AJTSNestBossEncounter::AJTSNestBossEncounter()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
+	Conditions=CreateDefaultSubobject<UJTSFacilityConditionComponent>(TEXT("Conditions"));
 	Ridges = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SurfaceRidges"));
 	Ridges->SetupAttachment(RootComponent);
 	Ridges->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -41,21 +48,40 @@ void AJTSNestBossEncounter::BeginPlay()
 bool AJTSNestBossEncounter::AreAllNestsDestroyed() const
 {
 	if (Nests.IsEmpty()) return false;
-	for (const AJTSPlanetEcologyHabitat* Nest : Nests) if (!IsValid(Nest) || !Nest->IsEntranceBlocked()) return false;
-	return true;
+	int32 Count=0;
+	for (const AJTSPlanetEcologyHabitat* Nest : Nests) if (IsValid(Nest) && Nest->IsEntranceBlocked()) ++Count;
+	return Count >= (MinimumDestroyedNests>0?MinimumDestroyedNests:Nests.Num());
+}
+bool AJTSNestBossEncounter::HasLivingParticipant() const
+{
+    for (TActorIterator<AJTSCharacter> It(GetWorld());It;++It)
+        if (!It->IsBoarded() && !It->GetHealthComponent()->IsDead()
+            && (TriggerRoom?TriggerRoom->Contains(It->GetActorLocation()):FVector::DistSquared(It->GetActorLocation(),GetActorLocation())<FMath::Square(6500.f))) return true;
+    return false;
+}
+void AJTSNestBossEncounter::OnRep_ArenaClosed()
+{
+    for (const auto& D:ArenaDoors) if (IsValid(D)) { D->SetActorHiddenInGame(!bArenaClosed); D->SetActorEnableCollision(bArenaClosed); }
 }
 void AJTSNestBossEncounter::CheckNests()
 {
-	if (!HasAuthority() || bTriggered || !Planet || !BossClass || !AreAllNestsDestroyed()) return;
+	if (!HasAuthority()) return;
+    if (bRoomTrigger && bTriggered && IsValid(ActiveBoss) && !ActiveBoss->Health->IsDead() && !HasLivingParticipant())
+    {
+        ActiveBoss->Destroy(); ActiveBoss=nullptr; bTriggered=false; bArenaClosed=false; OnRep_ArenaClosed(); ForceNetUpdate(); return;
+    }
+	if (bTriggered || !Planet || !BossClass || !Conditions->IsSatisfied()
+        || (bRoomTrigger?(!TriggerRoom || !HasLivingParticipant()):!AreAllNestsDestroyed())) return;
 	bTriggered = true;
-	GetWorldTimerManager().ClearTimer(CheckTimer);
+    if (!bRoomTrigger) GetWorldTimerManager().ClearTimer(CheckTimer);
+    bArenaClosed=bRoomTrigger; OnRep_ArenaClosed(); ForceNetUpdate();
 	GetWorldTimerManager().SetTimer(WakeTimer, this, &ThisClass::WakeBoss, FMath::Max(.01f, WakeDelay));
 }
 void AJTSNestBossEncounter::WakeBoss()
 {
 	if (!HasAuthority() || IsValid(ActiveBoss) || !Planet || !BossClass) return;
 	FJTSPlanetSurfaceHit Surface;
-	if (!Planet->ProjectPointToSurface(GetActorLocation(), Surface)) return;
+	if (!AJTSInteriorZone::ProjectGameplayGround(Planet,GetActorLocation(), Surface)) { bTriggered=false; bArenaClosed=false; OnRep_ArenaClosed(); return; }
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.OverrideLevel = GetLevel();
@@ -65,6 +91,10 @@ void AJTSNestBossEncounter::WakeBoss()
 	if (ActiveBoss)
 	{
 		ActiveBoss->InitializeOnPlanet(Planet);
+        if (auto* Phase=ActiveBoss->FindComponentByClass<UJTSBossPhaseComponent>())
+            if (const auto* E=GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>())
+                for (const auto& M:RemainingNestModifiers) if (!M.EntranceId.IsNone() && !E->IsEntranceBlocked(M.EntranceId))
+                { Phase->EncounterArmor=FMath::Min(Phase->EncounterArmor,M.ArmorMultiplier); if (M.SummonClass) { Phase->BonusSummonClass=M.SummonClass; Phase->BonusSummonCount=M.SummonCount; } }
 		ActiveBoss->Health->OnDeath.AddDynamic(this, &ThisClass::OnBossDefeated);
 	}
 	ForceNetUpdate();
@@ -72,6 +102,7 @@ void AJTSNestBossEncounter::WakeBoss()
 void AJTSNestBossEncounter::OnBossDefeated(AController*, AActor*)
 {
 	if (!HasAuthority()) return;
+    bArenaClosed=false; OnRep_ArenaClosed(); ForceNetUpdate();
 	RewardOrigin = IsValid(ActiveBoss) ? ActiveBoss->GetActorLocation() : GetActorLocation();
 	if (GetGameInstance())
 		if (auto* Expedition = GetGameInstance()->GetSubsystem<UJTSExpeditionSubsystem>()) Expedition->MarkEncounterDefeated(EncounterId);
@@ -87,7 +118,17 @@ void AJTSNestBossEncounter::SpawnReward()
 			if (Expedition->GetSnapshot().ImportantItemIds.Contains(Config->ImportantItemId)) return;
 	FJTSPlanetSurfaceHit Hit;
 	const FVector Heading = IsValid(ActiveBoss) ? ActiveBoss->GetActorForwardVector() : GetActorForwardVector();
-	if (!Planet->ProjectPointToSurface(RewardOrigin + Heading * RewardForwardOffset, Hit)) return;
+	FVector RewardPoint=RewardOrigin+Heading*RewardForwardOffset;
+	if (TriggerRoom)
+	{
+		FVector Local=TriggerRoom->GetActorTransform().InverseTransformPosition(RewardPoint);
+		const FVector Limit=TriggerRoom->Bounds->GetUnscaledBoxExtent()-FVector(130,130,40);
+		Local.X=FMath::Clamp(Local.X,-Limit.X,Limit.X); Local.Y=FMath::Clamp(Local.Y,-Limit.Y,Limit.Y);
+		Local.Z=FMath::Clamp(Local.Z,-Limit.Z,Limit.Z);
+		RewardPoint=TriggerRoom->GetActorTransform().TransformPosition(Local);
+		if (!AJTSInteriorZone::ProjectFloor(Planet,RewardPoint,Hit)) return;
+	}
+	else if (!AJTSInteriorZone::ProjectGameplayGround(Planet,RewardPoint,Hit)) return;
 	FActorSpawnParameters Params; Params.Owner = this; Params.OverrideLevel = GetLevel();
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ActiveReward = GetWorld()->SpawnActor<AJTSExpeditionKeyPickup>(RewardClass,
@@ -158,4 +199,5 @@ void AJTSNestBossEncounter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AJTSNestBossEncounter, ActiveBoss);
+    DOREPLIFETIME(AJTSNestBossEncounter,bArenaClosed);
 }

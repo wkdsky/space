@@ -33,6 +33,8 @@ namespace
 
 	FString AssetPathFor(EJTSItemId ItemId)
 	{
+		if (const auto* Override = GetDefault<UJTSItemDefinitionSettings>()->DefinitionOverrides.Find(ItemId))
+			return Override->ToSoftObjectPath().ToString();
 		switch (ItemId)
 		{
 		case EJTSItemId::Pickaxe: return TEXT("/Game/Space/Data/Items/DA_Item_Pickaxe.DA_Item_Pickaxe");
@@ -49,11 +51,15 @@ namespace
 		case EJTSItemId::Rock: return TEXT("/Game/Space/Data/Items/DA_Item_Rock.DA_Item_Rock");
 		case EJTSItemId::Ore: return TEXT("/Game/Space/Data/Items/DA_Item_Ore.DA_Item_Ore");
 		case EJTSItemId::Crystal: return TEXT("/Game/Space/Data/Items/DA_Item_Crystal.DA_Item_Crystal");
+		case EJTSItemId::ManufacturedPart: return TEXT("/Game/Space/Data/Items/DA_Item_ManufacturedPart.DA_Item_ManufacturedPart");
+		case EJTSItemId::HighGradeAlloy: return TEXT("/Game/Space/Data/Items/DA_Item_HighGradeAlloy.DA_Item_HighGradeAlloy");
 		case EJTSItemId::InorganicCarbon: return TEXT("/Game/Space/Data/Items/DA_Item_InorganicCarbon.DA_Item_InorganicCarbon");
 		case EJTSItemId::Fuel: return TEXT("/Game/Space/Data/Items/DA_Item_Fuel.DA_Item_Fuel");
 		case EJTSItemId::Water: return TEXT("/Game/Space/Data/Items/DA_Item_Water.DA_Item_Water");
 		case EJTSItemId::Food: return TEXT("/Game/Space/Data/Items/DA_Item_Food.DA_Item_Food");
 		case EJTSItemId::MoonAntCorpse: return TEXT("/Game/Space/Data/Items/DA_Item_MoonAntCorpse.DA_Item_MoonAntCorpse");
+		case EJTSItemId::StellarText: return TEXT("/Game/Space/Data/Items/DA_Item_StellarText.DA_Item_StellarText");
+		case EJTSItemId::StellarWeapon: return TEXT("/Game/Space/Data/Items/DA_Item_StellarWeapon.DA_Item_StellarWeapon");
 		case EJTSItemId::WaistLamp: return TEXT("/Game/Space/Data/Items/DA_Item_WaistLamp.DA_Item_WaistLamp");
 		default: return FString();
 		}
@@ -358,6 +364,10 @@ namespace
 		case EJTSItemId::Crystal:
 			SetResource(TEXT("矿物"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.45f, 0.25f, 1.0f, 1.0f));
 			break;
+		case EJTSItemId::ManufacturedPart:
+			SetResource(TEXT("人造构件"), ItemId, EJTSItemCategory::Resources, FLinearColor(.9f,.6f,.3f)); break;
+		case EJTSItemId::HighGradeAlloy:
+			SetResource(TEXT("高品位合金"), ItemId, EJTSItemCategory::Resources, FLinearColor(.7f,.8f,.9f)); break;
 		case EJTSItemId::InorganicCarbon:
 			SetResource(TEXT("无机碳"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.62f, 0.67f, 0.55f, 1.0f));
 			break;
@@ -372,7 +382,15 @@ namespace
 			break;
 		case EJTSItemId::MoonAntCorpse:
 			SetResource(TEXT("生物尸体"), ItemId, EJTSItemCategory::Resources, FLinearColor(0.70f, 0.30f, 0.72f, 1.0f));
+			Definition->CapabilityMask |= static_cast<int32>(EJTSItemCapability::Holdable);
 			Definition->MaxStackSize = 99;
+			break;
+		case EJTSItemId::PortableCommunicator:
+			Definition->DisplayName = NSLOCTEXT("JTS", "PortableCommunicator", "移动通讯器");
+			Definition->Description = NSLOCTEXT("JTS", "PortableCommunicatorDescription", "在飞船中心终端录入访问许可，手持设备对准基地读卡器刷开大门。");
+			Definition->PrimaryCategory = EJTSItemCategory::Utility;
+			Definition->CapabilityMask = CapabilityMask({ EJTSItemCapability::Holdable });
+			Definition->CombatDamage = 0;
 			break;
 		case EJTSItemId::WaistLamp:
 			Definition->DisplayName = FText::FromString(TEXT("头灯"));
@@ -462,6 +480,8 @@ bool UJTSItemDefinitionLibrary::TryGetResourceType(EJTSItemId ItemId, EJTSResour
 	case EJTSItemId::Rock: OutResourceType = EJTSResourceType::Rock; return true;
 	case EJTSItemId::Ore: OutResourceType = EJTSResourceType::Ore; return true;
 	case EJTSItemId::Crystal: OutResourceType = EJTSResourceType::Crystal; return true;
+	case EJTSItemId::ManufacturedPart: OutResourceType=EJTSResourceType::ManufacturedPart; return true;
+	case EJTSItemId::HighGradeAlloy: OutResourceType=EJTSResourceType::HighGradeAlloy; return true;
 	case EJTSItemId::InorganicCarbon: OutResourceType = EJTSResourceType::InorganicCarbon; return true;
 	case EJTSItemId::MoonAntCorpse: OutResourceType = EJTSResourceType::MoonAntCorpse; return true;
 	default: return false;
@@ -478,6 +498,8 @@ EJTSItemId UJTSItemDefinitionLibrary::GetItemIdForResource(EJTSResourceType Reso
 	case EJTSResourceType::Rock: return EJTSItemId::Rock;
 	case EJTSResourceType::Ore: return EJTSItemId::Ore;
 	case EJTSResourceType::Crystal: return EJTSItemId::Crystal;
+	case EJTSResourceType::ManufacturedPart: return EJTSItemId::ManufacturedPart;
+	case EJTSResourceType::HighGradeAlloy: return EJTSItemId::HighGradeAlloy;
 	case EJTSResourceType::InorganicCarbon: return EJTSItemId::InorganicCarbon;
 	case EJTSResourceType::MoonAntCorpse: return EJTSItemId::MoonAntCorpse;
 	default: return EJTSItemId::None;

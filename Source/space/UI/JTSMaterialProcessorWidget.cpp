@@ -40,7 +40,7 @@ FString UJTSMaterialProcessorWidget::PreviewText() const
 	FString Error;
 	if (!Processor->Preview(GraphCanvas->GetGraph(), Deltas, Error)) return Error;
 	TArray<FString> Costs, Products;
-	for (uint8 I = 0; I <= uint8(EJTSResourceType::InorganicCarbon); ++I)
+	for (uint8 I = 0; I <= uint8(EJTSResourceType::HighGradeAlloy); ++I)
 	{
 		const auto Type = EJTSResourceType(I);
 		const int64 Delta = Deltas.FindRef(Type);

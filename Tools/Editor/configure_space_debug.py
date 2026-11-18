@@ -9,6 +9,19 @@ OUT = ROOT / 'Saved/SpaceDebug'
 OUT.mkdir(parents=True, exist_ok=True)
 
 
+def configure_access_permits(debug):
+    entries = list(debug.get_editor_property('access_permits'))
+    entry = next((e for e in entries if str(e.item_id) == 'MarsEcologyAccess'), None)
+    if entry is None:
+        entry = unreal.JTSDebugAccessPermit()
+        entries.append(entry)
+    entry.set_editor_property('item_id', 'MarsEcologyAccess')
+    entry.set_editor_property('display_name', unreal.Text('火星许可'))
+    entry.set_editor_property('device_item_id', unreal.JTSItemId.PORTABLE_COMMUNICATOR)
+    debug.set_editor_property('access_permits', entries)
+    return [str(e.display_name) for e in entries]
+
+
 def configure():
     level = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -25,6 +38,7 @@ def configure():
         debug = actors.spawn_actor_from_class(unreal.JTSSpaceDebugTravelManager, unreal.Vector(0, 0, 0))
     debug.set_actor_label('Space_DebugTravel')
     debug.set_folder_path('Debug')
+    configure_access_permits(debug)
     entries = []
     for planet_id, label in [('Moon', '月球 / Moon'), ('Mars', '火星 / Mars')]:
         entry = unreal.JTSDebugTravelDestination()

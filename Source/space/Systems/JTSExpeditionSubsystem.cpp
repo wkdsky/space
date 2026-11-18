@@ -1,6 +1,12 @@
+#include "space/Systems/JTSExpeditionSubsystem.h"
+#include "EngineUtils.h"
+#include "space/World/JTSInteriorZone.h"
+#include "space/World/JTSPlanetAnchor.h"
+#include "space/Components/JTSInteriorStateComponent.h"
+#include "space/Components/JTSSpacecraftDurabilityComponent.h"
+#include "space/Systems/JTSCoordinateSettings.h"
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "space/Systems/JTSExpeditionSubsystem.h"
 
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
@@ -9,6 +15,7 @@
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSShipScannerComponent.h"
 #include "space/Components/JTSStellarLoadoutComponent.h"
 #include "space/Core/JTSGameState.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -16,6 +23,9 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
+#include "space/Components/JTSStellarExchangeComponent.h"
+#include "space/Ships/JTSShipDockActor.h"
 #include "space/Systems/JTSExpeditionSaveGame.h"
 
 void UJTSExpeditionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -99,6 +109,7 @@ bool UJTSExpeditionSubsystem::DeleteExpeditionSlot(int32 InSaveSlot)
 			World->GetTimerManager().ClearTimer(DeferredSaveTimer);
 		}
 		Snapshot = FJTSExpeditionSnapshot();
+	NormalizeCoordinates();
 		JoinCode.Reset();
 		JoinPasswordHash.Reset();
 		ActiveSaveSlot = INDEX_NONE;
@@ -162,6 +173,7 @@ void UJTSExpeditionSubsystem::NormalizeSnapshotMetadata(int32 PreferredSaveSlot)
 		Snapshot.LastPlayedUtcTicks = Snapshot.SavedUtcTicks;
 	}
 	Snapshot.PlaytimeSeconds = FMath::Max(0.0, Snapshot.PlaytimeSeconds);
+	NormalizeCoordinates();
 	if (Snapshot.SaveVersion<6)
 	{
 		// Matches EJTSAvatarColor order and UJTSGameInstance::GetSelectedAvatarLinearColor.
@@ -177,6 +189,7 @@ void UJTSExpeditionSubsystem::StartNewExpedition(const FString& InExpeditionId)
 		? ActiveSaveSlot
 		: FindFirstAvailableSaveSlot();
 	Snapshot = FJTSExpeditionSnapshot();
+	NormalizeCoordinates();
 	Snapshot.ExpeditionId = InExpeditionId.IsEmpty() ? FGuid::NewGuid().ToString(EGuidFormats::Digits) : InExpeditionId;
 	Snapshot.SaveSlot = SelectedSlot;
 	Snapshot.DisplayName = FString::Printf(TEXT("Expedition %02d"), SelectedSlot);
@@ -198,6 +211,7 @@ bool UJTSExpeditionSubsystem::BeginNewExpeditionInSlot(int32 InSaveSlot, const F
 
 	ActiveSaveSlot = InSaveSlot;
 	Snapshot = FJTSExpeditionSnapshot();
+	NormalizeCoordinates();
 	Snapshot.ExpeditionId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	Snapshot.SaveSlot = InSaveSlot;
 	Snapshot.DisplayName = InDisplayName.TrimStartAndEnd();
@@ -333,6 +347,13 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 
 			FJTSPlayerSnapshot& PlayerSnapshot = Snapshot.Players.AddDefaulted_GetRef();
 			PlayerSnapshot.PlayerId = PlayerState->GetOnlineIdentityString();
+            if (Character && !Character->IsBoarded())
+                if (const auto* Zone=AJTSInteriorZone::FindAt(Character->GetWorld(),Character->GetActorLocation()))
+                {
+                    PlayerSnapshot.InteriorZoneId=Zone->ZoneId;
+                    PlayerSnapshot.InteriorLocalPosition=Zone->GetActorTransform().InverseTransformPosition(Character->GetActorLocation());
+                    PlayerSnapshot.InteriorLocalRotation=(Zone->GetActorQuat().Inverse()*Character->GetActorQuat()).Rotator();
+                }
 			PlayerSnapshot.DisplayName = PlayerState->GetPlayerName();
 			PlayerSnapshot.AvatarColor = PlayerState->GetAvatarColor();
 			PlayerSnapshot.Appearance = PlayerState->GetAppearance();
@@ -367,6 +388,22 @@ void UJTSExpeditionSubsystem::CaptureWorldState(const AJTSGameState* GameState, 
 
 void UJTSExpeditionSubsystem::RestoreSpacecraft(AJTSSpacecraftActor* Spacecraft) const
 {
+    if (Spacecraft && Snapshot.bHasSpacecraftHull) if (auto* H=Spacecraft->FindComponentByClass<UJTSSpacecraftDurabilityComponent>()) H->RestoreHull(Snapshot.SpacecraftHull);
+	if(Spacecraft) Spacecraft->Scanner->RestoreState(Snapshot.ScannerCargo,Snapshot.AnalysisSample);
+	if (Spacecraft) Spacecraft->GetStellarExchange()->RestoreSnapshot(Snapshot.StellarExchange);
+	if (Spacecraft && Snapshot.bHasShipDockLoadout)
+	{
+		auto* Docks = Spacecraft->GetDockComponent();
+		TArray<FName> Installed = Snapshot.InstalledShipDockIds;
+		// Legacy expeditions predate the physical exchange. Respect the Blueprint's
+		// initial configuration without reinstalling any previously removed modules.
+		if (Snapshot.SaveVersion < 9)
+			for (const UJTSShipDockDefinition* Definition : Docks->Catalog)
+				if (Definition && Definition->ActorClass && Docks->InitialInstalledIds.Contains(Definition->ModuleId)
+					&& Definition->ActorClass->GetDefaultObject<AJTSShipDockActor>()->GetService() == EJTSShipDockService::StellarExchange)
+					Installed.AddUnique(Definition->ModuleId);
+		Docks->RestoreInstalledIds(Installed);
+	}
 	if (Spacecraft != nullptr && !Snapshot.SpacecraftStorage.IsEmpty())
 	{
 		Spacecraft->RestoreStorageSnapshot(Snapshot.SpacecraftStorage);
@@ -393,6 +430,14 @@ void UJTSExpeditionSubsystem::RestorePlayerState(AJTSPlayerState* PlayerState, A
 	}
 
 	PlayerState->SetAvatarColor(SavedPlayer->AvatarColor);
+    if (!SavedPlayer->InteriorZoneId.IsNone() && !Character->IsBoarded())
+        for (TActorIterator<AJTSInteriorZone> It(Character->GetWorld());It;++It)
+            if (It->ZoneId==SavedPlayer->InteriorZoneId && It->Planet && It->Planet->GetPlanetId().ToString()==Snapshot.CurrentPlanetId)
+            {
+                const FVector P=It->GetActorTransform().TransformPosition(SavedPlayer->InteriorLocalPosition);
+                if (It->Contains(P)) { Character->TeleportTo(P,(It->GetActorQuat()*SavedPlayer->InteriorLocalRotation.Quaternion()).Rotator(),false,false); if (auto* S=Character->FindComponentByClass<UJTSInteriorStateComponent>()) S->Zone=*It; }
+                break;
+            }
 	PlayerState->SetAppearance(SavedPlayer->Appearance);
 	PlayerState->RestoreShipLockerSlots(SavedPlayer->ShipLockerSlots);
 	PlayerState->RestoreDiscoveredStellarCoreIds(SavedPlayer->DiscoveredStellarCoreIds);
@@ -455,7 +500,14 @@ void UJTSExpeditionSubsystem::CaptureSpacecraftState(const AJTSSpacecraftActor* 
 {
 	if (!Spacecraft) return;
 	Snapshot.SpacecraftClass = Spacecraft->GetClass();
+    if (const auto* H=Spacecraft->FindComponentByClass<UJTSSpacecraftDurabilityComponent>()) { Snapshot.bHasSpacecraftHull=true; Snapshot.SpacecraftHull=H->Hull; }
 	Snapshot.SpacecraftStorage = Spacecraft->ExportStorageSnapshot();
+	Snapshot.ScannerCargo = Spacecraft->Scanner->GetCargo();
+	Snapshot.AnalysisSample = Spacecraft->Scanner->ExportPendingSample();
+	Snapshot.bHasShipDockLoadout = true;
+	Snapshot.InstalledShipDockIds = Spacecraft->GetDockComponent()->GetInstalledIds();
+	Snapshot.StellarExchange = Spacecraft->GetStellarExchange()->CaptureSnapshot();
+	Snapshot.SaveVersion = FMath::Max(9, Snapshot.SaveVersion);
 	if (const UJTSMaterialProcessorComponent* Processor = Spacecraft->GetMaterialProcessor())
 		Snapshot.MaterialProcessingGraph = Processor->GetSavedGraph();
 }
@@ -484,6 +536,7 @@ void UJTSExpeditionSubsystem::MarkEntranceBlocked(FName EntranceId)
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || EntranceId.IsNone()) return;
 	if (Snapshot.BlockedEntranceIds.Contains(EntranceId)) return;
 	Snapshot.BlockedEntranceIds.Add(EntranceId);
+	SyncProgression();
 	Snapshot.SaveVersion = FMath::Max(7, Snapshot.SaveVersion);
 	if (HasActiveExpedition() && !SaveNow()) RequestSave();
 }
@@ -492,6 +545,8 @@ bool UJTSExpeditionSubsystem::RecordImportantItem(FName ItemId)
 {
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || ItemId.IsNone() || Snapshot.ImportantItemIds.Contains(ItemId)) return false;
 	Snapshot.ImportantItemIds.Add(ItemId);
+	NormalizeCoordinates();
+	SyncProgression();
 	Snapshot.SaveVersion = FMath::Max(8, Snapshot.SaveVersion);
 	if (HasActiveExpedition() && !SaveNow()) RequestSave();
 	return true;
@@ -500,6 +555,7 @@ void UJTSExpeditionSubsystem::MarkEncounterDefeated(FName EncounterId)
 {
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || EncounterId.IsNone() || Snapshot.DefeatedEncounterIds.Contains(EncounterId)) return;
 	Snapshot.DefeatedEncounterIds.Add(EncounterId);
+	SyncProgression();
 	Snapshot.SaveVersion = FMath::Max(8, Snapshot.SaveVersion);
 	if (HasActiveExpedition() && !SaveNow()) RequestSave();
 }
@@ -540,6 +596,8 @@ bool UJTSExpeditionSubsystem::SaveNow()
 			? Snapshot.SaveSlot
 			: FindFirstAvailableSaveSlot();
 	}
+	if (const auto* State=World->GetGameState<AJTSGameState>(); State && !State->IsWaitingToStart())
+		CaptureWorldState(State,State->GetActiveSpacecraft());
 	NormalizeSnapshotMetadata(ActiveSaveSlot);
 	UpdatePlaytime();
 	Snapshot.SavedUtcTicks = FDateTime::UtcNow().GetTicks();
@@ -605,6 +663,7 @@ void UJTSExpeditionSubsystem::ResetClientTransientState()
 	if (UWorld* const World = GetWorld(); World != nullptr && World->GetNetMode() == NM_Client)
 	{
 		Snapshot = FJTSExpeditionSnapshot();
+	NormalizeCoordinates();
 		JoinCode.Reset();
 		JoinPasswordHash.Reset();
 		ActiveSaveSlot = INDEX_NONE;
@@ -644,4 +703,36 @@ TMap<EJTSResourceType, int32> UJTSExpeditionSubsystem::ToResourceMap(const TArra
 		}
 	}
 	return Result;
+}
+
+void UJTSExpeditionSubsystem::NormalizeCoordinates()
+{
+    const auto* Settings=GetDefault<UJTSCoordinateSettings>();
+    for (FName Id:Settings->DefaultCoordinateIds) if (!Id.IsNone()) Snapshot.LoadedCoordinateIds.Add(Id);
+    for (const auto& Pair:Settings->KeyCoordinateGrants)
+        if (Snapshot.ImportantItemIds.Contains(Pair.Key))
+            for (FName Id:Pair.Value.CoordinateIds) if (!Id.IsNone()) Snapshot.LoadedCoordinateIds.Add(Id);
+}
+void UJTSExpeditionSubsystem::SyncProgression()
+{
+    if (!GetWorld() || GetWorld()->GetNetMode()==NM_Client) return;
+    if (auto* S=GetWorld()->GetGameState<AJTSGameState>())
+    {
+        S->LoadedCoordinateIds=Snapshot.LoadedCoordinateIds.Array();
+        S->FacilityFlagIds=Snapshot.FacilityFlagIds.Array();
+        S->BlockedEntranceIds=Snapshot.BlockedEntranceIds.Array();
+        S->DefeatedEncounterIds=Snapshot.DefeatedEncounterIds.Array();
+        S->SetImportantItems(Snapshot.ImportantItemIds.Array());
+        S->ForceNetUpdate();
+    }
+}
+bool UJTSExpeditionSubsystem::LoadCoordinate(FName Id)
+{
+    if (!GetWorld() || GetWorld()->GetNetMode()==NM_Client || Id.IsNone() || Snapshot.LoadedCoordinateIds.Contains(Id)) return false;
+    Snapshot.LoadedCoordinateIds.Add(Id); SyncProgression(); RequestSave(); return true;
+}
+bool UJTSExpeditionSubsystem::SetFacilityFlag(FName Id)
+{
+    if (!GetWorld() || GetWorld()->GetNetMode()==NM_Client || Id.IsNone() || Snapshot.FacilityFlagIds.Contains(Id)) return false;
+    Snapshot.FacilityFlagIds.Add(Id); SyncProgression(); RequestSave(); return true;
 }

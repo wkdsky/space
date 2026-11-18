@@ -23,6 +23,7 @@
 #include "space/Characters/JTSPlanetBoss.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSBossEmergenceFeedbackComponent.h"
+#include "space/Components/JTSBossDeathPresentationComponent.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/World/JTSNestBossEncounter.h"
 #include "space/World/JTSPlanetAnchor.h"
@@ -160,13 +161,18 @@ bool FJTSBossCombatTest::RunTest(const FString&)
 		const float ShellDamage = HitPart(Shell); const float HeadDamage = HitPart(Head);
 		TestTrue(TEXT("Exposed head takes more damage than mirror shell"), HeadDamage > ShellDamage * 1.5f);
 	}
+	TestTrue(TEXT("Production corpse gives players at least thirty minutes to collect a specimen"),Boss->CorpseRetentionSeconds>=1800.f);
+	// Exercise the same hold/fade boundary with a shorter test clock.
+	Boss->CorpseRetentionSeconds=8.f;
 	Boss->Health->ApplyDamage(100000, PC, Pawn, true);
 	TestEqual(TEXT("Death stops every attack"), Boss->Combat->GetAction(), EJTSBossAction::Death);
 	for (auto* Box : Bodies) TestEqual(TEXT("Dead parts cannot intercept weapons or players"), Box->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
 	const float PlayerAtDeath = Pawn->GetHealthComponent()->GetHealth(); S.Advance(4);
 	TestEqual(TEXT("Dead boss never damages again"), Pawn->GetHealthComponent()->GetHealth(), PlayerAtDeath);
 	TestFalse(TEXT("Collapsed death pose is held without replay"), Boss->Mesh->GetSingleNodeInstance()->IsPlaying());
-	S.Advance(2.8f);
+	TestTrue(TEXT("Corpse remains available after the old short lifetime"),Boss->GetLifeSpan()>8.f);
+	const float OriginalHold=Boss->FindComponentByClass<UJTSBossDeathPresentationComponent>()->HoldDuration;
+	S.Advance(2.8f+Boss->CorpseRetentionSeconds-OriginalHold);
 	auto* Fade = Cast<UMaterialInstanceDynamic>(Boss->Mesh->GetMaterial(0));
 	if (TestNotNull(TEXT("Corpse switches to configured translucent material"), Fade))
 	{

@@ -2,12 +2,15 @@
 
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/Core/JTSGameState.h"
+#include "space/Systems/JTSCoordinateSettings.h"
 
 bool AJTSPlanetAnchor::IsNavigationDiscovered() const
 {
-	if (NavigationRequiredImportantItem.IsNone()) return true;
 	const auto* State = GetWorld() ? GetWorld()->GetGameState<AJTSGameState>() : nullptr;
-	return State && State->HasImportantItem(NavigationRequiredImportantItem);
+    if (!State) return NavigationRequiredImportantItem.IsNone();
+    const bool KeyAllowed=NavigationRequiredImportantItem.IsNone() || State->HasImportantItem(NavigationRequiredImportantItem);
+    const bool Gated=GetDefault<UJTSCoordinateSettings>()->CoordinateGatedPlanetIds.Contains(GetPlanetId());
+    return KeyAllowed && (!Gated || State->LoadedCoordinateIds.Contains(GetPlanetId()));
 }
 
 #include "CollisionQueryParams.h"

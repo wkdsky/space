@@ -1,4 +1,5 @@
 #include "space/Components/JTSHealthComponent.h"
+#include "space/Interaction/JTSMeleeTarget.h"
 #include "space/Components/JTSStellarSupportComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Player/JTSCharacter.h"
@@ -49,6 +50,10 @@ float UJTSHealthComponent::ApplyDamage(float Damage, AController* InstigatorCont
 	{
 		return 0.0f;
 	}
+	// An explicit target prerequisite also protects direct ability/execution damage, which can
+	// enter the health component without going through AActor::TakeDamage.
+	if(GetOwner()->Implements<UJTSMeleeTarget>() && (IJTSMeleeTarget::Execute_BlocksAttackInitiation(GetOwner(),Cast<APawn>(DamageCauser))
+		|| IJTSMeleeTarget::Execute_BlocksDamage(GetOwner(),Cast<APawn>(DamageCauser)))) return 0.f;
 
 	const auto* Attacker = Cast<AJTSPlayerController>(InstigatorController);
 	if (!Attacker && !InstigatorController && DamageCauser)

@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftDurabilityComponent.h"
+#include "space/Ships/JTSSpacecraftCollisionQuery.h"
 
 #include "CollisionQueryParams.h"
 #include "Components/BoxComponent.h"
@@ -90,6 +92,12 @@ void UJTSSpacecraftFlightMovementComponent::TickComponent(float DeltaTime, ELeve
 		return;
 	}
 
+    if (const auto* Hull=GetOwner()->FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); Hull && Hull->bDisabled)
+    {
+        FHitResult DriftHit;
+        SafeMoveUpdatedComponent(Velocity*DeltaTime,UpdatedComponent->GetComponentQuat(),true,DriftHit);
+        return;
+    }
 	auto* Interference = GetOwner()->FindComponentByClass<UJTSSpacecraftInterferenceComponent>();
 	if (Interference && Interference->UpdateFlight(DeltaTime, this))
 	{
@@ -1070,7 +1078,7 @@ bool UJTSSpacecraftFlightMovementComponent::MoveWithCollisionSweep(const FVector
 	}
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JTSSpacecraftFlight), false, OwningPawn);
-	QueryParams.AddIgnoredActor(OwningPawn);
+	JTSSpacecraftCollision::IgnoreSelfAndAttachments(QueryParams, OwningPawn);
 	// The Blueprint may offset and rotate the hull relative to the root.
 	const FTransform HullRelative = FlightCollision->GetComponentTransform().GetRelativeTransform(OwningPawn->GetActorTransform());
 	const FTransform TargetRoot(NewRotation, UpdatedComponent->GetComponentLocation(), OwningPawn->GetActorScale3D());

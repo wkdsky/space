@@ -1,0 +1,506 @@
+{
+  "SM_MP_Film_A_0_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_0_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_0_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_0_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_1_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_1_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_1_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_1_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_2_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_2_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_2_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_2_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_3_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_3_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_3_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_3_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_4_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_4_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_4_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_4_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_5_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_5_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_5_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_A_5_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_0_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_0_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_0_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_0_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_1_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_1_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_1_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_1_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_2_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_2_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_2_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_2_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_3_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_3_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_3_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_3_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_4_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_4_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_4_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_4_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_5_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_5_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_5_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_B_5_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_0_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_0_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_0_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_0_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_1_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_1_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_1_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_1_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_2_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_2_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_2_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_2_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_3_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_3_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_3_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_3_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_4_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_4_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_4_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_4_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_5_0": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_5_1": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_5_2": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  },
+  "SM_MP_Film_C_5_3": {
+    "triangles": 188,
+    "panel_area_m2": 14.4,
+    "collision_hulls": 1,
+    "collision": "thin_convex",
+    "ground_laid": true
+  }
+}

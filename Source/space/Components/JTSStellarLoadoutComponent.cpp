@@ -10,6 +10,7 @@
 #include "space/Player/JTSPlayerState.h"
 #include "space/Player/JTSCharacter.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 
 UJTSStellarLoadoutComponent::UJTSStellarLoadoutComponent()
@@ -54,6 +55,28 @@ void UJTSStellarLoadoutComponent::ConfigureLootTable(UJTSStellarLootTable* Table
 	OnRep_State();
 }
 
+bool UJTSStellarLoadoutComponent::TryStoreItem(const FJTSItemInstance& Item)
+{
+	if (!GetOwner()->HasAuthority() || Item.IsEmpty() || !FJTSStellarLoadoutRules::CanStore(Item,GetLootTable())) return false;
+	RefreshParticipants();
+	for (int32 I=0; I<AvailableSlotCount; ++I) if (Slots[I].CanStackWith(Item) && Slots[I].StackCount <= MAX_int32-Item.StackCount)
+	{ Slots[I].StackCount += Item.StackCount; Changed(); return true; }
+	for (int32 I=0; I<AvailableSlotCount; ++I) if (Slots[I].IsEmpty())
+	{ Slots[I]=Item; Changed(); return true; }
+	return false;
+}
+
+bool UJTSStellarLoadoutComponent::SplitForMutation(int32 Index)
+{
+	if (Slots[Index].StackCount <= 1) return true;
+	for (int32 I=0; I<AvailableSlotCount; ++I) if (Slots[I].IsEmpty())
+	{
+		Slots[I]=Slots[Index]; --Slots[I].StackCount; Slots[I].InstanceId=FGuid::NewGuid();
+		Slots[Index].StackCount=1; return true;
+	}
+	return false;
+}
+
 TArray<FJTSStellarWeaponBinding> UJTSStellarLoadoutComponent::GetWeapons() const
 {
 	return FJTSStellarLoadoutRules::Assemble(Slots, AvailableSlotCount, GetLootTable());
@@ -68,7 +91,7 @@ int32 UJTSStellarLoadoutComponent::GetAvailableFirmwareUnits() const
 	for (int32 Index = 0; Index < AvailableSlotCount; ++Index)
 	{
 		const auto* Entry = Table->FindEntry(Slots[Index].StellarItemId);
-		if (!Slots[Index].IsEmpty() && Entry && Entry->FirmwareUnits > 0) Units += Entry->FirmwareUnits;
+		if (!Slots[Index].IsEmpty() && Entry && Entry->FirmwareUnits > 0) Units += Entry->FirmwareUnits * Slots[Index].StackCount;
 	}
 	const AJTSCharacter* Character = Cast<AJTSCharacter>(PS->GetPawn());
 	const UJTSInventoryComponent* Inventory = Character ? Character->GetInventoryComponent() : nullptr;
@@ -76,8 +99,8 @@ int32 UJTSStellarLoadoutComponent::GetAvailableFirmwareUnits() const
 	{
 		const auto Item = Inventory->GetItemAtSlot(Index);
 		const auto* Entry = Table->FindEntry(Item.StellarItemId);
-		if (!Item.IsEmpty() && Item.ItemId == EJTSItemId::StellarText && Item.StackCount == 1
-			&& Entry && Entry->FirmwareUnits > 0) Units += Entry->FirmwareUnits;
+		if (!Item.IsEmpty() && Item.ItemId == EJTSItemId::StellarText && Item.StackCount > 0
+			&& Entry && Entry->FirmwareUnits > 0) Units += Entry->FirmwareUnits * Item.StackCount;
 	}
 	return Units;
 }
@@ -161,7 +184,9 @@ void UJTSStellarLoadoutComponent::ServerMoveSlot_Implementation(int32 From, FGui
 		|| (From >= AvailableSlotCount && !Slots[To].IsEmpty())) { ClientActionResult(false); return; }
 	if (!FJTSStellarLoadoutRules::CanStore(Slots[From], GetLootTable())
 		|| !FJTSStellarLoadoutRules::CanStore(Slots[To], GetLootTable())) { ClientActionResult(false); return; }
-	Swap(Slots[From], Slots[To]);
+	if (Slots[To].CanStackWith(Slots[From]) && Slots[To].StackCount <= MAX_int32-Slots[From].StackCount)
+	{ Slots[To].StackCount+=Slots[From].StackCount; Slots[From].Clear(); }
+	else Swap(Slots[From], Slots[To]);
 	ActiveCoreSlot = INDEX_NONE;
 	Changed();
 	ClientActionResult(true);
@@ -171,7 +196,10 @@ void UJTSStellarLoadoutComponent::ServerExchangeLocker_Implementation(AJTSSpacec
 	int32 LockerIndex, FGuid LockerToken, int32 LoadoutIndex, FGuid ExpectedItem)
 {
 	AJTSPlayerState* PS = Cast<AJTSPlayerState>(GetOwner());
-	if (!PS || !IsValid(Ship) || !Ship->CanUseShipTerminal(PS->GetPawn()) || !Slots.IsValidIndex(LoadoutIndex)) { ClientActionResult(false); return; }
+	const bool bAtLocker = PS && IsValid(Ship) && (Ship->CanUseShipTerminal(PS->GetPawn())
+		|| Ship->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, PS->GetPawn())
+		|| Ship->GetDockComponent()->CanUseService(EJTSShipDockService::StellarExchange, PS->GetPawn()));
+	if (!bAtLocker || !Slots.IsValidIndex(LoadoutIndex)) { ClientActionResult(false); return; }
 	RefreshParticipants();
 	const FJTSShipLockerSlot Locker = PS->GetShipLockerSlot(LockerIndex);
 	if (Slots[LoadoutIndex].InstanceId != ExpectedItem || Locker.SlotToken != LockerToken
@@ -189,6 +217,7 @@ void UJTSStellarLoadoutComponent::ServerExchangeLocker_Implementation(AJTSSpacec
 		if (!Entry) { ClientActionResult(false); return; }
 		Incoming = Table->MakeTextItem(Locker.StellarCoreId.IsNone() ? Locker.StellarItemId : Locker.StellarCoreId);
 		Incoming.InstanceId = Locker.StellarInstanceId.IsValid() ? Locker.StellarInstanceId : Locker.SlotToken;
+		Incoming.StackCount = Locker.StellarStackCount;
 		Incoming.StellarCoreLevel = Locker.StellarCoreLevel;
 		if (Locker.StellarCoreId.IsNone()) Incoming.StellarPoints = Locker.StellarPoints;
 		else
@@ -196,7 +225,7 @@ void UJTSStellarLoadoutComponent::ServerExchangeLocker_Implementation(AJTSSpacec
 			// One-time migration of old combined items into two independent physical slots.
 			if (!FJTSStellarLoadoutRules::IsCoreSlot(LoadoutIndex) || !Slots[LoadoutIndex].IsEmpty() || LoadoutIndex + 1 >= AvailableSlotCount
 				|| !Slots[LoadoutIndex + 1].IsEmpty() || !Table->CanCombine(Locker.StellarCoreId, Locker.StellarItemId)) { ClientActionResult(false); return; }
-			IncomingAttachment = Table->MakeTextItem(Locker.StellarItemId);
+			IncomingAttachment = Table->MakeTextItem(Locker.StellarItemId); IncomingAttachment.StackCount=Locker.StellarStackCount;
 			IncomingAttachment.InstanceId = Locker.StellarAttachmentInstanceId.IsValid()
 				? Locker.StellarAttachmentInstanceId : FGuid::NewGuid();
 			IncomingAttachment.StellarPoints = Locker.StellarPoints;
@@ -205,6 +234,12 @@ void UJTSStellarLoadoutComponent::ServerExchangeLocker_Implementation(AJTSSpacec
 	if ((Incoming.IsEmpty() && Slots[LoadoutIndex].IsEmpty())
 		|| !FJTSStellarLoadoutRules::CanStore(Incoming, Table)
 		|| !FJTSStellarLoadoutRules::CanStore(IncomingAttachment, Table)) { ClientActionResult(false); return; }
+	if (IncomingAttachment.IsEmpty() && Slots[LoadoutIndex].CanStackWith(Incoming)
+		&& Slots[LoadoutIndex].StackCount <= MAX_int32-Incoming.StackCount)
+	{
+		if (!PS->TryReplaceStellarLockerSlot(LockerIndex,LockerToken,FJTSItemInstance())) { ClientActionResult(false); return; }
+		Slots[LoadoutIndex].StackCount+=Incoming.StackCount; Changed(); ClientActionResult(true); return;
+	}
 	if (!PS->TryReplaceStellarLockerSlot(LockerIndex, LockerToken, Slots[LoadoutIndex])) { ClientActionResult(false); return; }
 	Slots[LoadoutIndex] = Incoming;
 	if (!IncomingAttachment.IsEmpty()) Slots[LoadoutIndex + 1] = IncomingAttachment;
@@ -223,12 +258,11 @@ void UJTSStellarLoadoutComponent::ServerExchangeInventory_Implementation(int32 I
 	// Only migrate legacy carried stellar items into empty equipment slots. Stellar equipment
 	// can never be extracted or swapped back into the character's ordinary inventory.
 	if (!Inventory || !Slots.IsValidIndex(LoadoutIndex) || Slots[LoadoutIndex].InstanceId != ExpectedItem
-		|| !Slots[LoadoutIndex].IsEmpty()
 		|| InventoryIndex < 0 || InventoryIndex >= Inventory->GetInventoryCapacity()) { ClientActionResult(false); return; }
 	const FJTSItemInstance Incoming = Inventory->GetItemAtSlot(InventoryIndex);
 	const UJTSStellarLootTable* Table = GetLootTable();
 	if (Incoming.InstanceId != ExpectedInventoryItem || (!Incoming.IsEmpty()
-		&& (LoadoutIndex >= AvailableSlotCount || !Table || Incoming.StackCount != 1
+		&& (LoadoutIndex >= AvailableSlotCount || !Table || Incoming.StackCount <= 0
 			|| (Incoming.ItemId != EJTSItemId::StellarText && Incoming.ItemId != EJTSItemId::StellarWeapon)
 			|| !Table->FindEntry(Incoming.StellarItemId)))) { ClientActionResult(false); return; }
 	FJTSItemInstance Core = Incoming, Attachment;
@@ -238,18 +272,20 @@ void UJTSStellarLoadoutComponent::ServerExchangeInventory_Implementation(int32 I
 			|| !Table->CanCombine(Incoming.StellarCoreId, Incoming.StellarItemId) || !Slots[LoadoutIndex].IsEmpty()
 			|| LoadoutIndex + 1 >= AvailableSlotCount || !Slots[LoadoutIndex + 1].IsEmpty()) { ClientActionResult(false); return; }
 		Core = Table->MakeTextItem(Incoming.StellarCoreId); Core.InstanceId = Incoming.InstanceId;
-		Core.StellarCoreLevel = Incoming.StellarCoreLevel;
-		Attachment = Table->MakeTextItem(Incoming.StellarItemId);
+		Core.StackCount=Incoming.StackCount; Core.StellarCoreLevel = Incoming.StellarCoreLevel;
+		Attachment = Table->MakeTextItem(Incoming.StellarItemId); Attachment.StackCount=Incoming.StackCount;
 		Attachment.InstanceId = Incoming.StellarAttachmentInstanceId.IsValid() ? Incoming.StellarAttachmentInstanceId : FGuid::NewGuid();
 		Attachment.StellarPoints = Incoming.StellarPoints;
 	}
 	if (!FJTSStellarLoadoutRules::CanStore(Core, Table)
 		|| !FJTSStellarLoadoutRules::CanStore(Attachment, Table)) { ClientActionResult(false); return; }
+	if (!Slots[LoadoutIndex].IsEmpty() && (!Slots[LoadoutIndex].CanStackWith(Core)
+		|| Slots[LoadoutIndex].StackCount>MAX_int32-Core.StackCount)) { ClientActionResult(false); return; }
 	FJTSItemInstance Replaced;
 	const bool bExchanged = !Incoming.IsEmpty()
 		&& Inventory->TryExtractItemAtSlot(InventoryIndex, ExpectedInventoryItem, Replaced);
 	if (!bExchanged) { ClientActionResult(false); return; }
-	Slots[LoadoutIndex] = Core;
+	if (Slots[LoadoutIndex].IsEmpty()) Slots[LoadoutIndex]=Core; else Slots[LoadoutIndex].StackCount+=Core.StackCount;
 	if (!Attachment.IsEmpty()) Slots[LoadoutIndex + 1] = Attachment;
 	ActiveCoreSlot = INDEX_NONE;
 	Changed(); ClientActionResult(true);
@@ -272,7 +308,7 @@ void UJTSStellarLoadoutComponent::ServerUpgradeCore_Implementation(int32 CoreSlo
 	{
 		const auto* Entry = Table->FindEntry(Slots[Index].StellarItemId);
 		if (Index != CoreSlot && !Slots[Index].IsEmpty() && Entry && Entry->FirmwareUnits > 0)
-		{ Units += Entry->FirmwareUnits; SpendSlots.Add(Index); }
+		{ Units += Entry->FirmwareUnits * Slots[Index].StackCount; SpendSlots.Add(Index); }
 	}
 	// Legacy saves may retain firmware in the ordinary inventory; consume it without allowing new transfers there.
 	AJTSCharacter* Character = Cast<AJTSCharacter>(PS->GetPawn());
@@ -282,11 +318,11 @@ void UJTSStellarLoadoutComponent::ServerUpgradeCore_Implementation(int32 CoreSlo
 	{
 		const auto Item = Inventory->GetItemAtSlot(Index);
 		const auto* Entry = Table->FindEntry(Item.StellarItemId);
-		if (!Item.IsEmpty() && Item.ItemId == EJTSItemId::StellarText && Item.StackCount == 1
+		if (!Item.IsEmpty() && Item.ItemId == EJTSItemId::StellarText && Item.StackCount > 0
 			&& Entry && Entry->FirmwareUnits > 0)
-		{ Units += Entry->FirmwareUnits; SpendInventorySlots.Add(Index); }
+		{ Units += Entry->FirmwareUnits * Item.StackCount; SpendInventorySlots.Add(Index); }
 	}
-	if (Units < Cost) { ClientActionResult(false); return; }
+	if (Units < Cost || !SplitForMutation(CoreSlot)) { ClientActionResult(false); return; }
 	for (int32 Index : SpendInventorySlots)
 	{
 		FJTSItemInstance Spent;
@@ -316,6 +352,8 @@ void UJTSStellarLoadoutComponent::ServerApplyPoints_Implementation(int32 Attachm
 	int32 Total = 0;
 	for (uint8 Point : Points) { if (Point > 10) { ClientActionResult(false); return; } Total += Point; }
 	if (Total > Budget) { ClientActionResult(false); return; }
+	if (Slots[AttachmentSlot].StellarPoints == Points) { ClientActionResult(true); return; }
+	if (!SplitForMutation(AttachmentSlot)) { ClientActionResult(false); return; }
 	Slots[AttachmentSlot].StellarPoints = Points;
 	Changed();
 	ClientActionResult(true);

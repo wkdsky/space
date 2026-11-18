@@ -197,7 +197,7 @@ def preview():
         if light.type=='LIGHT' and light.name.startswith('STUDIO_'):
             light.location*=7;light.data.energy*=49;light.data.size*=7
     scene.render.resolution_x=1200;scene.render.resolution_y=900
-    OUT.mkdir(parents=True,exist_ok=True);scene.render.filepath=str(OUT/'MirrorBoss.png')
+    (OUT/'Previews').mkdir(parents=True,exist_ok=True);scene.render.filepath=str(OUT/'Previews/MirrorBoss.png')
     bpy.ops.render.render(write_still=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'MirrorBoss.blend'),compress=True)
     return scene.render.filepath
@@ -221,7 +221,8 @@ def revision_assets():
         globals()['CLIPS']=all_clips
         rig['clips']=json.dumps([dict(name=n,action='A_'+KIND+'_'+n,frames=f,loop=l) for n,f,l in all_clips])
     scene,rig=delivery().show(KIND,'TurnLeft',10)
-    scene.render.filepath=str(OUT/'TurnLeft.png');bpy.ops.render.render(write_still=True)
+    (OUT/'Previews').mkdir(parents=True,exist_ok=True)
+    scene.render.filepath=str(OUT/'Previews/TurnLeft.png');bpy.ops.render.render(write_still=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'MirrorBoss.blend'),compress=True)
     return dict(export=result,validation=validate(),card=build_access_card())
 

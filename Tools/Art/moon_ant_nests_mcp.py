@@ -22,12 +22,16 @@ class MoonAntNestAuthoringTools(unreal.ToolsetDefinition):
     @toolset_registry.tool_call
     @staticmethod
     def author_crater_nests() -> str:
-        """Replace the old corpse anchor with nine separate, fitted Moon_AntNest entrances."""
+        """Replace the old corpse anchor with seven separate, fitted Moon_AntNest entrances."""
         editor=unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
         assert not editor.get_game_world(), "Stop PIE before authoring nests"
         assert editor.get_editor_world().get_path_name()=="/Game/Space/Maps/L_SpaceWorld.L_SpaceWorld"
-        state=moon_ant_level_actors();moon=state["MoonPlanet"].static_mesh_component
+        state=moon_ant_level_actors()
+        assert not any(label.startswith("Moon_Nest_") for label in state), "Legacy ant authoring cannot overwrite current ecology; use mirror_boss_editor"
+        moon=state["MoonPlanet"].static_mesh_component
         plan=json.loads((ROOT/"moon_ant_nest_placements.json").read_text())
+        plan["placements"]=plan["placements"][:7]
+        assert len(plan["placements"])==7
         asset_tools=unreal.AssetToolsHelpers.get_asset_tools()
         material=unreal.load_asset(VOID)
         if not material:
@@ -98,7 +102,7 @@ class MoonAntNestAuthoringTools(unreal.ToolsetDefinition):
         controller.modify();controller.set_editor_property("placed_moon_ant_nests",placed)
         controller.set_editor_property("corpse_surface_anchor",None)
         data=unreal.load_asset("/Game/Space/Data/Planets/Moon/PDA_MoonSurfaceGameplay")
-        data.modify();data.set_editor_property("moon_ant_nest_count",9)
+        data.modify();data.set_editor_property("moon_ant_nest_count",7)
         assert unreal.EditorAssetLibrary.save_loaded_asset(data,only_if_is_dirty=False)
         old=state.get("Moon_CorpseAnchor_A")
         if old:assert subsystem.destroy_actor(old)
@@ -133,30 +137,30 @@ class MoonAntNestAuthoringTools(unreal.ToolsetDefinition):
     @toolset_registry.tool_call
     @staticmethod
     def validate_pie() -> str:
-        """Check that exactly nine placed nests survive initialization and spawn the existing ants."""
+        """Check that exactly seven placed nests survive initialization and spawn the existing ants."""
         world=unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()
         assert world
         nests=unreal.GameplayStatics.get_all_actors_of_class(world,unreal.JTSMoonAntNestActor)
-        assert len(nests)==9,len(nests)
+        assert len(nests)==7,len(nests)
         controller=next(c for c in unreal.GameplayStatics.get_all_actors_of_class(world,unreal.JTSMoonSurfaceController)
                         if str(c.get_planet_id())=="Moon")
         assert controller.is_surface_gameplay_initialized()
         assert not controller.get_editor_property("corpse_surface_anchor")
         placed=list(controller.get_editor_property("placed_moon_ant_nests"))
-        assert len(placed)==9 and set(placed)==set(nests)
+        assert len(placed)==7 and set(placed)==set(nests)
         ants=unreal.GameplayStatics.get_all_actors_of_class(world,unreal.JTSMoonAntActor)
         assert ants,"Wait for the nest spawn timers"
         for ant in ants:assert ant.get_owner() in nests
         original=json.loads((ROOT/"moon_ant_nests_authored.json").read_text())
         rows=[]
-        for row in original["nests"]:
+        for row in original["nests"][:7]:
             name=row["actor"].rsplit(".",1)[-1]
             nest=next(n for n in nests if n.get_name()==name)
             assert (nest.get_actor_location()-unreal.Vector(*row["location_cm"])).length()<.1
             assert nest.get_editor_property("nest_mesh").get_editor_property("relative_scale3d")==unreal.Vector(1,1,1)
             rows.append({"name":row["name"],"active_ants":sum(a.get_owner()==nest for a in ants),
                          "transform_preserved":True,"replicates":nest.get_editor_property("replicates")})
-        result={"nest_count":9,"live_ant_count":len(ants),"legacy_random_nests":0,"nests":rows}
+        result={"nest_count":7,"live_ant_count":len(ants),"legacy_random_nests":0,"nests":rows}
         (ROOT/"moon_ant_nests_pie_validation.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         return json.dumps(result)
 

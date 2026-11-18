@@ -3,12 +3,14 @@
 #include "Math/RandomStream.h"
 #include "space/World/JTSMoonResourceSpawner.h"
 #include "space/World/JTSPlanetAnchor.h"
+#include "space/World/JTSInteriorZone.h"
 
 namespace
 {
 	bool SameDistribution(const AJTSMoonResourceSpawner* A, const AJTSMoonResourceSpawner* B)
 	{
 		if (A->ResourceDensity != B->ResourceDensity) return false;
+        if (A->bOverridePrimaryResource!=B->bOverridePrimaryResource || (A->bOverridePrimaryResource && A->PrimaryResource!=B->PrimaryResource)) return false;
 		for (int32 Index = 0; Index < static_cast<int32>(EJTSMoonResourceKind::Count); ++Index)
 		{
 			const auto Kind = static_cast<EJTSMoonResourceKind>(Index);
@@ -52,6 +54,7 @@ AJTSMoonResourceSpawner* FJTSMoonResourceCoverage::ResolveOwner(const FVector& S
 	const FRegion* WinningConfiguration = nullptr;
 	for (const FRegion& Region : Regions)
 	{
+        if (Region.Spawner.IsValid() && AJTSInteriorZone::FindAt(Planet->GetWorld(),Region.Spawner->GetActorLocation())!=AJTSInteriorZone::FindAt(Planet->GetWorld(),SurfaceLocation)) continue;
 		if (!Region.Spawner.IsValid() || Region.Spawner->IsActorBeingDestroyed()
 			|| FVector::DotProduct(Direction, Region.CenterDirection) + 1.e-10 < Region.CosAngle) continue;
 		Covering.Add(&Region);

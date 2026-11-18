@@ -12,7 +12,11 @@
 #include "space/Items/JTSResourcePickupActor.h"
 #include "space/Items/JTSWorldPickupActor.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Ships/JTSShipDockActor.h"
+#include "space/Items/JTSPortableCredentialDock.h"
+#include "space/World/JTSAutomaticAccessDoor.h"
 #include "space/World/JTSPlanetEcologyHabitat.h"
+#include "space/Characters/JTSPlanetSurfaceCreature.h"
 #include "space/Systems/JTSWorldPickupRegistrySubsystem.h"
 #include "TimerManager.h"
 
@@ -263,6 +267,8 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 
 	FCollisionQueryParams AimQueryParams(SCENE_QUERY_STAT(InteractionAim), false, InteractingPawn);
 	AimQueryParams.AddIgnoredActor(InteractingPawn);
+	for (AActor* Candidate : CandidateActors)
+		if (AJTSSpacecraftActor* Ship = Cast<AJTSSpacecraftActor>(Candidate)) AimQueryParams.AddIgnoredComponent(Ship->GetFlightCollisionComponent());
 	FHitResult AimHit;
 	const bool bHasAimHit = World->LineTraceSingleByChannel(
 		AimHit,
@@ -279,6 +285,8 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 	bool bBestTargetIsAimHit = false;
 	float BestViewAlignment = -1.0f;
 	float BestDistanceSquared = TNumericLimits<float>::Max();
+	AActor* BestScreen = nullptr;
+	float BestScreenAlignment = -1.f;
 	for (AActor* const Candidate : CandidateActors)
 	{
 		if (!IsValidInteractable(Candidate, InteractingPawn))
@@ -301,6 +309,11 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 		}
 
 		const bool bCandidateIsAimHit = bHasAimHit && AimHit.GetActor() == Candidate;
+		if (Candidate->IsA<AJTSShipDockActor>() && ViewAlignment > BestScreenAlignment)
+		{
+			BestScreen = Candidate;
+			BestScreenAlignment = ViewAlignment;
+		}
 		// Priority is explicit and shared by every interaction: an actual camera ray hit,
 		// then camera alignment, then physical proximity for near-equal view directions.
 		const bool bBetterAimHit = bCandidateIsAimHit && !bBestTargetIsAimHit;
@@ -318,7 +331,8 @@ AActor* UInteractionComponent::FindBestInteractable(APawn* InteractingPawn)
 		}
 	}
 
-	return BestTarget;
+	// A nearby usable console owns E; the hull remains a fallback target for hold-R boarding.
+	return BestScreen && BestTarget && BestTarget->IsA<AJTSSpacecraftActor>() ? BestScreen : BestTarget;
 }
 
 bool UInteractionComponent::IsValidInteractable(AActor* Candidate, APawn* InteractingPawn) const
@@ -421,6 +435,11 @@ bool UInteractionComponent::HasInteractionLineOfSight(
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractionLineOfSight), false, InteractingPawn);
 	QueryParams.AddIgnoredActor(InteractingPawn);
+	// Ship-mounted interactables share the dock's exclusion of the non-physical flight envelope.
+	const AJTSShipDockActor* Screen = Cast<AJTSShipDockActor>(Candidate);
+	if (!Screen && Candidate) Screen = Cast<AJTSShipDockActor>(Candidate->GetOwner());
+	if (Screen)
+		if (const AJTSSpacecraftActor* Ship = Screen->GetSpacecraft()) QueryParams.AddIgnoredComponent(Ship->GetFlightCollisionComponent());
 	FHitResult VisibilityHit;
 	if (!World->LineTraceSingleByChannel(
 		VisibilityHit,
@@ -477,6 +496,9 @@ bool UInteractionComponent::CanServerInteractWith(APawn* InteractingPawn, AActor
 
 FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* Candidate, const FVector& ReferenceLocation) const
 {
+	if (const AJTSShipDockActor* Dock = Cast<AJTSShipDockActor>(Candidate)) return Dock->GetInteractionWorldLocation(ReferenceLocation);
+	if (const auto* Door = Cast<AJTSAutomaticAccessDoor>(Candidate)) return Door->GetInteractionTargetWorldLocation();
+	if (const auto* Device = Cast<AJTSPortableCredentialDock>(Candidate)) return Device->GetInteractionTargetWorldLocation();
 	if (!IsValid(Candidate))
 	{
 		return FVector::ZeroVector;
@@ -502,6 +524,7 @@ FVector UInteractionComponent::GetInteractionTargetWorldLocation(const AActor* C
 	}
 	if (const AJTSPlanetEcologyHabitat* Habitat = Cast<AJTSPlanetEcologyHabitat>(Candidate))
 		return Habitat->GetInteractionAnchorWorldLocation();
+	if (const auto* Creature = Cast<AJTSPlanetSurfaceCreature>(Candidate)) return Creature->GetCorpseInteractionLocation();
 
 	const FBox CandidateBounds = Candidate->GetComponentsBoundingBox(true);
 	return CandidateBounds.IsValid ? CandidateBounds.GetCenter() : Candidate->GetActorLocation();

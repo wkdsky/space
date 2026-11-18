@@ -1,4 +1,6 @@
 #include "space/Components/JTSWeaponVisualComponent.h"
+#include "space/Components/JTSCorpseMeshComponent.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 #include "space/Components/JTSMiningStrikeComponent.h"
 #include "space/Components/JTSStellarWeaponComponent.h"
 
@@ -67,6 +69,7 @@ void UJTSWeaponVisualComponent::RefreshForAttack()
 	UpdatePalmAnchor();
 	UpdateLeftPistolAnchor();
 	ApplyPresentationTransform();
+	UpdateCorpseCarryTransform();
 }
 
 void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickType,
@@ -90,8 +93,9 @@ void UJTSWeaponVisualComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	UpdateLeftPistolAnchor();
 	UpdateWaistLamp();
 	ApplyPresentationTransform();
+	UpdateCorpseCarryTransform();
 	const bool bHeldItemVisible = (IsValid(WeaponBody) && WeaponBody->IsVisible())
-		|| (IsValid(StellarHeldMesh) && StellarHeldMesh->IsVisible());
+		|| (IsValid(StellarHeldMesh) && StellarHeldMesh->IsVisible()) || (CorpseHeldMesh && CorpseHeldMesh->IsVisible());
 	const bool bLampVisible = IsValid(WaistLampLight) && WaistLampLight->IsVisible();
 	if (!bHeldItemVisible && !bLampVisible && !bTwoHandVisible && ShotKickAlpha <= 0.0f && !bMeleeSwingPresentationActive)
 	{
@@ -168,6 +172,9 @@ void UJTSWeaponVisualComponent::EnsureMeshComponents()
 	// Keep presentation offsets, the item-local coordinate system, and the hand socket separate.
 	// This lets the model's authored grip point, not its arbitrary mesh origin, land at the hand.
 	WeaponPresentationRoot = CreateScene(TEXT("WeaponPresentationRoot"), HandAttachmentAnchor);
+	CorpseHeldMesh=NewObject<UJTSCorpseMeshComponent>(GetOwner(),TEXT("HeldOriginalCorpse"));
+	GetOwner()->AddInstanceComponent(CorpseHeldMesh); CorpseHeldMesh->SetupAttachment(HandAttachmentAnchor);
+	CorpseHeldMesh->RegisterComponent(); CorpseHeldMesh->SetVisibility(false);
 	WeaponModelRoot = CreateScene(TEXT("WeaponModelRoot"), WeaponPresentationRoot);
 	WeaponMuzzle = CreateScene(TEXT("WeaponMuzzle"), WeaponModelRoot);
 	MuzzleFlash = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("WeaponMuzzleFlash"));
@@ -669,6 +676,8 @@ void UJTSWeaponVisualComponent::RestoreAfterCharacterMeshShown()
 	{
 		return;
 	}
+	if(ItemId==EJTSItemId::MoonAntCorpse)
+	{ RefreshWeaponVisual(); return; }
 
 	// SetVisibility(false, true) on the skeletal mesh walks every attached child and
 	// sets bHiddenInGame. The visible flag comes back; this flag does not.
@@ -776,6 +785,7 @@ void UJTSWeaponVisualComponent::SetClimbStowed(bool bStowed)
 void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 {
 	EnsureMeshComponents();
+	if(CorpseHeldMesh) CorpseHeldMesh->SetVisibility(false);
 	if (StellarHeldMesh) { StellarHeldMesh->SetVisibility(false); StellarHeldMesh->SetHiddenInGame(true); }
 	const auto* Stellar = GetOwner() ? GetOwner()->FindComponentByClass<UJTSStellarWeaponComponent>() : nullptr;
 	if (Stellar && Stellar->HasActiveWeapon())
@@ -812,6 +822,21 @@ void UJTSWeaponVisualComponent::RefreshWeaponVisual()
 		: nullptr;
 	const EJTSItemId ItemId = IsValid(Inventory) ? Inventory->GetActiveItemId() : EJTSItemId::None;
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, ItemId);
+	if(Inventory && ItemId==EJTSItemId::MoonAntCorpse && CorpseHeldMesh)
+	{
+		SetVisible(false);
+		if(CorpseHeldMesh->SetSample(Inventory->GetActiveItem()))
+		{
+			bTwoHandCorpseCarry=CorpseHeldMesh->RequiresTwoHandCarry(Definition->HeldPresentation.OneHandCorpseMaxSpan,Definition->HeldPresentation.OneHandCorpseMaxGripWidth);
+			UpdatePalmAnchor(); UpdateCorpseCarryTransform(); SetComponentTickEnabled(true);
+		}
+		else if (const auto* Discovery=UJTSDiscoveryComponent::Find(this); !Discovery || !Discovery->GetCatalog())
+		{
+			// Team catalog and owner inventory can arrive in different replication packets.
+			GetWorld()->GetTimerManager().SetTimer(AttachmentValidationTimerHandle,this,&ThisClass::RefreshWeaponVisual,.2f,false);
+		}
+		UpdateWaistLamp(); return;
+	}
 	if (!IsValid(Definition) || !Definition->IsHoldable())
 	{
 		bTwoHandVisible = false;
@@ -1165,10 +1190,60 @@ void UJTSWeaponVisualComponent::ApplyPresentationTransform()
 	}
 }
 
+bool UJTSWeaponVisualComponent::IsCorpseCarryVisible() const
+{ return CorpseHeldMesh && CorpseHeldMesh->IsVisible(); }
+
+FVector UJTSWeaponVisualComponent::GetCarriedCorpseSize() const
+{ return CorpseHeldMesh ? CorpseHeldMesh->GetSourceBounds().GetSize() : FVector::ZeroVector; }
+
+void UJTSWeaponVisualComponent::UpdateCorpseCarryTransform()
+{
+	if (!IsCorpseCarryVisible() || !GetOwner()) return;
+	const FBox& Bounds = CorpseHeldMesh->GetSourceBounds();
+	if (!Bounds.IsValid) return;
+	auto* Mesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+	if (!Mesh || Mesh->GetBoneIndex(TEXT("Wrist_R")) == INDEX_NONE) return;
+	if (!bTwoHandCorpseCarry)
+	{
+		const FVector Wrist = Mesh->GetBoneLocation(TEXT("Wrist_R"));
+		const FVector ToFingers = Mesh->GetBoneLocation(TEXT("Index1_R"))-Wrist;
+		const FVector Forward = ToFingers.GetSafeNormal(SMALL_NUMBER,GetOwner()->GetActorForwardVector());
+		const FVector Up = GetOwner()->GetActorUpVector();
+		const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward,Up).ToQuat();
+		const FVector Center = Wrist+ToFingers*1.35f+Forward*4.f+Up;
+		CorpseHeldMesh->AttachToComponent(HandAttachmentAnchor, FAttachmentTransformRules::KeepWorldTransform);
+		CorpseHeldMesh->SetAbsolute(false, false, true);
+		CorpseHeldMesh->SetWorldTransform(FTransform(Rotation,Center-Rotation.RotateVector(Bounds.GetCenter()),FVector::OneVector));
+		return;
+	}
+	if (Mesh->GetBoneIndex(TEXT("Wrist_L")) == INDEX_NONE) return;
+	auto Palm = [Mesh](FName Wrist, FName Finger)
+	{
+		const FVector W = Mesh->GetBoneLocation(Wrist);
+		return W + (Mesh->GetBoneLocation(Finger)-W)*1.35f;
+	};
+	const FVector Size = Bounds.GetSize();
+	// The original long axis lies across both forearms; the model is never miniaturized.
+	FQuat LocalRotation = FQuat::Identity;
+	if (Size.X >= Size.Y && Size.X >= Size.Z) LocalRotation = FQuat(FVector::UpVector, HALF_PI);
+	else if (Size.Z > Size.Y) LocalRotation = FQuat(FVector::ForwardVector, HALF_PI);
+	const FVector Up = GetOwner()->GetActorUpVector();
+	const FVector Across = (Palm(TEXT("Wrist_R"),TEXT("Index1_R"))-Palm(TEXT("Wrist_L"),TEXT("Index1_L"))).GetSafeNormal();
+	const FVector Forward = FVector::CrossProduct(Across,Up).GetSafeNormal(SMALL_NUMBER,GetOwner()->GetActorForwardVector());
+	const FQuat Rotation = FRotationMatrix::MakeFromXZ(Forward,Up).ToQuat()*LocalRotation;
+	const FVector LocalUp = Rotation.UnrotateVector(Up).GetAbs();
+	const float HalfHeight = FVector::DotProduct(LocalUp,Bounds.GetExtent());
+	const FVector Center = (Palm(TEXT("Wrist_R"),TEXT("Index1_R"))+Palm(TEXT("Wrist_L"),TEXT("Index1_L")))*.5f + Up*(HalfHeight-2.f);
+	CorpseHeldMesh->AttachToComponent(Mesh, FAttachmentTransformRules::KeepWorldTransform);
+	CorpseHeldMesh->SetAbsolute(false, false, true);
+	CorpseHeldMesh->SetWorldTransform(FTransform(Rotation,Center-Rotation.RotateVector(Bounds.GetCenter()),FVector::OneVector));
+}
+
 void UJTSWeaponVisualComponent::SetVisible(bool bVisible)
 {
 	if (!bVisible)
 	{
+		if(CorpseHeldMesh) CorpseHeldMesh->SetVisibility(false);
 		if (StellarHeldMesh) { StellarHeldMesh->SetVisibility(false); StellarHeldMesh->SetHiddenInGame(true); }
 		bRangedVisible = false;
 		bUprightScepter = false;

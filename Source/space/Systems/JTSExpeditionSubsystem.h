@@ -81,6 +81,10 @@ public:
 	bool RecordImportantItem(FName ItemId);
 	void MarkEncounterDefeated(FName EncounterId);
 	void RequestSave();
+	UFUNCTION(BlueprintCallable,BlueprintAuthorityOnly,Category="Expedition|Progression") bool LoadCoordinate(FName Id);
+	UFUNCTION(BlueprintCallable,BlueprintAuthorityOnly,Category="Expedition|Progression") bool SetFacilityFlag(FName Id);
+	void SyncProgression();
+	void NormalizeCoordinates();
 	bool SaveNow();
 	bool LoadMostRecentSnapshot();
 	void MarkResumeRequested();

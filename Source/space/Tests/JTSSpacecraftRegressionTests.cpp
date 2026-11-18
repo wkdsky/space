@@ -7,6 +7,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -31,8 +32,10 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
+#include "space/Components/JTSSpacecraftDurabilityComponent.h"
 #include "space/Components/JTSSpacecraftInterferenceComponent.h"
 #include "space/Components/JTSSpacecraftPresentationComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
 #include "space/Components/JTSSpacecraftSurfaceEnvelopeComponent.h"
 #include "space/World/JTSPlanetArrivalAnchor.h"
@@ -43,6 +46,7 @@
 #include "space/Player/JTSPlayerController.h"
 #include "space/Player/JTSPlayerState.h"
 #include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Ships/JTSShipDockActor.h"
 #include "space/UI/JTSCruiseNavigationWidget.h"
 #include "space/UI/JTSCelestialNavigationLibrary.h"
 #include "space/UI/JTSCelestialMarkerWidget.h"
@@ -55,6 +59,7 @@
 
 namespace
 {
+
 	float PhysicalAltitudeAtNavigationKilometers(float Kilometers)
 	{
 		return 8000.0f * (FMath::Exp(Kilometers / 12.0f) - 1.0f);
@@ -217,6 +222,40 @@ bool FJTSItemDefinitionCacheGcRegression::RunTest(const FString& Parameters)
 	CollectGarbage(RF_NoFlags);
 	const FString After = UJTSItemDefinitionLibrary::GetItemDisplayName(EJTSItemId::RailPistol).ToString();
 	TestEqual(TEXT("Cached definition survives garbage collection"), After, Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSDockFlightIndependenceRegression, "JTS.Spacecraft.DocksDoNotGateFlightGearOrDisembark",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FJTSDockFlightIndependenceRegression::RunTest(const FString& Parameters)
+{
+	FShipTestWorld Fixture;
+	if (!TestTrue(TEXT("Independent-mechanism test parks the ship"), Fixture.Park(FVector::UpVector))) return false;
+	AJTSCharacter* Driver = nullptr; Fixture.AddPlayer(Driver,true);
+	if (!TestTrue(TEXT("Driver boards"),Fixture.Ship->TryBoardPlayer(Driver))) return false;
+	auto* Modules = Fixture.Ship->GetDockComponent(); Modules->SetComponentTickEnabled(false);
+	for (TActorIterator<AJTSShipDockActor> It(Fixture.World); It; ++It)
+	{
+		if (It->GetOwner()!=Fixture.Ship || !It->bDeployable) continue;
+		It->DeploymentDuration=0.05f; It->RetractionDuration=60.f; It->SetDeployed(true);
+	}
+	Fixture.World->Tick(LEVELTICK_All,0.1f);
+	for (TActorIterator<AJTSShipDockActor> It(Fixture.World); It; ++It) if (It->GetOwner()==Fixture.Ship) It->Tick(0.1f);
+	auto* Presentation=Fixture.Ship->FindComponentByClass<UJTSSpacecraftPresentationComponent>();
+	Presentation->TickComponent(5.f,LEVELTICK_All,nullptr);
+	Modules->NotifyTakeoff();
+	TestTrue(TEXT("A retracting dock does not lock landed disembark"),Fixture.Ship->CanDisembarkPlayer(Driver));
+	TestFalse(TEXT("Intentionally slow modules are still outside the bay"),Modules->AreAllStowed());
+	TestTrue(TEXT("Takeoff starts immediately with slow modules still retracting"),Fixture.Ship->BeginSurfaceTakeoff());
+	TestFalse(TEXT("Takeoff immediately leaves the landed state"),Fixture.Ship->IsLanded());
+	TestTrue(TEXT("Authoritative flight movement is immediately active"),Fixture.Ship->GetFlightMovementComponent()->IsActive());
+	const float GearBefore=Presentation->GetGearDeployAlpha();
+	Presentation->TickComponent(0.1f,LEVELTICK_All,nullptr);
+	TestTrue(TEXT("The gear retracts while docks remain unfolded"),Presentation->GetGearDeployAlpha()<GearBefore && !Modules->AreAllStowed());
+	const FVector Start=Fixture.Ship->GetActorLocation();
+	Fixture.Ship->GetFlightMovementComponent()->TickComponent(0.1f,LEVELTICK_All,nullptr);
+	TestTrue(TEXT("Hull motion ignores its own fixed terminal and retracting plugins"),
+		FVector::Dist(Fixture.Ship->GetActorLocation(),Start)>0.01f);
 	return true;
 }
 
@@ -463,13 +502,30 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rolled item exists in the configured pool"), Table->FindEntry(Result) != nullptr);
 
 	LockerState->RestoreShipLockerSlots({});
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	if (!TestTrue(TEXT("Fixture player can use the parked ship terminal"), Fixture.Ship->CanUseShipTerminal(Character))) return false;
 	TestTrue(TEXT("Ship accepts shop materials"), Fixture.Ship->DepositResourceAmounts({ { EJTSResourceType::Rock, 20 }, { EJTSResourceType::Ore, 20 } }));
 	TestEqual(TEXT("Purchase succeeds into locker"), Fixture.Ship->TryPurchase(Character, EJTSItemId::PowerHammer), EJTSShopPurchaseResult::Succeeded);
 	TestEqual(TEXT("Purchase remains out of carried inventory"), CarriedInventory->GetItemCount(EJTSItemId::PowerHammer), 0);
 	{
 		// Normal-weapon upgrade: server charges Rock/Ore, raises the level, and validates the skill budget.
+		Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+		AJTSShipDockActor* WeaponDock = nullptr;
+		for (TActorIterator<AJTSShipDockActor> It(Fixture.World); It; ++It)
+			if (It->GetOwner() == Fixture.Ship && It->GetService() == EJTSShipDockService::WeaponModification) WeaponDock = *It;
+		if (!TestNotNull(TEXT("Production loadout supplies the independent weapon dock"), WeaponDock)) return false;
+		TestFalse(TEXT("The ship terminal cannot remotely authorize weapon upgrades"),
+			Fixture.Ship->TryUpgradeLockerWeapon(Character, 0, LockerState->GetShipLockerSlot(0).SlotToken));
+		WeaponDock->DeploymentDuration = 0.05f;
+		Fixture.Ship->GetDockComponent()->SetComponentTickEnabled(false);
+		WeaponDock->SetDeployed(true);
+		Fixture.World->Tick(LEVELTICK_All, 0.1f);
+		WeaponDock->Tick(0.1f);
+		Character->SetActorLocation(WeaponDock->GetScreenWorldLocation() + WeaponDock->ScreenAnchor->GetRightVector() * 100);
+
+		if (!TestTrue(TEXT("Weapon operations require the deployed physical display"), WeaponDock->CanUseDock(Character))) return false;
 		const FGuid WeaponToken = LockerState->GetShipLockerSlot(0).SlotToken;
 		const int32 RockBefore = Fixture.Ship->GetResourceAmount(EJTSResourceType::Rock);
 		const int32 OreBefore = Fixture.Ship->GetResourceAmount(EJTSResourceType::Ore);
@@ -489,6 +545,9 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 		Fixture.Ship->DepositResourceAmounts({ { EJTSResourceType::Rock, RockBefore - Fixture.Ship->GetResourceAmount(EJTSResourceType::Rock) },
 			{ EJTSResourceType::Ore, OreBefore - Fixture.Ship->GetResourceAmount(EJTSResourceType::Ore) } });
 	}
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	const FGuid RollRequestId = FGuid::NewGuid();
 	FName AwardedItem;
 	int32 AwardedSlot = INDEX_NONE;
@@ -582,7 +641,9 @@ bool FJTSShipLockerRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rejected assembled transfer keeps the ordinary inventory empty"), CarriedInventory->GetActiveItem().IsEmpty());
 	TestEqual(TEXT("Rejected transfer keeps the assembled core"), LockerState->GetShipLockerSlot(0).StellarCoreId, FName(TEXT("FireCore")));
 	TestEqual(TEXT("Rejected transfer keeps the assembled attachment"), LockerState->GetShipLockerSlot(0).StellarItemId, FName(TEXT("JetTube")));
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	FindFProperty<FObjectProperty>(LockerState->GetClass(), TEXT("PawnPrivate"))->SetObjectPropertyValue_InContainer(LockerState, Character);
 	auto* Loadout = LockerState->GetStellarLoadout();
 	Loadout->RestoreState({}, 100);
@@ -616,7 +677,9 @@ bool FJTSStellarDebugGrantRegression::RunTest(const FString& Parameters)
 	const UJTSStellarLootTable* const Table = Fixture.Ship->GetStellarLootTable();
 	if (!TestNotNull(TEXT("Debug grant has a player state"), State)
 		|| !TestNotNull(TEXT("Debug grant reads the Blueprint-configured pool"), Table)) return false;
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	AJTSGameState* const GameState = Fixture.World->SpawnActor<AJTSGameState>();
 	Fixture.World->SetGameState(GameState);
 	GameState->SetActiveSpacecraft(Fixture.Ship);
@@ -697,7 +760,9 @@ bool FJTSStellarDebugGrantRegression::RunTest(const FString& Parameters)
 	Character->SetActorLocation(Fixture.Ship->GetActorLocation() + FVector(100000.0, 0.0, 0.0));
 	Controller->ServerRequestDebugStellarItems(Fixture.Ship);
 	TestTrue(TEXT("Out-of-range requests cannot fill locker slots"), State->GetShipLockerSlot(FreeIndex).IsEmpty());
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	Fixture.Ship->SetRole(ROLE_SimulatedProxy);
 	TestFalse(TEXT("Client-role ship cannot mutate the locker"), Fixture.Ship->TryGrantDebugStellarItems(Character, AddedCount, RequestedCount));
 	Fixture.Ship->SetRole(ROLE_Authority);
@@ -716,7 +781,9 @@ bool FJTSStellarFirmwareDragRegression::RunTest(const FString& Parameters)
 	AJTSPlayerState* const State = Controller ? Controller->GetPlayerState<AJTSPlayerState>() : nullptr;
 	const UJTSStellarLootTable* const Table = Fixture.Ship->GetStellarLootTable();
 	if (!TestNotNull(TEXT("Drag has a player state"), State) || !TestNotNull(TEXT("Drag has a loot table"), Table)) return false;
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	if (!TestTrue(TEXT("Drag can use the ship terminal"), Fixture.Ship->CanUseShipTerminal(Character))) return false;
 	const FJTSStellarLootEntry* const Firmware = Table->FindEntry(TEXT("UpgradeFirmware"));
 	if (!TestTrue(TEXT("Firmware supplies upgrade units"), Firmware && Firmware->FirmwareUnits > 0)) return false;
@@ -761,7 +828,9 @@ bool FJTSStellarFirmwareDragRegression::RunTest(const FString& Parameters)
 	Character->SetActorLocation(Fixture.Ship->GetActorLocation() + FVector(1000000.0, 0.0, 0.0));
 	Controller->ServerMoveShipLockerSlot(Fixture.Ship, 1, EarlierFirmwareToken, 0, CoreToken);
 	TestEqual(TEXT("An out-of-range player cannot upgrade"), State->GetShipLockerSlot(0).StellarCoreLevel, 1);
-	Character->SetActorLocation(Fixture.Ship->GetActorLocation());
+	Fixture.Ship->SetGroundedPlanet(Fixture.Planet);
+	Character->SetActorLocation(Fixture.Ship->GetDockComponent()->GetTerminal()->GetScreenWorldLocation()
+		+ Fixture.Ship->GetDockComponent()->GetTerminal()->ScreenAnchor->GetRightVector() * 120);
 	Controller->ServerMoveShipLockerSlot(Fixture.Ship, 1, EarlierFirmwareToken, 0, CoreToken);
 	TestEqual(TEXT("A combined weapon's core can receive a firmware drop"), State->GetShipLockerSlot(0).StellarCoreLevel, 2);
 	TestEqual(TEXT("The combined attachment stays equipped"), State->GetShipLockerSlot(0).StellarItemId, FName(TEXT("JetTube")));
@@ -866,7 +935,19 @@ bool FJTSBoardingRegression::RunTest(const FString& Parameters)
 	{
 		TestTrue(TEXT("Reboarded spacecraft flight actions are rebound"), ReboardedShipInput->GetActionEventBindings().Num() > 0);
 	}
-	TestTrue(TEXT("Repeated driver exit succeeds"), Fixture.Ship->TryDisembarkPlayerForController(Controllers[0]));
+	auto* Durability = Fixture.Ship->FindComponentByClass<UJTSSpacecraftDurabilityComponent>();
+	if (!TestNotNull(TEXT("Ship has authoritative hull state"), Durability)) return false;
+	Durability->ReconstructionCosts = {{EJTSResourceType::Rock, 1000000}};
+	Durability->RestoreHull(0);
+	Fixture.Ship->FlightDisembarkReleased(FInputActionValue(false));
+	Fixture.Ship->FlightDisembarkStarted(FInputActionValue(true));
+	{
+		// This is the second deferred R request in one automation frame.
+		TGuardValue<uint64> NextFrame(GFrameCounter, GFrameCounter + 1);
+		Fixture.World->Tick(LEVELTICK_All, 1.0f / 60.0f);
+	}
+	TestTrue(TEXT("Landed R exits a disabled ship even without reconstruction materials"), Controllers[0]->GetPawn() == Characters[0] && !Characters[0]->IsBoarded());
+	TestTrue(TEXT("Disembarking does not reconstruct or consume materials"), Durability->bDisabled && Durability->Hull == 0);
 	const UEnhancedInputComponent* const RepeatedCharacterInput = Cast<UEnhancedInputComponent>(Characters[0]->InputComponent);
 	TestNotNull(TEXT("Repeated disembark rebuilds character input"), RepeatedCharacterInput);
 	if (RepeatedCharacterInput != nullptr)

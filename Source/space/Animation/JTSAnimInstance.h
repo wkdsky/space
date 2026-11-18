@@ -114,6 +114,7 @@ protected:
 
 	/** Both hands carry a ranged pistol. */
 	bool bTwoHandHeld = false;
+	bool bCorpseHeld = false;
 
 	/** Normalized wall step phase, shared by hand and foothold reaches. */
 	float ClimbStepAlpha = 0.0f;

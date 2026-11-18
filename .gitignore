@@ -55,3 +55,6 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Blender automatic backups (keep editable .blend sources)
+SourceArt/**/*.blend[1-9]

@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "space/Items/JTSResourceType.h"
 #include "space/Interaction/IInteractable.h"
 #include "JTSExpeditionKeyPickup.generated.h"
 class USphereComponent;
@@ -11,6 +12,8 @@ UCLASS(Blueprintable)
 class SPACE_API AJTSExpeditionKeyPickup : public AActor, public IInteractable
 {
 	GENERATED_BODY()
+public:
+    UPROPERTY(EditDefaultsOnly,Category="Reward") TMap<EJTSResourceType,int32> ResourceReward;
 public:
 	AJTSExpeditionKeyPickup();
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Important Item") FName ImportantItemId;

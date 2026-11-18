@@ -9,6 +9,7 @@
 #include "JTSGameState.generated.h"
 
 class AJTSSpacecraftActor;
+class UJTSDiscoveryComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSGameplayPhaseChanged, EJTSGameplayPhase, NewGameplayPhase);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJTSEarthCollectionTimeChanged, float, RemainingTime);
@@ -22,6 +23,8 @@ class SPACE_API AJTSGameState : public AGameStateBase
 
 public:
 	AJTSGameState();
+	UFUNCTION(BlueprintPure, Category="Discovery") UJTSDiscoveryComponent* GetDiscoveryComponent() const { return Discovery; }
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Discovery") TObjectPtr<UJTSDiscoveryComponent> Discovery;
 
 	UFUNCTION(BlueprintPure, Category = "Gameplay")
 	EJTSGameplayPhase GetGameplayPhase() const;
@@ -94,6 +97,10 @@ public:
 	void SetExpeditionId(const FString& NewExpeditionId);
 	UFUNCTION(BlueprintPure, Category="Expedition") bool HasImportantItem(FName ItemId) const { return !ItemId.IsNone() && ImportantItemIds.Contains(ItemId); }
 	void SetImportantItems(const TArray<FName>& ItemIds);
+	UPROPERTY(ReplicatedUsing=OnRep_ExpeditionState, BlueprintReadOnly) TArray<FName> LoadedCoordinateIds;
+	UPROPERTY(ReplicatedUsing=OnRep_ExpeditionState, BlueprintReadOnly) TArray<FName> FacilityFlagIds;
+	UPROPERTY(ReplicatedUsing=OnRep_ExpeditionState, BlueprintReadOnly) TArray<FName> BlockedEntranceIds;
+	UPROPERTY(ReplicatedUsing=OnRep_ExpeditionState, BlueprintReadOnly) TArray<FName> DefeatedEncounterIds;
 
 	UPROPERTY(BlueprintAssignable, Category = "Gameplay")
 	FOnJTSGameplayPhaseChanged OnGameplayPhaseChanged;

@@ -6,6 +6,8 @@
 
 #include "JTSWeaponVisualComponent.generated.h"
 
+class UJTSCorpseMeshComponent;
+
 class UInventoryComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -67,6 +69,9 @@ public:
 	bool GetHeldItemTipWorldLocation(FVector& OutLocation) const;
 	UFUNCTION(BlueprintPure, Category="Weapon|Presentation")
 	UStaticMeshComponent* GetStellarHeldMesh() const { return StellarHeldMesh; }
+	bool IsCorpseCarryVisible() const;
+	bool IsTwoHandCorpseCarry() const { return bTwoHandCorpseCarry; }
+	FVector GetCarriedCorpseSize() const;
 
 private:
 	UFUNCTION()
@@ -78,6 +83,8 @@ private:
 	void AttachToRootFallback();
 	/** Places the grip in the palm from the posed wrist and finger bones, in world centimetres. */
 	void UpdatePalmAnchor();
+	void UpdateCorpseCarryTransform();
+	bool bTwoHandCorpseCarry = false;
 	void UpdateHandAnchor(USceneComponent* Anchor, const FName WristBone, const FName IndexBone, const FName ForearmBone, bool bRightHand);
 	void UpdateLeftPistolAnchor();
 	void UpdateWaistLamp();
@@ -163,6 +170,7 @@ private:
 	TObjectPtr<UStaticMeshComponent> WeaponSight;
 
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> StellarHeldMesh;
+	UPROPERTY(Transient) TObjectPtr<UJTSCorpseMeshComponent> CorpseHeldMesh;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> StellarCoreMaterial;
 
 	UPROPERTY(Transient)

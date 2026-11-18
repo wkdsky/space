@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 #include "space/Components/JTSSpacecraftLandingSupportComponent.h"
+#include "space/Ships/JTSSpacecraftCollisionQuery.h"
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "Components/SceneComponent.h"
@@ -143,6 +144,7 @@ bool UJTSSpacecraftLandingSupportComponent::ProbeFoot(AJTSPlanetAnchor* Planet, 
 		// An unrelated rock/actor over a real mesh is not silently accepted as terrain underneath it.
 		FHitResult Obstacle;
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSLandingFootObstacle), true, GetOwner());
+		JTSSpacecraftCollision::IgnoreSelfAndAttachments(Params, GetOwner());
 		if (GetWorld()->LineTraceSingleByChannel(Obstacle, Start, Hit.ImpactPoint - Up * 1.0f, ECC_Visibility, Params)
 			&& !Planet->OwnsGameplaySurfaceActor(Obstacle.GetActor())
 			&& FVector::DistSquared(Obstacle.ImpactPoint, Hit.ImpactPoint) > 4.0) return false;

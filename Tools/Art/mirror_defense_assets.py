@@ -170,7 +170,7 @@ def tune():
     assert unreal.EditorAssetLibrary.save_loaded_asset(bp)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
     nests = [a for a in actors if isinstance(a, unreal.JTSPlanetEcologyHabitat) and a.get_actor_label().startswith('Moon_Nest_')]
-    assert len(nests) == 9
+    assert len(nests) == 7
     for nest in nests:
         before = nest.get_actor_transform()
         nest.modify()

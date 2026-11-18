@@ -1,6 +1,9 @@
+#include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Components/JTSSpacecraftDurabilityComponent.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "space/Ships/JTSSpacecraftActor.h"
+#include "space/Ships/JTSSpacecraftCollisionQuery.h"
 
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -30,6 +33,11 @@
 #include "Materials/MaterialInterface.h"
 #include "space/Components/JTSCarryComponent.h"
 #include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
+#include "space/Components/JTSStellarExchangeComponent.h"
+#include "space/Components/JTSShipArmamentComponent.h"
+#include "space/Components/JTSShipCabinCouplingComponent.h"
+#include "space/Components/JTSShipScannerComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
 #include "space/Components/JTSSpacecraftFlightMovementComponent.h"
 #include "space/Components/JTSSpacecraftInterferenceComponent.h"
@@ -88,6 +96,8 @@ namespace
 		case EJTSResourceType::InorganicCarbon:
 			return TEXT("Inorganic Carbon");
 
+		case EJTSResourceType::ManufacturedPart: return TEXT("Manufactured Part");
+		case EJTSResourceType::HighGradeAlloy: return TEXT("High Grade Alloy");
 		default:
 			return TEXT("Unknown");
 		}
@@ -106,6 +116,8 @@ namespace
 		case EJTSResourceType::Organic:
 		case EJTSResourceType::MoonAntCorpse:
 		case EJTSResourceType::InorganicCarbon:
+		case EJTSResourceType::ManufacturedPart:
+		case EJTSResourceType::HighGradeAlloy:
 			return true;
 
 		default:
@@ -116,6 +128,7 @@ namespace
 
 AJTSSpacecraftActor::AJTSSpacecraftActor()
 {
+	CreateDefaultSubobject<UJTSSpacecraftDurabilityComponent>(TEXT("Durability"));
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -168,6 +181,14 @@ AJTSSpacecraftActor::AJTSSpacecraftActor()
 	SurfaceEnvelopeComponent = CreateDefaultSubobject<UJTSSpacecraftSurfaceEnvelopeComponent>(TEXT("SurfaceEnvelopeComponent"));
 	PresentationComponent = CreateDefaultSubobject<UJTSSpacecraftPresentationComponent>(TEXT("PresentationComponent"));
 	MaterialProcessor = CreateDefaultSubobject<UJTSMaterialProcessorComponent>(TEXT("MaterialProcessor"));
+	DockComponent = CreateDefaultSubobject<UJTSShipDockComponent>(TEXT("DockComponent"));
+	StellarExchange = CreateDefaultSubobject<UJTSStellarExchangeComponent>(TEXT("StellarExchange"));
+	Armament = CreateDefaultSubobject<UJTSShipArmamentComponent>(TEXT("Armament"));
+	CabinAssemblyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("CabinAssemblyRoot"));
+	CabinAssemblyRoot->SetupAttachment(SceneRoot);
+	CabinCoupling = CreateDefaultSubobject<UJTSShipCabinCouplingComponent>(TEXT("CabinCoupling"));
+	Scanner = CreateDefaultSubobject<UJTSShipScannerComponent>(TEXT("Scanner"));
+	Scanner->SetupAttachment(CabinAssemblyRoot);
 
 	// Retain the legacy subobject name so existing Blueprint component templates keep their camera tuning.
 	FlightCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -259,6 +280,9 @@ void AJTSSpacecraftActor::UpdateFlightCollisionFromSpacecraftMeshBounds()
 
 void AJTSSpacecraftActor::ConfigureCameraCollisionResponses()
 {
+	// The terrain-sweep envelope spans the empty passage between the arms. Only authored
+	// physical hull components may block walkers, including on legacy Blueprint instances.
+	if (FlightCollision) FlightCollision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(this);
 	for (UPrimitiveComponent* const PrimitiveComponent : PrimitiveComponents)
 	{
@@ -1162,7 +1186,7 @@ void AJTSSpacecraftActor::ApplyFlightCameraLook(float YawDegrees, float PitchDeg
 	const FQuat PitchDelta(FlightCameraAimRotation.GetRightVector(), FMath::DegreesToRadians(-PitchDegrees));
 	const FQuat DesiredAim = (PitchDelta * YawDelta * FlightCameraAimRotation).GetNormalized();
 	const FRotator Relative = (GetActorQuat().Inverse() * DesiredAim).Rotator();
-	const float YawLimit = bFlightFreeLookHeld ? 170.0f : FMath::Clamp(FlightCoupledLookLimit, 1.0f, 89.0f);
+	const float YawLimit = bFlightFreeLookHeld ? 180.0f : FMath::Clamp(FlightCoupledLookLimit, 1.0f, 89.0f);
 	const float PitchLimit = bFlightFreeLookHeld ? 85.0f : FMath::Clamp(FlightCoupledLookLimit, 1.0f, 89.0f);
 	FlightCameraAimRotation = (GetActorQuat() * FRotator(
 		FMath::Clamp(FRotator::NormalizeAxis(Relative.Pitch),
@@ -2073,6 +2097,7 @@ bool AJTSSpacecraftActor::RequestLanding()
 
 bool AJTSSpacecraftActor::RequestLandingInternal(bool bAllowControlledDescentCapture)
 {
+	if (CabinCoupling && !CabinCoupling->IsCabinDocked()) return false;
 	if (InterferenceComponent->IsControllingFlight()) return false;
 	if (!HasAuthority())
 	{
@@ -2314,6 +2339,7 @@ bool AJTSSpacecraftActor::BeginSurfaceTakeoff()
 			FlightMovementComponent->CaptureInertialReferenceUp(FlightInertialReferenceUp);
 		}
 	}
+	DockComponent->NotifyTakeoff();
 	SetFlightTargetPlanet(Planet);
 	ClearGroundedPlanet();
 	FlightMovementComponent->BeginEnvelopeEscape(true);
@@ -2463,7 +2489,7 @@ bool AJTSSpacecraftActor::CanOccupyLandingTransform(const FTransform& LandingTra
 	}
 
 	FCollisionQueryParams QueryParameters(SCENE_QUERY_STAT(JTSSpacecraftLandingClearance), false, this);
-	QueryParameters.AddIgnoredActor(this);
+	JTSSpacecraftCollision::IgnoreSelfAndAttachments(QueryParameters, this);
 	const FTransform CollisionTransform = GetFlightCollisionTransformForSpacecraftTransform(LandingTransform);
 	if (World->OverlapBlockingTestByChannel(
 		CollisionTransform.GetLocation(),
@@ -2490,6 +2516,7 @@ bool AJTSSpacecraftActor::CanTraverseLandingSegment(const FVector& Start, const 
 	const FTransform From = GetFlightCollisionTransformForSpacecraftTransform(FTransform(Rotation, Start, GetActorScale3D()));
 	const FTransform To = GetFlightCollisionTransformForSpacecraftTransform(FTransform(Rotation, End, GetActorScale3D()));
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSLandingApproach), false, this);
+	JTSSpacecraftCollision::IgnoreSelfAndAttachments(Params, this);
 	FHitResult Hit;
 	if (GetWorld()->SweepSingleByChannel(Hit, From.GetLocation(), To.GetLocation(), From.GetRotation(),
 		ECC_Visibility, FCollisionShape::MakeBox(FlightCollision->GetScaledBoxExtent()), Params)) return false;
@@ -2515,6 +2542,7 @@ bool AJTSSpacecraftActor::CanRecoverFlightPenetration(const FVector& Delta) cons
 	const auto CanRecoverShape = [&](const FTransform& Pose, const FCollisionShape& Shape)
 	{
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(JTSFlightPenetrationRecovery), false, this);
+		JTSSpacecraftCollision::IgnoreSelfAndAttachments(Params, this);
 		TArray<FOverlapResult> Overlaps;
 		World->OverlapMultiByChannel(Overlaps, Pose.GetLocation(), Pose.GetRotation(), ECC_Visibility, Shape, Params);
 		TSet<UPrimitiveComponent*> Existing;
@@ -2861,6 +2889,8 @@ FVector AJTSSpacecraftActor::GetNavigationMarkerWorldLocation() const
 
 bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) const
 {
+    if (const auto* H=FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); H && H->bDisabled)
+        return InteractingPawn && FVector::DistSquared(InteractingPawn->GetActorLocation(),GetActorLocation())<=FMath::Square(1800.f);
 	if (!IsValid(InteractingPawn))
 	{
 		return false;
@@ -2875,16 +2905,19 @@ bool AJTSSpacecraftActor::CanInteract_Implementation(APawn* InteractingPawn) con
 		&& IsPawnInBoardingRange(InteractingPawn);
 }
 
+UPrimitiveComponent* AJTSSpacecraftActor::GetFlightCollisionComponent() const { return FlightCollision; }
+
 bool AJTSSpacecraftActor::CanUseShipTerminal(APawn* InteractingPawn) const
 {
+    if (const auto* H=FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); H && H->bDisabled) return false;
 	return HasAuthority()
 		&& IsSpaceWorldSurfaceActive()
-		&& CanInteract_Implementation(InteractingPawn)
-		&& !IsPlayerBoarded(InteractingPawn);
+		&& DockComponent->CanUseService(EJTSShipDockService::ShipTerminal, InteractingPawn);
 }
 
 FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* InteractingPawn) const
 {
+    if (const auto* H=FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); H && H->bDisabled) return NSLOCTEXT("JTS","ReconstructShip","[E] 重构飞船（共享仓库及附近背包）");
 	if (!CanInteract_Implementation(InteractingPawn))
 	{
 		return FText::GetEmpty();
@@ -2897,7 +2930,7 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 			return FText::FromString(TEXT("HOLD [R] BOARD"));
 		}
 
-		return FText::FromString(TEXT("[E] SHIP TERMINAL\nHOLD [R] BOARD"));
+		return FText::FromString(TEXT("HOLD [R] BOARD"));
 	}
 
 	return CanDisembarkPlayer(InteractingPawn)
@@ -2905,8 +2938,11 @@ FText AJTSSpacecraftActor::GetInteractionPrompt_Implementation(APawn* Interactin
 		: FText::GetEmpty();
 }
 
+bool AJTSSpacecraftActor::CanExecuteInteraction_Implementation(APawn* Pawn) const
+{ const auto* H=FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); return H && H->bDisabled && CanInteract_Implementation(Pawn); }
 void AJTSSpacecraftActor::Interact_Implementation(APawn* InteractingPawn)
 {
+    if (auto* H=FindComponentByClass<UJTSSpacecraftDurabilityComponent>(); H && H->bDisabled) { H->Reconstruct(InteractingPawn); return; }
 	// Earth exposes the ship as an interaction target solely so its hold-R boarding path and prompt
 	// use the shared interaction validation. The supply screen remains a SpaceWorld-only feature.
 	if (!CanUseShipTerminal(InteractingPawn))
@@ -2955,7 +2991,7 @@ bool AJTSSpacecraftActor::ApplyMaterialDeltas(const TMap<EJTSResourceType, int64
 TArray<FJTSResourceAmount> AJTSSpacecraftActor::ExportStorageSnapshot() const
 {
 	TArray<FJTSResourceAmount> Result;
-	for (uint8 I = 0; I <= uint8(EJTSResourceType::InorganicCarbon); ++I)
+	for (uint8 I = 0; I <= uint8(EJTSResourceType::HighGradeAlloy); ++I)
 	{
 		const EJTSResourceType Type = EJTSResourceType(I);
 		const int64 HalfUnits = GetResourceHalfUnits(Type);
@@ -3529,86 +3565,26 @@ bool AJTSSpacecraftActor::DepositPlayerResources(AJTSCharacter* Player)
 
 bool AJTSSpacecraftActor::TryDepositPlayerMaterials(AJTSCharacter* Player)
 {
-	if (!HasAuthority() || !IsValid(Player) || !IsPawnInBoardingRange(Player))
+	if(!HasAuthority() || !IsValid(Player) || !IsPawnInBoardingRange(Player)) return false;
+	auto* Inventory=Player->GetInventoryComponent(); if(!Inventory) return false;
+	TArray<FJTSItemInstance> Removed; TMap<EJTSResourceType,int32> Materials;
+	const auto Slots=Inventory->GetItemSlots();
+	for(int32 Index=0;Index<Slots.Num();++Index)
 	{
-		return false;
+		const auto& Item=Slots[Index]; EJTSResourceType Resource;
+		if(Item.IsEmpty() || !UJTSDiscoveryComponent::IsKnown(this,Item)
+			|| !UJTSItemDefinitionLibrary::TryGetResourceType(Item.ItemId,Resource)
+			|| (Resource!=EJTSResourceType::Rock && Resource!=EJTSResourceType::Ore && Resource!=EJTSResourceType::Crystal
+				&& Resource!=EJTSResourceType::InorganicCarbon && Resource!=EJTSResourceType::MoonAntCorpse)) continue;
+		FJTSItemInstance Extracted;
+		if(Inventory->TryExtractItemAtSlot(Index,Item.InstanceId,Extracted))
+		{ Removed.Add(Extracted); Materials.FindOrAdd(Resource)+=Extracted.StackCount; }
 	}
-
-	UJTSInventoryComponent* const Inventory = Player->GetInventoryComponent();
-	if (!IsValid(Inventory))
-	{
-		return false;
-	}
-
-	const int32 RockCount = Inventory->GetItemCount(EJTSItemId::Rock);
-	const int32 OreCount = Inventory->GetItemCount(EJTSItemId::Ore);
-	const int32 CrystalCount = Inventory->GetItemCount(EJTSItemId::Crystal);
-	const int32 CarbonCount = Inventory->GetItemCount(EJTSItemId::InorganicCarbon);
-	const int32 MoonAntCorpseCount = Inventory->GetItemCount(EJTSItemId::MoonAntCorpse);
-	TMap<EJTSResourceType, int32> Materials;
-	if (RockCount > 0)
-	{
-		Materials.Add(EJTSResourceType::Rock, RockCount);
-	}
-	if (OreCount > 0)
-	{
-		Materials.Add(EJTSResourceType::Ore, OreCount);
-	}
-	if (CrystalCount > 0) Materials.Add(EJTSResourceType::Crystal, CrystalCount);
-	if (CarbonCount > 0) Materials.Add(EJTSResourceType::InorganicCarbon, CarbonCount);
-	if (MoonAntCorpseCount > 0)
-	{
-		Materials.Add(EJTSResourceType::MoonAntCorpse, MoonAntCorpseCount);
-	}
-	if (Materials.IsEmpty())
-	{
-		return false;
-	}
-
-	const bool bRemovedRock = RockCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Rock, RockCount);
-	const bool bRemovedOre = bRemovedRock && (OreCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Ore, OreCount));
-	const bool bRemovedCrystal = bRemovedOre && (CrystalCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::Crystal, CrystalCount));
-	const bool bRemovedCarbon = bRemovedCrystal && (CarbonCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::InorganicCarbon, CarbonCount));
-	const bool bRemovedCorpse = bRemovedCarbon && (MoonAntCorpseCount <= 0 || Inventory->TryRemoveItem(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount));
-	if (!bRemovedRock || !bRemovedOre || !bRemovedCrystal || !bRemovedCarbon || !bRemovedCorpse)
-	{
-		if (bRemovedRock && RockCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::Rock, RockCount);
-		}
-		if (bRemovedOre && OreCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
-		}
-		if (bRemovedCrystal && CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
-		if (bRemovedCarbon && CarbonCount > 0) Inventory->TryAddItemById(EJTSItemId::InorganicCarbon, CarbonCount);
-		if (bRemovedCorpse && MoonAntCorpseCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
-		}
-		return false;
-	}
-
-	if (!DepositResourceAmounts(Materials))
-	{
-		if (RockCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::Rock, RockCount);
-		}
-		if (OreCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::Ore, OreCount);
-		}
-		if (CrystalCount > 0) Inventory->TryAddItemById(EJTSItemId::Crystal, CrystalCount);
-		if (CarbonCount > 0) Inventory->TryAddItemById(EJTSItemId::InorganicCarbon, CarbonCount);
-		if (MoonAntCorpseCount > 0)
-		{
-			Inventory->TryAddItemById(EJTSItemId::MoonAntCorpse, MoonAntCorpseCount);
-		}
-		return false;
-	}
-
-	return true;
+	if(Removed.IsEmpty()) return false;
+	if(DepositResourceAmounts(Materials)) return true;
+	// Keep exact sample provenance/identity if storage refuses the transaction.
+	for(const auto& Item:Removed) { int32 Remaining=0; Inventory->TryAddItem(Item,Remaining); }
+	return false;
 }
 
 bool AJTSSpacecraftActor::BuildShopCosts(EJTSItemId ItemId, TMap<EJTSResourceType, int32>& OutCosts) const
@@ -3781,7 +3757,7 @@ void AJTSSpacecraftActor::HandleBoardingTriggerEndOverlap(
 bool AJTSSpacecraftActor::TryUpgradeLockerWeapon(AJTSCharacter* Player, int32 SlotIndex, FGuid ExpectedToken)
 {
 	AJTSPlayerState* const State = IsValid(Player) ? Player->GetPlayerState<AJTSPlayerState>() : nullptr;
-	if (!HasAuthority() || !IsValid(State) || !CanUseShipTerminal(Player)) return false;
+	if (!HasAuthority() || !IsValid(State) || !DockComponent->CanUseService(EJTSShipDockService::WeaponModification, Player)) return false;
 	const FJTSShipLockerSlot Slot = State->GetShipLockerSlot(SlotIndex);
 	const UJTSItemDefinition* const Definition = UJTSItemDefinitionLibrary::GetItemDefinition(this, Slot.StandardItem.ItemId);
 	TArray<FJTSItemCost> Cost;

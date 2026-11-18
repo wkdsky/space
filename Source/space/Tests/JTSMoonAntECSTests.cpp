@@ -9,6 +9,7 @@
 #include "space/Core/JTSGameState.h"
 #include "space/Components/JTSHealthComponent.h"
 #include "space/Components/JTSInventoryComponent.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 #include "space/Components/JTSStellarTargetComponent.h"
 #include "space/Items/JTSItemDefinition.h"
 #include "space/Items/JTSItemDefinitionLibrary.h"
@@ -98,6 +99,10 @@ bool FJTSAntCorpseItemTest::RunTest(const FString&)
 	const int32 OrganicBefore = Ship->GetResourceAmount(EJTSResourceType::Organic);
 	const int32 CorpseBefore = Ship->GetResourceAmount(EJTSResourceType::MoonAntCorpse);
 	Player->SetActorLocation(Ship->GetBoardingInteractionCenter());
+	TestFalse(TEXT("Unidentified corpse cannot enter shared storage automatically"),Ship->TryDepositResourcesFromPawn(Player));
+	TestEqual(TEXT("Unidentified sample remains carried for analysis"),Inventory->GetItemCount(EJTSItemId::MoonAntCorpse),1);
+	for(const auto& Item:Inventory->GetItemSlots()) if(Item.ItemId==EJTSItemId::MoonAntCorpse)
+		W.World->GetGameState<AJTSGameState>()->GetDiscoveryComponent()->Analyze(Item);
 	Ship->TryDepositResourcesFromPawn(Player); // Overlap may already have submitted the item.
 	TestEqual(TEXT("Depositing consumes the carried corpse"), Inventory->GetItemCount(EJTSItemId::MoonAntCorpse), 0);
 	TestEqual(TEXT("A corpse remains one biological feedstock unit"), Ship->GetResourceAmount(EJTSResourceType::MoonAntCorpse), CorpseBefore + 1);

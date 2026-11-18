@@ -1,8 +1,20 @@
+#include "JTSPlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "space/UI/JTSReadableDocumentWidget.h"
+#include "space/Items/JTSReadableDocument.h"
+#include "space/Components/JTSShipScannerComponent.h"
+#include "space/UI/JTSFieldGuideWidget.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "JTSPlayerController.h"
 #include "space/Components/JTSMaterialProcessorComponent.h"
+#include "space/Components/JTSShipDockComponent.h"
+#include "space/Components/JTSStellarExchangeComponent.h"
+#include "space/Ships/JTSShipDockActor.h"
 #include "space/UI/JTSExpeditionNoticeWidget.h"
+
+void AJTSPlayerController::ClientPlayExpeditionSound_Implementation(USoundBase* Sound)
+{ if (Sound) UGameplayStatics::PlaySound2D(this,Sound); }
 
 void AJTSPlayerController::ClientShowExpeditionNotice_Implementation(const FText& Message)
 {
@@ -33,6 +45,7 @@ void AJTSPlayerController::ClientShowExpeditionNotice_Implementation(const FText
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/Systems/JTSOnlineSessionSubsystem.h"
 #include "space/Systems/JTSLocalProfileSubsystem.h"
+#include "space/Systems/JTSExpeditionSubsystem.h"
 #include "space/Core/JTSMapPaths.h"
 #include "space/UI/JTSPreLaunchLobbyWidget.h"
 #include "space/UI/JTSInventoryQuantityDialogWidget.h"
@@ -325,24 +338,35 @@ void AJTSPlayerController::ClientReceiveMaterialProcessingResult_Implementation(
 
 void AJTSPlayerController::ServerRequestStellarRoll_Implementation(AJTSSpacecraftActor* Spacecraft, FGuid RequestId)
 {
-	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	FName ItemId;
 	int32 SlotIndex = INDEX_NONE;
-	const EJTSStellarRollResult Result = IsValid(Spacecraft) && IsValid(ControlledCharacter)
-		? Spacecraft->TryRollStellarItem(ControlledCharacter, ItemId, SlotIndex, RequestId)
-		: EJTSStellarRollResult::NotAvailable;
+	// Rolls can only be started through the physical lever's authoritative interaction.
+	const EJTSStellarRollResult Result = EJTSStellarRollResult::NotAvailable;
 	ClientReceiveStellarRollResult(Result, ItemId, SlotIndex);
+}
+
+void AJTSPlayerController::ServerClaimSharedStellarPrize_Implementation(AJTSSpacecraftActor* Spacecraft, FGuid Token)
+{
+	const bool Success = IsValid(Spacecraft) && Spacecraft->GetStellarExchange()->TryClaim(GetPawn(), Token);
+	ClientReceiveShipLockerMoveResult(Success);
 }
 
 void AJTSPlayerController::ClientReceiveStellarRollResult_Implementation(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex)
 {
+	if (ItemId.IsNone() && Result != EJTSStellarRollResult::Succeeded)
+	{
+		const TCHAR* Message = Result == EJTSStellarRollResult::InsufficientResources ? TEXT("飞船资源不足，无法启动拉杆")
+			: Result == EJTSStellarRollResult::InventoryFull ? TEXT("公共库存已满，请先在屏幕领取物品")
+			: Result == EJTSStellarRollResult::CoolingDown ? TEXT("设备正在滚动或冷却中") : TEXT("星际拓展坞暂不可用");
+		ClientShowExpeditionNotice_Implementation(FText::FromString(Message));
+	}
 	if (IsValid(SpaceShopWidget)) SpaceShopWidget->NotifyStellarRollResult(Result, ItemId, SlotIndex);
 }
 
 void AJTSPlayerController::ServerDeleteShipLockerSlot_Implementation(AJTSSpacecraftActor* Spacecraft, int32 SlotIndex, FGuid ExpectedToken)
 {
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::StellarExchange, GetPawn()))
 		&& IsValid(State) && State->TryDeleteShipLockerSlot(SlotIndex, ExpectedToken);
 	ClientReceiveShipLockerActionResult(bSucceeded, false);
 }
@@ -352,7 +376,7 @@ void AJTSPlayerController::ServerTakeShipLockerSlot_Implementation(AJTSSpacecraf
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(ControlledCharacter)
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(ControlledCharacter) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, ControlledCharacter) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::StellarExchange, ControlledCharacter))
 		&& IsValid(State) && State->TryTakeShipLockerItem(SlotIndex, ExpectedToken, Inventory,
 			Spacecraft->GetStellarLootTable());
 	ClientReceiveShipLockerActionResult(bSucceeded, true);
@@ -373,13 +397,13 @@ void AJTSPlayerController::ServerMoveShipLockerSlot_Implementation(AJTSSpacecraf
 		if (From.StandardItem.IsEmpty() && From.StellarCoreId.IsNone() && Firmware && Firmware->FirmwareUnits > 0
 			&& To.StandardItem.IsEmpty() && Core && Core->bCore)
 		{
-			const bool bUpgraded = Spacecraft->CanUseShipTerminal(GetPawn())
+			const bool bUpgraded = (Spacecraft->CanUseShipTerminal(GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::StellarExchange, GetPawn()))
 				&& State->TryUpgradeStellarCore(ToSlotIndex, ExpectedToToken, Table, FromSlotIndex, ExpectedFromToken);
 			ClientReceiveStellarProgressionResult(true, bUpgraded);
 			return;
 		}
 	}
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, GetPawn()) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::StellarExchange, GetPawn()))
 		&& IsValid(State) && State->TryMoveShipLockerSlot(FromSlotIndex, ExpectedFromToken,
 			ToSlotIndex, ExpectedToToken);
 	ClientReceiveShipLockerMoveResult(bSucceeded);
@@ -434,7 +458,7 @@ void AJTSPlayerController::ServerApplyWeaponPoints_Implementation(AJTSSpacecraft
 	int32 SlotIndex, FGuid ExpectedToken, const TArray<uint8>& Points)
 {
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(GetPawn())
+	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, GetPawn())
 		&& IsValid(State) && State->TryApplyWeaponPoints(SlotIndex, ExpectedToken, Points);
 	ClientReceiveWeaponUpgradeResult(false, bSucceeded);
 }
@@ -459,7 +483,7 @@ void AJTSPlayerController::ServerExchangeShipLockerWithCarriedSlot_Implementatio
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(ControlledCharacter)
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(ControlledCharacter) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, ControlledCharacter))
 		&& IsValid(State) && IsValid(Inventory)
 		&& State->TryExchangeShipLockerItemWithCarriedSlot(LockerSlotIndex, ExpectedLockerToken,
 			Inventory, CarriedSlotIndex, ExpectedCarriedInstanceId, Spacecraft->GetStellarLootTable());
@@ -477,7 +501,7 @@ void AJTSPlayerController::ServerStoreCarriedItemInShipLocker_Implementation(AJT
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
 	AJTSPlayerState* const State = GetPlayerState<AJTSPlayerState>();
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(ControlledCharacter)
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(ControlledCharacter) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, ControlledCharacter))
 		&& IsValid(State) && IsValid(Inventory)
 		&& State->TryStoreCarriedItemAtSlot(LockerSlotIndex, Inventory, CarriedSlotIndex, ExpectedInstanceId);
 	ClientReceiveCarriedShipActionResult(bSucceeded, true);
@@ -489,7 +513,7 @@ void AJTSPlayerController::ServerDestroyCarriedItemAtShip_Implementation(AJTSSpa
 	AJTSCharacter* const ControlledCharacter = Cast<AJTSCharacter>(GetPawn());
 	UJTSInventoryComponent* const Inventory = IsValid(ControlledCharacter) ? ControlledCharacter->GetInventoryComponent() : nullptr;
 	const FJTSItemInstance Item = IsValid(Inventory) ? Inventory->GetItemAtSlot(CarriedSlotIndex) : FJTSItemInstance();
-	const bool bSucceeded = IsValid(Spacecraft) && Spacecraft->CanUseShipTerminal(ControlledCharacter)
+	const bool bSucceeded = IsValid(Spacecraft) && (Spacecraft->CanUseShipTerminal(ControlledCharacter) || Spacecraft->GetDockComponent()->CanUseService(EJTSShipDockService::WeaponModification, ControlledCharacter))
 		&& !Item.IsEmpty() && ExpectedInstanceId.IsValid() && Item.InstanceId == ExpectedInstanceId
 		&& Inventory->DestroyItemQuantityAtSlot(CarriedSlotIndex, Item.StackCount);
 	ClientReceiveCarriedShipActionResult(bSucceeded, false);
@@ -555,6 +579,12 @@ void AJTSPlayerController::ClientReceiveShopPurchaseResult_Implementation(EJTSSh
 void AJTSPlayerController::ClientOpenSpaceShop_Implementation(AJTSSpacecraftActor* Spacecraft)
 {
 	OpenSpaceShop(Spacecraft);
+}
+
+void AJTSPlayerController::ClientOpenShipDock_Implementation(AJTSShipDockActor* Dock)
+{
+	if (!IsValid(Dock) || !Dock->CanUseDock(GetPawn())) return;
+	OpenSpaceShop(Dock->GetSpacecraft(), Dock);
 }
 
 void AJTSPlayerController::ServerRequestInventoryQuantityAction_Implementation(int32 SlotIndex, int32 Quantity, bool bDestroy)
@@ -648,6 +678,8 @@ void AJTSPlayerController::ApplyEarthCollectionInputMode()
 		return;
 	}
 	if (IsStellarItemDialogOpen()) { ApplyModalUIInputMode(StellarItemDialog.Get()); return; }
+	if (FieldGuideWidget) { ApplyModalUIInputMode(FieldGuideWidget); return; }
+    if (ReadableDocumentWidget) { ApplyModalUIInputMode(ReadableDocumentWidget); return; }
 	if (bInventoryArrangementMode)
 	{
 		if (auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD())) ApplyModalUIInputMode(Hud->GetPrototypeWidget());
@@ -828,13 +860,16 @@ bool AJTSPlayerController::IsMoonShopOpen() const
 	return IsValid(PrototypeWidget) && PrototypeWidget->IsMoonShopOpen();
 }
 
-void AJTSPlayerController::OpenSpaceShop(AJTSSpacecraftActor* Spacecraft)
+void AJTSPlayerController::OpenSpaceShop(AJTSSpacecraftActor* Spacecraft, AJTSShipDockActor* Dock)
 {
 	if (!IsLocalController() || !IsValid(Spacecraft) || IsGameMenuOpen())
 	{
 		return;
 	}
+	if (!Dock) Dock = Spacecraft->GetDockComponent()->GetTerminal();
+	if (!IsValid(Dock) || !Dock->CanUseDock(GetPawn())) return;
 	CloseMoonShop();
+	if(FieldGuideWidget) { FieldGuideWidget->RemoveFromParent(); FieldGuideWidget=nullptr; }
 	if (!IsValid(SpaceShopWidget))
 	{
 		TSubclassOf<UJTSShopWidget> ShopWidgetClass = SpaceShopWidgetClass.IsNull()
@@ -843,21 +878,21 @@ void AJTSPlayerController::OpenSpaceShop(AJTSSpacecraftActor* Spacecraft)
 		SpaceShopWidget = CreateWidget<UJTSShopWidget>(
 			this,
 			ShopWidgetClass != nullptr ? ShopWidgetClass : TSubclassOf<UJTSShopWidget>(UJTSShopWidget::StaticClass()));
-		if (IsValid(SpaceShopWidget))
-		{
-			SpaceShopWidget->AddToViewport(300);
-		}
 	}
-	if (!IsValid(SpaceShopWidget) || !SpaceShopWidget->OpenForSpacecraft(Spacecraft))
+	// Select the physical dock's page before Slate construction, ticks and modal focus begin.
+	if (!IsValid(SpaceShopWidget) || !(Dock ? SpaceShopWidget->OpenForDock(Dock) : SpaceShopWidget->OpenForSpacecraft(Spacecraft)))
 	{
 		return;
 	}
+	if (!SpaceShopWidget->IsInViewport()) SpaceShopWidget->AddToViewport(300);
 
 	ApplyModalUIInputMode(SpaceShopWidget);
 }
 
 void AJTSPlayerController::CloseSpaceShop()
 {
+    if (ReadableDocumentWidget) { ReadableDocumentWidget->RemoveFromParent(); ReadableDocumentWidget=nullptr; }
+	if(FieldGuideWidget) { FieldGuideWidget->RemoveFromParent(); FieldGuideWidget=nullptr; }
 	if (StellarItemDialog.IsValid()) StellarItemDialog->CloseDialog();
 	if (IsValid(SpaceShopWidget))
 	{
@@ -889,7 +924,8 @@ void AJTSPlayerController::OpenStellarItemDialog(UJTSStellarAttachmentDialog* Di
 void AJTSPlayerController::HandleStellarItemDialogClosed()
 {
 	StellarItemDialog.Reset();
-	if (IsSpaceShopOpen()) ApplyModalUIInputMode(SpaceShopWidget);
+	if(FieldGuideWidget) ApplyModalUIInputMode(FieldGuideWidget);
+	else if (IsSpaceShopOpen()) ApplyModalUIInputMode(SpaceShopWidget);
 	else RestoreGameplayInputAfterModal();
 }
 bool AJTSPlayerController::IsStellarItemDialogOpen() const
@@ -917,7 +953,7 @@ void AJTSPlayerController::SetInventoryArrangementMode(bool bEnabled)
 }
 void AJTSPlayerController::DropStellarItemInSpaceShop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId)
 {
-	if (IsSpaceShopOpen()) SpaceShopWidget->HandleStellarItemDrop(ScreenPosition, StellarIndex, ExpectedId);
+	if (IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen()) SpaceShopWidget->HandleStellarItemDrop(ScreenPosition, StellarIndex, ExpectedId);
 }
 int32 AJTSPlayerController::GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const
 {
@@ -927,20 +963,25 @@ int32 AJTSPlayerController::GetStellarSlotAtScreenPosition(const FVector2D& Scre
 
 bool AJTSPlayerController::IsSpaceShopOpen() const
 {
-	return IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen();
+	return IsValid(ReadableDocumentWidget) || IsValid(FieldGuideWidget) || (IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen());
 }
 
+void AJTSPlayerController::UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition,const FString& ItemLabel,bool bVisible)
+{ UpdateShipCarriedDragPreview(ScreenPosition,ItemLabel,bVisible,INDEX_NONE); }
+
 void AJTSPlayerController::UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition,
-	const FString& ItemLabel, bool bVisible)
+	const FString& ItemLabel, bool bVisible, int32 DraggedSlot)
 {
-	if (IsSpaceShopOpen()) SpaceShopWidget->UpdateCarriedDragPreview(ScreenPosition, ItemLabel, bVisible);
+	if (IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen()) SpaceShopWidget->UpdateCarriedDragPreview(ScreenPosition, ItemLabel, bVisible);
 	else if (const auto* Hud = Cast<AJTSPrototypeHUD>(GetHUD()))
 		if (auto* Widget = Hud->GetPrototypeWidget()) Widget->UpdateInventoryDragPreview(ScreenPosition, ItemLabel, bVisible);
+
 }
 
 void AJTSPlayerController::DropCarriedItemInSpaceShop(const FVector2D& ScreenPosition,
 	int32 CarriedSlotIndex, FGuid ExpectedInstanceId)
 {
+	if(TryPlaceInShipScanZone(ScreenPosition,CarriedSlotIndex,ExpectedInstanceId)) return;
 	const int32 Index = GetStellarSlotAtScreenPosition(ScreenPosition);
 	if (Index != INDEX_NONE)
 	{
@@ -948,7 +989,7 @@ void AJTSPlayerController::DropCarriedItemInSpaceShop(const FVector2D& ScreenPos
 			PS->GetStellarLoadout()->ServerExchangeInventory(CarriedSlotIndex, ExpectedInstanceId, Index, PS->GetStellarLoadout()->GetSlot(Index).InstanceId);
 		return;
 	}
-	if (IsSpaceShopOpen()) SpaceShopWidget->HandleCarriedItemDrop(ScreenPosition, CarriedSlotIndex, ExpectedInstanceId);
+	if (IsValid(SpaceShopWidget) && SpaceShopWidget->IsShopOpen()) SpaceShopWidget->HandleCarriedItemDrop(ScreenPosition, CarriedSlotIndex, ExpectedInstanceId);
 }
 
 bool AJTSPlayerController::IsOverCarriedQuickbar(const FVector2D& ScreenPosition) const
@@ -1107,6 +1148,7 @@ void AJTSPlayerController::RestoreGameplayInputAfterModal()
 
 bool AJTSPlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if(Params.Event==IE_Pressed && Params.Key==EKeys::J && IsNormalGameplayPhase()) { ToggleFieldGuide(); return true; }
 	if (Params.Key == EKeys::LeftAlt || Params.Key == EKeys::RightAlt)
 	{
 		SetAltCursorHeld(Params.Event != IE_Released);
@@ -1176,6 +1218,11 @@ void AJTSPlayerController::PlayerTick(float DeltaTime)
 void AJTSPlayerController::ServerRequestDebugPlanet_Implementation(FName PlanetId, bool bSetDefault)
 {
 	if (auto* Debug = AJTSSpaceDebugTravelManager::Find(this)) Debug->Request(this, PlanetId, bSetDefault);
+}
+
+void AJTSPlayerController::ServerRequestDebugAccessPermit_Implementation(FName PermitId)
+{
+	if (auto* Debug = AJTSSpaceDebugTravelManager::Find(this)) Debug->GrantAccessPermit(this,PermitId);
 }
 
 void AJTSPlayerController::ServerSetDebugInvulnerable_Implementation(bool bEnabled)
@@ -1479,4 +1526,49 @@ void AJTSPlayerController::HideLobby()
 		LobbyWidget->RemoveFromParent();
 		LobbyWidget = nullptr;
 	}
+}
+
+bool AJTSPlayerController::TryPlaceInShipScanZone(const FVector2D& Position,int32 Slot,FGuid ExpectedId)
+{
+	if(IsOverCarriedQuickbar(Position)) return false;
+	const auto* State=GetWorld()->GetGameState<AJTSGameState>(); auto* Ship=State?State->GetActiveSpacecraft():nullptr;
+	if(!Ship || !Ship->Scanner->IsZoneActive() || !GetPawn()) return false;
+	FVector2D Pixel,Viewport; USlateBlueprintLibrary::AbsoluteToViewport(this,Position,Pixel,Viewport);
+	FVector Origin,Direction; if(!DeprojectScreenPositionToWorld(Pixel.X,Pixel.Y,Origin,Direction)) return false;
+	const FTransform Ground=Ship->Scanner->GetGroundFrame(); const FVector Normal=Ground.GetUnitAxis(EAxis::Z);
+	const double Dot=FVector::DotProduct(Direction,Normal); if(FMath::Abs(Dot)<.001) return false;
+	const double Distance=FVector::DotProduct(Ground.GetLocation()-Origin,Normal)/Dot;
+	if(Distance<=0 || !Ship->Scanner->ContainsPoint(Origin+Direction*Distance+Normal*2)) return false;
+	if(FVector::DistSquared(GetPawn()->GetActorLocation(),Ground.GetLocation())>FMath::Square(400.f)) return false;
+	ServerPlaceShipScanSample(Ship,Slot,ExpectedId); return true;
+}
+void AJTSPlayerController::ServerPlaceShipScanSample_Implementation(AJTSSpacecraftActor* Ship,int32 Slot,FGuid ExpectedId)
+{ if(IsValid(Ship) && !Ship->Scanner->PlaceCarriedSample(GetPawn(),Slot,ExpectedId)) ClientAnalysisFeedback(FText::FromString(TEXT("请靠近扫描区并确认物品仍在背包中。"))); }
+void AJTSPlayerController::ServerRetrieveScannerCargo_Implementation(AJTSSpacecraftActor* Ship,int32 Slot,FGuid ExpectedId)
+{
+	const bool OK=IsValid(Ship) && Ship->Scanner->RetrieveCargo(GetPawn(),Slot,ExpectedId);
+	ClientAnalysisFeedback(FText::FromString(OK?TEXT("已领取。 "):TEXT("请靠近中央舱屏幕，并为背包腾出空间。")));
+}
+void AJTSPlayerController::ToggleFieldGuide()
+{
+	if(!IsLocalController() || !IsNormalGameplayPhase() || IsGameMenuOpen()) return;
+	if(FieldGuideWidget) { CloseSpaceShop(); return; }
+	CloseInventoryQuantityDialog(); CloseMoonShop(); CloseSpaceShop(); SetInventoryArrangementMode(false);
+	FieldGuideWidget=CreateWidget<UJTSFieldGuideWidget>(this,UJTSFieldGuideWidget::StaticClass());
+	if(FieldGuideWidget) { FieldGuideWidget->AddToViewport(350); ApplyModalUIInputMode(FieldGuideWidget); }
+}
+void AJTSPlayerController::ClientAnalysisFeedback_Implementation(const FText& Message)
+{ if(FieldGuideWidget) FieldGuideWidget->SetFeedback(Message); else if(!Message.IsEmpty()) ClientShowExpeditionNotice(Message); }
+
+void AJTSPlayerController::ClientReadDocument_Implementation(UJTSReadableDocumentData* Document)
+{
+    if (!Document || !IsLocalController()) return;
+    CloseSpaceShop();
+    CloseReadableDocument();
+    ReadableDocumentWidget=CreateWidget<UJTSReadableDocumentWidget>(this);
+    if (ReadableDocumentWidget) { ReadableDocumentWidget->ShowDocument(Document); ReadableDocumentWidget->AddToViewport(360); ApplyModalUIInputMode(ReadableDocumentWidget); }
+}
+void AJTSPlayerController::CloseReadableDocument()
+{
+    if (ReadableDocumentWidget) { ReadableDocumentWidget->RemoveFromParent(); ReadableDocumentWidget=nullptr; RestoreGameplayInputAfterModal(); }
 }

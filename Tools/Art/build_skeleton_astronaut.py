@@ -230,7 +230,9 @@ for side in ("L", "R"):
     boot_dimensions[side]=[max(p[i] for p in points)-min(p[i] for p in points) for i in range(3)]
 assert max(abs(a-b) for a,b in zip(boot_dimensions["L"],boot_dimensions["R"]))<0.004, boot_dimensions
 report["boot_dimensions_m"]=boot_dimensions
-(ROOT/"assembly_report.json").write_text(json.dumps(report,indent=2))
+qa=ROOT.parents[1]/'Saved/SkeletonAstronaut'
+qa.mkdir(parents=True,exist_ok=True)
+(qa/"assembly_report.json").write_text(json.dumps(report,indent=2))
 print("ASSEMBLY_REPORT",report)
 
 # Reusable studio preview, saved with the editable source.
@@ -244,6 +246,7 @@ gm=bpy.data.materials.new("StudioGround");gm.diffuse_color=(0.028,0.045,0.062,1)
 scene=bpy.context.scene;scene.render.engine="CYCLES";scene.cycles.samples=32
 scene.render.resolution_x=1100;scene.render.resolution_y=1100;scene.render.resolution_percentage=100
 scene.world.color=(0.18,0.18,0.18);scene.view_settings.view_transform="AgX"
-scene.render.image_settings.file_format="PNG";scene.render.filepath=str(ROOT / "Preview_Standing.png")
+(ROOT/'Previews').mkdir(parents=True,exist_ok=True)
+scene.render.image_settings.file_format="PNG";scene.render.filepath=str(ROOT/'Previews/Preview_Standing.png')
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT / "SkeletonAstronaut.blend"))
 bpy.ops.render.render(write_still=True)

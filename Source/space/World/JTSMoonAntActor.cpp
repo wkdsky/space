@@ -1,4 +1,5 @@
 #include "space/World/JTSMoonAntActor.h"
+#include "space/Components/JTSDiscoveryComponent.h"
 #include "space/Components/JTSPlanetSurfaceSteeringComponent.h"
 #include "space/Systems/JTSPlanetEnemySubsystem.h"
 #include "space/Systems/JTSPlanetAntFragments.h"
@@ -197,7 +198,7 @@ void AJTSMoonAntActor::ReceiveMeleeHit_Implementation(APawn* AttackingPawn, EJTS
 
 FText AJTSMoonAntActor::GetMeleeTargetDisplayName_Implementation() const
 {
-	return FText::FromString(TEXT("MOON ANT"));
+	return UJTSDiscoveryComponent::DisplayName(this,EJTSItemId::MoonAntCorpse);
 }
 
 FText AJTSMoonAntActor::GetMeleeTargetPrompt_Implementation(APawn* AttackingPawn) const

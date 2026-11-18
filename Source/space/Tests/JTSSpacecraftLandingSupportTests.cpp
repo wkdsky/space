@@ -14,6 +14,7 @@
 #include "space/Ships/JTSSpacecraftActor.h"
 #include "space/World/JTSPlanetAnchor.h"
 #include "space/World/JTSPlanetLandingManager.h"
+#include "space/World/JTSSpaceWorldManager.h"
 
 namespace
 {
@@ -21,12 +22,12 @@ namespace
 	{
 		UWorld* World;
 		AJTSPlanetAnchor* Planet;
-		AJTSSpacecraftActor* Ship;
+		AJTSSpacecraftActor* Ship = nullptr;
 		UProceduralMeshComponent* Terrain;
 		FVector Up = FVector(1, 2, 3).GetSafeNormal();
 		FTransform Surface;
 
-		FLandingTestWorld()
+		explicit FLandingTestWorld(bool bSpaceWorld = true)
 		{
 			UWorld::InitializationValues Values;
 			Values.AllowAudioPlayback(false).CreatePhysicsScene(true).RequiresHitProxies(false)
@@ -52,6 +53,7 @@ namespace
 			FindFProperty<FObjectProperty>(Planet->GetClass(), TEXT("GameplaySurfaceActor"))->SetObjectPropertyValue_InContainer(Planet, Ground);
 			FindFProperty<FFloatProperty>(Planet->GetClass(), TEXT("ApproximateRadius"))->SetPropertyValue_InContainer(Planet, 10000);
 			MakeTerrain(0);
+			if (bSpaceWorld) World->SpawnActor<AJTSSpaceWorldManager>()->SetCurrentPlanet(Planet);
 			UClass* ShipClass = LoadClass<AJTSSpacecraftActor>(nullptr, TEXT("/Game/Space/Ships/TwinforkR1/BP_Twinfork_R1.BP_Twinfork_R1_C"));
 			Ship = World->SpawnActor<AJTSSpacecraftActor>(ShipClass, FTransform(Surface.GetRotation(), Surface.GetLocation() + Up * 900), Params);
 			Ship->DispatchBeginPlay();
@@ -64,19 +66,24 @@ namespace
 		// Nonuniform grid allows a fissure smaller than a sole, independently of its centre sample.
 		void MakeTerrain(float SlopeDegrees, bool bHole = false, bool bNarrowHole = false, float FrontRightRise = 0)
 		{
-			const TArray<float> X = {-2500, 180, 200, 240, 270, 290, 300, 340, 2500};
-			const TArray<float> Y = {-2500, -500, -450, -420, -400, -360, -300, 300, 330, 430, 500, 2500};
+			// Put real gaps beneath the production rig's current sole, rather than its obsolete narrow stance.
+			const FVector Left = Ship ? Support()->Feet[0].DeployedContactFrame.GetLocation() : FVector(250,-555,-192);
+			const FVector Right = Ship ? Support()->Feet[1].DeployedContactFrame.GetLocation() : FVector(250,555,-192);
+			const float Edge = Ship ? Support()->Feet[0].PadHalfExtent.X : 47;
+			TArray<double> X = {-2500,Left.X-120,Left.X-80,Right.X-70,Left.X,Left.X+Edge-5,Left.X+Edge+5,Right.X+70,Left.X+80,Left.X+120,2500};
+			TArray<double> Y = {-2500,Left.Y-120,Left.Y-80,Left.Y-40,Left.Y,Left.Y+40,Left.Y+80,Left.Y+120,Right.Y-80,Right.Y-60,Right.Y+60,Right.Y+80,2500};
+			X.Sort();Y.Sort();
 			TArray<FVector> Vertices;
 			for (float Py : Y) for (float Px : X)
 			{
-				const float Rise = Px >= 200 && Px <= 300 && Py >= 330 && Py <= 430 ? FrontRightRise : 0;
+				const float Rise = Px >= Right.X-70 && Px <= Right.X+70 && Py >= Right.Y-60 && Py <= Right.Y+60 ? FrontRightRise : 0;
 				Vertices.Emplace(Px, Py, Px * FMath::Tan(FMath::DegreesToRadians(SlopeDegrees)) + Rise);
 			}
 			TArray<int32> Triangles;
 			for (int32 Iy = 0; Iy < Y.Num()-1; ++Iy) for (int32 Ix = 0; Ix < X.Num()-1; ++Ix)
 			{
-				const bool InHole = bHole && X[Ix] >= 200 && X[Ix+1] <= 300 && Y[Iy] >= -450 && Y[Iy+1] <= -300;
-				const bool InFissure = bNarrowHole && X[Ix] >= 270 && X[Ix+1] <= 290 && Y[Iy] >= -420 && Y[Iy+1] <= -360;
+				const bool InHole = bHole && X[Ix] >= Left.X-80 && X[Ix+1] <= Left.X+80 && Y[Iy] >= Left.Y-80 && Y[Iy+1] <= Left.Y+80;
+				const bool InFissure = bNarrowHole && X[Ix] >= Left.X+Edge-5 && X[Ix+1] <= Left.X+Edge+5 && Y[Iy] >= Left.Y-40 && Y[Iy+1] <= Left.Y+40;
 				if (InHole || InFissure) continue;
 				const int32 A = Iy * X.Num() + Ix, B = A+1, C = A+X.Num(), D = C+1;
 				Triangles.Append({A, B, D, A, D, C});
@@ -201,7 +208,8 @@ bool FJTSLandingExecutionRegression::RunTest(const FString& Parameters)
 		{
 			if (Foot->GetFName() == Contact.FootComponentName)
 			{
-				const FVector Sole = Foot->GetComponentTransform().TransformPosition(FVector(0, 0, -18));
+				const auto* Definition=F.Support()->Feet.FindByPredicate([Foot](const auto& D){return D.FootComponentName==Foot->GetFName();});
+				const FVector Sole = Foot->GetComponentTransform().TransformPosition(Definition->SoleCentreLocal);
 				AddInfo(FString::Printf(TEXT("Foot=%s Sole=%s Contact=%s Error=%.3f"), *Foot->GetName(), *Sole.ToString(), *Contact.Location.ToString(), FVector::Distance(Sole, Contact.Location)));
 				TestTrue(TEXT("Visible solid foot agrees with the server contact"), FVector::Distance(Sole, Contact.Location) < 1.5);
 			}
@@ -224,7 +232,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJTSEnvelopeBoundaryRegression, "JTS.Spacecraft
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FJTSEnvelopeBoundaryRegression::RunTest(const FString& Parameters)
 {
-	FLandingTestWorld F;
+	// This planar, million-centimetre-radius fixture isolates the envelope from celestial scaling.
+	FLandingTestWorld F(false);
 	auto* E = F.Ship->GetSurfaceEnvelopeComponent();
 	auto* Movement = F.Ship->GetFlightMovementComponent();
 	// A large-radius planet with an actual planar mesh isolates the promised flat clearance.

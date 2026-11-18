@@ -83,7 +83,7 @@ def environment():
             name=f'SM_MS3_{prefix}_{i}';old=bpy.data.objects.get(name)
             if old:bpy.data.objects.remove(old,do_unlink=True)
             g.refuge(name,mirror,seed+i);names.append(name)
-    for i in range(9):
+    for i in range(7):
         name=f'SM_MS3_FixedNest_{i+1:02d}';old=bpy.data.objects.get(name)
         if old:bpy.data.objects.remove(old,do_unlink=True)
         g.refuge(name,True,1600+i);names.append(name)
@@ -100,12 +100,12 @@ def environment():
 
 
 def rebuild_refuges():
-    """Rebuild only the four fissures and nine fixed MirrorSkimmer mouths."""
+    """Rebuild only the four fissures and seven fixed MirrorSkimmer mouths."""
     import importlib,moon_surface_geometry as g
     importlib.reload(g)
     bpy.context.window.scene=bpy.data.scenes[g.SCENE]
     names=[(f'SM_MS3_RiftRefuge_{i}',False,500+i) for i in range(4)]
-    names += [(f'SM_MS3_FixedNest_{i+1:02d}',True,1600+i) for i in range(9)]
+    names += [(f'SM_MS3_FixedNest_{i+1:02d}',True,1600+i) for i in range(7)]
     exported=[]
     for name,mirror,seed in names:
         old=bpy.data.objects.get(name)
@@ -130,7 +130,7 @@ def rebuild_refuges():
     recipe['assets']=[replacements.get(r['name'],r) for r in recipe['assets']]
     (ART/'surface_recipe.json').write_text(json.dumps(recipe,indent=2),encoding='utf-8')
     bpy.ops.wm.save_as_mainfile(filepath=str(ART/'MoonSurfaceV3.blend'),compress=True)
-    return dict(meshes=exported,fixed_mirror_mouths=9,rift_cave_mouths=0)
+    return dict(meshes=exported,fixed_mirror_mouths=7,rift_cave_mouths=0)
 
 def mineral_textures():
     import numpy as np

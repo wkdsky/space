@@ -100,7 +100,7 @@ def _apply():
             rows.append(dict(mesh=mesh.get_name(),triangles=len(raw['triangles'])))
     actors=unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
     nests=[a for a in actors if a.get_actor_label().startswith('Moon_Nest_')]
-    assert len(nests)==9
+    assert len(nests)==7
     for nest in nests:
         nest.modify()
         variant=(int(nest.get_actor_label()[-2:])-1)%4

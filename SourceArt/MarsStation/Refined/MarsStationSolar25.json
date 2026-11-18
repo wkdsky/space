@@ -1,0 +1,33 @@
+{
+  "SM_MP_Solar_Tracker": {
+    "triangles": 516,
+    "collision_hulls": 6,
+    "panel_area_m2": 72,
+    "tilt_deg": 25,
+    "axis_height_m": 3.2,
+    "low_edge_m": 1.932145214777902,
+    "high_edge_m": 4.467854785222098
+  },
+  "SM_MP_Solar_Canopy": {
+    "triangles": 3072,
+    "collision_hulls": 28,
+    "panel_area_m2": 280,
+    "tilt_deg": 25,
+    "rows": 4,
+    "columns": 2,
+    "columns_supports": 6,
+    "low_edge_m": 4.5,
+    "high_edge_m": 6.613091308703497,
+    "footprint_m": [
+      18.126155740732997,
+      14
+    ]
+  },
+  "SM_MP_Station_CollapsePit": {
+    "triangles": 780,
+    "collision_hulls": 65,
+    "diameter_m": 5,
+    "apparent_depth_m": 1.5,
+    "blocked": true
+  }
+}

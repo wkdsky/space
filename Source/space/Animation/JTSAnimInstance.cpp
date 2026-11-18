@@ -57,6 +57,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bool bStellarCasting = false;
 	bMeleeHeld = false;
 	bTwoHandHeld = false;
+	bCorpseHeld = false;
 	if (IsValid(Character))
 	{
 		if (const UJTSInventoryComponent* const Inventory = Character->FindComponentByClass<UJTSInventoryComponent>())
@@ -67,6 +68,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			const bool bGun = bHasHeldItem && Definition->IsRangedWeapon();
 			bTwoHandHeld = bHasHeldItem && Definition->HeldPresentation.bDualWield;
 			bMeleeHeld = bHasHeldItem && !bGun && !bTwoHandHeld;
+			bCorpseHeld = bHasHeldItem && ActiveId == EJTSItemId::MoonAntCorpse;
 		}
 		if (const UJTSRangedWeaponComponent* const Ranged = Character->FindComponentByClass<UJTSRangedWeaponComponent>())
 		{
@@ -85,6 +87,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			bWeaponAiming = !bStellarMelee && Stellar->IsAiming();
 			bTwoHandHeld = false;
 			bMeleeHeld = bStellarMelee;
+			bCorpseHeld = false;
 		}
 		bMeleeHeld = bMeleeHeld && !bActiveRangedWeapon;
 
@@ -119,6 +122,7 @@ void UJTSAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			bMeleeHeld = false;
 			bTwoHandHeld = false;
 			bStellarScepterHeld = false;
+			bCorpseHeld = false;
 			bStellarCasting = false;
 		}
 		const AJTSPlayerState* const GroundState = Character->GetPlayerState<AJTSPlayerState>();
@@ -893,6 +897,42 @@ void UJTSAnimInstance::ApplyFacingPose()
 		{
 			const FTransform ClimbTransform = Pose[Bone];
 			Pose[Bone].Blend(UnclimbedPose[Bone], ClimbTransform, ClimbBlendAlpha);
+		}
+	}
+	else if (bCorpseHeld && HeldVisual && HeldVisual->IsCorpseCarryVisible())
+	{
+		const bool bCradle = HeldVisual->IsTwoHandCorpseCarry();
+		const FVector Front = FQuat(PoseUp,FMath::DegreesToRadians(BodyYaw)).RotateVector(PoseForward);
+		const FVector Side = FVector::CrossProduct(PoseUp,Front).GetSafeNormal();
+		const int32 Chest = Mesh->GetBoneIndex(TEXT("Chest"));
+		if (Pose.IsValidIndex(Chest))
+		{
+			const FVector Center = Pose[Chest].GetLocation()+Front*(bCradle?34.f:30.f)-PoseUp*(bCradle?23.f:29.f);
+			const float Separation = bCradle ? FMath::Clamp(float(HeldVisual->GetCarriedCorpseSize().GetMax())*.24f,12.f,26.f) : 22.f;
+			auto CarryArm = [&](bool bRight)
+			{
+				const FName Upper=bRight?TEXT("UpperArm_R"):TEXT("UpperArm_L");
+				const FName Lower=bRight?TEXT("LowerArm_R"):TEXT("LowerArm_L");
+				const FName Wrist=bRight?TEXT("Wrist_R"):TEXT("Wrist_L");
+				const FName Finger=bRight?TEXT("Index1_R"):TEXT("Index1_L");
+				const int32 A=Mesh->GetBoneIndex(Upper), B=Mesh->GetBoneIndex(Lower), C=Mesh->GetBoneIndex(Wrist), D=Mesh->GetBoneIndex(Finger);
+				if (!Pose.IsValidIndex(A)||!Pose.IsValidIndex(B)||!Pose.IsValidIndex(C)||!Pose.IsValidIndex(D)) return;
+				const FVector Fingers = bCradle ? Front : (Front-PoseUp*.2f).GetSafeNormal();
+				const FVector Goal = Center+Side*(bRight?Separation:-Separation)-Fingers*FVector::Distance(Pose[C].GetLocation(),Pose[D].GetLocation())*1.35f;
+				const FVector Shoulder=Pose[A].GetLocation();
+				const float L1=FVector::Distance(Shoulder,Pose[B].GetLocation()), L2=FVector::Distance(Pose[B].GetLocation(),Pose[C].GetLocation());
+				const FVector Along=(Goal-Shoulder).GetSafeNormal();
+				const float Reach=FMath::Clamp(float((Goal-Shoulder).Size()),FMath::Abs(L1-L2)+.1f,L1+L2-.1f);
+				const float Axial=(L1*L1-L2*L2+Reach*Reach)/(2*Reach);
+				const FVector Pole=FVector::VectorPlaneProject(Side*(bRight?1.f:-1.f)-PoseUp*.7f,Along).GetSafeNormal();
+				const FVector Elbow=Shoulder+Along*Axial+Pole*FMath::Sqrt(FMath::Max(0.f,L1*L1-Axial*Axial));
+				AimSegment(Upper,Lower,Elbow-Shoulder);
+				AimSegment(Lower,Wrist,Shoulder+Along*Reach-Pose[B].GetLocation());
+				AimSegment(Wrist,Finger,Fingers);
+				CloseGrip(bRight);
+			};
+			CarryArm(true);
+			if (bCradle) CarryArm(false);
 		}
 	}
 	else if (bTwoHandHeld)

@@ -17,6 +17,7 @@ struct SPACE_API FJTSShipLockerSlot
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
 	FName StellarItemId = NAME_None;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ship Locker") int32 StellarStackCount = 1;
 
 	/** Nonempty only for an assembled weapon; StellarItemId is then its attachment. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
@@ -44,11 +45,19 @@ struct SPACE_API FJTSShipLockerSlot
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ship Locker")
 	FGuid StellarAttachmentInstanceId;
 
+	FJTSItemInstance StackItem() const
+	{
+		if (!StandardItem.IsEmpty()) return StandardItem;
+		FJTSItemInstance Item; Item.ItemId=StellarCoreId.IsNone()?EJTSItemId::StellarText:EJTSItemId::StellarWeapon;
+		Item.StackCount=StellarStackCount; Item.StellarItemId=StellarItemId; Item.StellarCoreId=StellarCoreId;
+		Item.StellarCoreLevel=StellarCoreLevel; Item.StellarPoints=StellarPoints; Item.InstanceId=StellarInstanceId;
+		return Item;
+	}
 	bool IsEmpty() const { return StandardItem.IsEmpty() && StellarItemId.IsNone() && !bPendingStellarReveal; }
 	void Clear()
 	{
 		StandardItem.Clear();
-		StellarItemId = NAME_None;
+		StellarItemId = NAME_None; StellarStackCount = 1;
 		StellarCoreId = NAME_None;
 		bPendingStellarReveal = false;
 		StellarCoreLevel = 1;

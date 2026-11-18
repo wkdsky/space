@@ -1,0 +1,36 @@
+{
+  "Tuantuan": {
+    "mesh": "SK_MP_Tuantuan",
+    "bones": 26,
+    "triangles": 9808,
+    "clips": [
+      "Emerge",
+      "Idle",
+      "Walk",
+      "Slam",
+      "Sweep",
+      "Charge",
+      "Stagger",
+      "Death",
+      "TurnLeft",
+      "TurnRight"
+    ]
+  },
+  "Fabricator": {
+    "mesh": "SK_MP_Fabricator",
+    "bones": 10,
+    "triangles": 12680,
+    "clips": [
+      "Emerge",
+      "Idle",
+      "Walk",
+      "Slam",
+      "Sweep",
+      "Charge",
+      "Stagger",
+      "Death",
+      "TurnLeft",
+      "TurnRight"
+    ]
+  }
+}

@@ -34,6 +34,9 @@ class SPACE_API AJTSPlanetSurfaceAttachment : public AActor, public IJTSMeleeTar
 {
 	GENERATED_BODY()
 public:
+	virtual bool BlocksAttackInitiation_Implementation(APawn* Pawn) const override;
+	virtual bool BlocksDamage_Implementation(APawn* Pawn) const override;
+	virtual float TakeDamage(float Damage,const FDamageEvent& Event,AController* Controller,AActor* Causer) override;
 	AJTSPlanetSurfaceAttachment();
 	void Initialize(UStaticMesh* Mesh, AJTSPlanetAnchor* Planet, const FTransform& Transform,
 		bool bConform, bool bCastShadow, float SurfaceOffset, bool bDestructible = false, UStaticMesh* CutVolume = nullptr,

@@ -178,6 +178,8 @@ bool AJTSMoonAntCorpsePickupActor::CanInteract_Implementation(APawn* Interacting
 void AJTSMoonAntCorpsePickupActor::BeginPlay()
 {
 	Super::BeginPlay();
+	// Expedition specimens must survive the journey back to the ship.
+	if(HasAuthority()) SetLifeSpan(0);
 	RealSurfacePlanet = GetRealSurfacePlanet();
 	if (!HasAuthority())
 	{

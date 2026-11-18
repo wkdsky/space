@@ -15,9 +15,12 @@
 class AJTSCharacter;
 class AJTSPlayerState;
 class AJTSSpacecraftActor;
+class AJTSShipDockActor;
 class UJTSPreLaunchLobbyWidget;
 class UJTSInventoryQuantityDialogWidget;
 class UJTSShopWidget;
+class UJTSFieldGuideWidget;
+class UJTSShipScannerComponent;
 class UUserWidget;
 struct FInputKeyEventArgs;
 
@@ -36,6 +39,7 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveMaterialProcessingResult(bool bSucceeded, const FString& Message);
 	UFUNCTION(Client, Reliable) void ClientShowExpeditionNotice(const FText& Message);
+	UFUNCTION(Client, Reliable) void ClientPlayExpeditionSound(class USoundBase* Sound);
 
 	UFUNCTION(BlueprintCallable, Category = "Menu")
 	void StartGame();
@@ -96,6 +100,7 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestStellarRoll(AJTSSpacecraftActor* Spacecraft, FGuid RequestId);
+	UFUNCTION(Server, Reliable) void ServerClaimSharedStellarPrize(AJTSSpacecraftActor* Spacecraft, FGuid Token);
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveStellarRollResult(EJTSStellarRollResult Result, FName ItemId, int32 SlotIndex);
@@ -176,6 +181,8 @@ public:
 
 	UFUNCTION(Client, Reliable)
 	void ClientOpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
+	UFUNCTION(Client, Reliable)
+	void ClientOpenShipDock(AJTSShipDockActor* Dock);
 
 	/** Server-authoritative execution for a quantity selected in the local drop/destroy dialog. */
 	UFUNCTION(Server, Reliable)
@@ -221,8 +228,10 @@ public:
 	void CloseMoonShop();
 	bool IsMoonShopOpen() const;
 
-	void OpenSpaceShop(AJTSSpacecraftActor* Spacecraft);
+	void OpenSpaceShop(AJTSSpacecraftActor* Spacecraft, AJTSShipDockActor* Dock = nullptr);
 	void CloseSpaceShop();
+	UFUNCTION(Client,Reliable) void ClientReadDocument(class UJTSReadableDocumentData* Document);
+    void CloseReadableDocument();
 	bool IsSpaceShopOpen() const;
 	void DropStellarItemInSpaceShop(const FVector2D& ScreenPosition, int32 StellarIndex, FGuid ExpectedId);
 	int32 GetStellarSlotAtScreenPosition(const FVector2D& ScreenPosition) const;
@@ -235,6 +244,12 @@ public:
 	bool IsStellarItemDragging() const { return bStellarItemDragging; }
 
 	void UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible);
+	void UpdateShipCarriedDragPreview(const FVector2D& ScreenPosition, const FString& ItemLabel, bool bVisible, int32 DraggedSlot);
+	bool TryPlaceInShipScanZone(const FVector2D& ScreenPosition, int32 Slot, FGuid ExpectedId);
+	void ToggleFieldGuide();
+	UFUNCTION(Server,Reliable) void ServerPlaceShipScanSample(AJTSSpacecraftActor* Ship,int32 Slot,FGuid ExpectedId);
+	UFUNCTION(Server,Reliable) void ServerRetrieveScannerCargo(AJTSSpacecraftActor* Ship,int32 Slot,FGuid ExpectedId);
+	UFUNCTION(Client,Reliable) void ClientAnalysisFeedback(const FText& Message);
 	void DropCarriedItemInSpaceShop(const FVector2D& ScreenPosition, int32 CarriedSlotIndex, FGuid ExpectedInstanceId);
 	bool IsOverCarriedQuickbar(const FVector2D& ScreenPosition) const;
 	int32 GetCarriedQuickbarSlotAtPosition(const FVector2D& ScreenPosition) const;
@@ -251,6 +266,8 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestDebugPlanet(FName PlanetId, bool bSetDefault);
+	UFUNCTION(Server, Reliable)
+	void ServerRequestDebugAccessPermit(FName PermitId);
 
 	/** Own-player debug intent; the server requires enabled development controls. */
 	UFUNCTION(Server, Reliable)
@@ -315,6 +332,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSShopWidget> SpaceShopWidget;
+	UPROPERTY(Transient) TObjectPtr<UJTSFieldGuideWidget> FieldGuideWidget;
+    UPROPERTY(Transient) TObjectPtr<class UJTSReadableDocumentWidget> ReadableDocumentWidget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UJTSInventoryQuantityDialogWidget> InventoryQuantityDialog;
